@@ -91,7 +91,8 @@ MAX_ITEMS = 500
 MAX_READ = 20_000   # chats whose progress the pool keeps
 MAX_PENDING = 2000  # chats read first the next night
 MAX_TRIES = 7       # nights a pending chat is read before it is let go
-MAX_PATTERN = 20_000
+MAX_PATTERN = 20_000  # a recipe's capped want of up to 200 words (arena/recipe.py) builds a long one
+MAX_NUMBER = 2 ** 53  # a number read from the pool file is at most this, so float() and math never overflow
 DEFAULT_KIND = "sales"
 KIND = plug_mod.AGENT_NAME  # one rule for a plug's kind and the pool's: a kind the plug takes, the pool takes
 POOL_FILE = "practice-{kind}.json"
@@ -325,7 +326,8 @@ def _split_ok(v):
 
 
 def _time(v):
-    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+    """An int or a float, not a bool, within MAX_NUMBER either way (NaN and inf fall outside)."""
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and -MAX_NUMBER <= v <= MAX_NUMBER
 
 
 def _item_ok(i):
@@ -351,20 +353,56 @@ def _style_ok(s):
 def _card_ok(c):
     return (isinstance(c, dict) and isinstance(c.get("id"), str) and c["id"].startswith("grown-")
             and _time(c.get("arena_weight")) and c["arena_weight"] >= 0
-            and isinstance(c.get("chats"), int) and not isinstance(c["chats"], bool) and c["chats"] >= 1
+            and isinstance(c.get("chats"), int) and not isinstance(c["chats"], bool) and 1 <= c["chats"] <= MAX_NUMBER
             and isinstance(c.get("want"), list) and all(isinstance(w, str) for w in c["want"]))
 
 
 def _capped_ok(c):
     if not (isinstance(c, dict) and isinstance(c.get("name"), str) and isinstance(c.get("pattern"), str)
             and len(c["pattern"]) <= MAX_PATTERN and isinstance(c.get("most"), (int, float))
-            and not isinstance(c["most"], bool) and 0 < c["most"] < 1):
+            and not isinstance(c["most"], bool) and 0 < c["most"] < 1) or _repeats_a_repeat(c["pattern"]):
         return False
     try:
         re.compile(c["pattern"], re.IGNORECASE)
     except (re.error, RecursionError, OverflowError):
         return False
     return True
+
+
+def _repeats_a_repeat(pattern):
+    """True when a group holding a quantifier or a | is itself repeated (*, + or {n,m} right after
+    it): (\\w+\\s?)* or (a|a)*, the shapes that backtrack for ever on a want that almost matches.
+    A recipe's capped words never build one (arena/recipe.py _words: a group is at most optional)."""
+    stack, risky, i = [], False, 0  # stack: per open group, whether it holds a quantifier or a |
+    while i < len(pattern):
+        ch, closed = pattern[i], False
+        if ch == "\\":
+            i += 2
+            risky = False
+            continue
+        if ch == "[":  # a class, skipped to its closing ]
+            i += 1
+            i += pattern.startswith("^", i)
+            i += pattern.startswith("]", i)
+            while i < len(pattern) and pattern[i] != "]":
+                i += 2 if pattern[i] == "\\" else 1
+            i += 1
+            risky = False
+            continue
+        if ch in "*+{" and risky:
+            return True
+        if ch == "(":
+            stack.append(False)
+            i += pattern.startswith("?", i + 1)  # (?:, (?<! and the like: that ? is no quantifier
+        elif ch == ")" and stack:
+            closed = stack.pop()
+            if stack and closed:
+                stack[-1] = True
+        elif ch in "*+?{|" and stack:
+            stack[-1] = True
+        risky = closed
+        i += 1
+    return False
 
 
 def _slug(text):

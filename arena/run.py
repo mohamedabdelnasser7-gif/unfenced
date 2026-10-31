@@ -84,6 +84,7 @@ if __name__ == "__main__" and str(ROOT) not in sys.path:  # run by its path unde
     sys.path.insert(0, str(ROOT))
 
 from arena import factcheck, match as match_mod, paths, replay as replay_mod, verdict  # noqa: E402
+from reflection import history as hist  # noqa: E402
 
 AGENT = "sales"
 DEFAULT_CARDS = ROOT / "demo" / "personas" / "cards"
@@ -773,7 +774,7 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
         if practice.changed:
             practice.save()
         rep["pool"] = practice.summary()
-    except (Refused, match_mod.PromptRefused, OSError, ValueError, RecursionError) as e:
+    except (Refused, hist.Refused, match_mod.PromptRefused, OSError, ValueError, OverflowError, RecursionError) as e:
         print(f"Not run: {e}", file=sys.stderr)
         return 2
     finally:

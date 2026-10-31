@@ -1043,6 +1043,55 @@ class PoolFile(unittest.TestCase):
             self.pool.add(bad[0], "c-x", 1, NOW)
 
 
+class ValuesInRange(unittest.TestCase):
+    """Red team round 2 of the feed (2026-10-31), item 1: a huge number or a pattern that backtracks
+    for ever in the pool file is dropped on load, and run.main says "Not run" instead of a traceback."""
+
+    def setUp(self):
+        self.owner = folder(self)
+        self.pool, _, _ = grown_pool(self, self.owner)
+        self.data = json.loads(self.pool.path.read_text(encoding="utf-8"))
+
+    def reload(self, **changes):
+        self.pool.path.write_text(json.dumps({**self.data, **changes}), encoding="utf-8")
+        return grow.Pool(self.owner, "sales")
+
+    def test_numbers_past_two_to_the_53_are_dropped_and_the_deck_still_draws(self):
+        big, good, item = 10 ** 400, self.data["cards"][0], self.data["items"][0]
+        for c in ({**good, "chats": big}, {**good, "chats": 2 ** 53 + 1}, {**good, "arena_weight": big}):
+            pool = self.reload(cards=[c])
+            self.assertEqual(pool.cards, [], c["chats"])
+            grow.decks([card(1, "size")], pool, set())
+        self.assertEqual(len(self.reload(cards=[{**good, "chats": 2 ** 53}]).cards), 1)
+        pool = self.reload(read={"c-1": [1, big], "c-2": [1, -big], "c-3": [1, NOW]}, floor=big,
+                           items=[{**item, "style": {**item["style"], "voice_notes": big}}])
+        self.assertEqual((list(pool.read), pool.floor, pool.items), (["c-3"], None, []))
+
+    def test_a_group_with_a_quantifier_or_a_bar_repeated_again_gives_the_example_caps(self):
+        for pat in (r"^(\w+\s?)*$", r"(a|a)*", r"(a+)+", r"((a+))*", r"([a-z]+){2,}"):
+            pool = self.reload(capped=[{"name": "printing", "pattern": pat, "most": 0.25}])
+            self.assertIsNone(pool.capped, pat)
+            grow.decks([dict(card(1, "size"), want=["a" * 28 + "!"])], pool, set())
+        kept = (r"(?:ab)*", r"[(a+)]*", r"(a[|+])*", r"\(a+\)*", r"(\w+)?", r"(a+)\w*", r"(a+)[bc]*",
+                recipe().capped[0][1].pattern)
+        for pat in kept:
+            pool = self.reload(capped=[{"name": "printing", "pattern": pat, "most": 0.25}])
+            self.assertEqual(pool.capped[0]["pattern"], pat)
+
+    def test_an_overflow_or_a_refusal_in_a_run_is_not_run_not_a_traceback(self):
+        cards = folder(self) / "cards"
+        cards.mkdir()
+        for c in (card(1, "size"), card(2, "price")):
+            (cards / f"{c['id']}.json").write_text(json.dumps(c), encoding="utf-8")
+        for err in (OverflowError("int too large to convert to float"), hist.Refused("the pool cannot be read")):
+            err_out = io.StringIO()
+            with mock.patch.object(grow, "for_state", side_effect=err), contextlib.redirect_stderr(err_out):
+                code = run.main(["--cards", str(cards), "--state", str(folder(self) / "state")],
+                                agent_model=Agent(), customer_model=Customer())
+            self.assertEqual(code, 2)
+            self.assertIn("Not run: " + str(err), err_out.getvalue())
+
+
 class Guards(unittest.TestCase):
     """One test per behaviour the mutant sweep found unpinned (review 9)."""
 

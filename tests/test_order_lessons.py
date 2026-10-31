@@ -42,16 +42,16 @@ class OrdersKeepTheirLessons(unittest.TestCase):
 
     def test_the_draft_and_the_order_rows_name_the_turns_lessons(self):
         args = order_args(governorate="el giza")
-        summary = "اجمالي الاوردر 1,510 جنيه: جزمة كورة بيضا مقاس 43 بـ 1,450 جنيه، والشحن 60 جنيه. هيوصل في يوم أو يومين. أأكد؟"
+        summary = "اجمالي الاوردر 16,560 جنيه: الـ Mercurial Vapor 17 Elite مقاس 43 بـ 16,500 جنيه، والشحن 60 جنيه. هيوصل في يوم أو يومين. أأكد؟"
         first = FakeModel(tool_call("draft_order", args), call("cod_risk"), say(summary))
-        self.assertEqual(self.turn(first, "عايز الجزمة البيضا مقاس 43").outcome, "replied")
+        self.assertEqual(self.turn(first, "عايز الـ Vapor 17 Elite مقاس 43").outcome, "replied")
         self.assertIn(TONE, first.calls[0]["messages"][0]["content"])  # the model was given the lesson
 
         def confirm(messages, tools_sent):
             code = next(json.loads(m["content"])["code"] for m in reversed(messages)
                         if m["role"] == "tool" and '"code"' in (m["content"] or ""))
             return tool_call("draft_order", {**args, "confirm": code})
-        r = self.turn(FakeModel(confirm, say("تمام، اوردر #1001 اتسجل، الاجمالي 1510 جنيه.")), "تمام اكد")
+        r = self.turn(FakeModel(confirm, say("تمام، اوردر #1001 اتسجل، الاجمالي 16560 جنيه.")), "تمام اكد")
         self.assertEqual(r.outcome, "replied")
         rows = self.results.for_chat(self.cid)
         self.assertEqual([(x["outcome"], x["lessons"]) for x in rows],

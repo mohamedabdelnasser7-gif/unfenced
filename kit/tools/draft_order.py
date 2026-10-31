@@ -6,7 +6,8 @@ saves a pending draft for the chat and returns a summary with a short code.
 
 A printing line (a product whose type in the store data is Printing) carries the name to
 print: the order's name unless the customer gives another as print_name (DECISIONS item 28).
-print_name on any other line is refused. Lines are keyed by product, size and name to print,
+print_name on any other line is refused. A product whose variants have tiers (Elite, Pro) needs the
+tier as well as the size. Lines are keyed by product, tier, size and name to print,
 so two names are two lines, and the name is part of the draft the customer confirms.
 
 Step 2 (confirm set to that code) creates the order only when:
@@ -41,7 +42,7 @@ MAX_LINES = 10
 MAX_QUANTITY = 20
 FIELDS = {"items", "name", "governorate", "address", "phone", "confirm"}
 REQUIRED = ("items", "name", "governorate", "address")
-ITEM_FIELDS = {"product", "size", "quantity", "print_name"}
+ITEM_FIELDS = {"product", "tier", "size", "quantity", "print_name"}
 TEXT_LIMITS = (("name", 2, 80), ("governorate", 2, delivery.MAX_PLACE), ("address", 5, 300))
 PRINTING = "printing"            # the store data's product type for the printing service, folded
 PRINT_MIN, PRINT_MAX = 2, 30     # the name to print, in characters after spaces are folded
@@ -61,6 +62,7 @@ DEFINITION = {"type": "function", "function": {
                 "type": "object",
                 "properties": {
                     "product": {"type": "string", "description": "The product title exactly as the store tool gives it."},
+                    "tier": {"type": "string", "description": "The tier as the store tool gives it, for example Elite. Leave out for a product with no tiers."},
                     "size": {"type": "string", "description": "The size as the store tool gives it. Leave out for a product with one size."},
                     "quantity": {"type": "integer", "minimum": 1, "maximum": MAX_QUANTITY},
                     "print_name": {"type": "string", "description": "Only on a product of type Printing: the name to print. Leave out to print the customer's name."},
@@ -124,12 +126,14 @@ def check(args, ctx):
         return False, f"items must be a list of 1 to {MAX_LINES} lines."
     for it in items:
         if not isinstance(it, dict) or set(it) - ITEM_FIELDS or "product" not in it or "quantity" not in it:
-            return False, ("Each item takes product and quantity, size when the product has sizes, and print_name "
-                           "on a printing line. Nothing else.")
+            return False, ("Each item takes product and quantity, tier and size when the product has them, and "
+                           "print_name on a printing line. Nothing else.")
         if not isinstance(it["product"], str) or not 0 < len(it["product"].strip()) <= 120:
             return False, "product must be the title from the store tool."
         if "size" in it and (not isinstance(it["size"], str) or len(it["size"]) > 60):
             return False, "size must be the size text from the store tool."
+        if "tier" in it and (not isinstance(it["tier"], str) or len(it["tier"]) > 60):
+            return False, "tier must be the tier text from the store tool."
         if "print_name" in it and (not isinstance(it["print_name"], str)
                                    or not PRINT_MIN <= len(_text(it["print_name"])) <= PRINT_MAX):
             return False, f"print_name must be the name to print, {PRINT_MIN} to {PRINT_MAX} characters."
@@ -306,15 +310,16 @@ def build(args, ctx):
     name = _text(args["name"])
     lines, currencies = {}, set()
     for it in args["items"]:
-        item, v, problem = _variant(catalogue, it["product"], it.get("size"))
+        item, v, problem = _variant(catalogue, it["product"], it.get("size"), it.get("tier"))
         if problem:
             return None, problem
         print_name, problem = _print_name(item, it, name)
         if problem:
             return None, problem
-        key = (item["title"], v.get("size", ""), print_name)
+        key = (item["title"], v.get("tier", ""), v.get("size", ""), print_name)
         if key not in lines:
-            lines[key] = {"product": item["title"], "size": v.get("size", ""), "sku": v.get("sku", ""),
+            lines[key] = {"product": item["title"], **({"tier": v["tier"]} if v.get("tier") else {}),
+                          "size": v.get("size", ""), "sku": v.get("sku", ""),
                           "price": str(orders.money(v["price"])), "quantity": 0}
             if print_name:
                 lines[key]["print_name"] = print_name
@@ -329,7 +334,8 @@ def build(args, ctx):
     quote = delivery.quote(args["governorate"])
     if not quote["ok"]:
         return None, quote["note"]
-    items = sorted(lines.values(), key=lambda line: (line["product"], line["size"], line.get("print_name", "")))
+    items = sorted(lines.values(), key=lambda line: (line["product"], line.get("tier", ""), line["size"],
+                                                   line.get("print_name", "")))
     subtotal = sum((orders.money(line["price"]) * line["quantity"] for line in items), Decimal(0))
     fee = orders.money(quote["fee"])
     return {
@@ -345,7 +351,8 @@ def build(args, ctx):
 def shown(draft):
     """The summary the model reads: amounts as numbers, no sku, the phone as Egyptians write it."""
     return {
-        "items": [{"product": i["product"], **({"size": i["size"]} if i["size"] else {}),
+        "items": [{"product": i["product"], **({"tier": i["tier"]} if i.get("tier") else {}),
+                   **({"size": i["size"]} if i["size"] else {}),
                    **({"print_name": i["print_name"]} if i.get("print_name") else {}),
                    "quantity": i["quantity"], "price": orders.amount(i["price"])} for i in draft["items"]],
         "subtotal": orders.amount(draft["subtotal"]), "fee": orders.amount(draft["fee"]),
@@ -356,13 +363,24 @@ def shown(draft):
     }
 
 
-def _variant(catalogue, product, size):
-    """(product, variant, None) for an exact title and size from the store data, else (None, None, feedback)."""
+def _variant(catalogue, product, size, tier=None):
+    """(product, variant, None) for an exact title, tier and size from the store data, else
+    (None, None, feedback). A product whose variants have tiers needs the tier; one with no tiers
+    refuses it."""
     item = next((i for i in catalogue if _fold(i.get("title")) == _fold(product)), None)
     if item is None:
         return None, None, "No product has that title. Call store and use the exact title it gives."
     variants = item.get("variants", [])
-    sizes = ", ".join(v.get("size", "") for v in variants)
+    tiers = list(dict.fromkeys(v["tier"] for v in variants if v.get("tier")))
+    if tier is not None and tier.strip():
+        if not tiers:
+            return None, None, f"{item['title']} has no tiers. Leave tier out for it."
+        variants = [v for v in variants if _fold(v.get("tier")) == _fold(tier)]
+        if not variants:
+            return None, None, f"{item['title']} comes in the tiers {', '.join(tiers)}. Ask the customer which one."
+    elif len(tiers) > 1:
+        return None, None, f"{item['title']} comes in the tiers {', '.join(tiers)}. Ask the customer which one."
+    sizes = ", ".join(dict.fromkeys(v.get("size", "") for v in variants))
     if size is None or not size.strip():
         found = variants if len(variants) == 1 else []
     elif not any(v.get("size") for v in variants):
@@ -374,7 +392,8 @@ def _variant(catalogue, product, size):
         return None, None, f"{item['title']} comes in: {sizes}. Ask the customer which one."
     v = found[0]
     if v.get("stock") == "out":
-        return None, None, f"{item['title']} in {v.get('size', 'this size')} is out of stock. Tell the customer."
+        what = " ".join(x for x in (v.get("tier"), v.get("size")) if x) or "this size"
+        return None, None, f"{item['title']} in {what} is out of stock. Tell the customer."
     if "price" not in v:
         return None, None, "This product has no price in the store data. Say you will check with the team."
     return item, v, None

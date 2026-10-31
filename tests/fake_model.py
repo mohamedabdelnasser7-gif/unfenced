@@ -42,9 +42,9 @@ def tool_call(name, args):
         "function": {"name": name, "arguments": json.dumps(args, ensure_ascii=False)}}]}
 
 
-PRICE = "The Football Boots, Black are 1450 EGP."
+PRICE = "The Mercurial Vapor 17 Elite is 16,500 EGP."
 BUY = "ok I'll take it. Demo Buyer, 12 Tahrir St, Dokki, Giza"  # a yes after the price, with the details an order needs
-ORDER = {"items": [{"product": "Beyond the Limits Football Boots, Black", "size": "43", "quantity": 1}], "name": "Demo Buyer",
+ORDER = {"items": [{"product": "Nike Mercurial Vapor 17", "tier": "Elite", "size": "43", "quantity": 1}], "name": "Demo Buyer",
          "governorate": "Giza", "address": "12 Tahrir St, Dokki"}
 
 
@@ -64,7 +64,7 @@ class Seller:
             if res.get("next_stage") == "ordering":
                 return tool_call("draft_order", self.order)
             if res.get("step") == "summary":
-                return say(f"Your order: Football Boots, Black size 43 x1, total {res['total']} EGP with delivery. Confirm?")
+                return say(f"Your order: Mercurial Vapor 17 Elite size 43 x1, total {res['total']} EGP with delivery. Confirm?")
             if res.get("step") == "created":
                 return say(f"Thanks, order {res['order']} is placed.")
             return say(self.price)
@@ -84,7 +84,7 @@ class Seller:
 class Buyer:
     """A customer that asks the price, buys with BUY, and answers an order summary with a plain yes."""
 
-    def __init__(self, first="How much are the Football Boots, Black?"):
+    def __init__(self, first="How much is the Mercurial Vapor 17 Elite?"):
         self.first, self.calls = first, []
 
     def chat(self, messages, tools=None, effort="medium", max_tokens=1500, whole=False):

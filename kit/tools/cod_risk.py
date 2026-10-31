@@ -20,7 +20,7 @@ from decimal import Decimal
 
 from kit import orders
 
-HIGH_TOTAL = Decimal(2500)   # a first order at or above this total counts as high
+HIGH_TOTAL = Decimal(25000)  # a first order at or above this total counts as high: above any one pair
 AREA_MIN_ORDERS = 5          # finished orders needed before a governorate's rate counts
 AREA_RATE = Decimal("0.3")   # refused share of finished orders that counts as many
 

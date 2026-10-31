@@ -45,7 +45,7 @@ class Customer:
         self.calls += 1
         worry = messages[0]["content"].split("Your worry is ")[1].split(".")[0]
         if len(messages) == 2:
-            return say("How much are the Football Boots, Black?")
+            return say("How much is the Mercurial Vapor 17 Elite?")
         if worry not in self.buyers:
             return say("[leave]")
         return say("yes" if "Confirm?" in (messages[-1]["content"] or "") else BUY)
@@ -86,7 +86,7 @@ class Loop(Base):
         item = json.loads((self.dir / rep["stuck"]["file"]).read_text(encoding="utf-8"))
         self.assertEqual(item["kind"], "arena_stuck")
         self.assertIn("0 of 4 held-out matches won after 3 rounds", item["line"])
-        self.assertEqual(item["lost"][0]["quote"]["text"], "The Football Boots, Black are 1450 EGP.")
+        self.assertEqual(item["lost"][0]["quote"]["text"], "The Mercurial Vapor 17 Elite is 16,500 EGP.")
 
     def test_between_runs_before_each_later_round(self):
         seen = []
@@ -165,7 +165,7 @@ class Loop(Base):
             def chat(self, messages, tools=None, effort="medium", max_tokens=1500, whole=False):
                 if len(messages) == 2:
                     self.match += 1
-                    return say("How much are the Football Boots, Black?")
+                    return say("How much is the Mercurial Vapor 17 Elite?")
                 if self.match not in self.buys:
                     return say("[leave]")
                 return say("yes" if "Confirm?" in (messages[-1]["content"] or "") else BUY)
@@ -371,7 +371,7 @@ class Buyer:
     """Buys after the price (BUY, then yes to the summary) unless its system prompt says it will not buy."""
     def chat(self, messages, tools=None, effort="medium", max_tokens=1500, whole=False):
         if len(messages) == 2:
-            return say("How much are the Football Boots, Black?")
+            return say("How much is the Mercurial Vapor 17 Elite?")
         if "will not buy" in messages[0]["content"]:
             return say("[leave]")
         return say("yes" if "Confirm?" in (messages[-1]["content"] or "") else BUY)
@@ -443,7 +443,7 @@ class MorningItem(Base):
         self.assertIn("<h3>The Arena</h3>", html)
         self.assertIn("0 of 4 held-out matches won after 3 rounds", html)
         self.assertIn("Lost persona-02:", html)
-        self.assertIn('(turn 1, agent: "The Football Boots, Black are 1450 EGP.")', html)
+        self.assertIn('(turn 1, agent: "The Mercurial Vapor 17 Elite is 16,500 EGP.")', html)
         self.assertNotIn("old line", html)
         (self.dir / "arena-sales-old.json").write_text(json.dumps(dict(older, line="<script>x</script>", at=2e9)),
                                                          encoding="utf-8")
@@ -481,9 +481,9 @@ class HistoryLessons(Base):
         self.assertGreater(len(rows), 50)
         self.case, self.at = rows[0]["case_id"], rows[0]["at"]
         learn.to_case(self.d, {"card": "persona-01", "worry": "price", "turns": [
-            {"n": 1, "customer": "How much?", "replies": ["1450 EGP."], "outcome": "replied", "failed": []}]},
+            {"n": 1, "customer": "How much?", "replies": ["16,500 EGP."], "outcome": "replied", "failed": []}]},
             {"won": False, "why": "the customer left after this reply",
-             "quote": {"turn": 1, "who": "agent", "text": "1450 EGP."}}, "m1", now=now)
+             "quote": {"turn": 1, "who": "agent", "text": "16,500 EGP."}}, "m1", now=now)
 
     def day(self, at):
         return time.strftime("%d %b %Y", time.gmtime(at))  # as engine/study.py writes a window
@@ -554,7 +554,7 @@ class ToReflection(Base):
         db = Db(":memory:")
         self.addCleanup(db.close)
         m = {"card": "persona-01", "worry": "price", "turns": [
-            {"n": 1, "customer": "How much?", "replies": ["1450 EGP."], "outcome": "replied", "failed": []},
+            {"n": 1, "customer": "How much?", "replies": ["16,500 EGP."], "outcome": "replied", "failed": []},
             {"n": 2, "customer": "too much", "replies": ["It is our price."], "outcome": "replied", "failed": []}]}
         judged = {"won": False, "why": "the customer left after this reply",
                   "quote": {"turn": 2, "who": "agent", "text": "It is our price."}}

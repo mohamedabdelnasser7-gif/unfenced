@@ -3,7 +3,10 @@ the store's own data (kit/tools/store.py catalogue and delivery, demo/governorat
 
 price     every amount in the reply (kit/send_check.py prices_in) is a price of a product the
           reply names, a delivery fee, one price plus one fee, or an amount a tool gave this
-          turn (a draft order's total). With no product named, any store price counts.
+          turn (a draft order's total). With no product named, any store price counts. A tier
+          the reply names (Elite, Pro; else one the customer's line names) narrows the prices to
+          that tier's, and in a clause that names one tier its amounts must be that tier's prices:
+          the Pro price given for an Elite boot is a wrong price.
 size      a size number after a size word (مقاس 43, size 43, EU 43) fits a size of a product
           the reply names, or of any product when it names none.
 stock     a reply that says a named product (and size, when it gives one) is available while
@@ -17,8 +20,9 @@ order     a reply that says the order is placed or confirmed (claims_order below
 
 check(reply, customer_text, tool_results, orders) returns the failed checks as
 [{"check", "why"}]; an empty list is a pass. Products are named by the words of their title
-after the store name ("Football Boots, Black"), in the reply or, when the reply names none, in the
-customer's line.
+after the store name, all of them or all but the first (the maker: "Mercurial Vapor" names "Nike
+Mercurial Vapor 17"), in the reply or, when the reply names none, in the customer's line. Tiers
+are named by their word from the store data ("Elite"), the same way.
 """
 import json
 import re
@@ -79,6 +83,9 @@ DAYS = re.compile(r"(?<![\d.])(\d{1,2})\s*(?:(?:-|to|او|أو|ل|الى|إلى|
                   r"(?:(?:working|business)\s+)?(?:days?|يوم|أيام|ايام|yom|youm|ayam)(?!\w)", re.IGNORECASE)
 TWO_DAYS = re.compile(r"(?<!\w)(?:يومين|yomein|youmein)(?!\w)", re.IGNORECASE)
 SENTENCE = re.compile(r"[^.!?؟\n]+")
+# a clause for the tier rule: cut at an end mark, a new line, ؛ ; ، or a comma that is not inside
+# a number (16,500 stays whole); a decimal point does not end it
+TIER_CLAUSE = re.compile(r"(?:[^.!?؟\n,،;؛]|(?<=\d)[.,](?=\d))+")
 
 
 def _words(text):
@@ -86,15 +93,16 @@ def _words(text):
 
 
 def products_named(text, items):
-    """The catalogue items whose title words (after the store name) all show in text."""
+    """The catalogue items whose title words (after the store name) all show in text, or all but
+    the first word (the maker, often left out: "Mercurial Vapor" for "Nike Mercurial Vapor 17")."""
     have = _words(text)
     out = []
     for item in items:
-        title = (item.get("title") or "").casefold().replace(STORE_NAME, "")
-        need = _words(title)
-        if need and need <= have:
+        title = re.findall(r"[a-z]+", (item.get("title") or "").casefold().replace(STORE_NAME, ""))
+        need, rest = set(title), set(title[1:])
+        if (need and need <= have) or (rest and rest <= have):
             out.append(item)
-    # a title whose words all sit inside a longer named title ("Boots" inside "Junior Boots")
+    # a title whose words all sit inside a longer named title ("Phantom" inside "Phantom Club")
     # gives way to the longer one; keep the longest titles only
     return [i for i in out if not any(o is not i and _words(i["title"]) < _words(o["title"]) for o in out)]
 
@@ -123,8 +131,19 @@ def _eu(size):
     return (int(m.group(1)), int(m.group(1))) if m else None
 
 
-def _variant_for(item, number=None, letter=None):
-    for v in item.get("variants", []):
+def tiers_named(text, tiers):
+    """The tiers (from the store data) whose word shows in text: "Elite" in "the Elite is 16,500"."""
+    low = (text or "").casefold()
+    return {t for t in tiers if re.search(r"(?<![\w])" + re.escape(t.casefold()) + r"(?![\w])", low)}
+
+
+def _of_tiers(variants, tiers):
+    """The variants in one of tiers, and those with no tier (the printing); all of them when tiers is empty."""
+    return [v for v in variants if not tiers or not v.get("tier") or v["tier"] in tiers]
+
+
+def _variant_for(item, number=None, letter=None, tiers=()):
+    for v in _of_tiers(item.get("variants", []), tiers):
         size = v.get("size") or ""
         if number is not None:
             r = _eu(size)
@@ -140,17 +159,37 @@ def check(reply, customer_text="", tool_results=(), orders=()):
     sizes = store.size_strings()
     zones = store.delivery().get("zones", [])
     fees = {send_check.amount(z["fee"]) for z in zones if "fee" in z}
+    all_tiers = store.tiers()
     named = products_named(reply, items) or products_named(customer_text, items)
+    said = tiers_named(reply, all_tiers) or tiers_named(customer_text, all_tiers)
     pool = named or items
-    prices = {send_check.amount(v["price"]) for i in pool for v in i.get("variants", []) if "price" in v}
-    allowed = set(prices) | fees | {p + f for p in prices for f in fees if p is not None and f is not None}
+    prices = {send_check.amount(v["price"]) for i in pool for v in _of_tiers(i.get("variants", []), said)
+              if "price" in v}
+    from_tools = set()
     for name, res in tool_results:
         if name in tools.AMOUNT_TOOLS:
-            allowed |= send_check.amounts_in(res)
-    failed = []
+            from_tools |= send_check.amounts_in(res)
+    allowed = set(prices) | fees | {p + f for p in prices for f in fees if p is not None and f is not None}
+    allowed |= from_tools
+    failed, wrong = [], set()
     for a in send_check.prices_in(reply, sizes, orders):
         if Decimal(str(a)) not in {Decimal(str(x)) for x in allowed if x is not None}:
+            wrong.add(Decimal(str(a)))
             failed.append({"check": "price", "why": f"{a} is not a store price, fee or tool amount"})
+
+    for clause in TIER_CLAUSE.findall(reply):
+        here = tiers_named(clause, all_tiers)
+        if len(here) != 1:
+            continue
+        mine = products_named(clause, items) or pool
+        ok = {send_check.amount(v["price"]) for i in mine for v in _of_tiers(i.get("variants", []), here)
+              if "price" in v and v.get("tier")}
+        ok |= fees | {p + f for p in ok for f in fees if p is not None and f is not None} | from_tools
+        for a in send_check.prices_in(clause, sizes, orders):
+            d = Decimal(str(a))
+            if d not in wrong and d not in {Decimal(str(x)) for x in ok if x is not None}:
+                wrong.add(d)
+                failed.append({"check": "price", "why": f"{a} is not the {next(iter(here))} price of {_names(mine)}"})
 
     for m in SIZE_NUMBER.finditer(reply):
         n = int(m.group(1))
@@ -165,20 +204,21 @@ def check(reply, customer_text="", tool_results=(), orders=()):
         here = products_named(sentence, items) or named
         nums = [int(m.group(1)) for m in SIZE_NUMBER.finditer(sentence)]
         letters = SIZE_LETTER.findall(sentence)
+        level = tiers_named(sentence, all_tiers) or said
         for item in here:
-            variants = [v for v in (_variant_for(item, number=n) for n in nums) if v]
-            variants += [v for v in (_variant_for(item, letter=x) for x in letters) if v]
+            variants = [v for v in (_variant_for(item, number=n, tiers=level) for n in nums) if v]
+            variants += [v for v in (_variant_for(item, letter=x, tiers=level) for x in letters) if v]
             if not variants and not nums and not letters:
-                variants = item.get("variants", [])
+                variants = _of_tiers(item.get("variants", []), level)
                 if says_in and variants and all(v.get("stock") == "out" for v in variants):
                     failed.append({"check": "stock", "why": f"{item['title']} is out, the reply says available"})
                 continue
             for v in variants:
                 if says_in and v.get("stock") == "out":
-                    failed.append({"check": "stock", "why": f"{item['title']} {v.get('size')} is out, "
+                    failed.append({"check": "stock", "why": f"{item['title']} {_label(v)} is out, "
                                                             f"the reply says available"})
                 if says_out and v.get("stock") not in (None, "out"):
-                    failed.append({"check": "stock", "why": f"{item['title']} {v.get('size')} is in stock, "
+                    failed.append({"check": "stock", "why": f"{item['title']} {_label(v)} is in stock, "
                                                             f"the reply says out"})
 
     zone = _governorate_zone(reply) or _governorate_zone(customer_text)
@@ -229,6 +269,10 @@ def placed(tool_results):
                 res.get("step") == "created" and res.get("order"):
             return True
     return False
+
+
+def _label(v):
+    return " ".join(x for x in (v.get("tier"), v.get("size")) if x) or "(no size)"
 
 
 def _names(items):

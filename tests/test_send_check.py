@@ -32,20 +32,20 @@ class SendCheck(unittest.TestCase):
         self.assertIsNone(detect_script("؟ 43"))
 
     def test_arabic_in_arabic_out(self):
-        self.assertTrue(self.ok("أيوه عندنا مقاس 43، الجزمة بـ 1450 جنيه.", AR)[0])
-        self.assertTrue(self.ok("عندنا Beyond the Limits Football Boots السودا مقاس 43 بـ 1450 جنيه.", AR)[0])
-        passed, fb = self.ok("Yes, we have size 43 for 1450 EGP.", AR)
+        self.assertTrue(self.ok("أيوه عندنا مقاس 43، الجزمة بـ 16500 جنيه.", AR)[0])
+        self.assertTrue(self.ok("عندنا Nike Phantom 6 Elite مقاس 43 بـ 16500 جنيه.", AR)[0])
+        passed, fb = self.ok("Yes, we have size 43 for 16500 EGP.", AR)
         self.assertFalse(passed)
         self.assertIn("Arabic letters", fb)
 
     def test_franco_in_latin_out(self):
-        self.assertTrue(self.ok("aywa 3andena size 43, b 1450 geneh.", FRANCO)[0])
+        self.assertTrue(self.ok("aywa 3andena size 43, b 16500 geneh.", FRANCO)[0])
         passed, fb = self.ok("أيوه عندنا مقاس 43.", FRANCO)
         self.assertFalse(passed)
         self.assertIn("Franco", fb)
 
     def test_english_in_english_out(self):
-        self.assertTrue(self.ok("Yes, size 43 is in stock at 1450 EGP.", EN)[0])
+        self.assertTrue(self.ok("Yes, size 43 is in stock at 16500 EGP.", EN)[0])
         self.assertFalse(self.ok("أيوه عندنا.", EN)[0])
         passed, fb = self.ok("aywa 3andena el size da.", EN)
         self.assertFalse(passed)
@@ -54,7 +54,7 @@ class SendCheck(unittest.TestCase):
     # banned words and dashes
 
     def test_banned_words(self):
-        for reply, word in (("1450 جنيه للجوز", "الجوز"), ("1450 geneh el goz", "el goz"), ("هيناسبك 43 مرتاح", "مرتاح")):
+        for reply, word in (("16500 جنيه للجوز", "الجوز"), ("16500 geneh el goz", "el goz"), ("هيناسبك 43 مرتاح", "مرتاح")):
             customer = FRANCO if "geneh" in reply else AR
             passed, fb = self.ok(reply, customer)
             self.assertFalse(passed, reply)
@@ -71,7 +71,7 @@ class SendCheck(unittest.TestCase):
             passed, fb = self.ok(f"Yes {dash} size 43 is in stock.", EN)
             self.assertFalse(passed)
             self.assertIn("dashes", fb)
-        self.assertTrue(self.ok("Sizes 40-45 and 30-38 are in stock.", EN)[0])
+        self.assertTrue(self.ok("Sizes 39-42 and 43-46 are in stock.", EN)[0])
 
     # prices
 
@@ -79,20 +79,37 @@ class SendCheck(unittest.TestCase):
         passed, fb = self.ok("الجزمة بـ 349 جنيه.", AR)
         self.assertFalse(passed)
         self.assertIn("349", fb)
-        for good in ("الجزمة بـ 1450 جنيه.", "الجزمة بـ ١٤٥٠ جنيه.", "الشحن 60 جنيه للقاهرة."):
+        for good in ("الجزمة بـ 16500 جنيه.", "الجزمة بـ ١٦٥٠٠ جنيه.", "الشحن 60 جنيه للقاهرة."):
             self.assertTrue(self.ok(good, AR)[0], good)
-        self.assertTrue(self.ok("It is EGP 1450, delivery 85 EGP.", EN)[0])
+        self.assertTrue(self.ok("It is EGP 16500, delivery 85 EGP.", EN)[0])
         self.assertTrue(self.ok("Delivery takes 2 to 4 days, exchanges within 14 days.", EN)[0])
 
     def test_totals_pass_only_from_tool_results(self):
-        self.assertFalse(self.ok("Your total is 1,510 EGP.", EN)[0])
-        amounts = self.amounts | amounts_in({"ok": True, "order": {"total": "1510.00"}})
-        self.assertTrue(self.ok("Your total is 1,510 EGP.", EN, amounts)[0])
+        self.assertFalse(self.ok("Your total is 16,560 EGP.", EN)[0])
+        amounts = self.amounts | amounts_in({"ok": True, "order": {"total": "16560.00"}})
+        self.assertTrue(self.ok("Your total is 16,560 EGP.", EN, amounts)[0])
 
     def test_prices_in(self):
-        self.assertEqual(prices_in("1450 جنيه و 60 جنيه شحن"), [1450, 60])
-        self.assertEqual(prices_in("EGP 1,510 total, 14 days"), [1510])
+        self.assertEqual(prices_in("16500 جنيه و 60 جنيه شحن"), [16500, 60])
+        self.assertEqual(prices_in("EGP 16,560 total, 14 days"), [16560])
         self.assertEqual(prices_in("size 43, 2 pairs"), [])
+
+    def test_a_weight_in_grams_is_not_an_amount(self):
+        # The Vapor 17 line in the store data: "150 grams of pure speed" (root's call, 31 Oct).
+        for reply, customer in (("The Vapor 17 Elite is 150 grams of pure speed.", EN),
+                                ("الـ Vapor 17 Elite وزنها 150 جرام بس.", AR),
+                                ("el Vapor 17 Elite 150 grams bas.", FRANCO)):
+            with self.subTest(reply=reply):
+                self.assertEqual(prices_in(reply), [])
+                self.assertTrue(self.ok(reply, customer)[0], reply)
+        # 4 or more digits, a phone-like run of digits, or جم (the currency) stay amounts.
+        for reply, n in (("It weighs 1234 grams.", [1234]), ("Weight 100 123 4567 grams.", [100123, 4567]),
+                         ("It is 123 456 grams.", [123456]), ("الجزمة بـ 150 جم", [150])):
+            with self.subTest(reply=reply):
+                self.assertEqual(prices_in(reply), n)
+                passed, fb = self.ok(reply, AR if "جم" in reply else EN)
+                self.assertFalse(passed, reply)
+                self.assertIn("not in the store or delivery data", fb)
 
     def test_empty_reply(self):
         self.assertFalse(self.ok("  ", EN)[0])
@@ -116,7 +133,7 @@ class SendCheck(unittest.TestCase):
         self.assertFalse(self.ok("أيوه موجود " + chr(0x2764) + chr(0xFE0F), AR)[0])
 
     def test_no_markdown_bold(self):
-        passed, fb = self.ok("The **black** boots are 1450 EGP.", EN)
+        passed, fb = self.ok("The **Elite** boots are 16500 EGP.", EN)
         self.assertFalse(passed)
         self.assertIn("markdown", fb)
 
@@ -124,9 +141,9 @@ class SendCheck(unittest.TestCase):
         passed, fb = self.ok("Yes - size 43 is in stock.", EN)
         self.assertFalse(passed)
         self.assertIn("hyphen", fb)
-        self.assertFalse(self.ok("الجزمة - 1450 جنيه.", AR)[0])
+        self.assertFalse(self.ok("الجزمة - 16500 جنيه.", AR)[0])
         self.assertTrue(self.ok("Sizes 40 - 45 are in stock.", EN)[0])
-        self.assertTrue(self.ok("Junior sizes run 30-38.", EN)[0])
+        self.assertTrue(self.ok("Sizes run 39-46.", EN)[0])
 
     def test_no_exact_stock_count(self):
         for reply, customer in (("Only 3 left in size 43.", EN), ("We have 2 pairs left.", EN),
@@ -150,9 +167,9 @@ class SendCheck(unittest.TestCase):
 
     def test_sizes_dates_orders_and_units_are_not_amounts(self):
         for reply, customer in (
-                ("عندنا الجونيور مقاس EU 30-38 بـ 700 جنيه.", AR),
-                ("Size 43 is in stock for 1450 EGP.", EN),
-                ("Sizes are 42 and 43, at 1450 EGP.", EN),
+                ("عندنا الـ Academy مقاس EU 39-46 بـ 7500 جنيه.", AR),
+                ("Size 43 is in stock for 16500 EGP.", EN),
+                ("Sizes are 42 and 43, at 16500 EGP.", EN),
                 ("Your order #1234 is on its way.", EN),
                 ("Order #5521 is with the courier.", EN),  # F7 (t261028j): an order number needs its #
                 ("اوردر #1234 اتسلم لبوسطة من 2 ايام.", AR),
@@ -161,7 +178,7 @@ class SendCheck(unittest.TestCase):
                 ("Delivery is 2 to 4 days.", EN),
                 ("التوصيل من 2 لـ 4 أيام.", AR),
                 ("Exchanges are free for 14 days.", EN),
-                ("It comes in 4 colours for 1450 EGP.", EN)):
+                ("It comes in 8 sizes for 16500 EGP.", EN)):
             self.assertTrue(self.ok(reply, customer)[0], reply)
 
     def test_catalogue_size_strings_are_not_amounts(self):
@@ -169,25 +186,25 @@ class SendCheck(unittest.TestCase):
         self.assertEqual(prices_in(reply), [10])
         self.assertEqual(prices_in(reply, sizes=("Kids 10",)), [])
         self.assertTrue(check(reply, EN, self.amounts, self.vocab, sizes=("Kids 10",))[0])
-        # The boots' bare sizes ("36"): after a weak word a size number is a size.
-        reply = "The junior boots for 36 are 700 EGP."
-        self.assertEqual(prices_in(reply), [700, 36])
-        self.assertEqual(prices_in(reply, sizes=store.size_strings()), [700])
+        # The boots' bare sizes ("40"): after a weak word a size number is a size.
+        reply = "The Academy boots for 40 are 7500 EGP."
+        self.assertEqual(prices_in(reply), [7500, 40])
+        self.assertEqual(prices_in(reply, sizes=store.size_strings()), [7500])
         self.assertTrue(check(reply, EN, self.amounts, self.vocab, sizes=store.size_strings())[0])
         # A size string with a range in brackets is masked whole, and its range counts as sizes.
-        items = [{"title": "Junior Boots", "variants": [{"size": "Junior (30-38)", "price": "700"}]}]
+        items = [{"title": "Range Boots", "variants": [{"size": "Adult (40-45)", "price": "7500"}]}]
         with mock.patch.object(store, "catalogue", return_value=items):
             sizes = store.size_strings()
-        self.assertEqual(prices_in("Price for Junior (30-38): 700 EGP."), [700, 30])
-        self.assertEqual(prices_in("Price for Junior (30-38): 700 EGP.", sizes=sizes), [700])
-        self.assertEqual(prices_in(reply, sizes=sizes), [700])
+        self.assertEqual(prices_in("Price for Adult (40-45): 7500 EGP."), [7500, 40])
+        self.assertEqual(prices_in("Price for Adult (40-45): 7500 EGP.", sizes=sizes), [7500])
+        self.assertEqual(prices_in(reply, sizes=sizes), [7500])
 
     # amounts from tool results
 
     def test_amounts_only_under_exact_keys(self):
         self.assertEqual(amounts_in({"coffee": 9999, "offer_amount": 7, "amount": 5, "cost": 3, "fees": 2}), set())
-        self.assertEqual(amounts_in({"items": [{"price": "1450"}, {"fee": 60}], "subtotal": 1510, "total": "1,570.00"}),
-                         {1450, 60, 1510, 1570})
+        self.assertEqual(amounts_in({"items": [{"price": "16500"}, {"fee": 60}], "subtotal": 16560, "total": "16,620.00"}),
+                         {16500, 60, 16560, 16620})
 
     def test_strings_are_never_parsed_as_json(self):
         self.assertEqual(amounts_in({"ok": True, "text": '{"price": 5}'}), set())
@@ -197,7 +214,7 @@ class SendCheck(unittest.TestCase):
     def test_non_finite_amounts_are_ignored(self):
         for bad in ("inf", "nan", "1e400", float("inf"), float("nan"), 10 ** 400, True, None, [1, 2]):
             self.assertEqual(amounts_in({"price": bad}) - {1, 2}, set(), repr(bad)[:20])
-        passed, _ = check("It is 1450 EGP.", EN, {1450, float("inf"), "x"}, self.vocab)
+        passed, _ = check("It is 16500 EGP.", EN, {16500, float("inf"), "x"}, self.vocab)
         self.assertTrue(passed)
 
 
@@ -266,15 +283,15 @@ NORMAL = (
     ("which sizes?", "The sizes are 42, 43 and 44, all in stock."),
     ("when does it come?", "Your order is out for delivery and arrives at 5 pm."),
     ("can I get 2?", "Yes, your order is 2 pairs in size 43."),
-    ("size?", "Size 43 is only in black."),
+    ("size?", "Size 43 is only in Elite."),
     ("is 44 there?", "44 is in stock, and delivery to Giza is 2 days."),
     ("ordered on 25 October", "Your order from 25 October is on its way, it arrives in 2 days."),
     ("when?", "Delivery takes 2 to 3 working days."),
-    ("do you have 43?", "Black is available in 42 and 43."),
-    ("do you have 43?", "The black ones are 42 and 43."),
-    ("do you have 43?", "We only have 43 and 44 in black."),
-    ("do you have 43?", "For 43 we have the black pair only, in stock."),
-    ("do you have 43?", "We have 43 available in black."),
+    ("do you have 43?", "Elite is available in 42 and 43."),
+    ("do you have 43?", "The Elite ones are 42 and 43."),
+    ("do you have 43?", "We only have 43 and 44 in Elite."),
+    ("do you have 43?", "For 43 we have the Elite pair only, in stock."),
+    ("do you have 43?", "We have 43 available in Elite."),
     ("el order emta yewsal?", "el order NLS0001 fel tare2 w hywsal fe 2 ayam"),
     ("el tawseel l Alex kam yom?", "el tawseel l Alex 2 l 3 ayam"),
     ("emta?", "hywsal fe 2 le 3 ayam"),
@@ -307,8 +324,8 @@ NORMAL = (
     ("بتردوا امتى؟", "بنرد من الساعة ٩:٣٠ لحد ١٠:٠٠ بالليل"),
     ("are you sure?", "Yes, 100% sure."),
     ("which one?", "Code BO-2936845 is in stock."),
-    ("how much?", "The black boots, 1450."),
-    ("how much?", "They are 1450.00 EGP."),
+    ("how much?", "The Elite boots, 16500."),
+    ("how much?", "They are 16500.00 EGP."),
 )
 
 # Mohamed's call, 28 Oct: a standalone number of 3 or more digits is an amount, with or
@@ -327,7 +344,7 @@ BARE_BLOCKED = (
     ("how long?", "You pay for 500 working days."),
     ("how long?", "It is 800 business days."),
     ("how much?", "Hoodie: 1,500."),
-    ("how much?", "Boots 1450-1600."),
+    ("how much?", "Boots 16500-1600."),
     ("size 43?", "Size 43, 500."),
     ("how much?", "It is 2000."),
     # A 4 digit number from 1900 to 2099 is a year only with a year word or a month next
@@ -338,7 +355,7 @@ BARE_BLOCKED = (
 )
 
 # Still blocked: a price word in the sentence keeps a size number an amount, and the
-# store's sizes run 30 to 45, so 1, 45 after a price word and 500 are all amounts.
+# store's sizes run 39 to 46, so 1, 45 after a price word and 500 are all amounts.
 STILL_BLOCKED = (
     ("delivery?", "Delivery to Giza is 45."),
     ("delivery?", "Shipping to Aswan takes longer and is 45."),
@@ -379,13 +396,13 @@ class NormalReplies(unittest.TestCase):
                 passed, fb = check(reply, customer, *self.args)
                 self.assertFalse(passed)
                 self.assertIn("not in the store or delivery data", fb)
-        for customer, reply in (("do you have 43?", "Black is available in 43."),
+        for customer, reply in (("do you have 43?", "Elite is available in 43."),
                                 ("when?", "It arrives on Oct 30, 2026."), ("when?", "The courier comes at 10:30."),
                                 ("3ndko 43?", "aywa, mawgood b 43")):
             with self.subTest(reply=reply):
                 self.assertEqual(check(reply, customer, *self.args), (True, ""))
         self.assertEqual(prices_in("سعره 43", sizes=("43",)), [43])
-        self.assertEqual(prices_in("Black is available in 43.", sizes=("43",)), [])
+        self.assertEqual(prices_in("Elite is available in 43.", sizes=("43",)), [])
 
     def test_a_count_that_is_not_a_size_is_still_refused(self):
         passed, fb = check("Only 3 left in 43.", "do you have 43?", *self.args)
@@ -415,24 +432,24 @@ class NumbersAsWritten(unittest.TestCase):
                 passed, fb = check(reply, customer, store.price_points())
                 self.assertFalse(passed)
                 self.assertIn("not in the store or delivery data", fb)
-        self.assertTrue(check("The junior boots are _700 EGP_.", EN, store.price_points())[0])
+        self.assertTrue(check("The Academy boots are _7500 EGP_.", EN, store.price_points())[0])
         self.assertFalse(check("el gazma b meteen geneh", "bkam el gazma?", store.price_points())[0])
 
     def test_decimals_count_as_written(self):
-        self.assertEqual(prices_in("It is 700.99 EGP."), [Decimal("700.99")])
-        self.assertEqual(prices_in("الجزمة ٧٠٠٫٩٩ جنيه"), [Decimal("700.99")])
-        self.assertFalse(check("It is 700.99 EGP.", EN, {700, 1450})[0])
-        self.assertFalse(check("The price is 700.99", EN, {700})[0])
-        self.assertTrue(check("It is 1450.00 EGP.", EN, {1450})[0])
-        self.assertTrue(check("It is 1450.50 EGP.", EN, {"1450.50"})[0])
-        self.assertFalse(check("It is 1450 EGP.", EN, {"1450.50"})[0])
-        self.assertEqual(amounts_in({"price": "1450.50", "fee": 60.0}), {Decimal("1450.5"), 60})
+        self.assertEqual(prices_in("It is 7500.99 EGP."), [Decimal("7500.99")])
+        self.assertEqual(prices_in("الجزمة ٧٥٠٠٫٩٩ جنيه"), [Decimal("7500.99")])
+        self.assertFalse(check("It is 7500.99 EGP.", EN, {7500, 16500})[0])
+        self.assertFalse(check("The price is 7500.99", EN, {7500})[0])
+        self.assertTrue(check("It is 16500.00 EGP.", EN, {16500})[0])
+        self.assertTrue(check("It is 16500.50 EGP.", EN, {"16500.50"})[0])
+        self.assertFalse(check("It is 16500 EGP.", EN, {"16500.50"})[0])
+        self.assertEqual(amounts_in({"price": "16500.50", "fee": 60.0}), {Decimal("16500.5"), 60})
 
     def test_store_prices_keep_their_fractions(self):
-        items = [{"title": "T", "variants": [{"size": "43", "price": "1450.50"}, {"size": "44", "price": "1450.00"}]}]
+        items = [{"title": "T", "variants": [{"size": "43", "price": "16500.50"}, {"size": "44", "price": "16500.00"}]}]
         with mock.patch.object(store, "catalogue", return_value=items):
             points = store.price_points()
-        self.assertEqual(points, {Decimal("1450.5"), 1450, 60, 85})  # 60 and 85: the demo delivery fees
+        self.assertEqual(points, {Decimal("16500.5"), 16500, 60, 85})  # 60 and 85: the demo delivery fees
 
     def test_amounts_with_k_are_refused(self):
         for reply in ("It costs 1k EGP.", "Only 1.5k.", "EGP 2k", "The price is 1k"):
@@ -465,8 +482,8 @@ class NumbersAsWritten(unittest.TestCase):
                 self.assertEqual(prices_in(reply), [n])
 
     def test_size_numbers_that_are_also_prices(self):
-        self.assertEqual(size_number_amounts({45, 1450, "60"}, ("Adult (40-45)", "Kids 60")), [45, 60])
-        self.assertEqual(size_number_amounts({43, 1450, "60"}, ("43", "44")), [43])
+        self.assertEqual(size_number_amounts({45, 16500, "60"}, ("Adult (40-45)", "Kids 60")), [45, 60])
+        self.assertEqual(size_number_amounts({43, 16500, "60"}, ("43", "44")), [43])
         self.assertEqual(size_number_amounts(store.price_points(), store.size_strings()), [])
 
 
@@ -530,21 +547,21 @@ class Round3(unittest.TestCase):
         # Red team t261028j F7: an order word with no # masks nothing, so "Your order 1500" is an amount.
         self.refused("Your order 1500 is ready.", EN, "not in the store or delivery data")
         self.passes("Your order #1500 is ready.", EN)
-        self.passes("Your total for order #1042 is 1450 EGP.", EN)
+        self.passes("Your total for order #1042 is 16500 EGP.", EN)
         self.assertEqual(prices_in("Your order 1500 is ready."), [1500])
 
     def test_every_digit_counts_and_a_decimal_comma_is_a_point(self):
         # R3-3 and R3-F4: dot thousands, decimal commas, letters after the number, item-price lists.
         for reply, n in (("Black boots 1.500", Decimal("1.5")), ("الجزمة ١٫٥٠٠", Decimal("1.5")),
-                         ("500,50", Decimal("500.5")), ("Black boots 700,99.", Decimal("700.99")),
-                         ("The price is 700,99", Decimal("700.99")), ("الكوتشي ٥٠٠٬٠٠", 500), ("12,3456", 3456),
+                         ("500,50", Decimal("500.5")), ("Black boots 7500,99.", Decimal("7500.99")),
+                         ("The price is 7500,99", Decimal("7500.99")), ("الكوتشي ٥٠٠٬٠٠", 500), ("12,3456", 3456),
                          ("el gazma 500bs", 500), ("Black boots 500.0.0", 500)):
             with self.subTest(reply=reply):
                 self.assertEqual(prices_in(reply), [n])
         self.assertEqual(prices_in("Black boots-500, white boots-550."), [500, 550])
-        for reply, customer in (("Black boots 1.500", EN), ("Black boots 700,99.", EN), ("el gazma 500bs", FR)):
+        for reply, customer in (("Black boots 1.500", EN), ("Black boots 7500,99.", EN), ("el gazma 500bs", FR)):
             self.refused(reply, customer, "not in the store or delivery data")
-        self.passes("The junior boots are 700,00 EGP.", EN)
+        self.passes("The Academy boots are 7500,00 EGP.", EN)
         for reply in ("NLS0001", "BO-2936845", "It arrives on 28.10.2026."):
             with self.subTest(reply=reply):
                 self.assertEqual(prices_in(reply), [])
@@ -579,8 +596,8 @@ class Round3(unittest.TestCase):
 
     def test_franco_le_before_a_small_number_and_landlines_are_not_amounts(self):
         # False blocks from the round 3 review.
-        for reply, customer in (("el ma2as mn 42 le 45.", FR), ("mawgod mn 42 le 45.", FR), ("el junior ma2as 30 le 38.", FR),
-                                ("el junior mn 30 le 38.", FR), ("momken t8ayar le 44.", FR),
+        for reply, customer in (("el ma2as mn 42 le 45.", FR), ("mawgod mn 42 le 45.", FR), ("el academy ma2as 39 le 46.", FR),
+                                ("el academy mn 39 le 46.", FR), ("momken t8ayar le 44.", FR),
                                 ("Call us on 02 2345 6789.", EN), ("Call us on 0223456789.", EN),
                                 ("Our Alex office is on 03 4567890.", EN), ("كلمنا على ٠٢٢٣٤٥٦٧٨٩", AR),
                                 ("Delivery on 28.10.2026.", EN)):
@@ -606,27 +623,27 @@ class OrderSummary(unittest.TestCase):
                       "Bldg. no. 125", "بالعمارة 125", "للعمارة: 125", "Apt #125", "St. 125"):
             with self.subTest(reply=reply):
                 self.assertEqual(prices_in(reply), [])
-        self.passes("العنوان: الدقي، عمارة 125، الدور 3، شقة 12. سعر الجزمة 1450 جنيه.", AR)
-        self.passes("Your address is Building 125, Flat 12. The boots are 1450 EGP.", EN)
+        self.passes("العنوان: الدقي، عمارة 125، الدور 3، شقة 12. سعر الجزمة 16500 جنيه.", AR)
+        self.passes("Your address is Building 125, Flat 12. The boots are 16500 EGP.", EN)
         # Review t261028j 4: after a price word in the same sentence, an address number is an amount.
-        self.refused("Delivery to Building 125, Flat 12. The boots are 1450 EGP.", EN, "125")
+        self.refused("Delivery to Building 125, Flat 12. The boots are 16500 EGP.", EN, "125")
 
     def test_an_address_word_never_hides_a_price(self):
         # A currency word is read first. Words that also sit before prices (a piece, a shop, a zone)
         # are not address words, and a number glued to a word before it (1st) is not after one.
-        for reply, n in (("عمارة 125 جنيه", 125), ("سعر القطعة 1450", 1450), ("سعرها في المحل 1450", 1450),
-                         ("Price per unit 1450", 1450), ("Delivery to your zone: 70", 70), ("المنطقة 150", 150),
+        for reply, n in (("عمارة 125 جنيه", 125), ("سعر القطعة 16500", 16500), ("سعرها في المحل 16500", 16500),
+                         ("Price per unit 16500", 16500), ("Delivery to your zone: 70", 70), ("المنطقة 150", 150),
                          ("1st 500", 500), ("عمارة 1,500", 1500)):
             with self.subTest(reply=reply):
                 self.assertEqual(prices_in(reply), [n])
         self.refused("عمارة 125 جنيه.", AR, "not in the store or delivery data")
 
     def test_a_draft_name_after_a_price_word_is_masked(self):
-        self.assertEqual(prices_in("Total for order #D1958 is 1450 EGP."), [1450])
+        self.assertEqual(prices_in("Total for order #D1958 is 16500 EGP."), [16500])
         self.assertEqual(prices_in("Total: # D12"), [])
-        self.passes("Your total for draft #D1958 is 1450 EGP.", EN)
+        self.passes("Your total for draft #D1958 is 16500 EGP.", EN)
         # The draft's name is not a Franco word, but other Franco next to it still is.
-        self.passes("Your order #D12 is received. The total is 1450 EGP.", EN)
+        self.passes("Your order #D12 is received. The total is 16500 EGP.", EN)
         self.refused("Order #D12: 3ndna el gazma.", EN, "not Franco")
 
     def test_a_number_with_a_plus_and_eight_or_more_digits_is_a_phone(self):

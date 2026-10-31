@@ -4,7 +4,8 @@
  "unwinnable": false,
  "why_unwinnable": null,
  "want": [
-  "football boots"
+  "football boots",
+  "something from the shop"
  ],
  "buy_trigger": [
   "a clear size answer"
@@ -20,9 +21,9 @@
    "long": 0.0
   },
   "language": {
-   "arabic": 0.67,
+   "arabic": 0.61,
    "franco": 0.17,
-   "english": 0.17
+   "english": 0.22
   },
   "voice_notes": 0.06,
   "opening": {
@@ -42,7 +43,7 @@
   "مقاس 43 متاح؟",
   "Hi, are these boots true to size?",
   "عايز الجزمة دي مقاس 41",
-  "عايز الجزمة الكحلي مقاس 44"
+  "عايز ال Phantom 6 Elite مقاس 44"
  ],
  "share": 0.214,
  "arena_weight": 0.214

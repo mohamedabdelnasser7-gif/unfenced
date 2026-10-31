@@ -17,10 +17,10 @@ it. One message goes through these steps, in this order:
  4. Phones in every Egyptian format, the groups split by spaces, dashes, dots, commas,
     underscores, stars, slashes or و -> [phone]; a number of 4 or more digits after an account
     cue (رقم الحساب, الحساب البنكي, IBAN, account no, rakam el 7esab) -> [number], even with a
-    currency or a letter after it (الحساب 1450 جنيه alone is the bill and stays); any other run
+    currency or a letter after it (الحساب 16500 جنيه alone is the bill and stays); any other run
     of 7 or more digits with up to 12 signs of any kind (or و, ثم, بعدين, then) between each two
     -> [number], except a sum of up to 11 digits that is not shaped like a phone and has a
-    currency right after it (1450 + 90 = 1540 جنيه) or = and + × or * in it (1450 + 60 = 1510);
+    currency right after it (16500 + 90 = 16590 جنيه) or = and + × or * in it (16500 + 60 = 16560);
     a lone run of 5 or 6 digits with no money word before or after it (a zip code, a tracking
     number) -> [number].
  5. Handles with no @: a word with an underscore, letters then 2 or more digits (yasmine1990),
@@ -252,7 +252,7 @@ BARE5 = re.compile(r"(?<![\w.,])\d{5,6}(?!\w|[.,]\d)")
 MONEY_NEXT = re.compile(r"\s*" + send_check.CURRENCY + r"(?!\w)", re.IGNORECASE)
 CUE_BEFORE = re.compile(LETTER_BEFORE + r"(?:" + "|".join(send_check.PRICE_WORDS) + r"|بـ|ب|b|be|bi|for)"
                         + NO_LETTER_AFTER + r"[ \t]*[:=]?[ \t]*$", re.IGNORECASE)
-# حساب is a price word (الحساب 1450 جنيه is the bill), so an account number needs its own cue:
+# حساب is a price word (الحساب 16500 جنيه is the bill), so an account number needs its own cue:
 # رقم الحساب, the bank account, IBAN, account no, rakam el 7esab. A number after one is never an amount.
 ACCOUNT_WORDS = (r"(?:و|ف|ب)?رقم\s+(?:ال)?(?:حساب|[اأ]كونت|محفظ[ةه]|كارت|بطاق[ةه]|فيزا)(?:ي|ى|ك|ه|ها|نا)?"
                  r"|(?:و|ف|ب)?(?:ال)?حساب(?:ي|ى|ك|ه|نا)?\s+(?:ال)?بنك(?:ي|ى)|(?:و|ف|ب)?(?:ال)?[اأآإ]يبان"
@@ -273,8 +273,8 @@ def _letter_o(m):
 
 
 def _spread(m):
-    """[number], except a sum with a currency right after it (1450 + 90 = 1540 جنيه) or with = and
-    + × or * in it (1450 + 60 = 1510, 2*1450=2900): up to 11 digits, not shaped like a phone
+    """[number], except a sum with a currency right after it (16500 + 90 = 16590 جنيه) or with = and
+    + × or * in it (16500 + 60 = 16560, 2*7500=15000): up to 11 digits, not shaped like a phone
     (1 and 0 1 2 or 5 then 8 digits, 0 and 9 or 10 digits, 20 or 00 first, or a +)."""
     run = m.group(0)
     digits = re.sub(r"\D", "", run)
@@ -308,7 +308,7 @@ CURRENCY_WORD = re.compile(send_check.CURRENCY, re.IGNORECASE)
 def _letter_digits(m):
     w = m.group("w")
     if is_stop(w) or CURRENCY_WORD.fullmatch(w) or send_check.PRICE_WORD.fullmatch(w):
-        return m.group(0)  # size42, EGP1450
+        return m.group(0)  # size42, EGP16500
     return "[user]"
 
 

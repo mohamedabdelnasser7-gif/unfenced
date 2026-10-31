@@ -4,7 +4,7 @@ Run this yourself, with BASETEN_API_KEY in .env:
 
     python3 -I tests/probes/tools_probe.py [photo.jpg]
 
-1. Function calling: a question that needs the store tool (black boots in size 43), sent
+1. Function calling: a question that needs the store tool (the Vapor 17 Elite in size 43), sent
    with the real store definition and tool_choice "auto". Reports any tool_calls, the name and the arguments.
 2. Round trip: sends the tool result back and reports the final reply.
 3. Photo: sends a photo as an image_url part with a data: URI, the exact shape
@@ -64,7 +64,7 @@ def main(argv):
 
     # 1. function calling
     q = [{"role": "system", "content": "You are a store assistant. Use the store tool for any product fact."},
-         {"role": "user", "content": "عندكم جزمة كورة سودا مقاس ٤٣؟ بكام؟"}]
+         {"role": "user", "content": "عندكم الـ Vapor 17 Elite مقاس ٤٣؟ بكام؟"}]
     out, err, s = ask(model, q, [store.DEFINITION])
     if err and "reasoning" in err.lower():
         print("reasoning_effort was refused; retrying without it")

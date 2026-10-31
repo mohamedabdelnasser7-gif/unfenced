@@ -323,38 +323,82 @@ class StoreTest(unittest.TestCase):
         clean_env(self)
 
     def test_demo_catalogue(self):
+        # Beyond the Limits, the latest drop (DECISIONS 39): five boots, each in three tiers and sizes 39 to 46.
         items = store.catalogue()
         self.assertEqual(len(items), 6)
-        adult = [i for i in items if i["title"].startswith("Beyond the Limits Football Boots")]
-        self.assertEqual(len(adult), 4)
-        self.assertEqual({v["price"] for i in adult for v in i["variants"]}, {"1450"})
-        self.assertEqual({v["size"] for i in adult for v in i["variants"]}, {str(n) for n in range(40, 46)})
-        junior = [i for i in items if i["title"] == "Beyond the Limits Junior Football Boots"]
-        self.assertEqual({v["price"] for i in junior for v in i["variants"]}, {"700"})
-        black_45 = [v for i in items if i["title"] == "Beyond the Limits Football Boots, Black" for v in i["variants"] if v["size"] == "45"]
-        self.assertEqual(black_45[0]["stock"], "out")
+        boots = {i["title"]: i for i in items if i["type"] == "Football Boots"}
+        prices = {"Nike Mercurial Superfly 11": {"Elite": "20000", "Pro": "13500", "Academy": "9500"},
+                  "Nike Mercurial Vapor 17": {"Elite": "16500", "Pro": "11000", "Academy": "7500"},
+                  "Nike Phantom 6": {"Elite": "16500", "Pro": "11000", "Academy": "7500"},
+                  "Nike Tiempo Maestro": {"Elite": "15500", "Pro": "11000", "Academy": "7500"},
+                  "Adidas F50 Messi El Ultimo Tango": {"Elite": "19500", "Pro": "11000", "League": "7500"}}
+        self.assertEqual(set(boots), set(prices))
+        for title, tiers in prices.items():
+            variants = boots[title]["variants"]
+            self.assertEqual(len(variants), 24, title)
+            self.assertEqual({v["tier"]: v["price"] for v in variants}, tiers, title)
+            for tier in tiers:
+                self.assertEqual(sorted(int(v["size"]) for v in variants if v["tier"] == tier), list(range(39, 47)))
+            self.assertFalse([v for v in variants if "stock" in v], title)   # the demo store does not track stock
+        self.assertEqual(store.tiers(), {"Elite", "Pro", "Academy", "League"})
         printing = [i for i in items if i["type"] == "Printing"]
         self.assertEqual(len(printing), 1)
+        self.assertEqual(printing[0]["title"], "Beyond the Limits Name Printing")
+        self.assertIn("two stickers, one on each shoe", printing[0]["description"])
         self.assertEqual(len(printing[0]["variants"]), 1)
         v = printing[0]["variants"][0]
-        self.assertEqual(v["price"], "150")
+        self.assertEqual(v["price"], "400")
         self.assertNotIn("size", v)
+        self.assertNotIn("tier", v)
         self.assertNotIn("stock", v)
 
     def test_only_fields_in_the_data(self):
         for item in store.catalogue():
             self.assertLessEqual(set(item), {"title", "type", "description", "variants"})
             for v in item["variants"]:
-                self.assertLessEqual(set(v), {"size", "price", "sku", "stock"})
+                self.assertLessEqual(set(v), {"tier", "size", "price", "sku", "stock"})
                 if "stock" in v:
                     self.assertIn(v["stock"], ("in stock", "few left", "out"))
-                else:
-                    self.assertEqual(item["type"], "Printing")
                 self.assertNotIn("currency", v)
 
+    def test_an_untracked_variant_has_no_stock_level(self):
+        # Root's call, 31 Oct: inventoryItem tracked false means no level is read, never "out".
+        from tests.test_orders import _Resp
+
+        def var(qty, item):
+            return {"title": "Elite / 43", "price": "16500.00", "sku": "S", "inventoryQuantity": qty,
+                    "selectedOptions": [{"name": "Tier", "value": "Elite"}, {"name": "Size", "value": "43"}],
+                    **({"inventoryItem": item} if item is not None else {})}
+        page = {"shop": {"currencyCode": "EGP"}, "products": {"pageInfo": {"hasNextPage": False, "endCursor": None},
+                "nodes": [{"title": "Nike Mercurial Vapor 17", "productType": "Football Boots", "description": "x",
+                           "variants": {"nodes": [var(0, {"tracked": False}), var(0, {"tracked": True}),
+                                                  var(3, None), var(12, {"tracked": False})]}}]}}
+        clean_env(self, SHOPIFY_STORE="demo-shop.myshopify.com", SHOPIFY_TOKEN="test-token-not-real")
+        sent = []
+
+        def fake_open(director, req, data_=None, timeout=None):
+            sent.append(json.loads(req.data)["query"])
+            return _Resp(json.dumps({"data": page}).encode())
+        import urllib.request
+        with mock.patch.object(urllib.request.OpenerDirector, "open", fake_open):
+            variants = store._from_shopify()[0]["variants"]
+        self.assertIn("inventoryItem { tracked }", sent[0])
+        self.assertEqual([v.get("stock") for v in variants], [None, "out", "few left", None])
+        self.assertEqual((variants[0]["tier"], variants[0]["size"]), ("Elite", "43"))
+        # The demo file reads the same way: quantities on an untracked variant are passed over.
+        demo = {"p0": {"title": "T", "variants": [
+            {"price": "1", "inventoryItem": {"tracked": False},
+             "inventoryQuantities": [{"name": "available", "quantity": 0}]},
+            {"price": "1", "inventoryItem": {"tracked": True},
+             "inventoryQuantities": [{"name": "available", "quantity": 0}]}]}}
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "catalogue.json"
+            path.write_text(json.dumps({"variables": demo}), encoding="utf-8")
+            self.assertEqual([v.get("stock") for v in store._from_demo(path)[0]["variants"]], [None, "out"])
+
     def test_search_and_checks(self):
-        hits = store.run({"query": "black boots"}, None)["items"]
-        self.assertTrue(hits and all("Black" in i["title"] for i in hits))
+        hits = store.run({"query": "phantom"}, None)["items"]
+        self.assertEqual([i["title"] for i in hits], ["Nike Phantom 6"])
         self.assertEqual(len(store.run({"query": "zzz"}, None)["items"]), 6)
         self.assertFalse(store.check({"query": "x", "price": 1}, None)[0])
         self.assertFalse(store.check({"query": "x" * 101}, None)[0])
@@ -370,13 +414,11 @@ class StoreTest(unittest.TestCase):
                 self.assertFalse(any(isinstance(x, int) for x in v.values()), v)
 
     def test_size_strings(self):
-        self.assertIn("43", store.size_strings())
-        self.assertIn("30", store.size_strings())
+        self.assertEqual(store.size_strings(), {str(n) for n in range(39, 47)})
 
     def test_price_points(self):
-        pts = store.price_points()
-        self.assertTrue({1450, 700, 150, 60, 85} <= pts)
-        self.assertNotIn(1500, pts)
+        # The tier prices, the printing (400) and the demo delivery fees (60, 85).
+        self.assertEqual(store.price_points(), {20000, 19500, 16500, 15500, 13500, 11000, 9500, 7500, 400, 60, 85})
 
 
 class EnvTest(unittest.TestCase):

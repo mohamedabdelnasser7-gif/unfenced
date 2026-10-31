@@ -1,11 +1,13 @@
-"""store: products, prices, sizes and stock.
+"""store: products, prices, tiers, sizes and stock.
 
 Reads the Shopify Admin GraphQL API when SHOPIFY_STORE and SHOPIFY_TOKEN are set,
 else demo/catalogue.json. Answers only with fields present in the data: a field the
-data does not have is left out, never filled in.
+data does not have is left out, never filled in. Each product option of a variant goes out under
+its own lowercase name: a boot's variant has a tier ("Elite") and a size ("42").
 
 Stock goes out as a level, never a count (Mohamed's call, 28 Oct): "in stock",
-"few left" (under FEW_LEFT) or "out".
+"few left" (under FEW_LEFT) or "out". A variant whose stock the store does not track
+(inventoryItem tracked false) has no stock field at all.
 """
 import html
 import json
@@ -29,9 +31,9 @@ NAME = "store"
 DEFINITION = {"type": "function", "function": {
     "name": NAME,
     "description": (
-        "Look up the store's products: names, prices, sizes and stock level (in stock, few left or out). "
+        "Look up the store's products: names, prices, tiers, sizes and stock level (in stock, few left or out) when the store tracks it. "
         "Search in English words "
-        "like 'black boots' or 'name printing'. Leave query empty to get every product."),
+        "like 'phantom' or 'name printing'. Leave query empty to get every product."),
     "parameters": {
         "type": "object",
         "properties": {"query": {"type": "string", "description": "Short search words in English, or empty."}},
@@ -90,6 +92,13 @@ def stock_level(quantity):
     return "few left" if quantity < FEW_LEFT else "in stock"
 
 
+def _tracked(variant):
+    """False only when the store says it does not track the variant's stock (inventoryItem
+    tracked false). Then no level is read: an untracked item has a quantity of 0, and reading
+    it would tell the customer "out" for an item the store sells."""
+    return (variant.get("inventoryItem") or {}).get("tracked") is not False
+
+
 def _put(d, key, value):
     if value is not None and value != "" and value != []:
         d[key] = value
@@ -112,11 +121,12 @@ def _from_demo(path):
         variants = []
         for v in p.get("variants", []):
             var = {}
-            _put(var, "size", " / ".join(o["name"] for o in v.get("optionValues", []) if o.get("name")))
+            for o in v.get("optionValues", []):
+                _put(var, (o.get("optionName") or "size").strip().casefold(), o.get("name"))
             _put(var, "price", v.get("price"))
             _put(var, "sku", v.get("sku"))
             qty = [q["quantity"] for q in v.get("inventoryQuantities", []) if q.get("name") == "available"]
-            if qty:
+            if qty and _tracked(v):
                 var["stock"] = stock_level(sum(qty))
             variants.append(var)
         _put(item, "variants", variants)
@@ -131,7 +141,9 @@ query Products($cursor: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       title productType description
-      variants(first: 50) { nodes { title price sku inventoryQuantity } }
+      variants(first: 50) {
+        nodes { title price sku inventoryQuantity inventoryItem { tracked } selectedOptions { name value } }
+      }
     }
   }
 }"""
@@ -162,11 +174,15 @@ def _from_shopify():
             variants = []
             for v in p["variants"]["nodes"]:
                 var = {}
-                _put(var, "size", v.get("title"))
+                options = [o for o in v.get("selectedOptions") or [] if o.get("name") != "Title"]
+                for o in options:
+                    _put(var, (o.get("name") or "size").strip().casefold(), o.get("value"))
+                if not options and v.get("title") != "Default Title":
+                    _put(var, "size", v.get("title"))
                 _put(var, "price", v.get("price"))
                 _put(var, "currency", currency)
                 _put(var, "sku", v.get("sku"))
-                if v.get("inventoryQuantity") is not None:
+                if v.get("inventoryQuantity") is not None and _tracked(v):
                     var["stock"] = stock_level(v["inventoryQuantity"])
                 variants.append(var)
             _put(item, "variants", variants)
@@ -186,7 +202,7 @@ def delivery():
 def price_points():
     """Every price and fee in the store and delivery data, for the send check.
 
-    Kept as written: 1450.00 is 1450, and 1450.50 stays 1450.50, never cut to 1450.
+    Kept as written: 16500.00 is 16500, and 16500.50 stays 16500.50, never cut to 16500.
     """
     values = [v["price"] for item in catalogue() for v in item.get("variants", []) if "price" in v]
     values += [zone["fee"] for zone in delivery().get("zones", []) if "fee" in zone]
@@ -194,15 +210,20 @@ def price_points():
 
 
 def vocabulary():
-    """Lowercase words in product names and sizes, allowed in Latin letters in an Arabic reply."""
+    """Lowercase words in product names, tiers and sizes, allowed in Latin letters in an Arabic reply."""
     words = set()
     for item in catalogue():
         words |= set(re.findall(r"[a-z]+", item.get("title", "").lower()))
         for v in item.get("variants", []):
-            words |= set(re.findall(r"[a-z]+", v.get("size", "").lower()))
+            words |= set(re.findall(r"[a-z]+", (v.get("tier", "") + " " + v.get("size", "")).lower()))
     return frozenset(words)
 
 
 def size_strings():
     """Every size string in the catalogue ("43"), so the send check never reads a size as an amount."""
     return frozenset(v["size"] for item in catalogue() for v in item.get("variants", []) if v.get("size"))
+
+
+def tiers():
+    """Every tier name in the catalogue ("Elite"), so a reply that names one is checked against its prices."""
+    return frozenset(v["tier"] for item in catalogue() for v in item.get("variants", []) if v.get("tier"))

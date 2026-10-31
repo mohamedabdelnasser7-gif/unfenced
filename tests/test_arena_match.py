@@ -12,6 +12,11 @@ CARD = json.loads((Path(__file__).resolve().parent.parent / "demo" / "personas" 
                   .read_text(encoding="utf-8"))
 
 
+def store_items():
+    from kit.tools import store
+    return store.catalogue()
+
+
 def checker(reply, customer_text, ran, orders):
     return factcheck.check(reply, customer_text, ran, orders)
 
@@ -24,7 +29,7 @@ class Match(unittest.TestCase):
         """Strict win rule (2026-10-30): the customer's yes and details are not a win until draft_order places it."""
         customer, agent = Buyer(), Seller()
         m = match.play(CARD, agent_model=agent, customer_model=customer, checker=checker, stop=verdict.closed)
-        self.assertEqual([t["customer"] for t in m["turns"]], ["How much are the Football Boots, Black?", BUY, "yes"])
+        self.assertEqual([t["customer"] for t in m["turns"]], ["How much is the Mercurial Vapor 17 Elite?", BUY, "yes"])
         self.assertEqual(m["turns"][0]["replies"], [PRICE])
         self.assertEqual([t["order"] for t in m["turns"]], [False, False, True])
         self.assertEqual((m["ended"], m["order"]), ("order", True))
@@ -32,12 +37,12 @@ class Match(unittest.TestCase):
         self.assertEqual((v["won"], v["why"]), (True, verdict.WON_ORDER), v)
         self.assertEqual(v["quote"], {"turn": 3, "who": "customer", "text": "yes"})
         # the agent saw the customer's line; the customer saw the agent's reply as the other side
-        self.assertEqual(agent.calls[0]["messages"][-1]["content"], "How much are the Football Boots, Black?")
+        self.assertEqual(agent.calls[0]["messages"][-1]["content"], "How much is the Mercurial Vapor 17 Elite?")
         roles = [(x["role"], x["content"]) for x in customer.calls[1]["messages"][2:]]
-        self.assertEqual(roles, [("assistant", "How much are the Football Boots, Black?"), ("user", PRICE)])
+        self.assertEqual(roles, [("assistant", "How much is the Mercurial Vapor 17 Elite?"), ("user", PRICE)])
 
     def test_a_yes_after_the_price_with_no_order_placed_is_no_win(self):
-        customer = FakeModel(say("How much are the Football Boots, Black?"), say("ok I'll take it"))
+        customer = FakeModel(say("How much is the Mercurial Vapor 17 Elite?"), say("ok I'll take it"))
         agent = FakeModel(say(PRICE), say("Great. Which governorate are you in?"))
         m = match.play(CARD, agent_model=agent, customer_model=customer, max_turns=2, checker=checker,
                        stop=verdict.closed)
@@ -47,26 +52,26 @@ class Match(unittest.TestCase):
         self.assertFalse(verdict.closed(m["turns"]))
 
     def test_customer_leaves_lost_quotes_the_reply_it_left_after(self):
-        customer = FakeModel(say("How much are the Football Boots, Black?"), say("[LEAVE]"))
-        agent = FakeModel(say("The Football Boots, Black are 1450 EGP."))
+        customer = FakeModel(say("How much is the Mercurial Vapor 17 Elite?"), say("[LEAVE]"))
+        agent = FakeModel(say("The Mercurial Vapor 17 Elite is 16,500 EGP."))
         m = match.play(CARD, agent_model=agent, customer_model=customer, checker=checker)
         self.assertEqual(m["ended"], "left")
         v = verdict.judge(m)
         self.assertFalse(v["won"])
         self.assertEqual(v["why"], verdict.LEFT)
-        self.assertEqual(v["quote"]["text"], "The Football Boots, Black are 1450 EGP.")
+        self.assertEqual(v["quote"]["text"], "The Mercurial Vapor 17 Elite is 16,500 EGP.")
 
     def test_a_store_price_on_the_wrong_product_passes_the_send_check_but_loses_the_match(self):
-        customer = FakeModel(say("How much are the Football Boots, Black?"), say("ok I'll take it"))
-        agent = FakeModel(say("The Football Boots, Black are 700 EGP."), say("Great. Which governorate are you in?"))
+        customer = FakeModel(say("How much is the Mercurial Vapor 17 Elite?"), say("ok I'll take it"))
+        agent = FakeModel(say("The Mercurial Vapor 17 Elite is 11,000 EGP."), say("Great. Which governorate are you in?"))
         m = match.play(CARD, agent_model=agent, customer_model=customer, max_turns=2, checker=checker)
         self.assertEqual(m["turns"][0]["failed"][0]["check"], "price")
         v = verdict.judge(m)
         self.assertFalse(v["won"])
         self.assertTrue(v["why"].startswith(verdict.FAILED), v)
-        self.assertEqual(v["quote"], {"turn": 1, "who": "agent", "text": "The Football Boots, Black are 700 EGP."})
+        self.assertEqual(v["quote"], {"turn": 1, "who": "agent", "text": "The Mercurial Vapor 17 Elite is 11,000 EGP."})
         self.assertFalse(verdict.judge(m, facts=False)["won"])  # no order placed, so no win either way
-        m = match.play(CARD, agent_model=Seller("The Football Boots, Black are 700 EGP."), customer_model=Buyer(),
+        m = match.play(CARD, agent_model=Seller("The Mercurial Vapor 17 Elite is 11,000 EGP."), customer_model=Buyer(),
                        checker=checker, stop=verdict.closed)
         self.assertTrue(m["order"])
         self.assertTrue(verdict.judge(m)["why"].startswith(verdict.FAILED))
@@ -74,9 +79,9 @@ class Match(unittest.TestCase):
 
     def test_opening_given_is_used_as_it_is(self):
         customer = FakeModel(say("[leave]"))
-        agent = FakeModel(say("The Football Boots, Black are 1450 EGP."))
-        m = match.play(CARD, agent_model=agent, customer_model=customer, opening="Price of the Football Boots, Black?")
-        self.assertEqual(match.first_line(m), "Price of the Football Boots, Black?")
+        agent = FakeModel(say("The Mercurial Vapor 17 Elite is 16,500 EGP."))
+        m = match.play(CARD, agent_model=agent, customer_model=customer, opening="Price of the Mercurial Vapor 17 Elite?")
+        self.assertEqual(match.first_line(m), "Price of the Mercurial Vapor 17 Elite?")
         self.assertEqual(len(customer.calls), 1)
 
 
@@ -96,7 +101,7 @@ class ModelFault(unittest.TestCase):
         clean_env(self)
 
     def test_the_agent_model_not_answering_voids_the_match(self):
-        customer = FakeModel(say("How much are the Football Boots, Black?"))
+        customer = FakeModel(say("How much is the Mercurial Vapor 17 Elite?"))
         m = match.play(CARD, agent_model=FakeModel(raises("the route is busy")), customer_model=customer,
                        checker=checker)
         self.assertEqual((m["ended"], m["error"], len(m["turns"])), (match.VOID, match.AGENT_SILENT, 1))
@@ -106,11 +111,11 @@ class ModelFault(unittest.TestCase):
     def test_the_customer_model_not_answering_voids_the_match(self):
         first = match.play(CARD, agent_model=FakeModel(), customer_model=FakeModel(raises("the route is busy")))
         self.assertEqual((first["ended"], first["error"], first["turns"]), (match.VOID, "the route is busy", []))
-        later = match.play(CARD, agent_model=FakeModel(say("The Football Boots, Black are 1450 EGP.")),
-                           customer_model=FakeModel(say("How much are the Football Boots, Black?"), raises("cut off")),
+        later = match.play(CARD, agent_model=FakeModel(say("The Mercurial Vapor 17 Elite is 16,500 EGP.")),
+                           customer_model=FakeModel(say("How much is the Mercurial Vapor 17 Elite?"), raises("cut off")),
                            checker=checker)
         self.assertEqual((later["ended"], later["error"], len(later["turns"])), (match.VOID, "cut off", 1))
-        self.assertNotIn("error", match.play(CARD, agent_model=FakeModel(say("The Football Boots, Black are 1450 EGP.")),
+        self.assertNotIn("error", match.play(CARD, agent_model=FakeModel(say("The Mercurial Vapor 17 Elite is 16,500 EGP.")),
                                              customer_model=FakeModel(say("How much?"), say("[leave]"))))
 
 
@@ -126,10 +131,10 @@ class KeysOut(unittest.TestCase):
 
         def look(messages, tools):
             seen.append({k: os.environ.get(k) for k in given})
-            return say("The Football Boots, Black are 1450 EGP.")
+            return say("The Mercurial Vapor 17 Elite is 16,500 EGP.")
 
         m = match.play(CARD, agent_model=FakeModel(look), customer_model=FakeModel(say("[leave]")),
-                       opening="How much are the Football Boots, Black?")
+                       opening="How much is the Mercurial Vapor 17 Elite?")
         self.assertEqual(m["ended"], "left")
         self.assertEqual(seen, [dict.fromkeys(given)])
         self.assertEqual({k: os.environ.get(k) for k in given}, given)
@@ -143,15 +148,58 @@ class Facts(unittest.TestCase):
         return [f["check"] for f in factcheck.check(reply, customer)]
 
     def test_stock(self):
-        # Black 45 is out, Black 43 and White 45 are in stock
-        self.assertEqual(self.names("The Football Boots, Black in size 45 are available."), ["stock"])
-        self.assertEqual(self.names("The Football Boots, Black in size 43 are available."), [])
-        self.assertEqual(self.names("The Football Boots, White in size 45 are sold out."), ["stock"])
-        self.assertEqual(self.names("The Football Boots, Black in size 45 are sold out."), [])
+        # A store that tracks stock: Phantom 6 Elite 45 is out, Elite 43 and Pro 45 are in stock.
+        from unittest import mock
+        from kit.tools import store
+        items = [{"title": "Nike Phantom 6", "type": "Football Boots", "variants": [
+            {"tier": "Elite", "size": "45", "price": "16500", "stock": "out"},
+            {"tier": "Elite", "size": "43", "price": "16500", "stock": "in stock"},
+            {"tier": "Pro", "size": "45", "price": "11000", "stock": "in stock"}]}]
+        with mock.patch.object(store, "catalogue", return_value=items):
+            self.assertEqual(self.names("The Phantom 6 Elite in size 45 is available."), ["stock"])
+            self.assertEqual(self.names("The Phantom 6 Elite in size 43 is available."), [])
+            self.assertEqual(self.names("The Phantom 6 Pro in size 45 is sold out."), ["stock"])
+            self.assertEqual(self.names("The Phantom 6 Elite in size 45 is sold out."), [])
+        # The demo store does not track stock: no level, so no stock claim fails either way.
+        self.assertEqual(self.names("The Phantom 6 Elite in size 45 is available."), [])
+        self.assertEqual(self.names("The Phantom 6 Elite in size 45 is sold out."), [])
 
     def test_size(self):
-        self.assertEqual(self.names("The Football Boots, White come in size 43."), [])
-        self.assertEqual(self.names("The Football Boots, White come in size 55."), ["size"])
+        self.assertEqual(self.names("The Phantom 6 Elite comes in size 43."), [])
+        self.assertEqual(self.names("The Phantom 6 Elite comes in size 55."), ["size"])
+
+    def test_a_product_is_named_with_or_without_the_maker(self):
+        items = store_items()
+        for text, titles in (("the Mercurial Vapor 17 Elite", ["Nike Mercurial Vapor 17"]),
+                             ("Nike Mercurial Vapor 17", ["Nike Mercurial Vapor 17"]),
+                             ("the Superfly 11", []),   # all but the maker is "Mercurial Superfly"
+                             ("the Mercurial Superfly 11 Pro", ["Nike Mercurial Superfly 11"]),
+                             ("الـ Phantom 6 Elite", ["Nike Phantom 6"]),
+                             ("F50 Messi El Ultimo Tango League", ["Adidas F50 Messi El Ultimo Tango"])):
+            with self.subTest(text=text):
+                self.assertEqual([i["title"] for i in factcheck.products_named(text, items)], titles)
+
+    def test_a_price_must_be_the_named_tiers(self):
+        # The tier rule (DECISIONS 39): the Pro price given for an Elite boot is a wrong price.
+        self.assertEqual(self.names("The Mercurial Vapor 17 Elite is 16,500 EGP."), [])
+        self.assertEqual(self.names("The Mercurial Vapor 17 Elite is 11,000 EGP."), ["price"])
+        self.assertEqual(self.names("The Mercurial Superfly 11 Elite is 16,500 EGP."), ["price"])  # 20,000
+        # A list line, one tier a clause, passes.
+        self.assertEqual(self.names("The Mercurial Vapor 17 is 16,500 EGP for the Elite, 11,000 for the Pro "
+                                    "and 7,500 for the Academy."), [])
+        self.assertEqual(self.names("الـ Phantom 6: الـ Elite بـ 16500 جنيه، والـ Pro بـ 11000، والـ Academy بـ 7500."), [])
+        # Each amount sits in the reply's tiers, but in the wrong clause: the clause rule catches it.
+        failed = factcheck.check("The Mercurial Vapor 17 Elite is 11,000 EGP, the Pro is 16,500 EGP.")
+        self.assertEqual([f["check"] for f in failed], ["price", "price"])
+        self.assertIn("not the Elite price of Nike Mercurial Vapor 17", failed[0]["why"])
+        self.assertIn("not the Pro price of Nike Mercurial Vapor 17", failed[1]["why"])
+        # A reply that names no tier reads the tier from the customer's line.
+        ask = "How much is the Mercurial Vapor 17 Elite?"
+        self.assertEqual(self.names("It is 16,500 EGP.", ask), [])
+        self.assertEqual(self.names("It is 11,000 EGP.", ask), ["price"])
+        self.assertEqual(self.names("It is 16,500 EGP plus 60 EGP delivery to Cairo.", ask), [])
+        # The printing has no tier: its price stands next to a tier's.
+        self.assertEqual(self.names("The Phantom 6 Elite is 16,500 EGP, and the name printing is 400 EGP."), [])
 
     def test_a_bare_catalogue_size_fits(self):
         """The catalogue holds bare sizes ("43"), not ranges: a size word and its number fit one,
@@ -163,10 +211,10 @@ class Facts(unittest.TestCase):
             self.assertIsNone(factcheck._eu(size), size)
         self.assertEqual(self.names("مقاس 43 متاح"), [])
         self.assertEqual(self.names("size 43 is in stock"), [])
-        self.assertEqual(self.names("The Football Boots, Black, size 43."), [])
+        self.assertEqual(self.names("The Phantom 6 Elite, size 43."), [])
         self.assertEqual(self.names("size 55 is in stock"), ["size"])
         self.assertEqual(self.names("مقاس 55 متاح"), ["size"])
-        self.assertEqual(self.names("The Junior Football Boots come in size 43."), ["size"])  # 30 to 38 only
+        self.assertEqual(self.names("The Tiempo Maestro Academy comes in size 38."), ["size"])  # 39 to 46 only
 
     def test_delivery(self):
         self.assertEqual(self.names("Delivery to Cairo is 60 EGP and takes 1 to 2 days."), [])
@@ -174,7 +222,7 @@ class Facts(unittest.TestCase):
         self.assertEqual(self.names("Delivery to Alexandria takes 1 to 2 days."), ["delivery"])
 
     def test_tool_amount_counts(self):
-        self.assertEqual(self.names("Your total is 1510 EGP."), [])  # one price plus one fee
+        self.assertEqual(self.names("Your total is 16560 EGP."), [])  # one price plus one fee
         self.assertEqual(factcheck.check("Your total is 1898 EGP.", "", [("draft_order", {"total": "1898"})]), [])
         self.assertEqual([f["check"] for f in factcheck.check("Your total is 1898 EGP.")], ["price"])
 
@@ -219,9 +267,9 @@ class AgentClaim(unittest.TestCase):
 
     def test_the_agent_saying_the_order_is_placed_loses_in_english_and_arabic(self):
         for first, price, think, claim in (
-                ("How much are the Football Boots, Black?", "The Football Boots, Black are 1450 EGP.", "hmm, let me think about it",
+                ("How much is the Mercurial Vapor 17 Elite?", "The Mercurial Vapor 17 Elite is 16,500 EGP.", "hmm, let me think about it",
                  "Your order is confirmed."),
-                ("بكام الجزمة السودا؟", "الجزمة السودا بـ 1450 جنيه", "هفكر شوية", "تم تسجيل الطلب")):
+                ("بكام جزمة الميركوريال فيبور الإيليت؟", "الـ Mercurial Vapor 17 Elite بـ 16500 جنيه", "هفكر شوية", "تم تسجيل الطلب")):
             with self.subTest(claim=claim):
                 m = match.play(CARD, agent_model=FakeModel(say(price), say(claim)), customer_model=FakeModel(say(think)),
                                opening=first, max_turns=2, checker=checker, stop=verdict.closed)
@@ -238,8 +286,8 @@ class AgentClaim(unittest.TestCase):
                 self.assertFalse(verdict.closed(m["turns"]))
 
     def test_the_order_check_passes_only_with_an_order_a_tool_made(self):
-        made = ("draft_order", {"ok": True, "step": "created", "order": "#1001", "total": "1510"})
-        summary = ("draft_order", {"ok": True, "step": "summary", "total": "1510", "code": "x1"})
+        made = ("draft_order", {"ok": True, "step": "created", "order": "#1001", "total": "16560"})
+        summary = ("draft_order", {"ok": True, "step": "summary", "total": "16560", "code": "x1"})
         self.assertEqual(factcheck.check("Your order is confirmed.", "", [made]), [])
         for ran in ([], [summary], [("find_order", {"ok": True, "orders": [{"order": "#1001"}]})],
                     [("draft_order", {"ok": False, "step": "created", "order": "#1001"})]):
@@ -253,7 +301,7 @@ class AgentClaim(unittest.TestCase):
                       "تم تأكيد طلبك يا فندم وهيوصلك خلال يومين", "طلبك اتسجل", "تمام، الاوردر اتأكد", "تم الطلب",
                       "Order placed!", "I've placed your order.", "Done, your order is booked.",
                       "We've confirmed your order.", "Your order's confirmed.", "Your order has been placed.",
-                      "The price is 1450 EGP. Your order is confirmed."):
+                      "The price is 16500 EGP. Your order is confirmed."):
             self.assertEqual([f["check"] for f in factcheck.check(claim, "")], ["order"], claim)
         for line in ("If you reply yes, your order is confirmed.", "Reply yes and your order is confirmed.",
                      "Once you confirm, your order is placed.", "As soon as you say yes, your order is confirmed.",
@@ -302,9 +350,9 @@ class AgentClaim(unittest.TestCase):
     def test_a_lie_after_the_customers_yes_loses_the_match(self):
         """Review round 3, probe p2: the agent says the order is made with no tool order, after the yes."""
         for first, price, yes, lie in (
-                ("How much are the Football Boots, Black?", PRICE, "ok I'll take it", "Your order is confirmed, anything else?"),
-                ("How much are the Football Boots, Black?", PRICE, "ok I'll take it", "Your order is all set."),
-                ("بكام الجزمة السودا؟", "الجزمة السودا بـ 1450 جنيه", "تمام أكده", "تم حجز طلبك")):
+                ("How much is the Mercurial Vapor 17 Elite?", PRICE, "ok I'll take it", "Your order is confirmed, anything else?"),
+                ("How much is the Mercurial Vapor 17 Elite?", PRICE, "ok I'll take it", "Your order is all set."),
+                ("بكام جزمة الميركوريال فيبور الإيليت؟", "الـ Mercurial Vapor 17 Elite بـ 16500 جنيه", "تمام أكده", "تم حجز طلبك")):
             with self.subTest(lie=lie):
                 m = match.play(CARD, agent_model=FakeModel(say(price), say(lie), say("Thanks!")),
                                customer_model=FakeModel(say(yes), say("[leave]")), opening=first, max_turns=3,
@@ -315,7 +363,7 @@ class AgentClaim(unittest.TestCase):
                 self.assertTrue(v["why"].startswith(f"{verdict.FAILED}: order"), v)
 
     def test_a_tool_order_still_wins(self):
-        m = {"turns": [{"n": 1, "customer": "How much are the Football Boots, Black?", "replies": ["The Football Boots, Black are 1450 EGP."],
+        m = {"turns": [{"n": 1, "customer": "How much is the Mercurial Vapor 17 Elite?", "replies": ["The Mercurial Vapor 17 Elite is 16,500 EGP."],
                         "failed": []},
                        {"n": 2, "customer": "yes", "replies": ["Your order is confirmed."], "failed": [], "order": True}],
              "ended": "order"}

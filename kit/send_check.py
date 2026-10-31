@@ -18,12 +18,13 @@ Rules (from the store rules, the 27 Oct morning review and Mohamed's calls on 28
    with a number or #), a number right after
    an address word with no price word earlier in the sentence (عمارة 125, Building 125,
    3emara 125; an address label such as عنوان التوصيل or delivery address is not a price word), Egyptian mobile and landline numbers grouped as phones are written, any number with
-   a + and 8 or more digits (+44 7700 900123), percentages, a number of 1 or 2 digits with a unit after it (2 days, 2 to 3 days), and
+   a + and 8 or more digits (+44 7700 900123), percentages, a number of 1 or 2 digits with a unit after it (2 days, 2 to 3 days), a weight
+   of up to 3 digits in grams (150 grams, 150 جرام), and
    a year from 1900 to 2099 with a year word or a month right next to it (model 2026, the
    2026 model, سنة 2026, May 2026) or inside a date (28 Oct 2026). Any other year is an
    amount, so "Boots: 1999." is refused. After a weak word (is, for, ب), a catalogue size
    number (43) is read as a size unless a price word comes earlier in the sentence. Decimals
-   count as written, so 1450.99 and 1450,99 are not 1450. An amount in words (next to a
+   count as written, so 16500.99 and 16500,99 are not 16500. An amount in words (next to a
    currency word, after a price word or ب, or 100 or more after any cue word), or with k or
    ألف after the digits (1k EGP, 1.5 ألف), is refused, so the model writes it in digits.
 5. No exact stock count. The store tool gives a level (in stock, few left, out), never a number.
@@ -38,7 +39,7 @@ from decimal import Decimal, InvalidOperation
 ARABIC = re.compile(r"[\u0621-\u064A\u0671-\u06D3\u06FA-\u06FC\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFC]")
 LATIN = re.compile(r"[A-Za-z]")
 WORD = re.compile(r"[\w\u0600-\u06ff]+", re.UNICODE)
-# Eastern digits, and the Arabic decimal and thousands signs (١٤٥٠٫٥٠ is 1450.50).
+# Eastern digits, and the Arabic decimal and thousands signs (١٦٥٠٠٫٥٠ is 16500.50).
 EASTERN_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹٫٬", "01234567890123456789.,")
 # Signs that look like ":" or "=" read as them (fullwidth, small, modifier letter, ratio), and
 # blanks that are neither Unicode spaces nor format characters read as a space when they show
@@ -95,12 +96,12 @@ MONEY = chr(2)  # stands in for a number with a currency next to it, already rea
 
 CURRENCY = (r"(?:جنيهات|جنيهاً|جنيهًا|جنيها|جنيه|جنية|ج\.م|جم|ج|egp|l\.e|le|egyptian\s+pounds?|pounds?"
             r"|geneh|genih|gneh|gnih|ginih|gnyh|gineh|gineeh|geneeh|ginee|e£|£)")
-# Digits as written, with thousands commas and decimals: 1,510 and 1450.99. A comma with one or
-# two digits after 3 or more digits is a decimal comma: 1450,99 is 1450.99 and 500,00 is 500.
+# Digits as written, with thousands commas and decimals: 16,560 and 16500.99. A comma with one or
+# two digits after 3 or more digits is a decimal comma: 16500,99 is 16500.99 and 500,00 is 500.
 DIGITS = r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{3,},\d{1,2}(?!\d)|\d+(?:\.\d+)?"
 DECIMAL_COMMA = re.compile(r"\d+,\d{1,2}")
-# 1 to 3 digits, then groups of 3 after a space: 1 150, 10 150. Every Unicode space counts (category Zs:
-# plain, no-break, thin, figure and the rest), so no space lets 1 150 read as 150 (red team t261028j r2).
+# 1 to 3 digits, then groups of 3 after a space: 1 400, 10 400. Every Unicode space counts (category Zs:
+# plain, no-break, thin, figure and the rest), so no space lets 1 400 read as 400 (red team t261028j r2).
 THOUSANDS_SPACE = re.compile("[ \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]")
 SPACED_THOUSANDS = re.compile(r"(?<![\d.,])[1-9]\d{0,2}(?:" + THOUSANDS_SPACE.pattern + r"\d{3})+(?!\d)")
 MAX_INT_DIGITS = 20
@@ -176,7 +177,12 @@ SEP = r"(?:-|to|and|or|/|,|،|و|او|أو|لـ|ل|l|w|aw|le)"
 UNITS = (r"(?:days?|yom|youm|ayam|ayyam|أيام|ايام|يومين|يوم|hours?|hrs?|ساعات|ساعة|ساعه|sa3a|sa3at|weeks?"
          r"|اسبوع|أسبوع|اسابيع|أسابيع|months?|شهور|شهر|minutes?|mins?|دقيقة|دقيقه|دقايق|pairs?|pieces?|pcs"
          r"|items?|قطعة|قطعه|قطع|7etta|7etat|colou?rs?|ألوان|الوان|لون|sizes?|مقاسات|cm|mm|سم|mb|ميجا|mega"
-         r"|kg|كيلو|am|pm|times|مرات|مرة|مره|years?|سنين|سنة|سنه)")
+         r"|kg|كيلو|grams?|جرامات|جرام|am|pm|times|مرات|مرة|مره|years?|سنين|سنة|سنه)")
+# A weight in grams of up to 3 digits ("150 grams of pure speed", the Vapor 17 line in the store
+# data) is not an amount, even standing alone. 4 or more digits stay amounts, so "16500 grams"
+# cannot hide a price. جم is left out: it is the currency (جنيه مصري), read first.
+WEIGHT_AFTER = re.compile(r"\s*(?:grams?|جرامات|جرام)" + NO_LETTER_AFTER, re.IGNORECASE)
+WEIGHT_DIGITS = 3
 # A unit after the number, or a range up to a second number then a unit (2 to 3 days). A range
 # that runs down ("70 to 3 days") is a fee, then a time, so the first number stays an amount.
 UNIT_AFTER = re.compile(rf"\s*(?:{SEP}\s*(?P<to>\d+)\s*)?(?:(?:working|business)\s+)?{UNITS}{NO_LETTER_AFTER}",
@@ -216,7 +222,7 @@ YEAR_CTX = re.compile(
 # on words, not on the customer's own address text, so an address can never hide an amount in a
 # price line. A number with a currency word is read first, so "عمارة 125 جنيه" is still an amount.
 # Left out on purpose, as they also sit before prices: piece words (قطعة, 2et3a, unit: "سعر القطعة
-# 1450"), shop words (محل, مول: "سعرها في المحل 1450") and zone words (zone, منطقة, manta2a: the
+# 16500"), shop words (محل, مول: "سعرها في المحل 16500") and zone words (zone, منطقة, manta2a: the
 # delivery data prices by zone).
 ADDRESS_WORDS = (
     r"(?:و|ف)?(?:بال|لل|ال|ب|ل)?(?:عمار[ةه]|برج|شق[ةه]|دور|طابق|بلوك|فيلا|مبن[ىي]|عقار|منزل|بيت"
@@ -239,7 +245,7 @@ HASH_NUMBER = re.compile(r"#\s*[A-Za-z]?\d+")   # for the script check only: #D1
 # Order numbers (red team t261028j F7): only order shaped numbers are masked. A draft name
 # (#D12) always; # and up to 5 digits (#1042) unless the sentence has a price word or an
 # amount with a currency and no order word stands right before the # ("Total: #1500" is an
-# amount, "Your total for order #1042 is 1450 EGP." keeps the order number). An order word
+# amount, "Your total for order #1042 is 16500 EGP." keeps the order number). An order word
 # with no # ("طلبك 1500", "Your order 1500") masks nothing.
 DRAFT_NAME = re.compile(r"#\s*[Dd]\d+")
 ORDER_NAME = re.compile(r"#\s*\d{1,5}(?![\d.,]?\d)")
@@ -359,8 +365,8 @@ def _plain(text):
 
 
 def _join_thousands(text):
-    """A space used as a thousands separator removed: "الطباعة 1 150 جنيه" reads as 1150, the
-    number the customer sees, not 150 (red team t261028j F6). Digits inside a phone number
+    """A space used as a thousands separator removed: "الطباعة 1 400 جنيه" reads as 1400, the
+    number the customer sees, not 400 (red team t261028j F6). Digits inside a phone number
     written the way phone numbers are (+1 202 555 0143) stay as they are."""
     phones = [m.span() for m in PHONE.finditer(text) if phone_shaped(m.group(0))]
     return SPACED_THOUSANDS.sub(
@@ -379,9 +385,9 @@ def _amount_digits(raw):
 
 
 def _number(raw):
-    """Digits as written, as a number: an int, or a Decimal when there is a fraction (1450.99 is not 1450).
+    """Digits as written, as a number: an int, or a Decimal when there is a fraction (16500.99 is not 16500).
 
-    A decimal comma counts as a point (1450,99 is 1450.99). Past 20 digits the Decimal is kept,
+    A decimal comma counts as a point (16500,99 is 16500.99). Past 20 digits the Decimal is kept,
     so turning it into text never hits Python's 4300 digit limit for ints.
     """
     if DECIMAL_COMMA.fullmatch(raw):
@@ -548,7 +554,7 @@ def _size_numbers(sizes):
 
 def _weak_size(text, m, size_numbers):
     """True when a cue match is a weak word, then a catalogue size number, with no price word
-    earlier in the same sentence ("Black is available in 42 and 43")."""
+    earlier in the same sentence ("The Elite is available in 42 and 43")."""
     if _number(m.group("n")) not in size_numbers or not WEAK_CUE.fullmatch(m.group("cue")):
         return False
     start = max((e.end() for e in _sentence_ends(text, 0, m.start())), default=0)
@@ -618,6 +624,8 @@ def prices_in(reply, sizes=(), orders=()):
         raw = m.group("n")
         if m.start("n") in counted or _amount_digits(raw) < BARE_DIGITS:
             continue
+        if _amount_digits(raw) <= WEIGHT_DIGITS and WEIGHT_AFTER.match(masked, m.end()):
+            continue
         out.append(_number(raw))
     return out
 
@@ -645,7 +653,7 @@ def stock_counts(reply, sizes=(), orders=()):
 
 def amount(x):
     """x as an amount (an int, or a Decimal when it has a fraction), or None for anything
-    that is not a plain finite number. "1450.00" is 1450; "1450.50" stays 1450.50."""
+    that is not a plain finite number. "16500.00" is 16500; "16500.50" stays 16500.50."""
     if isinstance(x, bool):
         return None
     if isinstance(x, str):

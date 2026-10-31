@@ -167,16 +167,16 @@ class Instagram(unittest.TestCase):
 
 
 ORDERS = ("Name,Total,Created at,Lineitem name,Phone,Shipping Phone,Billing Phone,Billing Name,Cancelled at\n"
-          '#1,1660.00,2026-07-05 14:05:09 +0300,"Beyond the Limits Football Boots, Black - 43",01000000045,,,Demo One,\n'
+          '#1,16960.00,2026-07-05 14:05:09 +0300,Nike Mercurial Vapor 17 - Elite / 43,01000000045,,,Demo One,\n'
           '#1,,,Beyond the Limits Name Printing,,,,,\n'
-          '#2,1510.00,2026-07-06 09:00:00 +0300,"Beyond the Limits Football Boots, White - 42",,+20 100 000 0046,,,2026-07-06 10:00:00 +0300\n')
+          '#2,11060.00,2026-07-06 09:00:00 +0300,Nike Phantom 6 - Pro / 42,,+20 100 000 0046,,,2026-07-06 10:00:00 +0300\n')
 
 
 class OrdersAndDeliveries(unittest.TestCase):
     def test_line_items_group_by_name(self):
         got = hist.parse_orders(ORDERS, hist.Reader())
         self.assertEqual(set(got), {"#1", "#2"})
-        self.assertEqual((got["#1"].phones, got["#1"].total, got["#1"].names), ({"201000000045"}, "1660.00", {"Demo One"}))
+        self.assertEqual((got["#1"].phones, got["#1"].total, got["#1"].names), ({"201000000045"}, "16960.00", {"Demo One"}))
         self.assertEqual(got["#1"].at, at(2026, 7, 5, 14, 5, 9))
         self.assertEqual((got["#2"].phones, got["#2"].cancelled), ({"201000000046"}, True))
 
@@ -412,7 +412,7 @@ class Candidates(Temp):
         for c in got:
             decided = [r["result"] for r in log.case(c["case_id"]) if r["result"] in ("delivered", "refused")]
             self.assertEqual(decided[-1], "delivered")
-        self.assertEqual(Counter(c["status"] for c in got), {"refined": 5, "rejected": 8})
+        self.assertEqual(Counter(c["status"] for c in got), {"refined": 5, "rejected": 11})
 
     def test_the_masks(self):
         self.assertEqual(hist.mask("رقم طلبك #1044 وكلمينا على +20 100 000 0045 يا Demo Mona", {"Demo Mona"}, ["#1044"]),
@@ -617,7 +617,7 @@ class Round1Fixes(Temp):
     def test_1_a_real_import_runs_no_humanizer_and_its_candidates_wait(self):
         rep = self.demo(**self.brand())
         self.assertEqual(rep["candidates"]["ran"], {})
-        self.assertEqual(rep["candidates"]["status"], {"refined": 0, "rejected": 0, "waiting": 13})
+        self.assertEqual(rep["candidates"]["status"], {"refined": 0, "rejected": 0, "waiting": 16})
         self.assertTrue(imp.demo_only(DEMO / "whatsapp", None, DEMO / "orders.csv"))
         self.assertFalse(imp.demo_only(DEMO / "whatsapp", self.tmp / "brand" / "orders.csv"))
         self.assertFalse(imp.demo_only(None, None))
@@ -628,7 +628,7 @@ class Round1Fixes(Temp):
                                            at=1.0)
         db.close()
         rep = self.demo()
-        self.assertEqual(rep["candidates"]["status"], {"refined": 5, "rejected": 8, "waiting": 1})
+        self.assertEqual(rep["candidates"]["status"], {"refined": 5, "rejected": 11, "waiting": 1})
         self.assertEqual(hum.Candidates(self.open(), PLUG.agent).mine(hum.WAITING)[0]["key"], "other")
 
     def test_1_rejected_candidates_hold_no_place_under_the_cap(self):

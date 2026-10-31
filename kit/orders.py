@@ -99,7 +99,7 @@ def local_phone(key):
 
 
 def money(x):
-    """A Decimal from a price in the data ("1450", "1450.00", 60). Raises ValueError otherwise."""
+    """A Decimal from a price in the data ("16500", "16500.00", 60). Raises ValueError otherwise."""
     if isinstance(x, bool):
         raise ValueError("not an amount")
     try:
@@ -112,7 +112,7 @@ def money(x):
 
 
 def amount(d):
-    """A Decimal amount as the number a result gives out: 1450, or 1450.5."""
+    """A Decimal amount as the number a result gives out: 16500, or 16500.5."""
     d = money(d)
     return int(d) if d == d.to_integral_value() else float(d.quantize(Decimal("0.01")))
 
@@ -226,8 +226,8 @@ class Book:
 
 
 def _plain_items(items):
-    """Product, size and quantity only."""
-    return [{k: i[k] for k in ("product", "size", "quantity") if i.get(k) not in (None, "")} for i in items]
+    """Product, tier, size and quantity only."""
+    return [{k: i[k] for k in ("product", "tier", "size", "quantity") if i.get(k) not in (None, "")} for i in items]
 
 
 def _when(day):

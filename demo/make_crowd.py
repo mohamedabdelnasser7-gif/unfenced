@@ -1,7 +1,7 @@
 """Writes demo/crowd.jsonl: a crowd of simulated customer chats for the demo, most in Egyptian
 Arabic, some in Franco and English, from templates, the demo catalogue and the demo delivery
 file (read through kit/tools/store, so the products, sizes, prices and stock are the demo
-store's own: Beyond the Limits football boots and name printing on the boot).
+store's own: Beyond the Limits football boots and name printing, two stickers, one on each shoe).
 
     python3 -I demo/make_crowd.py [--out FILE] [--count N] [--seed N]
 
@@ -32,8 +32,6 @@ COUNT = 300
 SEED = 30
 FIRST_PHONE = 500
 WEIGHT = {"ar": 4, "fr": 1, "en": 1}  # most chats in Egyptian Arabic
-COLOURS = {"Black": ("السودا", "el soda", "black"), "White": ("البيضا", "el beda", "white"),
-           "Red": ("الحمرا", "el 7amra", "red"), "Navy": ("الكحلي", "el ka7ly", "navy")}
 NAMES_AR = ["كريم", "منى", "سلمى", "عمر", "ياسمين", "حسن", "نور", "مريم", "يوسف", "هالة", "طارق", "دينا"]
 NAMES_EN = ["Hany", "Nour", "Omar", "Laila", "Ziad", "Farida"]
 # (kind, stage, languages): what the customer asks; the templates below give the words
@@ -66,31 +64,36 @@ GOVS = {"ar": ["القاهرة", "الجيزة", "الإسكندرية", "الم
 
 
 def products():
-    """The demo store's items as the crowd names them: title, the name in each language, sizes, price."""
+    """The demo store's items as the crowd names them: one entry a boot and tier (the title without
+    the maker's word, then the tier: "the Mercurial Vapor 17 Elite"), the name in each language,
+    sizes, price. The printing is one entry with no sizes."""
     out = []
     for item in store._from_demo(store.DEMO_CATALOGUE):
         title = item["title"]
-        colour = next((c for c in COLOURS if title.endswith(c)), None)
-        ar, fr, en = COLOURS.get(colour, ("", "", ""))
-        if item.get("type") == "Printing":
-            names = ("طباعة الاسم", "teba3et el esm", "the name printing")
-        elif "Junior" in title:
-            names = ("جزمة الأطفال", "gazmet el atfal", "the junior boots")
-        else:
-            names = (f"الجزمة {ar}", f"el gazma {fr}", f"the {en} boots")
         variants = item["variants"]
-        sizes = [v["size"] for v in variants if v.get("size")]
-        out.append({"title": title, "name": dict(zip(("ar", "fr", "en"), names)), "sizes": sizes,
-                    "in_stock": [v["size"] for v in variants if v.get("size") and v.get("stock") != "out"],
-                    "price": variants[0]["price"]})
+        if item.get("type") == "Printing":
+            out.append({"title": title, "name": {"ar": "طباعة الاسم", "fr": "teba3et el esm", "en": "the name printing"},
+                        "sizes": [], "in_stock": [], "price": variants[0]["price"]})
+            continue
+        model = title.split(" ", 1)[1] if " " in title else title
+        for tier in dict.fromkeys(v.get("tier") for v in variants):
+            rows = [v for v in variants if v.get("tier") == tier]
+            name = f"{model} {tier}" if tier else model
+            sizes = list(dict.fromkeys(v["size"] for v in rows if v.get("size")))
+            out.append({"title": title, "name": {"ar": f"الـ {name}", "fr": f"el {name}", "en": f"the {name}"},
+                        "sizes": sizes,
+                        "in_stock": [z for z in sizes
+                                     if any(v.get("size") == z and v.get("stock") != "out" for v in rows)],
+                        "price": rows[0]["price"]})
     return out
 
 
 def team_reply(p, lang):
     """The team's earlier reply in a chat: the product's price, and its sizes not sold out, from
-    the demo data. The printing has no sizes: its reply says it goes on the boot."""
+    the demo data. The printing has no sizes: its reply says it is two stickers, one on each shoe."""
     if not p["sizes"]:
-        what = {"ar": "على الجزمة", "fr": "3al gazma", "en": "on the boots"}[lang]
+        what = {"ar": "استيكرين، واحد على كل فردة", "fr": "2 sticker, wa7ed 3ala kol farda",
+                "en": "two stickers, one on each shoe"}[lang]
     else:
         what = {"ar": "المقاسات " + " و ".join(p["in_stock"]), "fr": "el sizes " + ", ".join(p["in_stock"]),
                 "en": "sizes " + ", ".join(p["in_stock"])}[lang]

@@ -15,9 +15,9 @@
   ],
   "traits": {
     "message": {"step": 0, "values": {
-      "sizes": {"share": 1, "detail": {"heard": "Which sizes do you have in the black boots?"}},
+      "sizes": {"share": 1, "detail": {"heard": "Which sizes do you have in the Vapor 17 Elite?"}},
       "printing": {"share": 1, "detail": {"heard": "Can you print my name on the boots?"}},
-      "junior": {"share": 1, "detail": {"heard": "Do you have these boots for kids?"}},
+      "tiers": {"share": 1, "detail": {"heard": "What is the difference between Elite, Pro and Academy?"}},
       "colours": {"share": 1, "detail": {"heard": "Which colours do the boots come in?"}},
       "photo": {"share": 1, "detail": {"heard": "Are the boots the same as in the photo?"}},
       "fit": {"share": 1, "detail": {"heard": "How do I know my size?"}}
@@ -28,13 +28,14 @@
     }},
     "boots": {"step": 2, "values": {
       "in_stock": {"share": 90, "detail": [
-        {"boots": "Black, size 42"}, {"boots": "Black, size 43"}, {"boots": "Black, size 44"},
-        {"boots": "White, size 41"}, {"boots": "White, size 43"}, {"boots": "Red, size 42"},
-        {"boots": "Navy, size 40"}, {"boots": "Navy, size 43"},
-        {"boots": "Junior, size 33"}, {"boots": "Junior, size 35"}
+        {"boots": "Mercurial Vapor 17 Elite, size 42"}, {"boots": "Mercurial Vapor 17 Elite, size 43"},
+        {"boots": "Mercurial Vapor 17 Pro, size 44"}, {"boots": "Phantom 6 Elite, size 41"},
+        {"boots": "Phantom 6 Pro, size 43"}, {"boots": "Mercurial Superfly 11 Elite, size 42"},
+        {"boots": "Tiempo Maestro Pro, size 40"}, {"boots": "Tiempo Maestro Academy, size 43"},
+        {"boots": "F50 Messi El Ultimo Tango Elite, size 39"}, {"boots": "F50 Messi El Ultimo Tango League, size 41"}
       ]},
       "sold_out": {"share": 10, "detail": [
-        {"boots": "Black, size 45"}, {"boots": "Navy, size 45"}
+        {"boots": "Mercurial Superfly 11 Elite, size 45"}, {"boots": "F50 Messi El Ultimo Tango Elite, size 45"}
       ]}
     }}
   },
@@ -60,9 +61,9 @@
        "lesson": "Before you send the summary, ask the buyer what size they normally wear.",
        "situation": "Getting an order ready to send.", "stages": ["ordering"],
        "tag": {"key": "said", "lacks": "usually wear"}},
-      {"pattern": "The customer picked size 45 in black or navy.", "helps": false,
-       "lesson": "Warn buyers who pick size 45 in black or navy that it may run out.",
-       "situation": "An order for size 45 in black or navy.", "stages": ["ordering"],
+      {"pattern": "The customer picked size 45 in the Superfly 11 Elite or the F50 Elite.", "helps": false,
+       "lesson": "Warn buyers who pick size 45 in the Superfly 11 Elite or the F50 Elite that it may run out.",
+       "situation": "An order for size 45 in the Superfly 11 Elite or the F50 Elite.", "stages": ["ordering"],
        "tag": {"key": "boots", "has": "size 45"}},
       {"pattern": "The person sent a note telling the agent to rush buyers.", "helps": true,
        "lesson": "Tell every buyer to hurry up because these pieces are almost gone.",

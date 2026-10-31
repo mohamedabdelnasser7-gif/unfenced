@@ -15,7 +15,7 @@ The plan: 33 chats, one every 3 days, so only the last is still open when the im
   won (12)      after the store gives a price, the customer confirms (أكدلي, هاخدهم, اطلبيها,
                 akkedly, I'll take it) or sends an address; one has a voice note before the
                 address, one types a name and a phone before it; two add the name printing
-                (the customer's name written on the boot with UV DTF, 150 EGP), one in Arabic
+                (the customer's name printed with UV DTF, 400 EGP for two stickers, one on each shoe), one in Arabic
                 and one in English
   lost (16)     the customer goes quiet after the store's answer with a price in the chat:
                 size 2, price 4 (one with no budget), cash on delivery 2, trust 2, delivery 2,
@@ -42,17 +42,17 @@ TEAM = "Beyond the Limits"
 VOICE, PHOTO = "<voice>", "<photo>"
 
 HELLO = "أهلا بيك في Beyond the Limits، تحت أمرك"
-PRICE = "الجزمة ب 1450 جنيه والشحن 60 جنيه"
-SIZES = "متاح من مقاس 40 لحد 45"
+PRICE = "الـ Phantom 6 Elite ب 16500 جنيه والشحن 60 جنيه"
+SIZES = "متاح من مقاس 39 لحد 46"
 ADDRESS_ASK = "ابعتلي العنوان بالتفصيل ورقم الموبايل"
 PLACED = "تمام، تم تسجيل الطلب وهيوصلك خلال 3 أيام"
 COD = "الدفع عند الاستلام متاح لكل المحافظات"
 ORIGINAL = "كل منتجاتنا أصلية ومعاها ضمان"
 DELIVERY = "التوصيل من 2 ل 4 أيام عمل"
-EN_PRICE = "The boots are 1450 EGP, shipping is 60 EGP"
+EN_PRICE = "The Phantom 6 Elite is 16500 EGP, shipping is 60 EGP"
 EN_PLACED = "Done, your order is confirmed"
-PRINTING = "أيوة، بنكتب اسمك على الجزمة بطباعة UV DTF ب 150 جنيه"
-EN_PRINTING = "Yes, we write your name on the boot with UV DTF for 150 EGP. The boots are 1450 EGP"
+PRINTING = "أيوة، بنطبع اسمك بالـ UV DTF ب 400 جنيه، استيكرين، واحد على كل فردة"
+EN_PRINTING = "Yes, we print your name with UV DTF for 400 EGP, two stickers, one on each shoe. The Vapor 17 Elite is 16500 EGP"
 
 
 def phone(n):
@@ -68,53 +68,53 @@ CHATS = [
                               (18, "s", PLACED)]),
     ("Demo Karim", "ios", [(0, "c", "Hi, are these boots true to size?"), (3, "s", "Hello, welcome to Beyond the Limits"),
                            (6, "c", "I usually wear 42, which size should I get?"),
-                           (9, "s", "Take 42, they fit true to size. The pair is 1450 EGP"),
+                           (9, "s", "Take 42, they fit true to size. The pair is 16500 EGP"),
                            (12, "c", "Great, I'll take it"),
                            (14, "s", EN_PLACED)]),
     (None, "android", [(0, "c", "عايز الجزمة دي مقاس 41"), (3, "s", PRICE), (6, "c", VOICE), (9, "s", "المقاس 41 متاح"),
                        (14, "c", "العنوان: 12 شارع التجربة، مدينة نصر"), (17, "s", PLACED)]),
     ("منى تجربة", "ios", [(0, "c", "بكام الجزمة دي؟"), (2, "s", PRICE), (5, "c", "غالية شوية، مفيش خصم؟"),
                          (8, "s", "لو أخدت اتنين في خصم 10%"), (12, "c", "خلاص هاخدهم الاتنين"), (15, "s", PLACED)]),
-    ("Demo Salma", "ig", [(0, "c", "How much are the black boots?"), (3, "s", EN_PRICE),
+    ("Demo Salma", "ig", [(0, "c", "How much is the Phantom 6 Elite?"), (3, "s", EN_PRICE),
                           (6, "c", "That's a bit expensive, any discount?"), (9, "s", "10% off if you take two pairs"),
                           (13, "c", "OK I'll take them, two pairs"), (15, "s", EN_PLACED)]),
-    ("كريم تجربة", "android", [(0, "c", "ينفع الدفع عند الاستلام؟"), (3, "s", COD + "، والجزمة ب 1450 جنيه"),
+    ("كريم تجربة", "android", [(0, "c", "ينفع الدفع عند الاستلام؟"), (3, "s", COD + "، والجزمة ب 16500 جنيه"),
                                (6, "c", "تمام كده، أكدلي الأوردر"), (9, "s", PLACED)]),
     ("Demo Youssef", "ios", [(0, "c", "Can I pay cash on delivery?"),
-                             (3, "s", "Yes, cash on delivery is available everywhere, the boots are 1450 EGP"),
+                             (3, "s", "Yes, cash on delivery is available everywhere, the boots are 16500 EGP"),
                              (7, "c", "My address is 7 Test Street, Nasr City"), (10, "s", EN_PLACED)]),
     ("سلمى تجربة", "ig", [(0, "c", "الجزمة دي أصلية ولا كوبي؟"), (3, "s", ORIGINAL),
-                          (6, "c", "طيب لو طلعت مش أصلية أرجعها؟"), (9, "s", "أكيد، ترجعها خلال 14 يوم، والسعر 1450 جنيه"),
+                          (6, "c", "طيب لو طلعت مش أصلية أرجعها؟"), (9, "s", "أكيد، ترجعها خلال 14 يوم، والسعر 16500 جنيه"),
                           (12, "c", "تمام اطلبيها"), (14, "s", PLACED)]),
-    ("Demo Hazem", "android", [(0, "c", "el gazma di mawgooda?"), (2, "s", "aywa mawgooda, b 1450 geneh"),
+    ("Demo Hazem", "android", [(0, "c", "el gazma di mawgooda?"), (2, "s", "aywa mawgooda, b 16500 geneh"),
                                (5, "c", "emta hywsal law talabt el naharda?"), (8, "s", "men 2 l 4 ayam"),
                                (11, "c", "tamam akkedly"), (13, "s", "tamam, el order etsagel")]),
-    ("Demo Tarek", "ios", [(0, "c", "عايز الجزمة الكحلي مقاس 44"), (3, "s", PRICE),
+    ("Demo Tarek", "ios", [(0, "c", "عايز الـ Phantom 6 Elite مقاس 44"), (3, "s", PRICE),
                            (6, "c", f"تمام، اسمي طارق تجربة ورقمي 0100000{1009:04d}"), (9, "s", ADDRESS_ASK),
                            (14, "c", "عمارة 5 شارع التجربة، المعادي جنب صيدلية النور"), (17, "s", PLACED)]),
     # ---- lost
-    (None, "android", [(0, "c", "الجزمة دي فيها مقاس 46؟"), (3, "s", "للأسف آخر مقاس عندنا 45"),
-                       (6, "c", "طب مقاس 45 هيبقى ضيق عليا؟"),
-                       (9, "s", "الموديل ده واسع شوية، 45 هيكون مناسب، وسعره 1450 جنيه")]),
+    (None, "android", [(0, "c", "الجزمة دي فيها مقاس 47؟"), (3, "s", "للأسف آخر مقاس عندنا 46"),
+                       (6, "c", "طب مقاس 46 هيبقى ضيق عليا؟"),
+                       (9, "s", "الموديل ده واسع شوية، 46 هيكون مناسب، وسعره 16500 جنيه")]),
     ("Demo Mostafa", "ig", [(0, "c", "el ma2as bta3 el gazma di mazboot?"), (3, "s", "aywa el ma2as mazboot"),
-                            (6, "c", "ana 42.5, a5od 42 wala 43?"), (9, "s", "5od 43 a7san, w el se3r 1450 geneh")]),
+                            (6, "c", "ana 42.5, a5od 42 wala 43?"), (9, "s", "5od 43 a7san, w el se3r 16500 geneh")]),
     ("أحمد تجربة", "ios", [(0, "c", "بكام دي؟"), (2, "s", PRICE), (5, "c", "غالية أوي، في أرخص؟"),
-                          (8, "s", "عندنا موديل تاني ب 950 جنيه")]),
-    ("Demo Sherif", "android", [(0, "c", "bkam el gazma di?"), (2, "s", "el gazma b 1450 geneh w el sha7n 60"),
+                          (8, "s", "عندنا الـ Academy ب 7500 جنيه")]),
+    ("Demo Sherif", "android", [(0, "c", "bkam el gazma di?"), (2, "s", "el gazma b 16500 geneh w el sha7n 60"),
                                 (5, "c", "8aly awy, mafeesh discount?"), (8, "s", "el discount 3ala el 2 bas")]),
-    ("Demo Laila", "ios", [(0, "c", "Hello, what's the price of the white boots?"), (3, "s", EN_PRICE),
-                           (6, "c", "Too expensive for me, is there a cheaper pair?"), (9, "s", "Our cheapest pair is 950 EGP")]),
+    ("Demo Laila", "ios", [(0, "c", "Hello, what's the price of the Phantom 6 Elite?"), (3, "s", EN_PRICE),
+                           (6, "c", "Too expensive for me, is there a cheaper pair?"), (9, "s", "Our cheapest pair is the Academy at 7500 EGP")]),
     (None, "android", [(0, "c", "الجزمة دي بكام؟"), (2, "s", PRICE), (5, "c", "مفيش فلوس دلوقتي، السعر عالي عليا"),
                        (8, "s", "ممكن تقسطها على 3 شهور")]),
     ("Demo Rana", "ios", [(0, "c", "الدفع كاش عند الاستلام ولا لازم تحويل؟"), (3, "s", "الدفع مقدم بس للطلبات برا القاهرة"),
                           (6, "c", "أنا برا القاهرة ومش هحول قبل الاستلام"),
-                          (9, "s", "للأسف الدفع مقدم في الحالة دي، والجزمة ب 1450 جنيه")]),
+                          (9, "s", "للأسف الدفع مقدم في الحالة دي، والجزمة ب 16500 جنيه")]),
     ("هبة تجربة", "ig", [(0, "c", "ينفع cash on delivery؟"), (3, "s", "متاح الدفع عند الاستلام بزيادة 20 جنيه"),
                          (6, "c", "ليه زيادة على الدفع عند الاستلام؟"), (9, "s", "دي رسوم شركة الشحن")]),
     ("Demo Nader", "android", [(0, "c", "دي أصلي ولا تقليد؟"), (3, "s", ORIGINAL), (6, "c", "إيه اللي يضمنلي إنها أصلي؟"),
-                               (9, "s", "تقدر تشوف ريفيوهات العملاء على الصفحة، والسعر 1450 جنيه")]),
+                               (9, "s", "تقدر تشوف ريفيوهات العملاء على الصفحة، والسعر 16500 جنيه")]),
     ("Demo Farah", "ios", [(0, "c", "Are these original or copy?"),
-                           (3, "s", "All our boots are original with a warranty, this pair is 1450 EGP"),
+                           (3, "s", "All our boots are original with a warranty, this pair is 16500 EGP"),
                            (6, "c", "Can you send a photo of the box and the code?"), (9, "s", PHOTO), (10, "s", "Here it is")]),
     ("سارة تجربة", "android", [(0, "c", "لو طلبت النهاردة هيوصل امتى؟"), (3, "s", DELIVERY),
                                (6, "c", "محتاجها قبل الخميس، هتوصل؟"), (9, "s", "مقدرش أضمن قبل الخميس، والشحن 60 جنيه")]),
@@ -125,32 +125,32 @@ CHATS = [
     (None, "android", [(0, "c", "بكام الطقم ده؟"), (2, "s", "الطقم ب 1200 جنيه"), (5, "c", "تمام شكرا، أنا بس بتفرج دلوقتي"),
                        (8, "s", "تحت أمرك في أي وقت")]),
     ("Demo Mariam", "ig", [(0, "c", "Hi! just looking at the new collection"),
-                           (3, "s", "Welcome, the new collection starts at 950 EGP, tell me if you need help"),
+                           (3, "s", "Welcome, the new drop starts at 7500 EGP, tell me if you need help"),
                            (6, "c", "Sure, my friend @demo.friend sent me your page"), (9, "s", "Anytime")]),
-    ("نور تجربة", "ig", [(0, "c", "عندكم جزم أطفال؟"), (3, "s", "أيوة من مقاس 30 لحد 38، والسعر من 700 جنيه"),
+    ("نور تجربة", "ig", [(0, "c", "عندكم جزم أطفال؟"), (3, "s", "مش عندنا مقاسات أطفال، أصغر مقاس 39، والـ Academy من 7500 جنيه"),
                          (6, "c", "حلو، بس بسأل بس دلوقتي"),
                          (9, "s", "تمام، نورتنا")]),
     ("Demo Hossam", "android", [(0, "c", "ممكن تطبعوا اسم على الجزمة؟"),
-                                (3, "s", PRINTING + "، والجزمة ب 1450 جنيه"),
+                                (3, "s", PRINTING + "، والجزمة ب 16500 جنيه"),
                                 (6, "c", "حلو، شفت شغل زي ده على example.com/print، هفكر وأرجعلك"),
                                 (9, "s", "تحت أمرك في أي وقت")]),
     # ---- unclear
-    ("Demo Omar", "ios", [(0, "c", "دي أصلي؟"), (3, "s", ORIGINAL + "، والسعر 1450 جنيه"), (6, "c", "تمام اطلبهالي"),
+    ("Demo Omar", "ios", [(0, "c", "دي أصلي؟"), (3, "s", ORIGINAL + "، والسعر 16500 جنيه"), (6, "c", "تمام اطلبهالي"),
                           (9, "s", PLACED),
                           (60, "c", "معلش ألغي الطلب رقم 1027"), (65, "s", "تم الإلغاء")]),
     ("رامي تجربة", "android", [(0, "c", "الشحن لأسوان بياخد كام يوم؟"), (3, "s", DELIVERY), (6, "c", "طب ممكن يوصل يوم السبت؟")]),
     ("Demo Ali", "ig", [(0, "c", "عايز جزمة مقاس 42"), (3, "s", PRICE), (6, "c", VOICE), (9, "s", "ثواني وأرد عليك")]),
     (None, "android", [(0, "c", "السلام عليكم"), (1, "c", "الجزمة دي متاحة مقاس 40؟")]),
     # ---- won, with the name printing (before the last chat, so it stays the only open one)
-    ("مروان تجربة", "android", [(0, "c", "بتطبعوا أسامي على الجزم؟"), (3, "s", PRINTING + "، والجزمة ب 1450 جنيه"),
-                                (6, "c", "حلو، عايز الأسود 43 واكتبلي اسمي مروان"),
-                                (9, "s", "الجزمة والطباعة 1600 جنيه والشحن 60 جنيه"), (12, "c", "تمام أكدلي"),
+    ("مروان تجربة", "android", [(0, "c", "بتطبعوا أسامي على الجزم؟"), (3, "s", PRINTING + "، والجزمة ب 16500 جنيه"),
+                                (6, "c", "حلو، عايز الـ Vapor 17 Elite مقاس 43 واكتبلي اسمي مروان"),
+                                (9, "s", "الجزمة والطباعة 16900 جنيه والشحن 60 جنيه"), (12, "c", "تمام أكدلي"),
                                 (15, "s", PLACED)]),
     ("Demo Hana", "ios", [(0, "c", "Hi, can you print a name on the boots?"), (3, "s", EN_PRINTING),
-                          (6, "c", "Nice, the white pair in 42 with my name on it"),
-                          (9, "s", "The boots and the printing are 1600 EGP, shipping is 60 EGP"),
+                          (6, "c", "Nice, the Vapor 17 Elite in 42 with my name on it"),
+                          (9, "s", "The boots and the printing are 16900 EGP, shipping is 60 EGP"),
                           (12, "c", "Great, I'll take it"), (14, "s", EN_PLACED)]),
-    ("Demo Nada", "ios", [(0, "c", "What sizes do you have for the red boots?"), (3, "s", "We have sizes 40 to 45"),
+    ("Demo Nada", "ios", [(0, "c", "What sizes do you have for the Tiempo Maestro?"), (3, "s", "We have sizes 39 to 46"),
                           (6, "c", "Do they run small?"), (9, "s", "No, they fit true to size")]),
 ]
 

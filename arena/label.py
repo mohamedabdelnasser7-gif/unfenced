@@ -2,8 +2,8 @@
 itself, by the rules below, in code (DECISIONS item 21). No order record is joined: that
 would need names or phones. Every text is read normalized (arena/clean.py normalize).
 
-price    a store message gives a price: an amount with a currency (1450 جنيه, EGP 900), a price
-         word with a number after it (السعر 1450, shipping 60; not a time such as الشحن بياخد 48
+price    a store message gives a price: an amount with a currency (16500 جنيه, EGP 900), a price
+         word with a number after it (السعر 16500, shipping 60; not a time such as الشحن بياخد 48
          ساعة or shipping takes 2 days) or an order summary.
 won      after a store price line, the customer sends an address (arena/clean.py gives_address;
          a message with a question mark or a question word such as فين, بتوصلوا or can you

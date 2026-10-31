@@ -20,12 +20,12 @@ from reflection.results import Results
 from tests.fake_model import FakeModel, Outbox, clean_env, say
 from tests.test_orders import ME, order_args, tool_call
 
-WHITE = "Beyond the Limits Football Boots, White"
+BOOTS = "Nike Mercurial Vapor 17"
 
 
 def boots_args(**kw):
-    """Two pairs of the white boots in size 43 to Giza: 2 x 1450 and 60 delivery is 2960."""
-    return order_args(**{"items": [{"product": WHITE, "size": "43", "quantity": 2}], "governorate": "الجيزة", **kw})
+    """Two pairs of the Vapor 17 Elite in size 43 to Giza: 2 x 16500 and 60 delivery is 33060."""
+    return order_args(**{"items": [{"product": BOOTS, "tier": "Elite", "size": "43", "quantity": 2}], "governorate": "الجيزة", **kw})
 
 
 def down(messages, tools_sent):
@@ -74,12 +74,12 @@ class SummaryReplyTest(TurnBase):
     """F1: only the model's own reply that shows the draft's total is the summary the customer saw."""
 
     def test_control_the_summary_reply_then_a_yes_places_the_order(self):
-        self.turn(FakeModel(tool_call("draft_order", self.args), summary_reply), "عايز اتنين ابيض مقاس 43")
+        self.turn(FakeModel(tool_call("draft_order", self.args), summary_reply), "عايز اتنين الإيليت مقاس 43")
         self.turn(self.done(), "تمام")
         self.assertTrue(self.placed())
 
     def test_pa1_the_model_down_line_is_not_the_summary(self):
-        r1 = self.turn(FakeModel(tool_call("draft_order", self.args), down), "عايز اتنين ابيض مقاس 43")
+        r1 = self.turn(FakeModel(tool_call("draft_order", self.args), down), "عايز اتنين الإيليت مقاس 43")
         self.assertEqual(r1.outcome, "model_error")
         self.assertIsNone(orders.Book(self.db).pending(self.cid))      # the line drops the summary
         self.turn(self.done(), "تمام")
@@ -88,7 +88,7 @@ class SummaryReplyTest(TurnBase):
     def test_pa2_the_limit_line_is_not_the_summary(self):
         now = [1_000_000.0]
         lim = Limits(self.db, per_customer=1, window=600, daily=1000, customer_daily=150, clock=lambda: now[0])
-        r1 = self.turn(FakeModel(tool_call("draft_order", self.args), say("never reached")), "عايز اتنين ابيض مقاس 43",
+        r1 = self.turn(FakeModel(tool_call("draft_order", self.args), say("never reached")), "عايز اتنين الإيليت مقاس 43",
                        limits=lim)
         self.assertEqual(r1.outcome, "limited")
         self.assertIsNone(orders.Book(self.db).pending(self.cid))
@@ -99,7 +99,7 @@ class SummaryReplyTest(TurnBase):
     def test_pa3_the_handoff_line_then_a_hand_back_is_not_the_summary(self):
         m = FakeModel(tool_call("draft_order", self.args), say("الاجمالي 1900 جنيه."), say("الاجمالي 1901 جنيه."),
                       say("الاجمالي 1902 جنيه."), say("العميل عايز يطلب"))
-        self.assertEqual(self.turn(m, "عايز اتنين ابيض مقاس 43").outcome, "handed_off")
+        self.assertEqual(self.turn(m, "عايز اتنين الإيليت مقاس 43").outcome, "handed_off")
         self.assertIsNone(orders.Book(self.db).pending(self.cid))
         self.chats.hand_back(self.cid)
         self.chats.set_stage(self.cid, "ordering")
@@ -107,7 +107,7 @@ class SummaryReplyTest(TurnBase):
         self.assertFalse(self.placed())
 
     def test_fixed_lines_are_saved_with_their_name(self):
-        self.turn(FakeModel(tool_call("draft_order", self.args), down), "عايز اتنين ابيض مقاس 43")
+        self.turn(FakeModel(tool_call("draft_order", self.args), down), "عايز اتنين الإيليت مقاس 43")
         lines = [s for s in self.chats.steps(self.cid) if s["role"] == "assistant" and not s["tool_calls"]]
         self.assertEqual([s["name"] for s in lines], [FIXED])
 
@@ -115,16 +115,16 @@ class SummaryReplyTest(TurnBase):
         def steps(*rows):
             return [{"n": n, "role": role, "content": text, "tool_calls": None, "name": name}
                     for n, (role, text, name) in enumerate(rows, 1)]
-        total = "2960.00"
+        total = "33060.00"
         for rows in (
             (("assistant", "مش قادر أرد دلوقتي.", FIXED), ("user", "تمام", None)),
-            (("assistant", "الاجمالي 2960 جنيه، أأكد؟", FIXED), ("user", "تمام", None)),
-            (("assistant", "الاجمالي 2960 جنيه، أأكد؟", PERSON), ("user", "تمام", None)),
+            (("assistant", "الاجمالي 33060 جنيه، أأكد؟", FIXED), ("user", "تمام", None)),
+            (("assistant", "الاجمالي 33060 جنيه، أأكد؟", PERSON), ("user", "تمام", None)),
             (("assistant", "ده ملخص الاوردر، أأكد؟", None), ("user", "تمام", None)),
-            (("assistant", "الاجمالي 2961 جنيه، أأكد؟", None), ("user", "تمام", None)),
+            (("assistant", "الاجمالي 33061 جنيه، أأكد؟", None), ("user", "تمام", None)),
         ):
             self.assertEqual(draft_order.answers(steps(*rows), 0, total), [], rows)
-        for text in ("الاجمالي 2960 جنيه، أأكد؟", "Total 2,960 EGP. Confirm?", "الاجمالي ٢٩٦٠ جنيه"):
+        for text in ("الاجمالي 33060 جنيه، أأكد؟", "Total 33,060 EGP. Confirm?", "الاجمالي ٣٣٠٦٠ جنيه"):
             got = draft_order.answers(steps(("assistant", text, None), ("user", "تمام", None)), 0, total)
             self.assertEqual([s["content"] for s in got], ["تمام"], text)
 
@@ -241,17 +241,17 @@ class MaskTest(SendCheckBase):
              "سعر التوصيل للبيت 120", "التوصيل لحد البيت 95.", "الشحن لحد باب العمارة 85",
              "Delivery to your house 120.", "Shipping to the building 150.",
              "The total with delivery to your flat 2100.")
-    PASS = ("Your order #D12 is received. The total is 1450 EGP.", "#D12 is on its way, 1450 EGP.",
-            "Your total for order #1042 is 1450 EGP.", "Your order #10234 is with the courier.",
+    PASS = ("Your order #D12 is received. The total is 16500 EGP.", "#D12 is on its way, 16500 EGP.",
+            "Your total for order #1042 is 16500 EGP.", "Your order #10234 is with the courier.",
             "الأوردر #1042 اتشحن وهيوصل بكرة", "Our WhatsApp is +20 10 1234 5678.", "kalemna 3la 010 1234 5678",
             "Call us on 02 2345 6789.", "Our Alex office is on 03 4567890.", "+44 7700 900123",
             "Write to 00201012345678 or +201012345678.", "28.10", "10.30", "Hoodie 1.5k",
-            "العنوان: الدقي، عمارة 125، الدور 3، شقة 12. سعر الجزمة 1450 جنيه.", "Building 125, Flat 12")
+            "العنوان: الدقي، عمارة 125، الدور 3، شقة 12. سعر الجزمة 16500 جنيه.", "Building 125, Flat 12")
 
     def test_must_block(self):
         for reply in self.BLOCK:
             with self.subTest(reply=reply):
-                self.assertIn("not in the store or delivery data", self.check(reply, {1450, 60, 2960})[1])
+                self.assertIn("not in the store or delivery data", self.check(reply, {16500, 60, 33060})[1])
 
     def test_still_passes(self):
         for reply in self.PASS:
@@ -264,11 +264,11 @@ class SpacedThousandsTest(SendCheckBase):
 
     def test_spaced_groups_read_as_one_number(self):
         from kit.send_check import prices_in
-        for reply, n in (("الطباعة 1 150 جنيه", 1150), ("Total: 10 150 EGP.", 10150), ("الشحن 1 060 جنيه", 1060),
-                         ("الإجمالي ١ ١٥٠ جنيه", 1150), ("The junior boots are 1\u00a0700 EGP.", 1700)):
+        for reply, n in (("الطباعة 1 400 جنيه", 1400), ("Total: 10 150 EGP.", 10150), ("الشحن 1 060 جنيه", 1060),
+                         ("الإجمالي ١ ٤٠٠ جنيه", 1400), ("The printing is 2\u00a0400 EGP.", 2400)):
             with self.subTest(reply=reply):
                 self.assertEqual(prices_in(reply), [n])
-                self.assertIn("not in the store or delivery data", self.check(reply, {1450, 700, 150, 60, 2960})[1])
+                self.assertIn("not in the store or delivery data", self.check(reply, {16500, 400, 60, 33060})[1])
 
     def test_every_unicode_space_joins_the_groups(self):
         import unicodedata
@@ -276,14 +276,14 @@ class SpacedThousandsTest(SendCheckBase):
         spaces = [c for c in map(chr, range(0x3001)) if unicodedata.category(c) == "Zs"]
         self.assertEqual(len(spaces), 17)
         for sp in spaces:
-            for reply in ("الطباعة 1" + sp + "150 جنيه", "الإجمالي ١" + sp + "١٥٠ جنيه"):
+            for reply in ("الطباعة 1" + sp + "400 جنيه", "الإجمالي ١" + sp + "٤٠٠ جنيه"):
                 with self.subTest(space=hex(ord(sp)), reply=reply):
-                    self.assertEqual(prices_in(reply), [1150])
-                    self.assertIn("not in the store or delivery data", self.check(reply, {150})[1])
+                    self.assertEqual(prices_in(reply), [1400])
+                    self.assertIn("not in the store or delivery data", self.check(reply, {400})[1])
 
     def test_phone_numbers_and_small_numbers_stay_apart(self):
         for reply in ("+1 202 555 0143", "Our WhatsApp is +20 10 1234 5678.", "Call us on 02 2345 6789.",
-                      "Sizes 42 43 44 are in stock.", "1 pair for 1450 EGP."):
+                      "Sizes 42 43 44 are in stock.", "1 pair for 16500 EGP."):
             with self.subTest(reply=reply):
                 self.assertEqual(self.number_problems(reply), [])
 
@@ -354,10 +354,10 @@ class OrderLineTest(TurnBase):
     """Review 2: an order created in a turn that then hits the limit, a model error or a crash
     is still told to the customer, with its number and total, instead of the usual line."""
 
-    LINE = "اوردرك اتسجل برقم #1001، والإجمالي 2,960 جنيه."
+    LINE = "اوردرك اتسجل برقم #1001، والإجمالي 33,060 جنيه."
 
     def summary(self):
-        self.turn(FakeModel(tool_call("draft_order", self.args), summary_reply), "عايز اتنين ابيض مقاس 43")
+        self.turn(FakeModel(tool_call("draft_order", self.args), summary_reply), "عايز اتنين الإيليت مقاس 43")
 
     def to_customer(self):
         return [t for to, t in self.out.sent if to == ME]
@@ -375,7 +375,7 @@ class OrderLineTest(TurnBase):
     def test_the_limit_after_the_order_was_created(self):
         now = [1_000_000.0]
         lim = Limits(self.db, per_customer=2, window=600, daily=1000, customer_daily=150, clock=lambda: now[0])
-        self.turn(FakeModel(tool_call("draft_order", self.args), summary_reply), "عايز اتنين ابيض مقاس 43", limits=lim)
+        self.turn(FakeModel(tool_call("draft_order", self.args), summary_reply), "عايز اتنين الإيليت مقاس 43", limits=lim)
         now[0] += 700
         r = self.turn(FakeModel(confirm_from_history(self.args), say("never reached")), "تمام", limits=lim)
         self.assertTrue(self.placed())
@@ -395,7 +395,7 @@ class OrderLineTest(TurnBase):
                       lessons=Lessons(self.db), results=self.results, send=self.out)
         r = loop.failed_turn(msg, chats=self.chats, model=None, results=self.results, send=self.out)
         self.assertTrue(self.placed())
-        self.assertEqual((r.outcome, r.reply), ("turn_failed", "Your order #1001 is placed. The total is 2,960 EGP."))
+        self.assertEqual((r.outcome, r.reply), ("turn_failed", "Your order #1001 is placed. The total is 33,060 EGP."))
 
     def test_the_second_model_error_hands_off_after_the_order_line(self):
         self.summary()
@@ -416,7 +416,7 @@ class OrderLineTest(TurnBase):
     def test_franco_and_no_order_keep_the_usual_lines(self):
         self.summary()
         r = self.turn(FakeModel(confirm_from_history(self.args), down), "tamam 2aked")
-        self.assertEqual(r.reply, "el order bta3ak etsagel b ra2am #1001, w el egmaly 2,960 geneh.")
+        self.assertEqual(r.reply, "el order bta3ak etsagel b ra2am #1001, w el egmaly 33,060 geneh.")
         self.chats.reset_model_errors(self.cid)
         r = self.turn(FakeModel(down), "fen el order")
         self.assertEqual(r.reply, loop.MODEL_DOWN["franco"])               # a later turn: no order made in it
@@ -437,7 +437,7 @@ class MediaMarkTest(TurnBase):
     """Review 3: a photo or voice note that was not opened leaves a mark, so its caption is never a yes."""
 
     def summary(self):
-        self.turn(FakeModel(tool_call("draft_order", self.args), summary_reply), "عايز اتنين ابيض مقاس 43")
+        self.turn(FakeModel(tool_call("draft_order", self.args), summary_reply), "عايز اتنين الإيليت مقاس 43")
 
     def media(self):
         return [s["media"] for s in self.chats.steps(self.cid) if s["role"] == "user"][-1]
@@ -485,7 +485,7 @@ class RiskBeforeTakeTest(TurnBase):
     def test_a_failed_risk_lookup_still_places_the_order(self):
         from unittest import mock
         from kit.tools import cod_risk
-        self.turn(FakeModel(tool_call("draft_order", self.args), summary_reply), "عايز اتنين ابيض مقاس 43")
+        self.turn(FakeModel(tool_call("draft_order", self.args), summary_reply), "عايز اتنين الإيليت مقاس 43")
         with mock.patch.object(cod_risk, "assess", side_effect=orders.StoreError("Shopify did not answer")):
             self.turn(self.done(), "تمام")
         made = orders.Book(self.db).demo_order("#1001")

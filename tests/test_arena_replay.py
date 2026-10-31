@@ -30,7 +30,7 @@ def cust(text=None, media=None):
     return t
 
 
-STORE = {"from": "store", "text": "1450 EGP."}
+STORE = {"from": "store", "text": "16,500 EGP."}
 
 
 class Records:
@@ -108,15 +108,15 @@ class Play(unittest.TestCase):
 
     def test_the_agent_answers_the_real_opening_and_the_persona_goes_on(self):
         customer = Records(BUY)
-        planned = [(chat(7, "size", cust("Hi"), cust("size 44 in black?"), STORE), card(1, "size"), "Hi\nsize 44 in black?")]
+        planned = [(chat(7, "size", cust("Hi"), cust("size 44 in Elite?"), STORE), card(1, "size"), "Hi\nsize 44 in Elite?")]
         out = self.arena(customer).replay(planned, {replay.NO_CARD: 2})
         self.assertEqual((out["played"], out["won"], out["lost"], out["skipped"], out["stopped"]),
                          (1, 1, [], {replay.NO_CARD: 2}, None))
         self.assertEqual([m["content"] for m in customer.seen[0][2:4]],
-                         ["Hi\nsize 44 in black?", "The Football Boots, Black are 1450 EGP."])  # it goes on from the real opening
+                         ["Hi\nsize 44 in Elite?", "The Mercurial Vapor 17 Elite is 16,500 EGP."])  # it goes on from the real opening
         saved = [json.loads(x) for x in (self.dir / run.MATCHES_FILE).read_text(encoding="utf-8").splitlines()]
         self.assertEqual([(m["replay"], m["won"], m["turns"][0]["customer"]) for m in saved],
-                         [("c0007", True, "Hi\nsize 44 in black?")])
+                         [("c0007", True, "Hi\nsize 44 in Elite?")])
         self.assertTrue(saved[0]["id"].endswith("-replay-c0007"))
         self.assertEqual(self.calls.count, 6 + 2)  # price, stage, draft, summary, confirm, placed; buy and yes
 
@@ -126,7 +126,7 @@ class Play(unittest.TestCase):
         out = self.arena(Records("[leave]"), learn=lambda m, j, mid: cases.append(mid) or mid).replay(planned)
         self.assertEqual((out["played"], out["won"]), (2, 0))
         self.assertEqual(out["lost"][0]["chat"], "c0001")
-        self.assertEqual(out["lost"][0]["quote"]["text"], "The Football Boots, Black are 1450 EGP.")
+        self.assertEqual(out["lost"][0]["quote"]["text"], "The Mercurial Vapor 17 Elite is 16,500 EGP.")
         self.assertEqual(len(cases), 2)
         self.assertEqual(out["cases"], cases)
 

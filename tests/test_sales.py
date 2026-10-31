@@ -94,16 +94,16 @@ class Instructions(unittest.TestCase):
         self.assertNotIn("store's assistant", loop.INSTRUCTIONS)
 
     def test_prices_from_1000_up_keep_the_comma(self):
-        # Mohamed's call: this line stays as it is; only its price example moved to the boots (1,450).
-        self.assertIn('Say the price plainly, the number then جنيه, for example "1,450 جنيه". From 1,000 up, put a comma '
-                      'in the thousands: "1,500 جنيه", never "1.500" or "1500".', loop.INSTRUCTIONS)
+        # Mohamed's call: this line stays as it is; only its price example moved to the boots (16,500).
+        self.assertIn('Say the price plainly, the number then جنيه, for example "16,500 جنيه". From 1,000 up, put a comma '
+                      'in the thousands: "11,000 جنيه", never "11.000" or "11000".', loop.INSTRUCTIONS)
 
     def test_the_store_and_its_printing(self):
         """Line 1 names the store, its boots and the name printing, sold in the order and never handed off
         (DECISIONS 13 and 22); the agent never jokes (DECISIONS 12); no courier is named."""
         first = loop.INSTRUCTIONS.splitlines()[0]
-        for part in ("Beyond the Limits", "football boots", "name printing", "the customer's name written on the "
-                     "boot with UV DTF, 150 EGP", "the customer's own name unless they give another",
+        for part in ("Beyond the Limits", "football boots", "name printing", "the customer's name printed with UV DTF, "
+                     "400 EGP for two stickers, one on each shoe", "the customer's own name unless they give another",
                      "never hand it off"):
             with self.subTest(part=part):
                 self.assertIn(part, first)
@@ -129,11 +129,11 @@ class Turns(unittest.TestCase):
 
     def test_full_turn(self):
         kept_lesson(self.lessons, "Say the price plainly, the number then جنيه.", ["asking"])
-        model = FakeModel(call("store", query="black boots"),
-                          say("عندنا Beyond the Limits Football Boots, Black مقاس 43 بـ 1,450 جنيه."))
-        r = self.turn(model, "عندكم جزمة سودا مقاس ٤٣؟ بكام")
+        model = FakeModel(call("store", query="vapor"),
+                          say("عندنا Nike Mercurial Vapor 17 Elite مقاس 43 بـ 16,500 جنيه."))
+        r = self.turn(model, "عندكم الـ Vapor 17 Elite مقاس ٤٣؟ بكام")
         self.assertEqual(r.outcome, "replied")
-        self.assertEqual(self.out.sent, [(CUSTOMER, "عندنا Beyond the Limits Football Boots, Black مقاس 43 بـ 1,450 جنيه.")])
+        self.assertEqual(self.out.sent, [(CUSTOMER, "عندنا Nike Mercurial Vapor 17 Elite مقاس 43 بـ 16,500 جنيه.")])
         first, second = model.calls
         self.assertEqual(tool_names(first["tools"]), ["store", "voice_note", "handoff", "delivery", "switch_stage"])
         system = first["messages"][0]["content"]
@@ -141,15 +141,15 @@ class Turns(unittest.TestCase):
         self.assertIn("stage asking", system)
         self.assertIn("Say the price plainly, the number then جنيه.", system)
         self.assertEqual(first["effort"], "medium")
-        self.assertIn('"price": "1450"', second["messages"][-1]["content"])
+        self.assertIn('"price": "16500"', second["messages"][-1]["content"])
         self.assertEqual([s["role"] for s in self.chats.steps(r.chat_id)], ["user", "assistant", "tool", "assistant"])
         self.assertEqual(self.outcomes(r.chat_id), ["replied"])
         self.assertEqual(self.results.for_chat(r.chat_id)[0]["lessons"], [1])
 
     def test_failed_check_retries_with_feedback(self):
-        model = FakeModel(say("1,350 جنيه للجوز"), say("الجزمة بـ 1,450 جنيه."))
+        model = FakeModel(say("1,350 جنيه للجوز"), say("الجزمة بـ 16,500 جنيه."))
         r = self.turn(model, "الجزمة بكام؟")
-        self.assertEqual(self.out.sent, [(CUSTOMER, "الجزمة بـ 1,450 جنيه.")])
+        self.assertEqual(self.out.sent, [(CUSTOMER, "الجزمة بـ 16,500 جنيه.")])
         retry = model.calls[1]["messages"][-1]["content"]
         self.assertIn("not sent", retry)
         self.assertIn("1350", retry)
@@ -168,7 +168,7 @@ class Turns(unittest.TestCase):
         self.assertEqual(self.outcomes(r.chat_id)[-4:], ["check_failed"] * 3 + ["handed_off"])
 
     def test_voice_transcript_adds_no_amount(self):
-        model = FakeModel(call("voice_note"), say('{"price": 5}'), say("The black boots are 5 EGP."),
+        model = FakeModel(call("voice_note"), say('{"price": 5}'), say("The Vapor 17 Elite is 5 EGP."),
                           say("I will check the price with the team."))
         r = self.turn(model, "", audio=b"RIFF fake", audio_mime="audio/wav")
         self.assertEqual(self.out.sent, [(CUSTOMER, "I will check the price with the team.")])
@@ -189,9 +189,9 @@ class Turns(unittest.TestCase):
 
     def test_tool_arguments_as_object_or_junk(self):
         obj = {"role": "assistant", "content": None, "tool_calls": [
-            {"id": "c1", "type": "function", "function": {"name": "store", "arguments": {"query": "black boots"}}},
+            {"id": "c1", "type": "function", "function": {"name": "store", "arguments": {"query": "vapor"}}},
             {"id": "c2", "type": "function", "function": {"name": "store", "arguments": 123}}]}
-        r = self.turn(FakeModel(obj, say("Yes, black boots are 1,450 EGP.")), "black boots?")
+        r = self.turn(FakeModel(obj, say("Yes, the Vapor 17 Elite is 16,500 EGP.")), "vapor elite?")
         self.assertEqual(r.outcome, "replied")
         results = [json.loads(s["content"]) for s in self.chats.steps(r.chat_id) if s["role"] == "tool"]
         self.assertTrue(results[0]["ok"])
@@ -317,7 +317,7 @@ class Turns(unittest.TestCase):
 
     def test_tool_steps_are_capped(self):
         model = FakeModel(*[call("store", query="boots") for _ in range(loop.MAX_TOOL_STEPS)],
-                          say("Yes, we have them at 1,450 EGP."))
+                          say("Yes, we have them at 16,500 EGP."))
         self.turn(model, "boots?")
         self.assertEqual(loop.MAX_TOOL_STEPS, 4)
         self.assertEqual(len(model.calls), loop.MAX_TOOL_STEPS + 1)
@@ -326,13 +326,13 @@ class Turns(unittest.TestCase):
     def test_last_step_words_win_over_a_tool_call(self):
         # On the last step no tools are sent; a tool call that comes back anyway is not run.
         last = call("store", query="boots")
-        last["content"] = "Yes, we have them at 1,450 EGP."
+        last["content"] = "Yes, we have them at 16,500 EGP."
         model = FakeModel(*[call("store", query="boots") for _ in range(loop.MAX_TOOL_STEPS)], last)
         real = tools.TOOLS["store"].run
         with mock.patch.object(tools.TOOLS["store"], "run", side_effect=real) as runs:
             r = self.turn(model, "boots?")
         self.assertEqual((runs.call_count, len(model.calls)), (loop.MAX_TOOL_STEPS, loop.MAX_TOOL_STEPS + 1))
-        self.assertEqual((r.outcome, r.reply), ("replied", "Yes, we have them at 1,450 EGP."))
+        self.assertEqual((r.outcome, r.reply), ("replied", "Yes, we have them at 16,500 EGP."))
 
     def test_a_voice_note_that_fails_is_not_converted_again(self):
         model = FakeModel(call("voice_note"), call("voice_note"), say("Please type your message."))
@@ -345,7 +345,7 @@ class Turns(unittest.TestCase):
         self.assertEqual(results[1], voice_note.NOT_HEARD)
 
     def test_photo_goes_to_the_model_and_only_its_hash_is_kept(self):
-        model = FakeModel(say("aywa 3andena, b 1,450 geneh."))
+        model = FakeModel(say("aywa 3andena, b 16,500 geneh."))
         r = self.turn(model, "3ndko de?", images=[Image(JPEG, "image/jpeg")])
         self.assertEqual(r.outcome, "replied")
         user = model.calls[0]["messages"][-1]
@@ -370,14 +370,14 @@ class Turns(unittest.TestCase):
 
     def test_voice_note(self):
         heard = "عندكم جزم كورة مقاس ٤٣؟"
-        model = FakeModel(call("voice_note"), say(heard), say("أيوه عندنا مقاس 43، بـ 1,450 جنيه."))
+        model = FakeModel(call("voice_note"), say(heard), say("أيوه عندنا مقاس 43، بـ 16,500 جنيه."))
         with mock.patch.object(voice_note, "to_wav", return_value=b"RIFF0000WAVE") as conv:
             r = self.turn(model, "", audio=b"OggS fake", audio_mime="audio/ogg; codecs=opus")
         conv.assert_called_once()
         self.assertEqual(r.outcome, "replied")
         parts = model.calls[1]["messages"][0]["content"]
         self.assertEqual((parts[1]["type"], parts[1]["input_audio"]["format"]), ("input_audio", "wav"))
-        self.assertEqual(self.out.sent, [(CUSTOMER, "أيوه عندنا مقاس 43، بـ 1,450 جنيه.")])
+        self.assertEqual(self.out.sent, [(CUSTOMER, "أيوه عندنا مقاس 43، بـ 16,500 جنيه.")])
         self.assertEqual(self.chats.steps(r.chat_id)[0]["media"][0]["kind"], "audio")
 
 
@@ -386,7 +386,7 @@ class SizePriceWarning(unittest.TestCase):
         clean_env(self)
 
     def test_a_price_that_is_also_a_size_number_is_logged_at_start(self):
-        with mock.patch.object(loop.store, "price_points", return_value={45, 1450}), \
+        with mock.patch.object(loop.store, "price_points", return_value={45, 16500}), \
                 mock.patch.object(loop.store, "size_strings", return_value=["40", "41", "42", "43", "44", "45"]), \
                 self.assertLogs("sales.loop", "WARNING") as logs:
             self.assertEqual(loop.warn_size_prices(), [45])
@@ -421,13 +421,13 @@ class LimitTurns(unittest.TestCase):
 
     def test_per_customer_limit_and_one_line_per_window(self):
         lim = self.limits(per_customer=2)
-        self.assertEqual(self.turn(FakeModel(call("store", query="boots"), say("Yes, 1,450 EGP.")), "boots?", lim).outcome,
+        self.assertEqual(self.turn(FakeModel(call("store", query="boots"), say("Yes, 16,500 EGP.")), "boots?", lim).outcome,
                          "replied")
         later = [self.turn(FakeModel(), "boots?", lim) for _ in range(2)]
         self.assertEqual([r.outcome for r in later], ["limited", "limited"])
         self.assertEqual([t for _, t in self.out.sent[1:]], [loop.LIMIT_LINE["english"]])
         self.now[0] += 601
-        self.assertEqual(self.turn(FakeModel(say("Yes, 1,450 EGP.")), "boots?", lim).outcome, "replied")
+        self.assertEqual(self.turn(FakeModel(say("Yes, 16,500 EGP.")), "boots?", lim).outcome, "replied")
 
     def test_limit_reached_mid_turn(self):
         lim = self.limits(per_customer=1)
@@ -437,7 +437,7 @@ class LimitTurns(unittest.TestCase):
 
     def test_daily_limit_covers_everyone(self):
         lim = self.limits(daily=1)
-        self.turn(FakeModel(say("Yes, 1,450 EGP.")), "boots?", lim)
+        self.turn(FakeModel(say("Yes, 16,500 EGP.")), "boots?", lim)
         r = self.turn(FakeModel(), "3ndko gezam?", lim, customer="201222222222")
         self.assertEqual((r.outcome, self.out.sent[-1][1]), ("limited", loop.LIMIT_LINE["franco"]))
 

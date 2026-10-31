@@ -20,9 +20,8 @@ ME = "201011112222"       # the customer in these tests: a new number with no hi
 A = "200000000101"        # demo/orders.json: three delivered, one shipped, Cairo
 B = "200000000102"        # two refused, one delivered, Giza
 C = "200000000103"        # one refused, Alexandria
-WHITE, BLACK, RED = ("Beyond the Limits Football Boots, White", "Beyond the Limits Football Boots, Black",
-                     "Beyond the Limits Football Boots, Red")
-JUNIOR = "Beyond the Limits Junior Football Boots"
+VAPOR, PHANTOM, TIEMPO = "Nike Mercurial Vapor 17", "Nike Phantom 6", "Nike Tiempo Maestro"  # Elite 16500, Pro 11000, Academy 7500
+SUPERFLY = "Nike Mercurial Superfly 11"       # Academy 9500
 PRINT = "Beyond the Limits Name Printing"     # type Printing: one variant, no size
 DEMO = json.loads(orders.DEMO_ORDERS.read_text(encoding="utf-8"))["orders"]
 
@@ -41,7 +40,7 @@ def use(mod, args, ctx):
 
 
 def order_args(**kw):
-    args = {"items": [{"product": WHITE, "size": "43", "quantity": 1}], "name": "Demo Buyer",
+    args = {"items": [{"product": VAPOR, "tier": "Elite", "size": "43", "quantity": 1}], "name": "Demo Buyer",
             "governorate": "الجيزة", "address": "شارع التحرير، الدقي، عمارة ١٢"}
     args.update(kw)
     return args
@@ -143,12 +142,12 @@ class DeliveryTest(unittest.TestCase):
 class DraftOrderTest(OrderBase):
     def test_totals_are_computed_in_code_from_the_data(self):
         out = self.summary(self.ctx(), items=[{"product": PRINT, "quantity": 1},
-                                              {"product": JUNIOR, "size": "34", "quantity": 1},
-                                              {"product": WHITE, "size": "43", "quantity": 2}])
+                                              {"product": SUPERFLY, "tier": "Academy", "size": "40", "quantity": 1},
+                                              {"product": VAPOR, "tier": "Elite", "size": "43", "quantity": 2}])
         self.assertEqual((out["subtotal"], out["fee"], out["total"]),
-                         (2 * 1450 + 700 + 150, 60, 2 * 1450 + 700 + 150 + 60))
-        self.assertEqual([(i["product"], i["price"]) for i in out["items"]], [(WHITE, 1450), (JUNIOR, 700), (PRINT, 150)])
-        self.assertEqual(send_check.amounts_in(out), {1450, 700, 150, 60, 3750, 3810})
+                         (2 * 16500 + 9500 + 400, 60, 2 * 16500 + 9500 + 400 + 60))
+        self.assertEqual([(i["product"], i["price"]) for i in out["items"]], [(PRINT, 400), (SUPERFLY, 9500), (VAPOR, 16500)])
+        self.assertEqual(send_check.amounts_in(out), {16500, 9500, 400, 60, 42900, 42960})
         self.assertEqual(len(out["code"]), orders.CODE_LENGTH)
         self.assertTrue(set(out["code"]) <= set(orders.CODE_LETTERS))
 
@@ -156,23 +155,23 @@ class DraftOrderTest(OrderBase):
         ctx = self.ctx()
         items = store.catalogue()
         cheap = json.loads(json.dumps(items))
-        variant(cheap, WHITE, "43")["price"] = "500"
+        variant(cheap, VAPOR, "43")["price"] = "500"
         with mock.patch.object(store, "catalogue", return_value=cheap):
-            out = self.summary(ctx, governorate="Aswan", items=[{"product": WHITE, "size": "43", "quantity": 2}])
+            out = self.summary(ctx, governorate="Aswan", items=[{"product": VAPOR, "tier": "Elite", "size": "43", "quantity": 2}])
         self.assertEqual((out["subtotal"], out["fee"], out["total"]), (1000, 85, 1085))
         # the model cannot pass a price: any extra key is refused before anything runs
-        bad = order_args(items=[{"product": WHITE, "size": "43", "quantity": 1, "price": 1}])
+        bad = order_args(items=[{"product": VAPOR, "tier": "Elite", "size": "43", "quantity": 1, "price": 1}])
         self.assertFalse(draft_order.check(bad, ctx)[0])
         self.assertFalse(draft_order.check(order_args(total=1), ctx)[0])
 
     def test_same_item_twice_is_one_line(self):
-        out = self.summary(self.ctx(), items=[{"product": WHITE, "size": "43", "quantity": 1},
-                                              {"product": WHITE.lower(), "size": " 43 ", "quantity": 2}])
+        out = self.summary(self.ctx(), items=[{"product": VAPOR, "tier": "Elite", "size": "43", "quantity": 1},
+                                              {"product": VAPOR.lower(), "tier": "elite", "size": " 43 ", "quantity": 2}])
         self.assertEqual([(i["size"], i["quantity"]) for i in out["items"]], [("43", 3)])
-        self.assertEqual(out["subtotal"], 3 * 1450)
+        self.assertEqual(out["subtotal"], 3 * 16500)
         # two lines of the same item cannot pass the cap together
-        over = use(draft_order, order_args(items=[{"product": WHITE, "size": "43", "quantity": 15},
-                                                  {"product": WHITE, "size": " 43", "quantity": 6}]), self.ctx())
+        over = use(draft_order, order_args(items=[{"product": VAPOR, "tier": "Elite", "size": "43", "quantity": 15},
+                                                  {"product": VAPOR, "tier": "Elite", "size": " 43", "quantity": 6}]), self.ctx())
         self.assertFalse(over["ok"])
         self.assertIn("At most 20", over["feedback"])
 
@@ -186,9 +185,12 @@ class DraftOrderTest(OrderBase):
         ctx = self.ctx()
         cases = (
             ([{"product": "Beyond the Limits Hoodie", "quantity": 1}], "No product has that title"),
-            ([{"product": WHITE, "quantity": 1}], "comes in"),                    # needs a size
-            ([{"product": WHITE, "size": "46", "quantity": 1}], "comes in"),
-            ([{"product": BLACK, "size": "45", "quantity": 1}], "out of stock"),  # stock 0 in the demo data
+            ([{"product": VAPOR, "quantity": 1}], "comes in the tiers"),         # needs a tier
+            ([{"product": VAPOR, "size": "43", "quantity": 1}], "comes in the tiers"),
+            ([{"product": VAPOR, "tier": "Elite", "quantity": 1}], "comes in: 39, 40"),  # needs a size
+            ([{"product": VAPOR, "tier": "Elite", "size": "47", "quantity": 1}], "comes in"),
+            ([{"product": VAPOR, "tier": "League", "size": "43", "quantity": 1}], "comes in the tiers Elite, Pro, Academy"),
+            ([{"product": PRINT, "tier": "Elite", "quantity": 1}], "has no tiers"),
             ([{"product": PRINT, "size": "43", "quantity": 1}], "has no sizes"),  # the printing has one variant, no size
         )
         for items, feedback in cases:
@@ -197,16 +199,16 @@ class DraftOrderTest(OrderBase):
             self.assertIn(feedback, out["feedback"])
         self.assertIsNone(self.book.pending(ctx.chat_id))
         one = self.summary(ctx, items=[{"product": PRINT, "quantity": 1}])  # one variant needs no size
-        self.assertEqual((one["items"][0]["product"], one["items"][0]["price"]), (PRINT, 150))
+        self.assertEqual((one["items"][0]["product"], one["items"][0]["price"]), (PRINT, 400))
         self.assertNotIn("size", one["items"][0])
 
     def test_a_size_that_starts_two_sizes_is_asked_about(self):
         """Review t261028j finding 10 (o10): "43" starts two sizes here, so the customer is asked which;
         a size that starts only one is that one."""
         boots = {"title": "Test Boots", "variants": [
-            {"size": "43 (EU)", "price": "1450", "sku": "TEST-43-EU", "stock": "in stock"},
-            {"size": "43 (US)", "price": "1500", "sku": "TEST-43-US", "stock": "in stock"},
-            {"size": "44 (EU)", "price": "1450", "sku": "TEST-44-EU", "stock": "in stock"}]}
+            {"size": "43 (EU)", "price": "16500", "sku": "TEST-43-EU", "stock": "in stock"},
+            {"size": "43 (US)", "price": "17000", "sku": "TEST-43-US", "stock": "in stock"},
+            {"size": "44 (EU)", "price": "16500", "sku": "TEST-44-EU", "stock": "in stock"}]}
         ctx = self.ctx()
         with mock.patch.object(store, "catalogue", return_value=[boots]):
             out = use(draft_order, order_args(items=[{"product": "Test Boots", "size": "43", "quantity": 1}]), ctx)
@@ -215,7 +217,7 @@ class DraftOrderTest(OrderBase):
             self.assertIsNone(self.book.pending(ctx.chat_id))
             exact = self.summary(ctx, items=[{"product": "Test Boots", "size": "43 (US)", "quantity": 1}])
             start = self.summary(ctx, items=[{"product": "Test Boots", "size": "44", "quantity": 1}])
-        self.assertEqual((exact["items"][0]["size"], exact["items"][0]["price"]), ("43 (US)", 1500))
+        self.assertEqual((exact["items"][0]["size"], exact["items"][0]["price"]), ("43 (US)", 17000))
         self.assertEqual(start["items"][0]["size"], "44 (EU)")
 
     def test_items_in_two_currencies_make_no_summary(self):
@@ -223,8 +225,8 @@ class DraftOrderTest(OrderBase):
         items = json.loads(json.dumps(store.catalogue()))
         for i in items:
             for v in i["variants"]:
-                v["currency"] = "USD" if i["title"] == RED else "EGP"
-        both = [{"product": WHITE, "size": "43", "quantity": 1}, {"product": RED, "size": "42", "quantity": 1}]
+                v["currency"] = "USD" if i["title"] == TIEMPO else "EGP"
+        both = [{"product": VAPOR, "tier": "Elite", "size": "43", "quantity": 1}, {"product": TIEMPO, "tier": "Academy", "size": "42", "quantity": 1}]
         ctx = self.ctx()
         with mock.patch.object(store, "catalogue", return_value=items):
             out = use(draft_order, order_args(items=both), ctx)
@@ -240,13 +242,13 @@ class DraftOrderTest(OrderBase):
         for bad in (
             {k: v for k, v in order_args().items() if k != "address"},
             order_args(items=[]),
-            order_args(items=[{"product": WHITE, "size": "43", "quantity": 0}]),
-            order_args(items=[{"product": WHITE, "size": "43", "quantity": "2"}]),
-            order_args(items=[{"product": WHITE, "size": "43", "quantity": True}]),
-            order_args(items=[{"product": WHITE, "size": "43", "quantity": draft_order.MAX_QUANTITY + 1}]),
-            order_args(items=[{"product": WHITE, "size": "43", "quantity": 1}] * (draft_order.MAX_LINES + 1)),
-            order_args(items=[{"product": WHITE, "size": "43", "quantity": 21}]),       # the caps as numbers:
-            order_args(items=[{"product": WHITE, "size": "43", "quantity": 1}] * 11),   # 20 a line, 10 lines
+            order_args(items=[{"product": VAPOR, "tier": "Elite", "size": "43", "quantity": 0}]),
+            order_args(items=[{"product": VAPOR, "tier": "Elite", "size": "43", "quantity": "2"}]),
+            order_args(items=[{"product": VAPOR, "tier": "Elite", "size": "43", "quantity": True}]),
+            order_args(items=[{"product": VAPOR, "tier": "Elite", "size": "43", "quantity": draft_order.MAX_QUANTITY + 1}]),
+            order_args(items=[{"product": VAPOR, "tier": "Elite", "size": "43", "quantity": 1}] * (draft_order.MAX_LINES + 1)),
+            order_args(items=[{"product": VAPOR, "tier": "Elite", "size": "43", "quantity": 21}]),       # the caps as numbers:
+            order_args(items=[{"product": VAPOR, "tier": "Elite", "size": "43", "quantity": 1}] * 11),   # 20 a line, 10 lines
             order_args(items=[{"product": PRINT, "quantity": 1, "print_name": "Y"}]),   # the name to print:
             order_args(items=[{"product": PRINT, "quantity": 1, "print_name": " Y  "}]),  # 2 to 30 characters
             order_args(items=[{"product": PRINT, "quantity": 1, "print_name": "Y" * 31}]),  # after spaces fold
@@ -289,7 +291,7 @@ class DraftOrderTest(OrderBase):
 
     def test_a_reply_from_before_the_summary_does_not_count(self):
         ctx = self.ctx()
-        self.reply_and_answer(ctx, "عايز جزمة كورة بيضا")   # an earlier exchange, before any summary
+        self.reply_and_answer(ctx, "عايز الـ Phantom 6")   # an earlier exchange, before any summary
         code = self.summary(ctx)["code"]
         out = self.confirm(ctx, code)                  # the same turn: the customer has not seen the summary
         self.assertFalse(out["ok"])
@@ -332,9 +334,9 @@ class DraftOrderTest(OrderBase):
         self.reply_and_answer(ctx, "ايوه بس غير المقاس 44")
         self.reply_and_answer(ctx, "yes")      # the model answered without a new summary: still refused
         self.assertEqual(self.confirm(ctx, code), {"ok": False, "feedback": draft_order.NOT_A_YES})
-        new = self.summary(ctx, items=[{"product": WHITE, "size": "44", "quantity": 1}])["code"]
+        new = self.summary(ctx, items=[{"product": VAPOR, "tier": "Elite", "size": "44", "quantity": 1}])["code"]
         self.reply_and_answer(ctx, "yes")
-        out = self.confirm(ctx, new, items=[{"product": WHITE, "size": "44", "quantity": 1}])
+        out = self.confirm(ctx, new, items=[{"product": VAPOR, "tier": "Elite", "size": "44", "quantity": 1}])
         self.assertTrue(out["ok"], out)
 
     def voice_ctx(self, heard=None, audio=b"ogg"):
@@ -377,10 +379,10 @@ class DraftOrderTest(OrderBase):
         self.reply_and_answer(ctx)
         out = self.confirm(ctx, code.lower())
         self.assertTrue(out["ok"], out)
-        self.assertEqual((out["step"], out["order"], out["total"]), ("created", "#1001", 1510))
+        self.assertEqual((out["step"], out["order"], out["total"]), ("created", "#1001", 16560))
         row = self.book.demo_order("#1001")
         self.assertEqual((row["chat_id"], row["whatsapp"], row["phone"]), (ctx.chat_id, ME, ME))
-        self.assertEqual((row["total"], row["status"], row["governorate"]), ("1510", "received", "Giza"))
+        self.assertEqual((row["total"], row["status"], row["governorate"]), ("16560", "received", "Giza"))
         self.assertIn(f"wa-{ME}", json.loads(row["tags"]))
         self.assertIsNone(self.book.pending(ctx.chat_id))
         again = self.confirm(ctx, code)
@@ -393,8 +395,8 @@ class DraftOrderTest(OrderBase):
         self.reply_and_answer(ctx)
         for change in ({"address": "شارع الهرم، عمارة ٥"}, {"governorate": "Cairo"}, {"name": "Someone Else"},
                        {"phone": "01233334444"},
-                       {"items": [{"product": WHITE, "size": "43", "quantity": 3}]},
-                       {"items": [{"product": WHITE, "size": "44", "quantity": 1}]}):
+                       {"items": [{"product": VAPOR, "tier": "Elite", "size": "43", "quantity": 3}]},
+                       {"items": [{"product": VAPOR, "tier": "Elite", "size": "44", "quantity": 1}]}):
             out = self.confirm(ctx, code, **change)
             self.assertFalse(out["ok"], change)
             self.assertIn("not the order in the summary", out["feedback"])
@@ -406,13 +408,13 @@ class DraftOrderTest(OrderBase):
         code = self.summary(ctx)["code"]
         self.reply_and_answer(ctx)
         dearer = json.loads(json.dumps(store.catalogue()))
-        variant(dearer, WHITE, "43")["price"] = "1500"
+        variant(dearer, VAPOR, "43")["price"] = "17000"
         with mock.patch.object(store, "catalogue", return_value=dearer):
             out = self.confirm(ctx, code)
         self.assertFalse(out["ok"])
         self.assertIn("not the order in the summary", out["feedback"])
         gone = json.loads(json.dumps(store.catalogue()))
-        variant(gone, WHITE, "43")["stock"] = "out"
+        variant(gone, VAPOR, "43")["stock"] = "out"
         with mock.patch.object(store, "catalogue", return_value=gone):
             out = self.confirm(ctx, code)
         self.assertFalse(out["ok"])
@@ -489,10 +491,10 @@ class DraftOrderTest(OrderBase):
         self.assertTrue(self.confirm(ctx, code)["ok"])
         rows = Results(self.db).for_chat(ctx.chat_id)
         self.assertEqual([r["outcome"] for r in rows], ["order_drafted", "order_created"])
-        self.assertEqual(rows[0]["detail"], {"total": 1510})
+        self.assertEqual(rows[0]["detail"], {"total": 16560})
         self.assertEqual(rows[1]["detail"]["cod_risk"], "high")
         self.assertEqual(rows[1]["detail"]["order"], "#1001")
-        self.assertEqual(rows[1]["detail"]["total"], 1510)
+        self.assertEqual(rows[1]["detail"]["total"], 16560)
         self.assertEqual(rows[1]["detail"]["area"], "Cairo and Giza")  # the zone, for the delivery days fact
         self.assertIn("cod-risk-high", json.loads(self.book.demo_order("#1001")["tags"]))
         with self.assertRaises(ValueError):        # the old outcome name is gone
@@ -545,7 +547,7 @@ class DraftOrderTest(OrderBase):
                 self.assertNotIn(word, text, out["step"])
 
 
-BOOTS_AND_PRINT = [{"product": WHITE, "size": "43", "quantity": 1}, {"product": PRINT, "quantity": 1}]
+BOOTS_AND_PRINT = [{"product": VAPOR, "tier": "Elite", "size": "43", "quantity": 1}, {"product": PRINT, "quantity": 1}]
 
 
 def printed(name, quantity=1):
@@ -562,8 +564,8 @@ class PrintNameTest(OrderBase):
         out = self.summary(self.ctx(), items=BOOTS_AND_PRINT, name="  Demo   Buyer ")
         self.assertEqual(self.line(out)["print_name"], "Demo Buyer")
         self.assertEqual(out["name"], "Demo Buyer")
-        self.assertNotIn("print_name", self.line(out, WHITE))      # only the printing line has one
-        self.assertEqual(out["subtotal"], 1450 + 150)
+        self.assertNotIn("print_name", self.line(out, VAPOR))      # only the printing line has one
+        self.assertEqual(out["subtotal"], 16500 + 400)
 
     def test_a_given_name_is_printed(self):
         ctx = self.ctx()
@@ -571,11 +573,11 @@ class PrintNameTest(OrderBase):
         self.assertEqual(self.line(out)["print_name"], "يوسف علي")
         self.assertEqual(out["name"], "Demo Buyer")                # the delivery name stays the order's
         lines = self.book.pending(ctx.chat_id)["draft"]["items"]
-        self.assertEqual([i.get("print_name") for i in lines], [None, "يوسف علي"])
+        self.assertEqual([i.get("print_name") for i in lines], ["يوسف علي", None])   # lines sorted by title
 
     def test_a_name_on_a_boots_line_is_refused(self):
         ctx = self.ctx()
-        out = use(draft_order, order_args(items=[{"product": WHITE, "size": "43", "quantity": 1,
+        out = use(draft_order, order_args(items=[{"product": VAPOR, "tier": "Elite", "size": "43", "quantity": 1,
                                                   "print_name": "Youssef"}]), ctx)
         self.assertFalse(out["ok"])
         self.assertIn("print_name goes only on a printing line", out["feedback"])
@@ -612,8 +614,8 @@ class PrintNameTest(OrderBase):
     def test_shown_in_the_summary(self):
         out = self.summary(self.ctx(), items=[BOOTS_AND_PRINT[0], printed("Youssef")])
         self.assertEqual(out["items"], [
-            {"product": WHITE, "size": "43", "quantity": 1, "price": 1450},
-            {"product": PRINT, "print_name": "Youssef", "quantity": 1, "price": 150}])
+            {"product": PRINT, "print_name": "Youssef", "quantity": 1, "price": 400},
+            {"product": VAPOR, "tier": "Elite", "size": "43", "quantity": 1, "price": 16500}])
         self.assertIn("name to print", out["next"])
         item = draft_order.DEFINITION["function"]["parameters"]["properties"]["items"]["items"]
         self.assertIn("print_name", item["properties"])
@@ -624,7 +626,7 @@ class PrintNameTest(OrderBase):
                                               printed(" Youssef ", 2), {"product": PRINT, "quantity": 1}])
         lines = [(i["print_name"], i["quantity"]) for i in out["items"] if i["product"] == PRINT]
         self.assertEqual(lines, [("Demo Buyer", 1), ("Omar", 1), ("Youssef", 3)])
-        self.assertEqual(out["subtotal"], 1450 + 5 * 150)
+        self.assertEqual(out["subtotal"], 16500 + 5 * 400)
         # each name has its own cap of 20
         over = use(draft_order, order_args(items=[printed("Youssef", 15), printed("Youssef", 6)]), self.ctx())
         self.assertIn("At most 20", over["feedback"])
@@ -662,10 +664,10 @@ class PrintNameTest(OrderBase):
         items = [BOOTS_AND_PRINT[0], printed("Youssef")]
         code = self.summary(ctx, items=items)["code"]
         self.reply_and_answer(ctx)
-        self.assertEqual(self.confirm(ctx, code, items=items)["total"], 1450 + 150 + 60)
+        self.assertEqual(self.confirm(ctx, code, items=items)["total"], 16500 + 400 + 60)
         saved = json.loads(self.book.demo_order("#1001")["items"])
-        self.assertEqual([(i["product"], i.get("print_name")) for i in saved], [(WHITE, None), (PRINT, "Youssef")])
-        self.assertEqual(saved[1]["sku"], "BTL-PRINT-NAME")
+        self.assertEqual([(i["product"], i.get("print_name")) for i in saved], [(PRINT, "Youssef"), (VAPOR, None)])
+        self.assertEqual(saved[0]["sku"], "BTL-PRINT-NAME")
 
 
 class CodRiskTest(OrderBase):
@@ -690,7 +692,7 @@ class CodRiskTest(OrderBase):
         self.assertEqual((out["level"], out["reasons"]), ("medium", ["Refused 1 earlier cash on delivery order."]))
 
     def test_a_first_order_with_a_high_total(self):
-        out = self.risk(items=[{"product": WHITE, "size": "43", "quantity": 2}])   # 2960, at or over 2500
+        out = self.risk(items=[{"product": VAPOR, "tier": "Elite", "size": "43", "quantity": 2}])   # 33060, at or over 25000
         self.assertEqual((out["level"], out["reasons"]), ("medium", ["First order from this number, and the total is high."]))
         small = self.risk(number="201055556666")
         self.assertEqual((small["level"], small["reasons"]), ("low", ["No warning signs in past orders."]))
@@ -702,14 +704,14 @@ class CodRiskTest(OrderBase):
         self.assertEqual(out["level"], "medium")
         self.assertEqual(out["reasons"], ["Many cash on delivery orders to Aswan were refused (3 of 6 finished orders)."])
         both = self.risk(number="201077778888", governorate="أسوان",
-                         items=[{"product": WHITE, "size": "43", "quantity": 2}])
+                         items=[{"product": VAPOR, "tier": "Elite", "size": "43", "quantity": 2}])
         self.assertEqual(both["level"], "high")
         self.assertEqual(len(both["reasons"]), 2)
         # Giza has refusals too, but too few finished orders to count
         self.assertEqual(self.book.area_counts("Giza"), (2, 3))
 
     def test_a_good_history_is_low(self):
-        out = self.risk(A, items=[{"product": WHITE, "size": "43", "quantity": 2}])   # a high total, not a first order
+        out = self.risk(A, items=[{"product": VAPOR, "tier": "Elite", "size": "43", "quantity": 2}])   # a high total, not a first order
         self.assertEqual((out["level"], out["reasons"]), ("low", ["3 earlier orders delivered, none refused."]))
 
     def test_the_delivery_phone_counts_too(self):
@@ -755,7 +757,7 @@ class FindOrderTest(OrderBase):
     def test_an_order_number_picks_among_their_own(self):
         out = use(find_order, {"order": "7009"}, self.ctx(number=A, stage="my_order"))
         self.assertEqual([o["order"] for o in out["orders"]], ["#7009"])
-        self.assertEqual(out["orders"][0]["total"], 1510)
+        self.assertEqual(out["orders"][0]["total"], 11060)
 
     def test_new_orders_are_found_by_the_number_that_placed_them(self):
         ctx = self.ctx()
@@ -763,7 +765,7 @@ class FindOrderTest(OrderBase):
         self.reply_and_answer(ctx)
         self.confirm(ctx, code)
         out = use(find_order, {}, self.ctx(stage="my_order"))
-        self.assertEqual([(o["order"], o["status"], o["total"]) for o in out["orders"]], [("#1001", "received", 1510)])
+        self.assertEqual([(o["order"], o["status"], o["total"]) for o in out["orders"]], [("#1001", "received", 16560)])
         self.assertEqual(use(find_order, {}, self.ctx(number=B, stage="my_order"))["orders"][0]["order"], "#7010")
 
     def test_the_number_comes_from_the_chat_only(self):
@@ -788,12 +790,13 @@ class PhoneTest(unittest.TestCase):
         self.assertEqual(orders.local_phone(""), "")
 
     def test_demo_history_is_fake_and_adds_up(self):
-        price = {(i["title"], v.get("size", "")): int(v["price"]) for i in store.catalogue() for v in i["variants"]}
+        price = {(i["title"], v.get("tier", ""), v.get("size", "")): int(v["price"])
+                 for i in store.catalogue() for v in i["variants"]}
         kind = {i["title"]: i.get("type", "") for i in store.catalogue()}
         for o in DEMO:
             self.assertTrue(o["phone"].startswith("200"), o["name"])  # no Egyptian number has a 0 after 20
             self.assertTrue(o["customer"].startswith("Demo Customer"))
-            sub = sum(price[(i["product"], i.get("size", ""))] * i["quantity"] for i in o["items"])
+            sub = sum(price[(i["product"], i.get("tier", ""), i.get("size", ""))] * i["quantity"] for i in o["items"])
             self.assertEqual((o["subtotal"], o["fee"], o["total"]),
                              (sub, delivery.quote(o["governorate"])["fee"], sub + o["fee"]), o["name"])
             for i in o["items"]:   # a name to print only on a printing line
@@ -858,7 +861,7 @@ class ShopifyTest(OrderBase):
                 {"id": "gid://shopify/ProductVariant/1", "sku": b["variables"]["q"][4:]}]}}),
             ("draftOrderCreate", {"draftOrderCreate": {"draftOrder": {
                 "id": "gid://shopify/DraftOrder/9", "name": "#D9",
-                "totalPriceSet": {"shopMoney": {"amount": "1510.0", "currencyCode": "EGP"}}}, "userErrors": []}}),
+                "totalPriceSet": {"shopMoney": {"amount": "16560.0", "currencyCode": "EGP"}}}, "userErrors": []}}),
             ("FindByPhone", {"orders": {"nodes": []}, "draftOrders": {"nodes": []}, "customers": {"nodes": []}}),
         )
         ctx = self.ctx(number=B)
@@ -887,26 +890,26 @@ class ShopifyTest(OrderBase):
                 "totalPriceSet": {"shopMoney": {"amount": "1810.0", "currencyCode": "EGP"}}}, "userErrors": []}}),
             ("FindByPhone", {"orders": {"nodes": []}, "draftOrders": {"nodes": []}, "customers": {"nodes": []}}),
         )
-        items = [{"product": WHITE, "size": "43", "quantity": 1}, printed("Youssef"), printed("Omar")]
+        items = [{"product": VAPOR, "tier": "Elite", "size": "43", "quantity": 1}, printed("Youssef"), printed("Omar")]
         ctx = self.ctx()
         code = self.summary(ctx, items=items)["code"]
         self.reply_and_answer(ctx)
         out = self.confirm(ctx, code, items=items)
-        self.assertEqual((out["ok"], out["order"], out["total"]), (True, "#D9", 1450 + 2 * 150 + 60))
+        self.assertEqual((out["ok"], out["order"], out["total"]), (True, "#D9", 16500 + 2 * 400 + 60))
         _, body = next(r for r in fake.requests if "draftOrderCreate" in r[1]["query"])
         variant_id = "gid://shopify/ProductVariant/"
         self.assertEqual(body["variables"]["input"]["lineItems"], [
-            {"variantId": variant_id + "BTL-FB-WHT-43", "quantity": 1},
             {"variantId": variant_id + "BTL-PRINT-NAME", "quantity": 1,
              "customAttributes": [{"key": "Name to print", "value": "Omar"}]},
             {"variantId": variant_id + "BTL-PRINT-NAME", "quantity": 1,
-             "customAttributes": [{"key": "Name to print", "value": "Youssef"}]}])
+             "customAttributes": [{"key": "Name to print", "value": "Youssef"}]},
+            {"variantId": variant_id + "BTL-VAP17-ELITE-43", "quantity": 1}])
         looked_up = [b["variables"]["q"] for _, b in fake.requests if "productVariants" in b["query"]]
-        self.assertEqual(looked_up, ["sku:BTL-FB-WHT-43", "sku:BTL-PRINT-NAME"])   # one lookup a sku
+        self.assertEqual(looked_up, ["sku:BTL-PRINT-NAME", "sku:BTL-VAP17-ELITE-43"])   # one lookup a sku
 
     def test_user_errors_keep_the_summary(self):
         self.shop(
-            ("productVariants", {"productVariants": {"nodes": [{"id": "gid://shopify/ProductVariant/1", "sku": "BTL-FB-WHT-43"}]}}),
+            ("productVariants", {"productVariants": {"nodes": [{"id": "gid://shopify/ProductVariant/1", "sku": "BTL-VAP17-ELITE-43"}]}}),
             ("draftOrderCreate", {"draftOrderCreate": {"draftOrder": None, "userErrors": [{"field": ["x"], "message": "no"}]}}),
             ("FindByPhone", {"orders": {"nodes": []}, "draftOrders": {"nodes": []}, "customers": {"nodes": []}}),
         )
@@ -923,8 +926,8 @@ class ShopifyTest(OrderBase):
                     "displayFulfillmentStatus": status, "phone": phone, "tags": list(tags),
                     "shippingAddress": {"phone": ship, "city": "Giza"},
                     "customer": {"defaultPhoneNumber": {"phoneNumber": cust}} if cust else None,
-                    "totalPriceSet": {"shopMoney": {"amount": "1510.00"}},
-                    "lineItems": {"nodes": [{"title": WHITE, "variantTitle": "43", "quantity": 1}]}}
+                    "totalPriceSet": {"shopMoney": {"amount": "16560.00"}},
+                    "lineItems": {"nodes": [{"title": VAPOR, "variantTitle": "43", "quantity": 1}]}}
         fake = self.shop(
             ("FindByPhone", {
                 "orders": {"nodes": [order("#1", tags=[f"wa-{ME}"], status="FULFILLED"),
@@ -952,8 +955,8 @@ class ShopifyTest(OrderBase):
         def draft(name, phone):
             return {"name": name, "createdAt": "2026-10-20T10:00:00Z", "cancelledAt": None, "status": "OPEN",
                     "phone": phone, "tags": [], "shippingAddress": {"phone": phone, "city": "Giza"},
-                    "customer": None, "totalPriceSet": {"shopMoney": {"amount": "1510.00"}},
-                    "lineItems": {"nodes": [{"title": WHITE, "variantTitle": "43", "quantity": 1}]}}
+                    "customer": None, "totalPriceSet": {"shopMoney": {"amount": "16560.00"}},
+                    "lineItems": {"nodes": [{"title": VAPOR, "variantTitle": "43", "quantity": 1}]}}
         self.shop(("FindByPhone", {"orders": {"nodes": []},
                                    "draftOrders": {"nodes": [draft("#D8", other), draft("#D9", "+" + ME)]},
                                    "customers": {"nodes": []}}))
@@ -983,8 +986,8 @@ class LoopTest(unittest.TestCase):
 
     def test_summary_then_yes_places_the_order(self):
         args = order_args(governorate="el giza")
-        summary = "اجمالي الاوردر 1,510 جنيه: جزمة كورة بيضا مقاس 43 بـ 1,450 جنيه، والشحن 60 جنيه. هيوصل في يوم أو يومين. أأكد؟"
-        r = self.turn(FakeModel(tool_call("draft_order", args), call("cod_risk"), say(summary)), "عايز الجزمة البيضا مقاس 43")
+        summary = "اجمالي الاوردر 16,560 جنيه: الـ Mercurial Vapor 17 Elite مقاس 43 بـ 16,500 جنيه، والشحن 60 جنيه. هيوصل في يوم أو يومين. أأكد؟"
+        r = self.turn(FakeModel(tool_call("draft_order", args), call("cod_risk"), say(summary)), "عايز الـ Vapor 17 Elite مقاس 43")
         self.assertEqual((r.outcome, r.reply), ("replied", summary))
         self.assertIsNone(orders.Book(self.db).demo_order("#1001"))
 
@@ -992,15 +995,15 @@ class LoopTest(unittest.TestCase):
             code = next(json.loads(m["content"])["code"] for m in reversed(messages)
                         if m["role"] == "tool" and '"code"' in (m["content"] or ""))
             return tool_call("draft_order", {**args, "confirm": code})
-        r = self.turn(FakeModel(confirm, say("تمام، اوردر #1001 اتسجل، الاجمالي 1510 جنيه.")), "تمام اكد")
+        r = self.turn(FakeModel(confirm, say("تمام، اوردر #1001 اتسجل، الاجمالي 16560 جنيه.")), "تمام اكد")
         self.assertEqual(r.outcome, "replied")
         self.assertEqual(orders.Book(self.db).demo_order("#1001")["chat_id"], self.cid)
         self.assertEqual([x["outcome"] for x in self.results.for_chat(self.cid)], ["order_drafted", "replied", "order_created", "replied"])
 
     def test_a_yes_with_a_change_does_not_place_the_order(self):
         args = order_args(governorate="el giza")
-        summary = "Total 1510 EGP: white football boots, size 43, at 1450 EGP, delivery 60 EGP. It arrives in 1 to 2 days. Confirm?"
-        self.turn(FakeModel(tool_call("draft_order", args), say(summary)), "I want the white boots in 43")
+        summary = "Total 16560 EGP: Mercurial Vapor 17 Elite, size 43, at 16500 EGP, delivery 60 EGP. It arrives in 1 to 2 days. Confirm?"
+        self.turn(FakeModel(tool_call("draft_order", args), say(summary)), "I want the Vapor 17 Elite in 43")
         seen = []
 
         def confirm(messages, tools_sent):
@@ -1026,10 +1029,10 @@ class LoopTest(unittest.TestCase):
             msg = Message(channel="whatsapp", customer_id=A, text="how much was my order 7004?")
             return loop.turn(msg, chats=self.chats, model=model, lessons=Lessons(self.db), results=self.results,
                              send=self.out)
-        right = "Your order #7004 was delivered. Its total was 1,660 EGP."
+        right = "Your order #7004 was delivered. Its total was 16,960 EGP."
         r = turn(FakeModel(tool_call("find_order", {"order": "7004"}), say(right)))
         self.assertEqual((r.outcome, r.reply), ("replied", right))
-        for wrong in ("Your order #7004 was delivered. Its total was 4,435 EGP.",   # another customer's order (#7011)
+        for wrong in ("Your order #7004 was delivered. Its total was 33,085 EGP.",   # another customer's order (#7011)
                       "Your order #7004 was delivered. Its total was 1,800 EGP."):
             with self.subTest(wrong=wrong):
                 r = turn(FakeModel(tool_call("find_order", {"order": "7004"}), say(wrong),
@@ -1040,9 +1043,9 @@ class LoopTest(unittest.TestCase):
 
     def test_a_summary_with_the_address_and_another_countrys_phone_passes(self):
         args = order_args(governorate="Giza", address="الدقي، عمارة 125، الدور 3، شقة 12", phone="+44 7700 900123")
-        summary = ("جزمة كورة بيضا مقاس 43 بـ 1450 جنيه، والشحن 60 جنيه، الاجمالي 1510 جنيه. العنوان: الدقي، عمارة 125، "
+        summary = ("الـ Mercurial Vapor 17 Elite مقاس 43 بـ 16500 جنيه، والشحن 60 جنيه، الاجمالي 16560 جنيه. العنوان: الدقي، عمارة 125، "
                    "الدور 3، شقة 12. الموبايل: +447700900123. أأكد؟")
-        r = self.turn(FakeModel(tool_call("draft_order", args), say(summary), say("مش هيعدي")), "عايز الجزمة البيضا مقاس 43")
+        r = self.turn(FakeModel(tool_call("draft_order", args), say(summary), say("مش هيعدي")), "عايز الـ Vapor 17 Elite مقاس 43")
         self.assertEqual((r.outcome, r.reply), ("replied", summary))
         self.assertEqual(orders.Book(self.db).pending(self.cid)["draft"]["phone"], "447700900123")
 
@@ -1067,9 +1070,9 @@ class LoopTest(unittest.TestCase):
 
     def test_a_made_up_total_is_still_blocked(self):
         args = order_args(governorate="Giza")
-        r = self.turn(FakeModel(tool_call("draft_order", args), say("الاجمالي 1900 جنيه."), say("الاجمالي 1510 جنيه.")),
-                      "عايز الجزمة البيضا مقاس 43")
-        self.assertEqual(r.reply, "الاجمالي 1510 جنيه.")
+        r = self.turn(FakeModel(tool_call("draft_order", args), say("الاجمالي 1900 جنيه."), say("الاجمالي 16560 جنيه.")),
+                      "عايز الـ Vapor 17 Elite مقاس 43")
+        self.assertEqual(r.reply, "الاجمالي 16560 جنيه.")
         self.assertEqual([x["outcome"] for x in self.results.for_chat(self.cid)],
                          ["order_drafted", "check_failed", "replied"])
 

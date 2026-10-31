@@ -1,7 +1,7 @@
 """Writes the fake history in demo/history: WhatsApp exports, one Instagram download, a Shopify
 orders export, a deliveries file in our own format, and the demo humanizer's pairs. The store
-is the made-up Beyond the Limits: football boots (1450 EGP, junior 700) and name printing on
-the boot with UV DTF (150 EGP).
+is Beyond the Limits: the latest drop of Nike and adidas football boots, each in tiers with
+their own prices, and name printing with UV DTF (400 EGP, two stickers, one on each shoe).
 
     python3 -I demo/make_history.py [--out DIR]
 
@@ -12,7 +12,7 @@ compares a fresh run with the files in demo/history). These files feed the impor
 (reflection/importer.py) and its tests; they are not part of the demo flow.
 
 The plan: 22 chats, 18 on WhatsApp (Android and iOS lines) and 4 on Instagram. Each asks
-about the boots; in chats 4, 9 and 16 a parent asks about the junior boots for a child. In
+about a pair of boots; in chats 4, 9 and 16 a parent asks about boots for their son. In
 4 chats the customer adds the name printing to the order: with their own name (11 and 21)
 or a name they give, their child's (4 and 16). In 10 of them the team asks for a landmark
 near the address; 8 of those 10 end delivered. In the other 12, 3 end delivered. Chat 3's
@@ -41,21 +41,25 @@ OUTCOME = {0: "delivered", 1: "delivered", 2: "delivered", 3: "late", 4: "delive
 NAMED = {7: "منى تجربة", 11: "كريم تجربة"}           # WhatsApp chats whose sender is a name, not a number
 IG_NAMES = {18: "سلمى تجربة", 19: "Demo Hany", 20: "Demo Nour", 21: "ياسمين تجربة"}
 
-COLOURS = [("Black", "السودا"), ("White", "البيضا"), ("Red", "الحمرا"), ("Navy", "الكحلي")]
-JUNIOR = {4, 9, 16}                                   # a parent buying the junior boots for a child
+BOOTS = [  # (title, how the customer writes it, {tier: price in EGP}) from demo/catalogue.json
+    ("Nike Mercurial Vapor 17", "Vapor 17", {"Elite": 16500, "Pro": 11000, "Academy": 7500}),
+    ("Nike Phantom 6", "Phantom 6", {"Elite": 16500, "Pro": 11000, "Academy": 7500}),
+    ("Nike Tiempo Maestro", "Tiempo Maestro", {"Elite": 15500, "Pro": 11000, "Academy": 7500}),
+    ("Nike Mercurial Superfly 11", "Superfly 11", {"Elite": 20000, "Pro": 13500, "Academy": 9500}),
+    ("Adidas F50 Messi El Ultimo Tango", "F50 Messi", {"Elite": 19500, "Pro": 11000, "League": 7500}),
+]
+FOR_A_SON = {4, 9, 16}                                # a parent buying boots for their son
 WRITES_AS_A_WOMAN = {4, 7, 9, 16, 18, 21}
 OWN_NAME = {11, 21}                                   # adds the printing with their own name
 GIVEN_NAME = {4: "آدم تجربة", 16: "علي تجربة"}        # adds the printing with a name they give
 
-ASK = ["السلام عليكم، الجزمة {c} لسه متاحة؟", "مساء الخير، عندكم الجزمة {c}؟", "لو سمحت الجزمة {c} بكام؟"]
-JUNIOR_ASK = ["السلام عليكم، عندكم جزمة كورة للأطفال؟", "مساء الخير، جزمة الأطفال لسه متاحة؟",
-              "لو سمحت جزمة الأطفال بكام؟"]
-PRICE = "الجزمة ب 1450 جنيه والشحن 60 جنيه للقاهرة والجيزة و85 جنيه لباقي المحافظات"
-JUNIOR_PRICE = "جزمة الأطفال ب 700 جنيه والشحن 60 جنيه للقاهرة والجيزة و85 جنيه لباقي المحافظات"
-SIZES = "المقاسات من 40 لحد 45"
-JUNIOR_SIZES = "المقاسات من 30 لحد 38"
+ASK = ["السلام عليكم، الـ {c} لسه متاحة؟", "مساء الخير، عندكم الـ {c}؟", "لو سمحت الـ {c} بكام؟"]
+SON_ASK = ["السلام عليكم، عايزة جزمة كورة لابني، الـ {c} متاحة؟", "مساء الخير، الـ {c} ينفع لابني؟",
+           "لو سمحت الـ {c} بكام؟ عايزاها لابني"]
+PRICE = "الـ {c} ب {price} جنيه والشحن 60 جنيه للقاهرة والجيزة و85 جنيه لباقي المحافظات"
+SIZES = "المقاسات من 39 لحد 46"
 PRINT_ASK = "ينفع تكتبوا اسم على الجزمة؟"
-PRINT = "أيوه، بنكتب الاسم على الجزمة بالـ UV DTF ب 150 جنيه زيادة. الاسم اللي هيتكتب إيه؟"
+PRINT = "أيوه، بنطبع الاسم بالـ UV DTF ب 400 جنيه زيادة، استيكرين، واحد على كل فردة. الاسم اللي هيتكتب إيه؟"
 PRINT_OK = "تمام، هنضيف الطباعة على الطلب"
 LAND = "ممكن أقرب علامة مميزة للعنوان؟ عشان المندوب يوصل بسهولة"
 ADDRESS_ASK = "ممكن حضرتك تبعتلنا العنوان بالتفصيل ورقم الموبايل؟"
@@ -64,12 +68,13 @@ THANKS = "شكرا لذوق حضرتك، نورتنا"
 STORE_PHONE = "لأي استفسار كلمنا على 01000000999"
 PAIRS = [
     (LAND, "ممكن حضرتك تقولنا أقرب علامة مميزة جنب العنوان؟ كده المندوب هيوصل أسرع."),
-    (PRICE, "الجزمة بـ 1,450 جنيه، والشحن 60 جنيه في القاهرة والجيزة و85 جنيه في باقي المحافظات."),
-    (SIZES, "المقاسات من 40 لـ 45. حضرتك مقاسك كام؟"),
-    (PRINT, "أيوه، نقدر نكتب الاسم على الجزمة بالـ UV DTF بـ 150 جنيه زيادة. الاسم اللي نكتبه إيه؟"),
+    (PRICE.format(c="Vapor 17 Elite", price=16500),
+     "الـ Vapor 17 Elite بـ 16,500 جنيه، والشحن 60 جنيه في القاهرة والجيزة و85 جنيه في باقي المحافظات."),
+    (SIZES, "المقاسات من 39 لـ 46. حضرتك مقاسك كام؟"),
+    (PRINT, "أيوه، نقدر نطبع الاسم بالـ UV DTF بـ 400 جنيه زيادة، استيكرين، واحد على كل فردة. الاسم اللي نطبعه إيه؟"),
     (THANKS, "شكرا لحضرتك، ونتمنى الجزمة تعجبك."),
 ]
-PRINTING = ("Beyond the Limits Name Printing", 150, 1)
+PRINTING = ("Beyond the Limits Name Printing", 400, 1)
 
 
 def local(i):
@@ -81,15 +86,23 @@ def spaced(i):
 
 
 def size(i):
-    """The size chat i asks for: junior 31 to 36, the others 40 to 44 (never one sold out)."""
-    return 31 + i % 6 if i in JUNIOR else 40 + i % 5
+    """The size chat i asks for: 39 to 41 for a son, the others 40 to 44."""
+    return 39 + i % 3 if i in FOR_A_SON else 40 + i % 5
 
 
-def boots(i, colour=None):
+def pick(i, shift=0):
+    """Chat i's boot: (title, how the customer writes it with the tier, tier, price). Elite or Pro by
+    turns, the cheapest tier for a son; shift moves to the next boot in the list."""
+    title, said, prices = BOOTS[(i + shift) % len(BOOTS)]
+    tiers = list(prices)
+    tier = tiers[-1] if i in FOR_A_SON else tiers[i % 2]
+    return title, f"{said} {tier}", tier, prices[tier]
+
+
+def boots(i, shift=0):
     """Chat i's boots as an order line: (Shopify line item name, price, quantity)."""
-    if i in JUNIOR:
-        return (f"Beyond the Limits Junior Football Boots - {size(i)}", 700, 1)
-    return (f"Beyond the Limits Football Boots, {colour or COLOURS[i % 4][0]} - {size(i)}", 1450, 1)
+    title, _, tier, price = pick(i, shift)
+    return (f"{title} - {tier} / {size(i)}", price, 1)
 
 
 def script(i, rng):
@@ -97,11 +110,10 @@ def script(i, rng):
     first = NAMED.get(i, IG_NAMES.get(i, "")).split(" ")[0]
     greet = f"أهلا يا {first}، تحت أمرك" if first and first != "Demo" else "أهلا بحضرتك يا فندم، تحت أمرك"
     want = "عايزة" if i in WRITES_AS_A_WOMAN else "عايز"
-    if i in JUNIOR:
-        ask, price, sizes, wants = rng.choice(JUNIOR_ASK), JUNIOR_PRICE, JUNIOR_SIZES, f"{want} مقاس {size(i)} لابني"
-    else:
-        ask, price, sizes = rng.choice(ASK).format(c=COLOURS[i % 4][1]), PRICE, SIZES
-        wants = f"{want} مقاس {size(i)}"
+    _, said, _, amount = pick(i)
+    ask = rng.choice(SON_ASK if i in FOR_A_SON else ASK).format(c=said)
+    price, sizes = PRICE.format(c=said, price=amount), SIZES
+    wants = f"{want} مقاس {size(i)}" + (" لابني" if i in FOR_A_SON else "")
     lines = [(0, False, ask), (3, True, greet), (5, True, price), (9, False, wants),
              (12, True, sizes), (15, False, "<media>")]
     if i in OWN_NAME or i in GIVEN_NAME:
@@ -219,17 +231,17 @@ def write(out=OUT):
             placed = [(f"#{1001 + i}", times[-3] - datetime.timedelta(minutes=30))]
         states = ["delivered" if result in ("late", "two") else result]
         lines = [[boots(i)] + ([PRINTING] if i in OWN_NAME or i in GIVEN_NAME else [])]
-        if result == "two":  # a second pair, in the next colour, the day after
+        if result == "two":  # a second pair, the next boot in the list, the day after
             placed.append(("#1030", last + datetime.timedelta(hours=26)))
             states.append("refused")
-            lines.append([boots(i, COLOURS[(i + 1) % 4][0])])
+            lines.append([boots(i, 1)])
         for (name, at), state, picked in zip(placed, states, lines):
             orders += order_rows(name, at, forms[i % 4], i, picked, rng)
             day = (at + datetime.timedelta(days=2 + rng.randrange(4))).date()
             deliveries.append({"order": name, "state": state, "date": day.isoformat()})
     for n, (name, state) in enumerate((("#1040", "delivered"), ("#1041", "refused"))):
         at = BASE + datetime.timedelta(days=20 + 9 * n, hours=3)
-        picked = [(f"Beyond the Limits Football Boots, {('Black', 'Red')[n]} - {(43, 41)[n]}", 1450, 1)]
+        picked = [(f"{BOOTS[n][0]} - Pro / {(43, 41)[n]}", BOOTS[n][2]["Pro"], 1)]
         orders += order_rows(name, at, local(89 + n), n, picked, rng)
         deliveries.append({"order": name, "state": state, "date": (at + datetime.timedelta(days=3)).date().isoformat()})
     deliveries.append({"order": "#1999", "state": "delivered", "date": "2026-09-30"})

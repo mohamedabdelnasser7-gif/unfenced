@@ -48,7 +48,7 @@ CHOSEN = {"sales": 182, "marketing": 29}  # each scenario's own seed, the one it
 
 # the planted lines, written out here so a changed scenario cannot move what is expected
 SALES_REAL = "Before you send the summary, ask the buyer what size they normally wear."
-SALES_DECOY = "Warn buyers who pick size 45 in black or navy that it may run out."
+SALES_DECOY = "Warn buyers who pick size 45 in the Superfly 11 Elite or the F50 Elite that it may run out."
 SALES_BAD = "Tell every buyer to hurry up because these pieces are almost gone."
 MK_REAL = "Put the price in the first line of every post."
 MK_DECOY = "Do not post on Thursdays."
@@ -505,7 +505,7 @@ class SalesNight(Plants):
         mine = [call for call in self.tagger.calls if call["agent"] == "sales"]
         self.assertTrue(mine)
         seen = Counter(s.get("detail", {}).get("boots") for call in mine for v in call["cases"] for s in v["steps"])
-        self.assertTrue(seen["Black, size 42"])
+        self.assertTrue(seen["Mercurial Vapor 17 Elite, size 42"])
         self.assertFalse([b for b in seen if b and "size 45" in b])
 
     def test_the_decoy_is_no_lesson(self):

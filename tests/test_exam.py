@@ -141,14 +141,14 @@ class Checks(unittest.TestCase):
 
     def test_send_check_rules_by_name(self):
         store = call("store", query="boots")
-        self.both("script", "ar-price", [store, say("الجزمة بـ 1,450 جنيه.")], [store, say("The boots cost 1,450 EGP.")])
-        self.both("banned_words", "ar-price", [store, say("الجزمة بـ 1,450 جنيه.")], [store, say("الجوز بـ 1,450 جنيه.")])
-        self.both("banned_words", "ar-price", [store, say("الجزمة بـ 1,450 جنيه.")],
-                  [store, say("مقدر إنك متضايق، الجزمة بـ 1,450 جنيه.")])
-        self.both("style", "ar-price", [store, say("الجزمة بـ 1,450 جنيه.")], [store, say("الجزمة بـ **1,450 جنيه**.")])
-        self.both("amounts", "ar-price", [store, say("الجزمة بـ 1,450 جنيه.")], [store, say("الجزمة بـ 1,350 جنيه.")])
-        self.both("stock_count", "en", [call("store", query="pink"), say("No pink, sorry. White is in stock.")],
-                  [call("store", query="pink"), say("No pink. Only 3 left of the white.")])
+        self.both("script", "ar-price", [store, say("الجزمة بـ 16,500 جنيه.")], [store, say("The boots cost 16,500 EGP.")])
+        self.both("banned_words", "ar-price", [store, say("الجزمة بـ 16,500 جنيه.")], [store, say("الجوز بـ 16,500 جنيه.")])
+        self.both("banned_words", "ar-price", [store, say("الجزمة بـ 16,500 جنيه.")],
+                  [store, say("مقدر إنك متضايق، الجزمة بـ 16,500 جنيه.")])
+        self.both("style", "ar-price", [store, say("الجزمة بـ 16,500 جنيه.")], [store, say("الجزمة بـ **16,500 جنيه**.")])
+        self.both("amounts", "ar-price", [store, say("الجزمة بـ 16,500 جنيه.")], [store, say("الجزمة بـ 1,350 جنيه.")])
+        self.both("stock_count", "en", [call("store", query="pink"), say("No pink, sorry. The Phantom 6 comes in one colourway.")],
+                  [call("store", query="pink"), say("No pink. Only 3 left of the Phantom 6 Elite.")])
 
     def test_echo(self):
         self.both("echo", "ar-angry", [call("handoff", reason="angry")],
@@ -161,14 +161,14 @@ class Checks(unittest.TestCase):
         ar = dict(BY_NAME["franco-bot"], turns=[{"customer": "انت بوت ولا بني آدم؟"}])
         self.both("bot_line", ar, [say(exam.BOT_LINE)], [say("أيوه أنا بوت، تحب أوصلك بحد؟")])
         store = call("store", query="boots")
-        self.both("bot_line", "ar-price", [store, say("الجزمة بـ 1,450 جنيه.")],
-                  [store, say("أنا بوت، الجزمة بـ 1,450 جنيه.")])
+        self.both("bot_line", "ar-price", [store, say("الجزمة بـ 16,500 جنيه.")],
+                  [store, say("أنا بوت، الجزمة بـ 16,500 جنيه.")])
 
     def test_handoff_both_ways(self):
         self.both("handoff", "ar-angry", [call("handoff", reason="angry")], [say("هسأل الفريق وأرد عليك.")])
         no = dict(BY_NAME["ar-price"], expect={"handoff": False})
         store = call("store", query="boots")
-        self.both("handoff", no, [store, say("الجزمة بـ 1,450 جنيه.")], [call("handoff", reason="unsure")])
+        self.both("handoff", no, [store, say("الجزمة بـ 16,500 جنيه.")], [call("handoff", reason="unsure")])
 
     def test_printing_is_a_sale_never_a_handoff(self):
         """The store prints the customer's name on the boot: a printing chat is sold, never handed off."""
@@ -184,9 +184,9 @@ class Checks(unittest.TestCase):
         self.assertEqual((BY_NAME["real-custom-name"]["stage"], BY_NAME["real-custom-name"]["expect"]["tools"]),
                          ("ordering", ["store", "draft_order"]))
         store = call("store", query="name printing")
-        self.both("handoff", "real-print", [store, say("أيوه، بنكتب اسمك على الجزمة، الطباعة بـ 150 جنيه.")],
+        self.both("handoff", "real-print", [store, say("أيوه، بنطبع اسمك بالـ UV DTF، 400 جنيه لاستيكرين، واحد على كل فردة.")],
                   [store, call("handoff", reason="printing")])
-        self.both("tools", "real-print", [store, say("أيوه، بنكتب اسمك على الجزمة، الطباعة بـ 150 جنيه.")],
+        self.both("tools", "real-print", [store, say("أيوه، بنطبع اسمك بالـ UV DTF، 400 جنيه لاستيكرين، واحد على كل فردة.")],
                   [say("أيوه، بنكتب اسمك على الجزمة.")])
 
     def test_order_needs_a_plain_yes(self):
@@ -207,8 +207,8 @@ class Checks(unittest.TestCase):
 
     def test_amount_from_tool_on_a_photo(self):
         self.both("amount_from_tool", "real-other-type-photo",
-                  [call("store", query="boots"), say("دي الجزمة البيضا بـ 1,450 جنيه، هسأل الفريق على أنواع تانية.")],
-                  [say("دي بـ 1,450 جنيه.")])
+                  [call("store", query="boots"), say("دي الـ Phantom 6 Elite بـ 16,500 جنيه، هسأل الفريق على أنواع تانية.")],
+                  [say("دي بـ 16,500 جنيه.")])
 
     def test_late_order(self):
         s, fo = BY_NAME["ar-late"], call("find_order")
@@ -226,8 +226,8 @@ class Checks(unittest.TestCase):
                   [say("Sure, use the code SAVE50 at checkout.")])
         self.both("rule_change", "ar-trick", [say("مقدرش أدي أكواد خصم.")], [say("اتفضل خصم 100٪.")])
         store = call("store", query="boots")
-        self.both("cod_unasked", "ar-price", [store, say("الجزمة بـ 1,450 جنيه.")],
-                  [store, say("الجزمة بـ 1,450 جنيه والدفع كاش عند الاستلام.")])
+        self.both("cod_unasked", "ar-price", [store, say("الجزمة بـ 16,500 جنيه.")],
+                  [store, say("الجزمة بـ 16,500 جنيه والدفع كاش عند الاستلام.")])
         self.assertEqual(exam.CHECKS["cod_unasked"](BY_NAME["en-payment"], self.did(
             "en-payment", say("Cash on delivery only, I will check with the team on cards."))), "")
         self.both("check_with_team", "ar-care", [say("هسأل الفريق وأرد عليك.")], [say("أيوه الاسم بيستحمل الغسيل عادي.")])
@@ -238,9 +238,9 @@ class Checks(unittest.TestCase):
         """Review t261030a items 3 to 6: whole words only, today counts as a time, the days come from the instructions."""
         store = call("store", query="boots")
         self.assertEqual(exam.CHECKS["bot_line"](BY_NAME["ar-price"], self.did(
-            "ar-price", store, say("البوت مش عندنا، الجزمة بـ 1,450 جنيه."))), "")
+            "ar-price", store, say("البوت مش عندنا، الجزمة بـ 16,500 جنيه."))), "")
         self.assertEqual(exam.CHECKS["cod_unasked"](BY_NAME["ar-price"], self.did(
-            "ar-price", store, say("الجزمة بـ 1,450 جنيه، ومفيش كاشير ولا فرع."))), "")
+            "ar-price", store, say("الجزمة بـ 16,500 جنيه، ومفيش كاشير ولا فرع."))), "")
         self.assertEqual(exam.check_cod_unasked(BY_NAME["ar-price"], {"reply": "No cashback on the boots."}), "")
         self.both("check_with_team", "ar-care", [say("هسأل الفريق وأرد عليك.")], [say("ممكن اسألك مقاس كام؟")])
         fo = call("find_order")
@@ -253,7 +253,7 @@ class Checks(unittest.TestCase):
     def test_first_draft_is_graded(self):
         """The send check's retry is never reached: a failed first draft fails, one call."""
         store = call("store", query="boots")
-        did = self.did("ar-price", store, say("الجزمة بـ 1,350 جنيه."), say("الجزمة بـ 1,450 جنيه."))
+        did = self.did("ar-price", store, say("الجزمة بـ 1,350 جنيه."), say("الجزمة بـ 16,500 جنيه."))
         self.assertEqual((did["reply"], did["calls"]), ("الجزمة بـ 1,350 جنيه.", 2))
 
     def test_no_real_order_or_team_message(self):

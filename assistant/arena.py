@@ -98,6 +98,7 @@ ROLE_WORDS = frozenset({"info", "sales", "support", "news", "newsletter", "norep
                         "user", "me", "hr"})
 MAIL_HOSTS = frozenset({"gmail", "googlemail", "yahoo", "outlook", "hotmail", "live", "icloud", "mail", "proton",
                         "protonmail", "aol", "msn", "yandex", "gmx", "zoho", "example", "test", "com", "net", "org"})
+MAX_LINE, MAX_LINES = 4_000_000, 400  # the longest finished-day line read, and the most lines a night reads
 DEFAULT_LIKES = {"rushed_words": 30, "focused_words": 120, "brief_words": 90}
 
 
@@ -472,35 +473,100 @@ def _clean_hidden(hid, body, text):
     return out
 
 
+def _quarantine(path):
+    """Moves a finished-days file aside, 0600, where the night never reads it again; None when gone."""
+    if not os.path.lexists(path):
+        return None
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    dest = os.path.join(os.path.dirname(path), f"finished-days.quarantine-{stamp}-{secrets.token_hex(3)}.jsonl")
+    os.rename(path, dest)
+    if not os.path.islink(dest):
+        os.chmod(dest, 0o600)
+    return dest
+
+
+def _lines(f, rep):
+    """The rows of an open file, each at most MAX_LINE bytes and at most MAX_LINES of them; a longer
+    line is counted unreadable and the lines past the cap are counted skipped, never read whole."""
+    n = 0
+    while True:
+        raw = f.readline(MAX_LINE + 1)
+        if not raw:
+            return
+        if len(raw) > MAX_LINE:
+            rep["unreadable"] += 1
+            while raw and not raw.endswith(b"\n"):
+                raw = f.readline(MAX_LINE + 1)
+            continue
+        if not raw.strip():
+            continue
+        n += 1
+        if n > MAX_LINES:
+            rep["skipped"] += 1
+            continue
+        yield raw
+
+
 def take_finished(state):
     """The night step: each finished day worth practising, cleaned, joins the pool once; easy days are
-    skipped; the file is removed after. Returns the counts."""
-    path = Path(state) / FINISHED_FILE
-    rep = {"added": 0, "easy": 0, "already": 0, "unreadable": 0}
-    if not path.is_file():
+    skipped. Returns the counts. Until the live day runner calls keep_finished, the file is empty
+    and this adds nothing.
+
+    The file is first renamed to finished-days.jsonl.taken, so a day kept while the night reads goes
+    to a new file for the next night; the night then holds the file's lock, so a row still being
+    written ends before it is read. Each line is read alone, at most MAX_LINE bytes and MAX_LINES
+    lines: a line that fails for any reason (bad JSON, too deep, too long, not a day) is counted
+    unreadable and the rest go on. The taken file is removed after the pool is saved. When the step
+    fails as a whole, the taken file is moved aside (_quarantine) and the error raised, so the night
+    goes on and the next night does not fail on the same file; a taken file left by a night that was
+    stopped is moved aside the same way."""
+    state = os.fspath(state)
+    path, taken = os.path.join(state, FINISHED_FILE), os.path.join(state, FINISHED_FILE + ".taken")
+    rep = {"added": 0, "easy": 0, "already": 0, "unreadable": 0, "skipped": 0, "quarantined": 0}
+    if os.path.lexists(taken):
+        _quarantine(taken)
+        rep["quarantined"] += 1
+    try:
+        os.rename(path, taken)
+    except FileNotFoundError:
         return rep
-    pool = Pool(state)
-    have = {d.get("id") for d in pool.real}
-    for line in path.read_text(encoding="utf-8").splitlines():
+    try:
+        fd = os.open(taken, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         try:
-            row = json.loads(line)
-            if not isinstance(row, dict):
-                raise ValueError("not a row")
-            if not worth_practising(row):
-                rep["easy"] += 1
-                continue
-            day = clean_day(row.get("day"))
-        except (ValueError, TypeError, KeyError, AttributeError):
-            rep["unreadable"] += 1
-            continue
-        if day["id"] in have:
-            rep["already"] += 1
-            continue
-        pool.add_day(day)
-        have.add(day["id"])
-        rep["added"] += 1
-    pool.save()
-    path.unlink()
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise OSError("finished-days.jsonl is not a plain file")
+            pool = Pool(state)
+            have = {d.get("id") for d in pool.real}
+            with os.fdopen(os.dup(fd), "rb") as f:
+                for raw in _lines(f, rep):
+                    try:
+                        row = json.loads(raw.decode("utf-8"))
+                        if not isinstance(row, dict):
+                            raise ValueError("not a row")
+                        if not worth_practising(row):
+                            rep["easy"] += 1
+                            continue
+                        day = clean_day(row.get("day"))
+                    except Exception:  # any failure in one line (RecursionError, MemoryError, re.error too)
+                        rep["unreadable"] += 1
+                        continue
+                    if day["id"] in have:
+                        rep["already"] += 1
+                        continue
+                    pool.add_day(day)
+                    have.add(day["id"])
+                    rep["added"] += 1
+            pool.save()
+            os.unlink(taken)
+        finally:
+            os.close(fd)
+    except BaseException:
+        try:
+            _quarantine(taken)
+        except OSError:
+            pass
+        raise
     return rep
 
 

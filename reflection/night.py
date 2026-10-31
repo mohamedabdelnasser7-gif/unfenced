@@ -56,7 +56,9 @@ For the personal assistant, the night first sends its Arena new practice days (D
 30, 32; assistant/arena.py take_finished): each day the user lived and finished that is worth
 practising (the user corrected something, or the code found a missed urgent item, a clash or
 another miss) is cleaned and joins the Arena's pool in the assistant's folder; easy days are
-skipped. The report counts them as practice_days.
+skipped. The report counts them as practice_days; when that step fails as a whole, its file is
+moved aside, the report says practice_days.failed and the night goes on and saves. Until the live
+day runner keeps the finished days (keep_finished), there are none to send.
 Then it takes the new mode step (assistant/newmode.py,
 DECISIONS item 36): the day's moments that fit no mode, kept in the assistant's folder
 (--assistant-state, data/assistant unless named, the Arena's folder), may become one mode card
@@ -311,7 +313,9 @@ def assistant_state(value=None):
 
 
 def practice_days(state):
-    """The assistant's finished days worth practising, cleaned, join its Arena's pool; returns the counts."""
+    """The assistant's finished days worth practising, cleaned, join its Arena's pool; returns the counts.
+    It raises when the step fails as a whole (the file is moved aside first); main() then counts the
+    failure in the report as practice_days.failed and still saves it."""
     from assistant import arena as assistant_arena
     return assistant_arena.take_finished(state)
 
@@ -570,7 +574,10 @@ def main(argv=None, *, until=None):
     if Path(args.db).resolve() != DEFAULT_PATH.resolve():
         rep["snapshot"]["db"] = args.db
     if state is not None:
-        rep["practice_days"] = practice_days(state)
+        try:
+            rep["practice_days"] = practice_days(state)
+        except Exception as e:  # the file was moved aside; the night still saves its report
+            rep["practice_days"] = {"added": 0, "easy": 0, "failed": type(e).__name__}
         card, stopped = new_mode(args.db, state)
         rep["mode_card"] = None if card is None else str(card)
         if stopped:
@@ -590,7 +597,10 @@ def main(argv=None, *, until=None):
         print(text(rep, plug))
         if rep.get("practice_days"):
             p = rep["practice_days"]
-            print(f"  new practice days for the Arena: {p['added']} added, {p['easy']} easy days skipped")
+            if p.get("failed"):
+                print(f"  new practice days for the Arena: not read ({p['failed']}); the file was moved aside")
+            else:
+                print(f"  new practice days for the Arena: {p['added']} added, {p['easy']} easy days skipped")
         if rep.get("mode_card"):
             print(f"  a new mode card waits on the Morning page: {rep['mode_card']}")
         if rep.get("practice"):

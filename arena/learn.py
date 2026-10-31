@@ -5,7 +5,9 @@ No second case shape: the match is written into the Sales agent's log (engine/lo
 reflection/results.py, the rows sales/loop.py writes live), one row a turn with the action and
 result the turn ended with, under the case id "arena-<match id>". Each row's detail holds the
 customer's line and the agent's reply (the text the study's proposer and tagger read), the
-failed fact checks and, on the last row, the verdict and its quote.
+failed fact checks and, on the last row, the verdict and its quote. arena/run.py hands it the
+Arena's own copy of the database (<db>.arena, DECISIONS item 46), so the case never reaches the
+live agent's log.
 
 An Arena match has no courier, so it gets no deciding result: it is written as a chat that went
 quiet, timed one day past the plug's longest deciding window before now, which engine/study.py

@@ -10,3 +10,7 @@ arena-calls.json.tmp
 arena-calls.lock
 arena-matches.jsonl
 arena-*-*.json
+*.arena
+*.arena-wal
+*.arena-shm
+*.arena-journal

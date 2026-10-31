@@ -5,7 +5,9 @@ models only, no network; the cards are made here, never read from arena/real/.""
 import contextlib
 import io
 import json
+import sqlite3
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -15,7 +17,9 @@ from engine.lessons import TRYING, WAITING
 from kit.db import Db
 from reflection import PLUG
 from reflection.lessons import Lessons as SalesLessons
+from reflection.results import Results
 from tests.fake_model import BUY, Seller, clean_env, say
+from tests.kept import kept_lesson
 
 GOOD = "Ask the customer which size they wear first."
 BAD = "Keep each reply short and plain."
@@ -151,6 +155,10 @@ class Base(unittest.TestCase):
         L = SalesLessons(d)
         return {les["text"]: les for les in L.mine()}, L
 
+    def arena_lessons(self, db):
+        """The lessons in the Arena's own copy of the database (DECISIONS item 46)."""
+        return self.lessons(db.with_name(db.name + run.ARENA_SUFFIX))
+
     def round_two(self):
         """The agent's system messages after the night study, and before it."""
         k = self.night.agent_before
@@ -175,9 +183,11 @@ class Between(Base):
         self.assertFalse(any(GOOD in s for s in before))
         self.assertTrue(all(GOOD in s for s in after), after[0])
         self.assertFalse(any(BAD in s for s in self.agent.systems))
-        saved, _ = self.lessons(db)
+        saved, _ = self.lessons(db)  # the live database: only the lesson that passed
         self.assertEqual(saved[GOOD]["state"], TRYING)
-        self.assertEqual(saved[BAD]["state"], WAITING)  # held by the gate: it waits for a yes
+        self.assertNotIn(BAD, saved)
+        practised, _ = self.arena_lessons(db)
+        self.assertEqual(practised[BAD]["state"], WAITING)  # held by the gate, in the Arena's copy only
 
     def test_the_report_and_the_morning_item_show_each_round(self):
         from reflection import morning
@@ -252,7 +262,9 @@ class Between(Base):
         self.assertTrue(True in flags and False in flags)
         self.assertEqual(flags, sorted(flags, reverse=True))
         saved, _ = self.lessons(db)
-        self.assertEqual(saved[GOOD]["state"], WAITING)
+        self.assertEqual(saved, {})  # refused: it never reaches the live database
+        practised, _ = self.arena_lessons(db)
+        self.assertEqual(practised[GOOD]["state"], WAITING)
 
     def test_a_cap_reached_in_the_night_study_stops_the_run_cleanly(self):
         self.cli(self.db("measure"), [GOOD, BAD], refuse=[BAD])
@@ -273,7 +285,9 @@ class Between(Base):
         self.assertEqual(json.loads((run.state_dir(db) / run.CALLS_FILE).read_text(encoding="utf-8"))["calls"],
                          before_night + 1)
         saved, _ = self.lessons(db)
-        self.assertEqual({saved[GOOD]["state"], saved[BAD]["state"]}, {WAITING})  # nothing unchecked goes ahead
+        self.assertEqual(saved, {})
+        practised, _ = self.arena_lessons(db)
+        self.assertEqual({practised[GOOD]["state"], practised[BAD]["state"]}, {WAITING})  # nothing unchecked goes ahead
         self.assertIn("stopped at the model call cap", run.text(rep))
 
     def test_a_high_risk_lesson_takes_the_gate_and_still_waits_for_a_yes(self):
@@ -294,7 +308,8 @@ class Between(Base):
         code, rep = self.cli(db, [HIGH], refuse=[HIGH])
         got = rep["rounds"][0]["reflection"]
         self.assertEqual((got["passed"], got["refused"], got["handed"], got["waits_for_yes"]), (0, 1, 0, 0))
-        saved, L = self.lessons(db)
+        self.assertEqual(self.lessons(db)[0], {})
+        saved, L = self.arena_lessons(db)
         self.assertEqual(L.exam_of(saved[HIGH]["id"])["passed"], 0)
         self.assertFalse(any(HIGH in s for s in self.agent.systems))
 
@@ -340,6 +355,121 @@ class Between(Base):
             code = run.main(argv, agent_model=Agent(), customer_model=Customer())
         self.assertEqual(code, 2)
         self.assertIn("Not run:", err.getvalue())
+
+
+def dump(path):
+    """Every row of every table in the database at path, by table, as text: for a before and after."""
+    c = sqlite3.connect(str(path))
+    try:
+        tables = [r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE "
+                                          "'sqlite_%' ORDER BY name")]
+        return {t: sorted(repr(tuple(r)) for r in c.execute(f'SELECT * FROM "{t}"')) for t in tables}
+    finally:
+        c.close()
+
+
+class LiveStaysLive(Base):
+    """DECISIONS item 46: the Arena practises on its own copy of the database, and the live one
+    changes only by a lesson that passed the eval gate."""
+
+    def live_db(self):
+        db = self.db()
+        d = Db(str(db))
+        L = SalesLessons(d)
+        kept_lesson(L, "Say the price and the delivery fee together.", ["all"])
+        Results(d).act("live-chat-1", PLUG.result("replied").after, result="replied", stage="asking", step=1,
+                       detail={"customer": "How much?", "reply": "16,500 EGP."}, at=1_000_000.0)
+        d.close()
+        return db
+
+    def copy_of(self, db):
+        return db.with_name(db.name + run.ARENA_SUFFIX)
+
+    def arena_cases(self, path):
+        d = Db(str(path))
+        self.addCleanup(d.close)
+        with d.tx() as c:
+            return {r[0] for r in c.execute("SELECT case_id FROM trace WHERE json_extract(detail, '$.arena') = 1")}
+
+    def test_the_live_database_gains_only_the_lesson_that_passed(self):
+        db = self.live_db()
+        before = dump(db)
+        code, rep = self.cli(db, [GOOD, BAD], refuse=[BAD])
+        got = rep["rounds"][0]["reflection"]
+        self.assertEqual((got["passed"], got["refused"]), (1, 1))
+        after = dump(db)
+        for table, rows in before.items():  # nothing the live database held is changed or removed
+            self.assertLessEqual(set(rows), set(after[table]), table)
+        added = {t: sorted(set(after[t]) - set(before.get(t, []))) for t in after}
+        added = {t: rows for t, rows in added.items() if rows}
+        self.assertEqual(sorted(added), ["lesson_exams", "lessons", "trials"])
+        self.assertEqual([len(added[t]) for t in ("lesson_exams", "lessons", "trials")], [1, 1, 1])
+        self.assertIn(GOOD, added["lessons"][0])
+        self.assertNotIn(BAD, repr(after))
+        live, L = self.lessons(db)
+        passed = [one for one in got["lessons"] if one["passed"]][0]
+        self.assertEqual(passed["live_id"], live[GOOD]["id"])
+        self.assertNotIn("live_id", [one for one in got["lessons"] if not one["passed"]][0])
+        self.assertEqual(live[GOOD]["state"], TRYING)  # a Canary on the live share, as the live rules start it
+        self.assertEqual(L.exam_of(live[GOOD]["id"])["passed"], 1)
+        self.assertEqual(self.arena_cases(db), set())  # the lost matches are cases in the copy only
+        self.assertGreaterEqual(len(self.arena_cases(self.copy_of(db))), got["cases"])  # each round's losses
+        practised, _ = self.arena_lessons(db)
+        self.assertLessEqual({GOOD, BAD, "Say the price and the delivery fee together."}, set(practised))
+
+    def test_a_run_with_no_lesson_passed_leaves_the_live_database_as_it_was(self):
+        for ideas, refuse, rounds_n in (([GOOD], (), 1), ([GOOD, BAD], (GOOD, BAD), 2)):
+            with self.subTest(rounds=rounds_n):
+                db = self.live_db() if rounds_n == 1 else self.db("second")
+                if rounds_n == 2:
+                    d = Db(str(db))
+                    kept_lesson(SalesLessons(d), "Name the size chart.", ["all"])
+                    d.close()
+                before = dump(db)
+                code, rep = self.cli(db, ideas, refuse=refuse, rounds_n=rounds_n)
+                self.assertEqual(dump(db), before)
+                self.assertTrue(self.arena_cases(self.copy_of(db)))
+
+    def test_each_run_starts_from_a_fresh_copy_of_the_live_database(self):
+        db = self.live_db()
+        copy = self.copy_of(db)
+        copy.write_text("not a database", encoding="utf-8")
+        copy.with_name(copy.name + "-wal").write_text("a stale side file", encoding="utf-8")
+        self.cli(db, [GOOD, BAD], refuse=[BAD])
+        self.assertIn(BAD, self.arena_lessons(db)[0])
+        self.cli(db, [], rounds_n=1)  # the next run copies the live database again: BAD was never there
+        practised = self.arena_lessons(db)[0]
+        self.assertNotIn(BAD, practised)
+        self.assertEqual(practised[GOOD]["state"], TRYING)
+
+    def test_hand_live_follows_the_live_rules_and_refuses_a_lesson_that_failed(self):
+        def examiner(ok):
+            def examine(text, tags):
+                row = engine_exam.Row(1, "price asked", "exam", ok, "" if ok else "price", "" if ok else "no price")
+                return engine_exam.Result(passed=ok, rows=[row], calls=1)
+            return examine
+        copy, live = Db(":memory:"), Db(":memory:")
+        self.addCleanup(copy.close)
+        self.addCleanup(live.close)
+        low = lambda text, high_about, low_about: "low"  # noqa: E731
+        practised = SalesLessons(copy, judge=low, exam=examiner(True))
+        passed = practised.propose(GOOD, ["all"], source="night study of sales", sources=[])
+        self.assertEqual(practised.get(passed)["state"], TRYING)
+        failing = SalesLessons(copy, judge=low, exam=examiner(False))
+        failed = failing.propose(BAD, ["all"], source="night study of sales", sources=[])
+        L = SalesLessons(live)
+        on_trial = L.add("Name the size chart.", ["all"])  # a live trial on the same stage
+        self.assertEqual(L.get(on_trial)["state"], TRYING)
+        new = rounds.hand_live(copy, L, passed, now=time.time())
+        les = L.get(new)
+        self.assertEqual((les["text"], les["state"], les["risk"], les["origin"]), (GOOD, WAITING, "low", "agent"))
+        trial = L.trial(new)
+        self.assertIsNone(trial["started_at"])  # waits its turn behind the live trial
+        self.assertIsNotNone(trial["queued_at"])
+        self.assertEqual(L.exam_of(new)["passed"], 1)
+        with self.assertRaises(ValueError):
+            rounds.hand_live(copy, L, failed)
+        self.assertEqual(sorted(x["text"] for x in L.mine()), sorted([GOOD, "Name the size chart."]))
 
 
 class Keys(unittest.TestCase):

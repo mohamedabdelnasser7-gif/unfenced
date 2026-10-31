@@ -9,11 +9,17 @@ train on, then the gate: the agent's trust level of matches (its "matches") draw
 from the held-out cards that can buy, which never train it (their losses go nowhere). The gate
 passes at the level's "wins". With no --held-out, the held-out cards are a seeded share of the
 cards that can buy, spread over their worries; a card that will not buy is never a gate match.
-With --db the Sales agent plays every match with that database's kept lessons handed, as the
-exam hands them, so the gate tests the agent with what it has learned, not the bare seed. A lost training match becomes a case the night study reads (arena/learn.py)
-when --db names the Sales agent's database. Every agent starts from zero and earns its lessons
-in the Arena (DECISIONS item 20), so a database holding a lesson sourced from history rows (a
-business's past imported by reflection/importer.py) is refused: see history_lessons.
+With --db the Arena practises on its own copy of the Sales agent's database (DECISIONS item 46):
+at the start of the run the live database is copied to <db>.arena beside it (arena_copy, replacing
+the last run's copy), and every case, lesson, exam and trial the run writes goes into the copy.
+The live database changes only when a lesson passes the eval gate between rounds: that lesson
+alone is written to it, as the night study writes one there (arena/rounds.py hand_live). The
+Sales agent plays every match with the database's kept lessons handed, as the exam hands them,
+so the gate tests the agent with what it has learned, not the bare seed. A lost training match
+becomes a case in the copy, for the night study between rounds (arena/learn.py). Every agent
+starts from zero and earns its lessons in the Arena (DECISIONS item 20), so a database holding a
+lesson sourced from history rows (a business's past imported by reflection/importer.py) is
+refused: see history_lessons.
 
 Trust levels are per agent and stay out of the repo (DECISIONS item 17): --trust names a JSON file
 outside it, shaped like {"sales": {"matches": 4, "wins": 3, "zero_failed_checks": true}} (stand-in
@@ -80,6 +86,7 @@ import json
 import os
 import random
 import re
+import sqlite3
 import sys
 import time
 import zoneinfo
@@ -528,6 +535,33 @@ class Arena:
         return item
 
 
+ARENA_SUFFIX = ".arena"
+
+
+def arena_copy(db):
+    """Copy the live database at db to the Arena's own, <db>.arena beside it, through SQLite's
+    backup (a whole, consistent copy while the live agent keeps writing), replacing the last run's
+    copy and its side files. Returns the copy's path. The live database is only read."""
+    live = Path(db)
+    copy = live.with_name(live.name + ARENA_SUFFIX)
+    for p in (copy, *(copy.with_name(copy.name + s) for s in ("-wal", "-shm", "-journal"))):
+        if p.is_symlink() or p.exists():
+            p.unlink()
+    try:
+        src = sqlite3.connect(f"{live.resolve().as_uri()}?mode=ro", uri=True)
+        try:
+            dst = sqlite3.connect(str(copy))
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
+        finally:
+            src.close()
+    except sqlite3.Error as e:
+        raise Refused(f"the database at {db} could not be copied for the Arena: {e}") from None
+    return copy
+
+
 def state_dir(db):
     """The Arena's folder for an agent: its database's own folder, as the night reports."""
     return Path(db).resolve().parent
@@ -693,7 +727,7 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
     ap.add_argument("--customer-prompt", default=None, help="the tuned customer prompt, outside the repo")
     ap.add_argument("--cap", type=int, default=DEFAULT_CAP, help="model calls a day")
     ap.add_argument("--state", default=None, help="the folder for the call count and the matches, for a run with no --db")
-    ap.add_argument("--db", default=None, help="the Sales agent's database: lost training matches become cases")
+    ap.add_argument("--db", default=None, help="the Sales agent's database: the Arena practises on its copy, <db>.arena beside it")
     ap.add_argument("--replay", default=None, help="the persona build's replay.jsonl, outside the repo")
     ap.add_argument("--replay-max", type=int, default=replay_mod.MAX_REPLAYS, help="real lost chats to replay")
     ap.add_argument("--fact-checks", choices=("on", "off"), default=None)
@@ -712,7 +746,7 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
         if not model_mod.has_key():
             print(model_mod.NO_KEY_LINE, file=sys.stderr)
             return 2
-    db = None
+    db, live = None, []
     try:
         cards = load_cards(args.cards)
         if args.replay_max < 1:
@@ -752,7 +786,7 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
             from reflection import PLUG as SALES_PLUG
             from reflection.exam import _Lessons
             from reflection.lessons import Lessons as SalesLessons
-            db = Db(args.db)
+            db = Db(str(arena_copy(args.db)))  # the Arena's own copy; the live database is only read
             mined = history_lessons(db)
             if mined:
                 raise Refused(f"the database at {args.db} holds {len(mined)} lesson{'s' if len(mined) > 1 else ''} "
@@ -766,9 +800,12 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
             lessons = _Lessons(pool, None)
             if between_models is not None:
                 examiner = between_models.pop("examiner", rounds_mod.real_examiner)
+                def live_lessons():  # opened at the first lesson that passes the gate, not before
+                    live.append(Db(args.db))
+                    return SalesLessons(live[0])
                 between = rounds_mod.Between(db, SALES_PLUG, calls=calls, state=state, pool=pool,
                                              agent_model=agent_model, customer_model=customer_model,
-                                             models=between_models, examiner=examiner)
+                                             models=between_models, examiner=examiner, live=live_lessons)
                 learn = between.learn
         arena = Arena(cards, agent_model=agent_model, customer_model=customer_model, calls=calls, trust=trust,
                       prompt=prompt, held_out=[x for x in args.held_out.split(",") if x.strip()],
@@ -790,8 +827,9 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
         print(f"Not run: {e}", file=sys.stderr)
         return 2
     finally:
-        if db is not None:
-            db.close()
+        for d in [db] + live:
+            if d is not None:
+                d.close()
     print(json.dumps(rep, ensure_ascii=False, indent=1) if args.json else text(rep))
     return 0 if rep["stopped"] == PASSED else 1
 

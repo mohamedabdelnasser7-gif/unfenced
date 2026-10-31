@@ -3,7 +3,8 @@ lost training matches go to the night study, every new lesson goes through the e
 the lessons that pass are handed to the next round.
 
 arena/run.py builds a Between when --db names the Sales agent's database and the run has more than
-one round. Its learn() writes each lost training match as a case (arena/learn.py) and remembers it;
+one round, on the Arena's own copy of that database (arena/run.py arena_copy). Its learn() writes
+each lost training match as a case in the copy (arena/learn.py) and remembers it;
 calling it with a round's number then:
 
 1. Runs the night study (reflection/night.py LinkedStudy, the night's own Meta parts) on that
@@ -23,6 +24,15 @@ calling it with a round's number then:
    only on a person's yes, or under Accept high risk as the engine already allows; a lesson that
    failed the gate is never handed, whatever its state.
 
+4. Hands a lesson that passed the gate to the live agent's database (hand_live; DECISIONS item 46).
+   arena/run.py gives Between the Arena's own copy of the database as db, and the live one as
+   live: the cases, the study, the failed lessons and their exams stay in the copy, and only a
+   lesson that passed is written to the live database, as the study writes one there: as waiting,
+   with its risk, its lines and its exam row, then on trial at the live database's own level (or
+   waiting its turn behind a live trial) when it went on trial or waited its turn in the copy. A
+   high risk one starts there only under the live database's Accept high risk; else it waits for
+   a person's yes. With no live, db is the agent's own database and nothing is copied.
+
 Every model call of the study, the risk judge, the exam and the rerun is taken from the Arena's own
 call count (arena/run.py Calls, arena-calls.json), so one cap holds the whole run. At the cap each
 part fails closed: no candidates or ideas, the judge unsure (so high), the exam not run (so the
@@ -31,6 +41,7 @@ lesson is refused). Nothing from that study is handed on, and arena/run.py stops
 import time
 
 from engine import exam as exam_mod
+from engine import switches as switches_mod
 from engine.lessons import KEPT, MAX_PICK, PULLED, TRYING, WAITING
 from engine.plug import ALL
 from engine.risk import LOW
@@ -82,6 +93,57 @@ def goes_ahead(les, trial, passed):
     return les["state"] == WAITING and trial is not None and les["risk"] == LOW
 
 
+LESSON_COLUMNS = ("agent", "text", "stages", "fields", "risk", "risk_why", "score", "source", "origin", "kind",
+                  "added_at")
+
+
+def hand_live(arena_db, live, lesson_id, now=None):
+    """Write one lesson that passed the gate in the Arena's copy (arena_db) to the live database:
+    live is the live agent's Lessons (engine/lessons.py), on its own database. The lesson is written
+    as waiting with its risk, risk lines, source, origin, kind and when it was added, its exam row
+    beside it, and its clashes with lessons the live database holds. When it went on trial or waited
+    its turn in the copy, it starts its trial in the live database now, at the live level, or waits
+    its turn there behind a live trial (engine Lessons._try); a high risk one only while the live
+    Accept high risk is on, else it waits for a person's yes. A lesson the copy pulled, or one that
+    did not pass, is refused. Returns the lesson's id in the live database."""
+    with arena_db.tx() as c:
+        les = c.execute("SELECT * FROM lessons WHERE id = ?", (lesson_id,)).fetchone()
+        exam = c.execute("SELECT * FROM lesson_exams WHERE lesson_id = ?", (lesson_id,)).fetchone()
+        tried = c.execute("SELECT 1 FROM trials WHERE lesson_id = ?", (lesson_id,)).fetchone() is not None
+        clashes = [r["live_id"] for r in c.execute("SELECT live_id FROM lesson_clashes WHERE lesson_id = ?",
+                                                   (lesson_id,))]
+    if les is None or les["agent"] != live.agent or les["state"] == PULLED:
+        raise ValueError(f"no lesson {lesson_id} of {live.agent} to hand to the live database")
+    if exam is None or not exam["passed"]:
+        raise ValueError(f"lesson {lesson_id} did not pass the eval gate")
+    now = time.time() if now is None else float(now)
+    with live.db.tx() as c:
+        source_id = les["source_lesson_id"]
+        if source_id is not None and c.execute("SELECT 1 FROM lessons WHERE id = ? AND agent != ?",
+                                               (source_id, live.agent)).fetchone() is None:
+            source_id = None  # its source is not in the live database
+        cur = c.execute(f"INSERT INTO lessons ({', '.join(LESSON_COLUMNS)}, state, share, source_lesson_id) "
+                        f"VALUES ({', '.join('?' * len(LESSON_COLUMNS))}, 'waiting', 1, ?)",
+                        (*(les[k] for k in LESSON_COLUMNS), source_id))
+        new_id = cur.lastrowid
+        have = {r["name"] for r in c.execute("PRAGMA table_info(lesson_exams)")}
+        cols = [k for k in exam.keys() if k in have and k != "lesson_id"]
+        c.execute(f"INSERT INTO lesson_exams (lesson_id, {', '.join(cols)}) VALUES (?, {', '.join('?' * len(cols))})",
+                  (new_id, *(exam[k] for k in cols)))
+        for other in clashes:
+            if c.execute("SELECT 1 FROM lessons WHERE id = ?", (other,)).fetchone() is not None:
+                c.execute("INSERT OR IGNORE INTO lesson_clashes (lesson_id, live_id, agent, at) VALUES (?, ?, ?, ?)",
+                          (new_id, other, live.agent, now))
+        if tried:
+            accept = None
+            if les["risk"] != LOW:
+                row = switches_mod.latest(c, live.agent, switches_mod.ACCEPT)
+                accept = row if switches_mod.accept_on(row, now) else None
+            if les["risk"] == LOW or accept is not None:
+                live._try(c, new_id, [t for t in les["stages"].split(",") if t], now, accept=accept)
+    return new_id
+
+
 def real_examiner(plug, kept, model):
     """The Sales agent's exam with the gate's counts (reflection/exam.py, as night.sales_exam has it)."""
     from reflection import exam as exam_mod_sales
@@ -92,14 +154,18 @@ class Between:
     """The night study and the eval gate between two Arena rounds. models: {"study": the proposer,
     tagger and idea part's model, "open": the fit check, adapter and risk judge's model, "exam": the
     exam's model}; each is taken from calls. agent_model and customer_model: the Arena's own, not yet
-    counted (the gate counts them). examiner(plug, kept, model): the exam (real_examiner)."""
+    counted (the gate counts them). examiner(plug, kept, model): the exam (real_examiner). db: the
+    Arena's own copy of the agent's database; live: a callable giving the live agent's Lessons,
+    called at the first lesson that passes, which hand_live writes it to (None: db is the agent's
+    own database, and there is nothing to hand)."""
 
     def __init__(self, db, plug, *, calls, state, pool, agent_model, customer_model, models, examiner=real_examiner,
-                 now=time.time):
+                 now=time.time, live=None):
         self.db, self.plug, self.calls, self.state, self.pool = db, plug, calls, state, pool
         self.agent_model, self.customer_model = agent_model, customer_model
         self.models, self.examiner, self.now = dict(models), examiner, now
         self.pending = []
+        self.live, self._live = live, None
 
     def learn(self, match, judged, match_id):
         """A lost training match as a case (arena/learn.py), kept for the study after its round."""
@@ -173,9 +239,14 @@ class Between:
         handed = goes_ahead(les, lessons.trial(lesson_id), passed)
         if handed:
             self.pool.hand_on(lesson_id)
-        return {"lesson_id": lesson_id, "text": les["text"], "risk": les["risk"], "state": les["state"],
-                "passed": passed, "handed": handed, "waits_for_yes": passed and not handed and les["state"] == WAITING,
-                "why": exam_mod.held_line(row), "gate": exam_mod.effect_of(row)}
+        out = {"lesson_id": lesson_id, "text": les["text"], "risk": les["risk"], "state": les["state"],
+               "passed": passed, "handed": handed, "waits_for_yes": passed and not handed and les["state"] == WAITING,
+               "why": exam_mod.held_line(row), "gate": exam_mod.effect_of(row)}
+        if passed and self.live is not None:  # only a lesson that passed reaches the live database
+            if self._live is None:
+                self._live = self.live()
+            out["live_id"] = hand_live(self.db, self._live, lesson_id, now)
+        return out
 
 
 class _Only:

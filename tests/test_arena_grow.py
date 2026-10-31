@@ -327,10 +327,13 @@ class GateAndTraining(unittest.TestCase):
         self.assertTrue(any(c["id"].startswith("grown-") for c in a.train))
 
     def test_a_card_that_has_trained_is_never_held_out(self):
+        # round 2 of the feed: the saved split stays while its ids and seed match (a card of the
+        # same worry training is no reason to drop it); a new draw and --held-out leave it out
         pool = grow.Pool(folder(self), "sales")
         held = [c["id"] for c in arena_with(self, self.base, pool).held]
-        pool.record(next(c for c in self.base if c["id"] == held[0]), True)  # it trained, say with another sibling
-        again = [c["id"] for c in arena_with(self, self.base, pool).held]
+        pool.record(next(c for c in self.base if c["id"] == held[0]), True)  # its group trained
+        self.assertEqual([c["id"] for c in arena_with(self, self.base, pool).held], held)
+        again = [c["id"] for c in arena_with(self, self.base, pool, seed=1).held]
         self.assertNotIn(held[0], again)
         with self.assertRaises(run.Refused):
             arena_with(self, self.base, pool, held_out=[held[0]])
@@ -349,6 +352,83 @@ class GateAndTraining(unittest.TestCase):
         self.assertEqual(pool.split["seed"], 0)
         arena_with(self, self.base[:-1], pool, seed=0)
         self.assertEqual(pool.split["cards"], sorted(c["id"] for c in self.base[:-1]))
+
+
+class SplitKept(unittest.TestCase):
+    """Review and red team round 2 of the feed (2026-10-31): the saved split stays while its ids and
+    seed match; a new one prefers cards that have not trained and tops up from the least played;
+    a saved split split() refuses is drawn again; --held-out for one run leaves the saved split."""
+
+    def setUp(self):
+        self.base = demo_cards()
+        self.pool = grow.Pool(folder(self), "sales")
+
+    def held(self, cards, held_out=None, seed=0):
+        return sorted(c["id"] for c in run.fixed_split(cards, held_out, seed, self.pool)[1])
+
+    def train_all(self, train):
+        for c in train:
+            self.pool.record(c, True)
+
+    def test_two_cards_of_one_worry_the_second_run_keeps_the_gate(self):
+        cards = [card(1, "size"), card(2, "size"), card(3, "price")]
+        train, held = run.fixed_split(cards, None, 0, self.pool)
+        self.train_all(train)  # the other size card trained: every worry has trained now
+        self.assertTrue(all(self.pool.trained(c) for c in cards))
+        self.assertEqual(self.held(cards), sorted(c["id"] for c in held))
+
+    def test_one_held_out_run_leaves_the_saved_gate(self):
+        first = self.held(self.base)
+        self.assertEqual(first, ["persona-01", "persona-02"])
+        self.train_all(c for c in self.base if c["id"] not in first)
+        saved = dict(self.pool.split)
+        train, _ = run.fixed_split(self.base, ["persona-01"], 0, self.pool)
+        self.train_all(train)  # persona-02 trains in this one run
+        self.assertEqual(self.pool.split, saved)
+        self.assertEqual(self.held(self.base), first)
+
+    def test_a_rebuild_where_every_card_has_trained_still_draws_a_gate(self):
+        self.train_all(self.base)
+        rebuilt = [c for c in self.base if c["id"] != "persona-01"]
+        held = self.held(rebuilt)
+        self.assertEqual(len(held), max(1, round(run.HELD_OUT_SHARE * len(rebuilt))))
+        self.assertEqual(self.pool.split["held"], held)
+
+    def test_the_top_up_takes_the_least_played_first(self):
+        cards = [card(i, w) for i, w in enumerate(("size", "price", "trust", "delivery", "fit"), 1)]
+        for c, n in zip(cards, (5, 1, 4, 2, 3)):
+            for _ in range(n):
+                self.pool.record(c, True)
+        self.assertEqual(self.held(cards), ["persona-02", "persona-04"])  # 1 and 2 plays
+
+    def test_a_new_split_holds_the_untrained_cards_spread_over_worries(self):
+        cards = [card(i, "size") for i in range(1, 9)] + [card(9, "price"), card(10, "trust")]
+        self.pool.record(cards[-1], True)
+        for seed in range(6):
+            self.pool.split = None
+            held = self.held(cards, seed=seed)
+            self.assertEqual(len(held), 3)
+            self.assertIn("persona-09", held, seed)
+            self.assertNotIn("persona-10", held, seed)
+
+    def test_a_saved_split_split_refuses_is_drawn_again(self):
+        first = self.held(self.base)
+        changed = [dict(c, unwinnable=True) if c["id"] in first else c for c in self.base]  # same ids
+        held = self.held(changed)
+        self.assertTrue(set(held).isdisjoint(first))
+        self.assertEqual(self.pool.split["held"], held)
+
+    def test_another_seed_draws_a_new_split(self):
+        self.held(self.base, seed=0)
+        self.held(self.base, seed=1)
+        self.assertEqual(self.pool.split["seed"], 1)
+
+    def test_a_saved_split_with_no_held_card_or_one_not_in_its_cards_is_dropped_on_load(self):
+        owner = folder(self)
+        for split in ({"cards": ["persona-01", "persona-02"], "seed": 0, "held": []},
+                      {"cards": ["persona-01", "persona-02"], "seed": 0, "held": ["persona-09"]}):
+            (owner / "practice-sales.json").write_text(json.dumps({"kind": "sales", "split": split}), encoding="utf-8")
+            self.assertIsNone(grow.Pool(owner, "sales").split, split)
 
 
 class WhichChats(unittest.TestCase):

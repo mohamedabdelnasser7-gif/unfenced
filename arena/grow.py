@@ -218,9 +218,14 @@ class Pool:
         """1 + LOST_WEIGHT per loss of the card's group in training, at most MAX_COUNTED_LOSSES counted."""
         return 1 + LOST_WEIGHT * min(int(self.played.get(group(card), {}).get("lost", 0)), MAX_COUNTED_LOSSES)
 
+    def plays(self, card):
+        """The training matches the card's group has played."""
+        return int(self.played.get(group(card), {}).get("played", 0))
+
     def trained(self, card):
-        """True when the card's group has played a training match: it is never held out for the gate."""
-        return int(self.played.get(group(card), {}).get("played", 0)) > 0
+        """True when the card's group has played a training match: a new split holds it only to top
+        up, and --held-out never names it (arena/run.py fixed_split)."""
+        return self.plays(card) > 0
 
     def record(self, card, won):
         """A training match's result, counted for the card's group (group)."""

@@ -50,8 +50,9 @@ only for a run with no database (its wins feed no gate); one of the two is neede
 
 Both sides grow (items 30, 48, 51; arena/grow.py). The base cards are split first, and the held
 ids are saved in the owner's pool of practice customers, so the gate keeps the same cards run
-after run while the pool grows; a card grown from real chats and a card that has trained are
-never held out. The cards grown from real chats then join the training cards only. In training
+after run while the pool grows and while the base card ids and the seed stay; a card grown from
+real chats is never held out, and a new split holds a card that has trained only when too few
+have not (fixed_split). The cards grown from real chats then join the training cards only. In training
 a card whose group beat the agent is drawn more often (per loss, grow.LOST_WEIGHT, at most
 grow.MAX_COUNTED_LOSSES losses counted), and each side's
 share and the capped wants are held on the training draws; the gate draws at the weights before
@@ -261,20 +262,45 @@ def split(cards, held_out=None, share=HELD_OUT_SHARE, seed=0, never=()):
 
 
 def fixed_split(cards, held_out, seed, pool):
-    """split() of the base cards with the owner's pool (arena/grow.py): the cards that have trained
-    are never held out, and the held ids are saved in the pool, so the gate stays the same set run
-    after run while the pool grows. A saved split is used again while the base cards and the seed
-    are the same and none of its cards has trained since; else a new one is drawn and saved."""
-    never = {c["id"] for c in cards if pool.trained(c)}
+    """split() of the base cards with the owner's pool (arena/grow.py), the held ids saved in the
+    pool, so the gate stays the same set run after run while the pool grows. A saved split is used
+    again while the base card ids and the seed are the same, whatever has trained since (a held
+    card never trains; another card of its worry may); a saved split split() refuses (none of its
+    cards can buy now) is drawn again. held_out names the gate for this run only: a card that has
+    trained is refused, and the saved split stays as it was. A new split (draw_held) holds the
+    cards that have not trained first and tops up from the least played, so it never shrinks or
+    stops because every worry has trained."""
     if held_out:
-        return split(cards, held_out, seed=seed, never=never)
+        return split(cards, held_out, seed=seed, never={c["id"] for c in cards if pool.trained(c)})
     ids, saved = sorted({c["id"] for c in cards}), pool.split
-    if saved and saved["cards"] == ids and saved["seed"] == seed and not set(saved["held"]) & never:
-        return split(cards, saved["held"], seed=seed, never=never)
-    train, held = split(cards, None, seed=seed, never=never)
-    pool.split = {"cards": ids, "seed": seed, "held": sorted(c["id"] for c in held)}
+    if saved and saved["cards"] == ids and saved["seed"] == seed:
+        try:
+            return split(cards, saved["held"], seed=seed)
+        except Refused:
+            pass
+    held = draw_held(cards, seed, pool)
+    pool.split = {"cards": ids, "seed": seed, "held": held}
     pool.changed = True
-    return train, held
+    return split(cards, held, seed=seed)
+
+
+def draw_held(cards, seed, pool, share=HELD_OUT_SHARE):
+    """The held ids of a new split, sorted: split()'s seeded draw over the cards that can buy and
+    have not trained, then topped up to split()'s size from the cards that can buy and have
+    trained, the least played first (grow.Pool.plays; a seeded order among equals)."""
+    winnable = [c for c in cards if can_buy(c) and not c["id"].startswith(GROWN)]
+    if not winnable:
+        raise Refused("no card can buy, so no gate match can be won; the Arena needs a card that can buy")
+    n = min(max(1, round(share * len(cards))), len(winnable), len(cards) - 1)
+    trained = {c["id"] for c in winnable if pool.trained(c)}
+    held = set()
+    if len(trained) < len(winnable):
+        held = {c["id"] for c in split(cards, None, share, seed, never=trained)[1]}
+    rest = sorted((c for c in winnable if c["id"] not in held), key=lambda c: c["id"])
+    random.Random(f"top-up:{seed}").shuffle(rest)
+    rest.sort(key=pool.plays)
+    held |= {c["id"] for c in rest[:n - len(held)]}
+    return sorted(held)
 
 
 def draw(cards, rng):

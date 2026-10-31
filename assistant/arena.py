@@ -80,6 +80,19 @@ TIME_SHAPE = re.compile(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]")
 ID_SHAPE = re.compile(r"[a-z]{1,3}[0-9]{1,3}")  # i01, e1: the shape a simulated day's ids have
 MODE_SHAPE = re.compile(r"[a-z]{2,20}")
 ITEM_KINDS = ("email", "meeting_request", "sent")
+NAME_PART = re.compile(r"[^\W\d_]{2,}")  # the words of an address's local part: karim.tawfik99 is karim, tawfik
+MAX_NAME = 200
+# a sign-off on a line of its own: what follows it is a signature (name, title, company, phone), cut as [name]
+SIGN_OFF = re.compile(r"^[ \t]*(?:--|(?:(?:best|kind|warm|warmest)[ \t]+)?regards|best|thanks|thank[ \t]+you|many[ \t]+thanks"
+                      r"|cheers|sincerely|yours(?:[ \t]+(?:truly|sincerely))?|br|مع[ \t]+(?:خالص[ \t]+)?(?:تحياتي|التحية|الشكر)"
+                      r"|تحياتي|شكرا|شكراً)[ \t]*[,.!،]?[ \t]*$", re.IGNORECASE | re.MULTILINE)
+SELF_NAMED = re.compile(r"(?:^|(?<=[,.!؟?،\n]))([ \t]*)([^\W\d_]{3,})(?=[ \t]+(?:here|هنا)\b)", re.IGNORECASE)
+FAMILY_AFTER = re.compile(r"(\[name\][ \t]+)(ال[ء-ي]{3,})")  # محمد الشربيني: the ال family name after a masked name
+ROLE_WORDS = frozenset({"info", "sales", "support", "news", "newsletter", "noreply", "no", "reply", "hello", "contact",
+                        "team", "admin", "billing", "jobs", "careers", "office", "mail", "notifications", "updates",
+                        "user", "me", "hr"})
+MAIL_HOSTS = frozenset({"gmail", "googlemail", "yahoo", "outlook", "hotmail", "live", "icloud", "mail", "proton",
+                        "protonmail", "aol", "msn", "yandex", "gmx", "zoho", "example", "test", "com", "net", "org"})
 DEFAULT_LIKES = {"rushed_words": 30, "focused_words": 120, "brief_words": 90}
 
 
@@ -185,6 +198,15 @@ def real_date(text):
     return text
 
 
+def _after_names(text):
+    """Two name shapes the Arena's cleaner leaves, masked after it: a name saying who writes (sherbiny
+    here) and an ال family name right after a masked name (محمد الشربيني)."""
+    from arena.clean import arabic_name_like, is_stop, latin_name_like
+    text = SELF_NAMED.sub(lambda m: m.group(1) + "[name]" if (latin_name_like(m.group(2))
+                          or arabic_name_like(m.group(2))) and not is_stop(m.group(2)) else m.group(0), text)
+    return FAMILY_AFTER.sub(lambda m: m.group(0) if is_stop(m.group(2)) else m.group(1) + "[name]", text)
+
+
 def _clean_text(text, clean):
     """One text through the Arena's cleaner, whole, so its number cleaner sees every digit. Only a
     real calendar date (YYYY-MM-DD) with no other digit within NEAR characters is put back, so a
@@ -194,6 +216,9 @@ def _clean_text(text, clean):
     if not isinstance(text, str):
         return ""
     text = normalize(text[:MAX_TEXT]).replace(KEEP, "")
+    cut = SIGN_OFF.search(text)
+    if cut and text[cut.end():].strip():
+        text = text[:cut.end()] + "\n[name]"
     dates = [m for m in ISO_DATE.finditer(text) if real_date(m.group(0))]
     bare = list(text)
     for m in dates:
@@ -207,7 +232,7 @@ def _clean_text(text, clean):
         out += [text[last:m.start()], KEEP]
         kept.append(m.group(0))
         last = m.end()
-    cleaned = clean("".join(out) + text[last:])
+    cleaned = _after_names(clean("".join(out) + text[last:]))
     parts = cleaned.split(KEEP)
     if len(parts) != len(kept) + 1:  # the cleaner took a whole message (an address): no date comes back
         return "".join(parts)
@@ -234,6 +259,42 @@ def _list(v, cap):
     return v[:cap] if isinstance(v, list) else []
 
 
+def _names_of(day):
+    """The names a day carries, for the cleaner: each address's local part as a name (karim.tawfik
+    as karim tawfik) with its company from the domain (not a mail service), and every display name
+    as typed, Latin or Arabic. The cleaner then masks each of their words wherever it stands."""
+    found, names = [], set()
+
+    def walk_addr(a):
+        if isinstance(a, str) and "@" in a:
+            found.append(a)
+
+    walk_addr(day.get("user"))
+    for a in _list(day.get("contacts"), MAX_CONTACTS):
+        walk_addr(a)
+    for ev in _list(day.get("calendar"), MAX_CALENDAR):
+        if isinstance(ev, dict):
+            for a in _list(ev.get("with"), MAX_PEOPLE):
+                walk_addr(a)
+    for e in _list(day.get("events"), MAX_EVENTS):
+        if not isinstance(e, dict):
+            continue
+        for k in ("from", "to", "reply_to"):
+            walk_addr(e.get(k))
+        for a in _list(e.get("cc"), MAX_PEOPLE):
+            walk_addr(a)
+        if isinstance(e.get("from_name"), str) and e["from_name"].strip():
+            names.add(e["from_name"].strip()[:MAX_NAME])
+    for a in found:
+        local, _, host = a.strip()[:MAX_NAME].partition("@")
+        words = [w for w in NAME_PART.findall(local) if w.casefold() not in ROLE_WORDS]
+        if words:
+            names.add(" ".join(words))
+        labels = [w for w in host.casefold().split(".")[:-1] if len(w) >= 3 and w not in MAIL_HOSTS]
+        names.update(labels)
+    return sorted(names)
+
+
 class _Ids:
     """Ids kept only when they match ID_SHAPE and are new in the day; any other gets a fresh one."""
 
@@ -255,9 +316,11 @@ def clean_day(day):
     """A finished day, rebuilt from an allow-list to join the pool (see the module lines): only the
     keys a simulated day has, each of its type; every other key is dropped and every text left is
     cleaned. Raises ValueError when it is not shaped like a simulated day."""
-    from arena.clean import clean
+    from arena.clean import Cleaner
     if not isinstance(day, dict) or not isinstance(day.get("events"), list) or not isinstance(day.get("hidden"), dict):
         raise ValueError("a finished day has events and hidden answers, like a simulated one")
+    names = _names_of(day)
+    clean = Cleaner(names).chat(names)
     date = real_date(day.get("date"))
     if date is None:
         raise ValueError("a finished day has a real calendar date")
@@ -296,9 +359,10 @@ def clean_day(day):
                "with": addrs(ev.get("with"))}
         if isinstance(ev.get("focus"), bool):
             row["focus"] = ev["focus"]
-        for k in ("location", "notes"):
-            if isinstance(ev.get(k), str):
-                row[k] = text(ev[k])
+        if isinstance(ev.get("location"), str) and ev["location"].strip():
+            row["location"] = "[place]"  # a meeting's location is a place, whatever it says
+        if isinstance(ev.get("notes"), str):
+            row["notes"] = text(ev["notes"])
         calendar.append(row)
     out["calendar"] = calendar
 

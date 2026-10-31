@@ -584,6 +584,65 @@ class NamesFromOrders(unittest.TestCase):
         self.assertEqual(chat.addresses, {"شارع واحد اتنين"})
 
 
+class NamesWithNoOrder(unittest.TestCase):
+    """Lost chats have no order to learn a name from (review round 2 of the feed, 2026-10-31): a
+    surname beside a masked name, a name a cue showed, typed again alone, never reaches the pool or
+    the tagger. And a name given for an order in an earlier talk is masked in a later one."""
+
+    LINES = {"q-a": ("بكام الجزمة السودا؟ نورهان الشربيني", ["نورهان", "الشربيني"]),
+             "q-b": ("hi karim tawfik here, how much are the black boots?", ["karim", "tawfik"]),
+             "q-c": ("الشربيني معاك تاني، بكام الجزمة الحمرا؟", ["الشربيني"]),
+             "q-e": ("عايز اطبع يوسف الحناوي على الجزمة، بكام؟", ["يوسف", "الحناوي"]),
+             "q-f": ("Tawfik Mansour, size 43 black boots price?", ["Tawfik", "Mansour"])}
+
+    def grown(self, chats):
+        owner = folder(self)
+        _, counts, model = grown_pool(self, owner, chats=chats)
+        return counts, (owner / "practice-sales.json").read_text(encoding="utf-8"), json.dumps(model.calls, ensure_ascii=False)
+
+    def test_the_review_lines_lost_with_no_order(self):
+        counts, saved, sent = self.grown([(k, [("user", text, 70, None), ("assistant", "ب 1450 جنيه، المقاس متاح", 69.9, None)])
+                                          for k, (text, _) in self.LINES.items()])
+        self.assertEqual(counts.get("lost"), 5, counts)
+        for _, words in self.LINES.values():
+            for w in words:
+                self.assertNotIn(w, saved)
+                self.assertNotIn(w, sent)
+        self.assertIn("اطبع", saved)  # the want stays: printing is capped by it
+
+    def test_a_name_given_after_the_store_asks_then_the_surname_alone(self):
+        steps = [("user", "بكام الجاكيت الاسود؟ بلاتيرو بيسأل", 80, None), ("assistant", "الجاكيت ب 950 جنيه. تحب تطلبه؟", 79.9, None),
+                 ("user", "تمام", 79.8, None), ("assistant", "ممكن الاسم بالكامل؟", 79.7, None),
+                 ("user", "زورفانو بلاتيرو", 79.6, None), ("assistant", "تمام، والعنوان؟", 79.5, None),
+                 ("user", "هبعته بكرة، بلاتيرو", 79.4, None), ("assistant", "تمام، مستنيك", 79.3, None)]
+        counts, saved, sent = self.grown([("c-lost-name", steps)])
+        self.assertEqual(counts.get("lost"), 1, counts)
+        for text in (saved, sent):
+            self.assertNotIn("بلاتيرو", text)
+            self.assertNotIn("زورفانو", text)
+
+    def test_an_order_name_from_an_earlier_talk_is_masked_in_a_later_talk(self):
+        db = Db(":memory:")
+        self.addCleanup(db.close)
+        write_chats(db, [("c-repeat", [("user", "عايز الجزمة البيضا 42", 70, None), ("assistant", "ب 1450 جنيه", 69.9, None),
+                                       ("user", "تمام", 69.8, None),
+                                       ("assistant", "", 69.7, None, order_call(items=[], name="نورهان بلاتيرو",
+                                                                                address="12 شارع النصر المعادي")),
+                                       ("assistant", "تم تسجيل الطلب", 69.6, None)])])
+        pool = grow.Pool(folder(self), "sales")
+        first = grow.grow(db, pool, since=SINCE, until=NOW, tagger=Tagger(model=ScriptedModel(recipe()), cap=50, recipe=recipe()))
+        self.assertEqual(first.get("easy wins, skipped"), 1, first)
+        add_steps(db, "c-repeat", [("user", "بلاتيرو تاني، بكام الشنطة؟", -20 * 24, None),
+                                   ("assistant", "ب 900 جنيه", -20 * 24 - 0.1, None)])
+        model = ScriptedModel(recipe())
+        later = NOW + 23 * 24 * H
+        got = grow.grow(db, pool, since=later - 24 * H, until=later, tagger=Tagger(model=model, cap=50, recipe=recipe()))
+        self.assertEqual(got.get("lost"), 1, got)
+        self.assertEqual(pool.items[0]["read"], "c-repeat:7")
+        self.assertNotIn("بلاتيرو", json.dumps(pool.items, ensure_ascii=False))
+        self.assertNotIn("بلاتيرو", json.dumps(model.calls, ensure_ascii=False))
+
+
 class Siblings(unittest.TestCase):
     def setUp(self):
         self.owner = folder(self)

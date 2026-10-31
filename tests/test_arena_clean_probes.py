@@ -497,7 +497,8 @@ class ChatLevel(unittest.TestCase):
         moved = "تمام يا فندم، المقاس 42 متاح بسعر 1450 جنيه"
         got = self.texts([(True, "اسمك ايه؟"), (False, "لحظة"), (False, "لوكاس مارتن"), (False, "مقاس 42"),
                           (True, moved), (False, "لوكاس مارتن")])
-        self.assertEqual(got, ["اسمك ايه؟", "[name]", "[name]", "[name]", moved, "لوكاس مارتن"])
+        # the answer's words join the chat's names: typed again after the window closed, still masked
+        self.assertEqual(got, ["اسمك ايه؟", "[name]", "[name]", "[name]", moved, "[name]"])
 
     def test_more_ways_to_ask_the_name(self):
         for ask in ("ممكن الاسم بالكامل", "الاسم الثلاثي لو سمحت", "الاسم لو سمحت", "ممكن الاسم", "اسم المستلم؟",
@@ -615,6 +616,58 @@ class WholeRun(unittest.TestCase):
             self.assertEqual(third[2], "[name]")
             first = next(v for v in turns.values() if "الجزمة دي بكام" in v)
             self.assertEqual(first[4:9], ["[address]"] * 5)
+
+
+class NamesBesideAndLearned(Check):
+    """Review and red team round 2 of the feed (2026-10-31): a surname beside a [name], a name a cue
+    showed in one turn masked in the others, and el or al in a Latin name meeting the Arabic ال."""
+
+    def chat(self, rows, names=()):
+        return cl.Cleaner(names).chat(names).texts([msg(t, team) for team, t in rows])
+
+    def test_a_name_shaped_word_right_after_or_before_a_name(self):
+        self.check([("بكام الجزمة السودا؟ نورهان الشربيني", "بكام الجزمة السودا؟ [name]"),
+                    ("hi karim tawfik here, how much are the black boots?",
+                     "hi [name] here, how much are the black boots?"),
+                    ("عايز اطبع يوسف الحناوي على الجزمة، بكام؟", "عايز اطبع [name] على الجزمة، بكام؟"),
+                    ("Tawfik Mansour, size 43 black boots price?", "[name], size 43 black boots price?")])
+
+    def test_a_name_shaped_word_before_here_or_maak_at_the_start(self):
+        self.check([("الشربيني معاك تاني، بكام الجزمة الحمرا؟", "[name] معاك تاني، بكام الجزمة الحمرا؟")])
+
+    def test_el_between_a_word_and_a_name(self):
+        self.check([("call me Nour el sherbiny plz", "call me [name] plz")], names=("Nourhan El Sherbiny",))
+
+    def test_common_words_beside_a_name_stay(self):
+        self.check([("Print Karim on the back please", "Print [name] on the back please"),
+                    ("Order for Karim confirmed", "Order for [name] confirmed"),
+                    ("عايز اطبع كريم عليها", "عايز اطبع [name] عليها")])
+
+    def test_the_answer_to_the_name_question_is_masked_in_a_later_turn(self):
+        got = self.chat([(True, "ممكن الاسم بالكامل؟"), (False, "زورفانو بلاتيرو"), (True, "تمام، والعنوان؟"),
+                         (False, "هبعته بكرة، بلاتيرو")])
+        self.assertEqual(got[3], "هبعته بكرة، [name]")
+
+    def test_a_name_after_a_cue_is_masked_in_an_earlier_turn(self):
+        got = self.chat([(False, "بلاتيرو بيسأل عن الجاكيت"), (True, "ب 950 جنيه"), (False, "اسمي زورفانو بلاتيرو")])
+        self.assertEqual(got[0], "[name] بيسأل عن الجاكيت")
+
+    def test_a_surname_beside_a_name_is_masked_alone_later(self):
+        got = self.chat([(False, "بكام الجاكيت؟ نورهان بلاتيرو"), (True, "ب 950 جنيه"), (False, "هبعته بكرة، بلاتيرو")])
+        self.assertEqual(got[2], "هبعته بكرة، [name]")
+
+    def test_a_name_after_ya_or_hi_is_masked_alone_later(self):
+        got = self.chat([(True, "اهلا يا زورفانو، تحت امرك"), (False, "زورفانو بيسأل، بكام؟")])
+        self.assertEqual(got[1], "[name] بيسأل، بكام؟")
+        got = self.chat([(True, "hi Zorvanello, how can we help?"), (False, "zorvanello again, price?")])
+        self.assertEqual(got[1], "[name] again, price?")
+
+    def test_el_joined_to_the_next_word_meets_the_arabic_al(self):
+        self.assertEqual(cl.Cleaner(["Nourhan El Sherbiny"]).full_names("نورهان الشربيني"), "[name]")
+
+    def test_the_al_of_an_arabic_word_taken_off_meets_the_latin(self):
+        self.assertEqual(cl.Display(["Nourhan Sherbiny"]).hit("الشربيني"), "")
+        self.assertEqual(cl.Display(["نورهان الشربيني"]).hit("Sherbiny"), "")
 
 
 class Examples(unittest.TestCase):

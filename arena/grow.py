@@ -29,7 +29,9 @@ Each kept chat is cleaned (arena/clean.py: names, numbers and places out) before
 (arena/tag.py) sees it and before anything is written; no second scan (item 40). The cleaner
 knows what the customers gave for their orders: every name and name to print in the night's
 draft_order calls is masked in any chat of the night, and in its own chat each word of it, the
-address and the chat's number too, so a name typed bare with no cue word still goes. Its tags and
+address and the chat's number too, so a name typed bare with no cue word still goes. A chat with
+no order keeps the words its cues showed as a name (arena/clean.py ChatCleaner.texts) and masks
+them in all its turns, with a name-shaped word beside any [name]. Its tags and
 cleaned turns join the pool, and the pool's cards are rebuilt through the card code
 (arena/cards.py build), so the unwinnable share and the capped wants (item 33: name printing at
 most 25%) hold for the grown cards as for the first ones. A grown card's id names its group

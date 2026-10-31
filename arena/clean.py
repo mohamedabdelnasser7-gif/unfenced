@@ -36,7 +36,9 @@ it. One message goes through these steps, in this order:
     stopping at a word that is never a name; any sender's full name from the whole import
     (hamza and ta marbuta forms as one, Arabic typed for a Latin display name and back); the
     history Masker with the chat's own sender names; each of their words in any of its forms,
-    joined to و ف ب ل يا, or two of them typed as one; عبد ال... and abd el... names.
+    joined to و ف ب ل يا, or two of them typed as one, el and al joined to the word after them and
+    ال taken off before the Arabic and Latin spellings are compared (Nourhan El Sherbiny masks
+    نورهان الشربيني); عبد ال... and abd el... names.
  8. Governorates, cities, districts, malls and big streets -> [place]; a short message of a
     [place] and at most 4 other words, none a common word, no digit and no question -> [address]
     (عباس العقاد مدينة نصر). Zamalek and Smouha are left out: they are football clubs too.
@@ -45,7 +47,10 @@ it. One message goes through these steps, in this order:
     انا, I'm, معاك, a relation word (لابني, لماما, my son), a name-like word after a lone ل, after
     a ل joined to it behind a delivery verb (ابعتها لزوزو) or after deliver to, ship it to, send
     it to (lower case too, a colon or a new line between); every common first name in
-    arena/words.py wherever it stands; then up to 2 name-like words after any [name].
+    arena/words.py wherever it stands; then up to 2 name-like words after any [name]; then one
+    name-shaped word right before and right after each [name] (Tawfik [name], [name] الشربيني),
+    never a common word, an Arabic word starting with ا (اطبع) or a lower case Latin word in a
+    message with capitals; a name-shaped word at a message's start before معاك or here.
 Prices and sizes stay (السعر 850 جنيه, مقاس 43): they are what the personas are about.
 
 ChatCleaner.texts cleans a whole chat: after the store asks the name (اسمك ايه, ممكن الاسم,
@@ -54,7 +59,9 @@ is [name] (لحظة, then the name, are both [name]); a short store line with no
 a thumbs up, ok, an export's media or deleted message line) does not move on. After the store asks
 for the address, or after a customer message that cleaned to [address] or [place], every
 customer message up to the store's next one is [address]. When the store asks both at once,
-the first answer is [name] and the rest [address].
+the first answer is [name] and the rest [address]. Every word a cue showed as a name in the chat
+(steps 7 and 9, the answer to the name question) joins the chat's names and the chat is cleaned
+again with them, so a surname typed bare in another turn, before or after, is masked too.
 """
 import json
 import re
@@ -377,7 +384,8 @@ def _cue_word(w):
     return len(f) >= 2 and not is_stop(w) and not verb_shaped(f) and f not in LATIN_FORMS
 
 
-def _name_cue(m):
+def _name_cue(m, learned=None):
+    """learned: a set the words taken as a name join (ChatCleaner masks them in the rest of the chat)."""
     parts = re.split(r"([ \t]+)", m.group("rest"))
     take = 0
     for k, w in enumerate(parts[::2]):
@@ -386,6 +394,8 @@ def _name_cue(m):
         take = k + 1
     if not take:
         return m.group(0)
+    if learned is not None:
+        learned.update(parts[:2 * take - 1:2])
     return m.group(0)[:m.start("rest") - m.start()] + "[name]" + "".join(parts[2 * take - 1:])
 
 
@@ -433,22 +443,55 @@ def _name_words(name):
     return [t for t in re.findall(r"\w+", normalize(name)) if not t.isdigit()]
 
 
+ARTICLES = frozenset({"el", "al", "ال"})
+
+
+def _bare(word):
+    """An Arabic word with its ال taken off when 3 letters or more are left (الشربيني: شربيني), else None."""
+    f = fold(word)
+    return word[2:] if ARABIC.search(word) and f.startswith("ال") and len(f) >= 5 else None
+
+
+def _forms(toks):
+    """A name's words as typed, with el or al joined to the word after it (El Sherbiny as
+    ElSherbiny, whose skeleton is the Arabic الشربيني's), and with the ال of its Arabic words
+    taken off (الشربيني as شربيني, whose skeleton is the Latin Sherbiny's)."""
+    joined, k = [], 0
+    while k < len(toks):
+        if fold(toks[k]) in ARTICLES and k + 1 < len(toks):
+            joined.append(toks[k] + toks[k + 1])
+            k += 2
+        else:
+            joined.append(toks[k])
+            k += 1
+    bare = [_bare(t) or t for t in toks]
+    out = [toks]
+    for form in (joined, bare):
+        if form not in out:
+            out.append(form)
+    return out
+
+
 class Display:
     """The chat's own sender names, word by word, in any of their forms: folded (أحمد and احمد
     as one), joined to و ف ب ل يا, two words typed as one (كريمفوزي), and Arabic typed for a
-    Latin name or back (skeleton of 3 letters or more)."""
+    Latin name or back (skeleton of 3 letters or more, el and al joined to the next word, an
+    Arabic word's ال taken off when what is left has 4 or more)."""
 
     def __init__(self, names=()):
         self.words, self.joined, self.skel = set(), set(), {}
         for name in names:
             toks = _name_words(name)
+            for form in _forms(toks):
+                for t in form:
+                    if fold(t) in COMMON or fold(t) in ARTICLES:
+                        continue
+                    if len(t) >= 3 or len(toks) == 1 and len(t) >= 2:
+                        self.words.add(fold(t))
+                        s = skeleton(t)
+                        if len(s) >= 3:
+                            self.skel.setdefault(s, set()).add(_script(t))
             keep = [t for t in toks if fold(t) not in COMMON]
-            for t in keep:
-                if len(t) >= 3 or len(toks) == 1 and len(t) >= 2:
-                    self.words.add(fold(t))
-                    s = skeleton(t)
-                    if len(s) >= 3:
-                        self.skel.setdefault(s, set()).add(_script(t))
             for a, b in zip(keep, keep[1:]):
                 self.joined.add(fold(a + b))
 
@@ -462,6 +505,10 @@ class Display:
             return w[:len(m.group(1))]
         s = skeleton(w) if len(w) >= 3 else ""
         if s in self.skel and (self.skel[s] - {_script(w)} or _franco(w)):
+            return ""
+        bare = _bare(w)
+        s = skeleton(bare) if bare else ""
+        if len(s) >= 4 and s in self.skel and self.skel[s] - {"ar"}:
             return ""
         return None
 
@@ -572,18 +619,24 @@ LATIN_FORMS = frozenset({
 })
 
 
-def _latin_call(m):
+def _latin_call(m, learned=None):
     cue, word = " ".join(m.group("cue").casefold().split()), m.group("w")
     f = fold(word)
     if f in LATIN_FORMS or f in W.TITLES or is_stop(word) and not is_listed(word):
         return m.group(0)  # a form of address, or a title the title rule reads: Dear Mr Smith
     if cue in GREETINGS and not word[0].isupper() and not is_listed(word):
         return m.group(0)
+    if learned is not None:
+        learned.add(word)
     return m.group(0)[:m.start("w") - m.start()] + "[name]"
 
 
-def _ya(m):
-    return m.group(0)[:m.start(1) - m.start()] + "[name]" if hist._name_like(m.group(1)) else m.group(0)
+def _ya(m, learned=None):
+    if not hist._name_like(m.group(1)):
+        return m.group(0)
+    if learned is not None:
+        learned.add(m.group(1))
+    return m.group(0)[:m.start(1) - m.start()] + "[name]"
 
 
 # English titles that only ever come before a name: a lower case or Arabic word after them is a
@@ -632,9 +685,40 @@ def _chained(w):
     return not w.startswith("[") and (is_listed(w) or latin_capital(w) or arabic_name_like(w))
 
 
-def _cue_names(text):
+# "X here", "X معاك": a word at a message's start before one of these is a name (الشربيني معاك)
+SPEAKING = frozenset(fold(w) for w in ("معاك", "معاكي", "معاكم", "here", "m3ak", "ma3ak", "m3aki"))
+# words that come before a name and are no name: print Karim on it, the Franco name cues (esmy,
+# besm, el mostalem), the greetings before a name (thnx Karim)
+NOT_BESIDE = frozenset({"print", "write", "put", "add", "deliver", "ship", "gift", "named", "called", "saved",
+                        "esm", "esmy", "esmi", "ismy", "ismi", "esmo", "esmaha", "besm", "besmy", "bism",
+                        "recipient", "mostalem", "ya", *(g for g in GREETINGS if " " not in g),
+                        *map(fold, ("تاني", "ثاني", "تانيه", "برضو", "بردو", "خالص", "again", "tany", "tani"))})
+
+
+def name_shaped(word, lower=False):
+    """A word that can be a name beside a [name] (a surname with no cue): no common word (a stop
+    word, a form of address, a title, a cue word), Latin letters only, 3 or more, capitalised or
+    in a message typed in lower case (lower), or Arabic of 3 letters or more not shaped like a verb
+    and not starting with ا (an order to the store: اطبع, اكتب; a name with ا is on the first name
+    list); a word with ال is never a verb (الشربيني)."""
+    f = fold(word)
+    if word.startswith("[") or not word.isalpha() or is_stop(word) or f in LATIN_FORMS or f in W.TITLES \
+            or f.startswith("يا") and f[2:] in W.TITLES or f in W.DELIVERY_VERBS or f in W.RELATION \
+            or f in COMMON or f in W.WEAK or f in SPEAKING or f in NOT_BESIDE or f in ARTICLES:
+        return False
+    if ARABIC.search(word):
+        if f.startswith("ال"):
+            return len(f) >= 5
+        return len(f) >= 3 and not f.startswith("ا") and not verb_shaped(f)
+    return word.isascii() and len(word) >= 3 and (word[0].isupper() or lower)
+
+
+def _cue_names(text, learned=None, lower=None):
     """Step 9 after يا and hi: titles, weak and relation cues, a lone ل, listed first names,
-    then up to 2 name-like words after any [name]."""
+    then up to 2 name-like words after any [name], then one name-shaped word right before and
+    right after each [name] (Tawfik [name], [name] الشربيني), and a name-shaped word at the start
+    before معاك or here. learned: a set every word masked here joins. lower: the message as typed
+    had no capital letter (read off text when not given)."""
     toks = [(m.start(), m.end(), m.group(0)) for m in TOKEN.finditer(text)]
     if not toks:
         return text
@@ -693,6 +777,21 @@ def _cue_names(text):
             for j in (i + 1, i + 2):
                 if not take(j, _chained):
                     break
+    # beside a [name]: one name-shaped word right before it and one right after it, over spaces
+    # only; a word taken here takes no other (a lower case Latin word only in a lower case message)
+    lower = not re.search(r"[A-Z]", text) if lower is None else lower
+    named =[i for i in range(n) if i in mask or words[i] == "[name]"]
+    for i in named:
+        take(i + 1, lambda x: name_shaped(x, lower))
+        if i and spaced[i] and name_shaped(words[i - 1], lower):
+            mask.add(i - 1)
+        elif i > 1 and spaced[i] and spaced[i - 1] and folded[i - 1] in ("el", "al") \
+                and name_shaped(words[i - 2], lower):  # Nour el [name]
+            mask |= {i - 2, i - 1}
+    if n > 1 and folded[1] in SPEAKING and spaced[1] and name_shaped(words[0], True):  # الشربيني معاك
+        mask.add(0)
+    if learned is not None:
+        learned.update(words[i] for i in mask)
     if not mask:
         return text
     out, last = [], 0
@@ -760,10 +859,13 @@ class Cleaner:
             toks = _name_words(name)
             if not 2 <= len(toks) <= 6:
                 continue
-            self.full.add(tuple(map(fold, toks)))
-            sk = tuple(map(skeleton, toks))
-            if all(len(s) >= 2 for s in sk) and len("".join(sk)) >= 5:
-                self.skel.setdefault(sk, set()).add(_script(toks[0]))
+            for form in _forms(toks):  # Nourhan El Sherbiny also as Nourhan ElSherbiny: نورهان الشربيني
+                if len(form) < 2:
+                    continue
+                self.full.add(tuple(map(fold, form)))
+                sk = tuple(map(skeleton, form))
+                if all(len(s) >= 2 for s in sk) and len("".join(sk)) >= 5:
+                    self.skel.setdefault(sk, set()).add(_script(form[0]))
         self.longest = max(map(len, self.full), default=0)
 
     def chat(self, names=(), usernames=()):
@@ -812,6 +914,8 @@ class ChatCleaner:
 
     def __init__(self, parent, names=(), usernames=()):
         self.parent = parent
+        self.names = [n for n in names if isinstance(n, str)]
+        self.learned = set()  # words a cue showed as a name in this chat (texts)
         self.masker = hist.Masker([n for n in map(_without_common, names) if n])
         self.display = Display(names)
         users = sorted({normalize(u) for u in usernames if isinstance(u, str) and len(u) >= 3}, key=len, reverse=True)
@@ -822,6 +926,7 @@ class ChatCleaner:
         if not isinstance(text, str) or not text:
             return ""
         text = normalize(text)
+        lower = not re.search(r"[A-Z]", text)  # typed in lower case: a lower case word can be a name
         if "@" in text:
             text = hist.EMAIL.sub("[email]", text)
             text = SPACED_EMAIL.sub("[email]", text)
@@ -848,7 +953,7 @@ class ChatCleaner:
         text = HASH_ORDER.sub("[order]", text)
         text = ORDER_NUMBER.sub(_order, text)
         text = ORDER_BEFORE.sub(_order_before, text)
-        text = NAME_CUE.sub(_name_cue, text)
+        text = NAME_CUE.sub(lambda m: _name_cue(m, self.learned), text)
         text = self.parent.full_names(text)
         text = self.masker(text)
         text = self.display(text)
@@ -856,14 +961,34 @@ class ChatCleaner:
         text = places().sub("[place]", text)
         if short_place(text):
             return "[address]"
-        text = hist.YA.sub(_ya, text)
-        text = LATIN_CALL.sub(_latin_call, text)
-        text = _cue_names(text)
+        text = hist.YA.sub(lambda m: _ya(m, self.learned), text)
+        text = LATIN_CALL.sub(lambda m: _latin_call(m, self.learned), text)
+        text = _cue_names(text, self.learned, lower)
         return RUN.sub(r"[\1]", text)
+
+    MAX_ANSWER = 4  # words of an answer to the name question taken as the chat's name
 
     def texts(self, messages):
         """The cleaned text of each message of one chat ("" for none), with the chat-level rules
-        in the module notes: the answer to the name question, and the address window."""
+        in the module notes: the answer to the name question, and the address window. Every word a
+        cue showed as a name (after a name cue, يا, hi, a title, beside a [name], the answer to the
+        name question) joins the chat's names, and the chat is cleaned again with them, so a bare
+        surname is masked before and after the turn that showed it."""
+        out = self._texts(messages)
+        for _ in range(2):
+            display = Display(self.names + sorted(self.learned))
+            if display.words == self.display.words and display.skel == self.display.skel:
+                break
+            self.display = display
+            out = self._texts(messages)
+        return out
+
+    def _learn_answer(self, text):
+        words = TOKEN.findall(normalize(text))
+        if len(words) <= self.MAX_ANSWER:
+            self.learned.update(w for w in words if name_shaped(w, True) or is_listed(w))
+
+    def _texts(self, messages):
         out, ask_name, window = [], False, False
         for m in messages:
             if not m.text:
@@ -878,9 +1003,12 @@ class ChatCleaner:
                     ask_name, window = asks, address
                 out.append(self(m.text))
             elif window:  # the store asked name and address at once: the first answer is the name
+                if ask_name:
+                    self._learn_answer(m.text)
                 out.append("[name]" if ask_name else "[address]")
                 ask_name = False
             elif ask_name:  # open up to the store's next message: لحظة, then the name
+                self._learn_answer(m.text)
                 out.append("[name]")
             else:
                 got = self(m.text)

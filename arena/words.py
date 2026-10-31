@@ -106,6 +106,7 @@ gay ray7 nazel barra gowa ha5od hatlob otlob akkedly eb3at gazma ma2as lon se3r 
 salam ahlan el7amdolelah full name what where when how who which why can could will should do does did
 have has had get got send sent call message msg dm thx
 work home house office email mail gmail inbox kindly check
+regards best cheers sincerely warmly kind yours
 """
 PRODUCT_LA = """
 jacket jackets hoodie jersey shirt tshirt shorts pants bag cap dress leather waterproof original

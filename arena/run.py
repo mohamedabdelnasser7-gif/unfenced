@@ -11,7 +11,8 @@ passes at the level's "wins". With no --held-out, the held-out cards are a seede
 cards that can buy, spread over their worries; a card that will not buy is never a gate match.
 With --db the Arena practises on its own copy of the Sales agent's database (DECISIONS item 46):
 at the start of the run the live database is copied to <db>.arena beside it (arena_copy, replacing
-the last run's copy), and every case, lesson, exam and trial the run writes goes into the copy.
+the last run's copy, whose lessons that failed the eval gate and still wait come along with their
+exam rows, DECISIONS item 50), and every case, lesson, exam and trial the run writes goes into the copy.
 The live database changes only when a lesson passes the eval gate between rounds: that lesson
 alone is written to it, as the night study writes one there (arena/rounds.py hand_live). The
 Sales agent plays every match with the database's kept lessons handed, as the exam hands them,
@@ -87,6 +88,7 @@ import os
 import random
 import re
 import sqlite3
+import stat
 import sys
 import time
 import zoneinfo
@@ -536,29 +538,133 @@ class Arena:
 
 
 ARENA_SUFFIX = ".arena"
+SIDE_FILES = ("-wal", "-shm", "-journal")
+
+
+def _file_id(path):
+    """(st_dev, st_ino) of the file at path, following links; None when there is none."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return st.st_dev, st.st_ino
+
+
+def _failed_untried(old):
+    """The lessons of the last run's copy at old that failed the eval gate, never had a trial and
+    still wait (DECISIONS item 50), each as ({column: value}, {exam column: value}), oldest first.
+    Nothing to carry when old is not a regular file or not a database; Refused when it is a
+    database that cannot be read now (another run holding it)."""
+    try:
+        st = os.lstat(old)
+    except OSError:
+        return []
+    if not stat.S_ISREG(st.st_mode):
+        return []
+    try:
+        c = sqlite3.connect(str(old), timeout=5)
+        try:
+            c.row_factory = sqlite3.Row
+            have = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+            if not {"lessons", "lesson_exams"} <= have:
+                return []
+            tried = "AND l.id NOT IN (SELECT lesson_id FROM trials)" if "trials" in have else ""
+            rows = c.execute("SELECT l.id FROM lessons l JOIN lesson_exams e ON e.lesson_id = l.id "
+                             f"WHERE l.state = 'waiting' AND e.passed = 0 AND l.yes_at IS NULL {tried} "
+                             "ORDER BY l.id").fetchall()
+            out = []
+            for r in rows:
+                les = dict(c.execute("SELECT * FROM lessons WHERE id = ?", (r[0],)).fetchone())
+                exam = dict(c.execute("SELECT * FROM lesson_exams WHERE lesson_id = ?", (r[0],)).fetchone())
+                out.append((les, exam))
+            return out
+        finally:
+            c.close()
+    except sqlite3.OperationalError as e:
+        raise Refused(f"the last run's copy at {old} could not be read ({e}); is another Arena run using it?") from None
+    except sqlite3.DatabaseError:
+        return []  # not a database: it holds no lesson to carry
+
+
+def _carry(copy, carried):
+    """Write the carried lessons into the new copy, each as a new lesson with its exam row, unless
+    the copy already holds a lesson of that agent with the same words."""
+    from engine import exam as exam_mod
+    from engine import lessons as lessons_mod
+    from kit.db import Db
+    d = Db(str(copy))
+    try:
+        d.script(lessons_mod.SCHEMA)
+        exam_mod.ensure(d)
+        with d.tx() as c:
+            les_cols = {r[1] for r in c.execute("PRAGMA table_info(lessons)")} - {"id", "source_lesson_id"}
+            exam_cols = {r[1] for r in c.execute("PRAGMA table_info(lesson_exams)")} - {"lesson_id"}
+            for les, exam in carried:
+                if c.execute("SELECT 1 FROM lessons WHERE agent = ? AND text = ?",
+                             (les["agent"], les["text"])).fetchone() is not None:
+                    continue
+                cols = [k for k in les if k in les_cols]
+                new_id = c.execute(f"INSERT INTO lessons ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                                   [les[k] for k in cols]).lastrowid
+                cols = [k for k in exam if k in exam_cols]
+                c.execute(f"INSERT INTO lesson_exams (lesson_id, {', '.join(cols)}) "
+                          f"VALUES (?, {', '.join('?' * len(cols))})", [new_id, *(exam[k] for k in cols)])
+    finally:
+        d.close()
 
 
 def arena_copy(db):
     """Copy the live database at db to the Arena's own, <db>.arena beside it, through SQLite's
     backup (a whole, consistent copy while the live agent keeps writing), replacing the last run's
-    copy and its side files. Returns the copy's path. The live database is only read."""
+    copy and its side files. Returns the copy's path. The live database is only read.
+
+    Refused, before anything is removed, when the copy's name or one of its side files is the live
+    database or one of its side files under another name (a link either way). The new copy is made
+    as a new file (O_EXCL and O_NOFOLLOW, mode 0600), so a link planted at its name is never written
+    through. The lessons of the last copy that failed the eval gate, never had a trial and still
+    wait are carried into the new copy with their exam rows (DECISIONS item 50), so a line refused
+    in one run is not written and passed in the next."""
     live = Path(db)
     copy = live.with_name(live.name + ARENA_SUFFIX)
-    for p in (copy, *(copy.with_name(copy.name + s) for s in ("-wal", "-shm", "-journal"))):
+    live_ids = {i for i in (_file_id(p) for p in (live, *(live.with_name(live.name + s) for s in SIDE_FILES)))
+                if i is not None}
+    if _file_id(live) is None:
+        raise Refused(f"the database at {db} could not be copied for the Arena: no file there")
+    olds = (copy, *(copy.with_name(copy.name + s) for s in SIDE_FILES))
+    for p in olds:
+        if _file_id(p) in live_ids:
+            raise Refused(f"the Arena's copy {p} is the live database under another name; remove that link first")
+    carried = _failed_untried(copy)
+    for p in olds:
         if p.is_symlink() or p.exists():
             p.unlink()
     try:
-        src = sqlite3.connect(f"{live.resolve().as_uri()}?mode=ro", uri=True)
+        fd = os.open(copy, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    except OSError as e:
+        raise Refused(f"the Arena's copy {copy} could not be made as a new file: {e}") from None
+    try:
+        os.fchmod(fd, 0o600)
+        made = os.fstat(fd)
         try:
-            dst = sqlite3.connect(str(copy))
+            src = sqlite3.connect(f"{live.resolve().as_uri()}?mode=ro", uri=True)
             try:
-                src.backup(dst)
+                if _file_id(copy) != (made.st_dev, made.st_ino) or os.path.islink(copy):
+                    raise Refused(f"the Arena's copy {copy} was replaced while it was made")
+                if _file_id(live) == (made.st_dev, made.st_ino):
+                    raise Refused(f"the Arena's copy {copy} is the live database under another name")
+                dst = sqlite3.connect(str(copy))
+                try:
+                    src.backup(dst)
+                finally:
+                    dst.close()
             finally:
-                dst.close()
-        finally:
-            src.close()
-    except sqlite3.Error as e:
-        raise Refused(f"the database at {db} could not be copied for the Arena: {e}") from None
+                src.close()
+            if carried:
+                _carry(copy, carried)
+        except sqlite3.Error as e:
+            raise Refused(f"the database at {db} could not be copied for the Arena: {e}") from None
+    finally:
+        os.close(fd)
     return copy
 
 
@@ -728,7 +834,7 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
     ap.add_argument("--cap", type=int, default=DEFAULT_CAP, help="model calls a day")
     ap.add_argument("--state", default=None, help="the folder for the call count and the matches, for a run with no --db")
     ap.add_argument("--db", default=None, help="the Sales agent's database: the Arena practises on its copy, <db>.arena beside it")
-    ap.add_argument("--replay", default=None, help="the persona build's replay.jsonl, outside the repo")
+    ap.add_argument("--replay", default=None, help="the persona build's replay.jsonl: outside the repo, or the cleaned set arena/real/replay.jsonl")
     ap.add_argument("--replay-max", type=int, default=replay_mod.MAX_REPLAYS, help="real lost chats to replay")
     ap.add_argument("--fact-checks", choices=("on", "off"), default=None)
     ap.add_argument("--seed", type=int, default=0)

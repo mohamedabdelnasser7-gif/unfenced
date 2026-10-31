@@ -1,0 +1,51 @@
+{
+ "id": "persona-08",
+ "worry": "design",
+ "unwinnable": false,
+ "why_unwinnable": null,
+ "want": [
+  "customized boots",
+  "f50 pro ag boots size 42 2/3",
+  "custom white cleats with name flag"
+ ],
+ "buy_trigger": [
+  "seeing available boot designs",
+  "having f50 pro ag in stock",
+  "seeing photos of previous prints"
+ ],
+ "patience": {
+  "median": 1,
+  "most": 1
+ },
+ "style": {
+  "length": {
+   "short": 0.4,
+   "medium": 0.6,
+   "long": 0.0
+  },
+  "language": {
+   "arabic": 0.35,
+   "franco": 0.11,
+   "english": 0.54
+  },
+  "voice_notes": 0.0,
+  "opening": {
+   "voice note": 0.0,
+   "photo or link": 0.6,
+   "price": 0.4,
+   "size": 0.0,
+   "availability": 0.0,
+   "greeting": 0.0,
+   "other": 0.0
+  }
+ },
+ "chats": 5,
+ "won": 1,
+ "lost": 4,
+ "examples": [
+  "How much is the customization?",
+  "Is there f50 pro ag boots"
+ ],
+ "share": 0.017,
+ "arena_weight": 0.149
+}

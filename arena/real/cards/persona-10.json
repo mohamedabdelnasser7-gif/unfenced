@@ -1,0 +1,46 @@
+{
+ "id": "persona-10",
+ "worry": "print lasts",
+ "unwinnable": false,
+ "why_unwinnable": null,
+ "want": [
+  "custom stickers for personal items"
+ ],
+ "buy_trigger": [
+  "proven durability guarantee with time estimate"
+ ],
+ "patience": {
+  "median": 1,
+  "most": 1
+ },
+ "style": {
+  "length": {
+   "short": 0.0,
+   "medium": 1.0,
+   "long": 0.0
+  },
+  "language": {
+   "arabic": 0.5,
+   "franco": 0.0,
+   "english": 0.5
+  },
+  "voice_notes": 0.0,
+  "opening": {
+   "voice note": 0.0,
+   "photo or link": 1.0,
+   "price": 0.0,
+   "size": 0.0,
+   "availability": 0.0,
+   "greeting": 0.0,
+   "other": 0.0
+  }
+ },
+ "chats": 1,
+ "won": 0,
+ "lost": 1,
+ "examples": [
+  "How much is the customization?"
+ ],
+ "share": 0.003,
+ "arena_weight": 0.0
+}

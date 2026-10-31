@@ -1,0 +1,69 @@
+{
+ "recipe": "own",
+ "recipe_sha256": "74fbaa954209",
+ "model": "Baseten meta-models/muse-spark-open-1026",
+ "read": {
+  "whatsapp_chats": 0,
+  "instagram_chats": 5000,
+  "messages": 52265
+ },
+ "not_read": [
+  {
+   "kind": "instagram",
+   "why": "over the file count cap",
+   "files": 4527
+  }
+ ],
+ "team": {
+  "from": "found",
+  "names": 1
+ },
+ "labels": {
+  "won": 81,
+  "lost": 3003,
+  "unclear": 1916
+ },
+ "why": {
+  "lost: quiet after the price": 3003,
+  "unclear: cancelled after the won sign": 3,
+  "unclear: last customer message is a voice note": 19,
+  "unclear: last customer message not answered": 368,
+  "unclear: no store reply": 13,
+  "unclear: quiet with no price given": 1479,
+  "unclear: still open": 2,
+  "unclear: voice note after the won sign": 22,
+  "unclear: won sign before any price": 10,
+  "won: address sent": 59,
+  "won: order confirmed by the customer": 15,
+  "won: order confirmed by the store": 7
+ },
+ "tagging": {
+  "cap": 1000,
+  "limit": 300,
+  "picked": 300,
+  "calls": 300,
+  "failed": 0,
+  "bad_answers": 0,
+  "tagged": 300,
+  "not_tagged": 0,
+  "stopped": null,
+  "last_error": null
+ },
+ "cards": {
+  "cards": 10,
+  "unwinnable_cards": 2,
+  "tagged_chats": 300,
+  "unwinnable_chats": 19,
+  "unwinnable_share_real": 0.063,
+  "unwinnable_share_used": 0.063,
+  "capped_wants": [
+   {
+    "name": "name printing",
+    "most": 0.25,
+    "share_real": 0.897,
+    "share_used": 0.247
+   }
+  ]
+ },
+ "replay_chats": 3084
+}

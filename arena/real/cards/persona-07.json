@@ -1,0 +1,52 @@
+{
+ "id": "persona-07",
+ "worry": "other",
+ "unwinnable": false,
+ "why_unwinnable": null,
+ "want": [
+  "custom shoes with egypt flag and name",
+  "buy mercurial bag separately only",
+  "custom design printing service"
+ ],
+ "buy_trigger": [
+  "home pickup and delivery service",
+  "allow selling bag separately",
+  "shop printing instead of diy"
+ ],
+ "patience": {
+  "median": 0.0,
+  "most": 1
+ },
+ "style": {
+  "length": {
+   "short": 0.33,
+   "medium": 0.67,
+   "long": 0.0
+  },
+  "language": {
+   "arabic": 0.46,
+   "franco": 0.0,
+   "english": 0.54
+  },
+  "voice_notes": 0.0,
+  "opening": {
+   "voice note": 0.0,
+   "photo or link": 0.83,
+   "price": 0.0,
+   "size": 0.0,
+   "availability": 0.0,
+   "greeting": 0.0,
+   "other": 0.17
+  }
+ },
+ "chats": 6,
+ "won": 1,
+ "lost": 5,
+ "examples": [
+  "يكون علم مصر و اسم ادم",
+  "بكام الاستارز اللي في الاستوري؟",
+  "How much is the customization?"
+ ],
+ "share": 0.02,
+ "arena_weight": 0.005
+}

@@ -1,0 +1,53 @@
+{
+ "id": "persona-05",
+ "worry": "size",
+ "unwinnable": false,
+ "why_unwinnable": null,
+ "want": [
+  "size 46 nike [name] boots",
+  "vapor elite [name] boots size 46",
+  "new blue mercurial size 39"
+ ],
+ "buy_trigger": [
+  "confirmed size 46 in stock",
+  "confirmed size 46 availability",
+  "confirming size 39 availability"
+ ],
+ "patience": {
+  "median": 1,
+  "most": 2
+ },
+ "style": {
+  "length": {
+   "short": 0.86,
+   "medium": 0.14,
+   "long": 0.0
+  },
+  "language": {
+   "arabic": 0.34,
+   "franco": 0.0,
+   "english": 0.66
+  },
+  "voice_notes": 0.0,
+  "opening": {
+   "voice note": 0.0,
+   "photo or link": 0.71,
+   "price": 0.14,
+   "size": 0.14,
+   "availability": 0.0,
+   "greeting": 0.0,
+   "other": 0.0
+  }
+ },
+ "chats": 7,
+ "won": 1,
+ "lost": 6,
+ "examples": [
+  "whats the sizes that are available",
+  "لو سمحت هي المركريال الجديده الزرقه أقل مقاس فيها كام وهي بكام",
+  "لوسمحت فيه استارزات مقاس 46",
+  "Do you have my size in stock?"
+ ],
+ "share": 0.023,
+ "arena_weight": 0.202
+}

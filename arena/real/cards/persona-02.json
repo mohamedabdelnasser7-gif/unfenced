@@ -1,0 +1,53 @@
+{
+ "id": "persona-02",
+ "worry": "delivery time",
+ "unwinnable": false,
+ "why_unwinnable": null,
+ "want": [
+  "custom name stickers with emojis for shoes",
+  "custom printed shoes with letters design",
+  "[name] boots size 41"
+ ],
+ "buy_trigger": [
+  "guaranteed delivery before eid",
+  "faster delivery for custom print",
+  "clear delivery time answer"
+ ],
+ "patience": {
+  "median": 1,
+  "most": 4
+ },
+ "style": {
+  "length": {
+   "short": 0.87,
+   "medium": 0.13,
+   "long": 0.0
+  },
+  "language": {
+   "arabic": 0.28,
+   "franco": 0.02,
+   "english": 0.69
+  },
+  "voice_notes": 0.0,
+  "opening": {
+   "voice note": 0.0,
+   "photo or link": 0.4,
+   "price": 0.27,
+   "size": 0.0,
+   "availability": 0.07,
+   "greeting": 0.0,
+   "other": 0.27
+  }
+ },
+ "chats": 15,
+ "won": 3,
+ "lost": 12,
+ "examples": [
+  "How long does delivery take?",
+  "How long will the shipment take?",
+  "Okay when does it get delivered?",
+  "when is it coming?"
+ ],
+ "share": 0.05,
+ "arena_weight": 0.013
+}

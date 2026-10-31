@@ -1,0 +1,48 @@
+{
+ "id": "persona-09",
+ "worry": "cash on delivery",
+ "unwinnable": false,
+ "why_unwinnable": null,
+ "want": [
+  "dress without neck collar",
+  "nike mercurial vapor elite size 41"
+ ],
+ "buy_trigger": [
+  "cash on delivery no deposit",
+  "cash on delivery with no deposit"
+ ],
+ "patience": {
+  "median": 0.0,
+  "most": 0
+ },
+ "style": {
+  "length": {
+   "short": 1.0,
+   "medium": 0.0,
+   "long": 0.0
+  },
+  "language": {
+   "arabic": 0.17,
+   "franco": 0.0,
+   "english": 0.83
+  },
+  "voice_notes": 0.19,
+  "opening": {
+   "voice note": 0.0,
+   "photo or link": 1.0,
+   "price": 0.0,
+   "size": 0.0,
+   "availability": 0.0,
+   "greeting": 0.0,
+   "other": 0.0
+  }
+ },
+ "chats": 2,
+ "won": 0,
+ "lost": 2,
+ "examples": [
+  "موجود من غير رقبه"
+ ],
+ "share": 0.007,
+ "arena_weight": 0.061
+}

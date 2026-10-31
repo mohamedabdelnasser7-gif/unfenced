@@ -1,0 +1,53 @@
+{
+ "id": "persona-01",
+ "worry": "price",
+ "unwinnable": false,
+ "why_unwinnable": null,
+ "want": [
+  "custom name stickers for shoes",
+  "custom name stickers for cleats",
+  "adidas f50 messi [name] boots"
+ ],
+ "buy_trigger": [
+  "lower price or discount offer",
+  "lower price or discount",
+  "lower price or installment option"
+ ],
+ "patience": {
+  "median": 1,
+  "most": 3
+ },
+ "style": {
+  "length": {
+   "short": 0.66,
+   "medium": 0.33,
+   "long": 0.01
+  },
+  "language": {
+   "arabic": 0.28,
+   "franco": 0.07,
+   "english": 0.65
+  },
+  "voice_notes": 0.0,
+  "opening": {
+   "voice note": 0.0,
+   "photo or link": 0.47,
+   "price": 0.39,
+   "size": 0.0,
+   "availability": 0.01,
+   "greeting": 0.02,
+   "other": 0.11
+  }
+ },
+ "chats": 235,
+ "won": 1,
+ "lost": 234,
+ "examples": [
+  "Aywa hateb2a bkam ya3ni",
+  "هل يمكنك التحقق من سعر منتج ما؟",
+  "What is the price of F50?",
+  "What’s the price?"
+ ],
+ "share": 0.783,
+ "arena_weight": 0.218
+}

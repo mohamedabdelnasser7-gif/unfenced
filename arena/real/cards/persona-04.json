@@ -1,0 +1,53 @@
+{
+ "id": "persona-04",
+ "worry": "trust",
+ "unwinnable": false,
+ "why_unwinnable": null,
+ "want": [
+  "customized item with name and emoji",
+  "nike mercurial vapor elite [name] boots",
+  "custom phantom boot with customization service"
+ ],
+ "buy_trigger": [
+  "reassurance about online-only store legitimacy",
+  "reassurance deposit guarantees custom order legitimacy",
+  "store offering to apply customization themselves"
+ ],
+ "patience": {
+  "median": 1.0,
+  "most": 3
+ },
+ "style": {
+  "length": {
+   "short": 0.6,
+   "medium": 0.4,
+   "long": 0.0
+  },
+  "language": {
+   "arabic": 0.61,
+   "franco": 0.0,
+   "english": 0.39
+  },
+  "voice_notes": 0.0,
+  "opening": {
+   "voice note": 0.0,
+   "photo or link": 0.5,
+   "price": 0.3,
+   "size": 0.0,
+   "availability": 0.0,
+   "greeting": 0.1,
+   "other": 0.1
+  }
+ },
+ "chats": 10,
+ "won": 1,
+ "lost": 9,
+ "examples": [
+  "حضرتك في فروع للمحل فين",
+  "Can you show me a picture ?",
+  "Can I make a purchase?",
+  "How much is the customization?"
+ ],
+ "share": 0.033,
+ "arena_weight": 0.289
+}

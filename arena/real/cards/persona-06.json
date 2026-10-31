@@ -1,0 +1,53 @@
+{
+ "id": "persona-06",
+ "worry": "price",
+ "unwinnable": true,
+ "why_unwinnable": "no budget",
+ "want": [
+  "nike mercurial [name] boots size 46",
+  "original shoes size 42-43 with customization",
+  "adidas f50 hyperfast [name] boots"
+ ],
+ "buy_trigger": [
+  "lower price or cheaper alternative",
+  "option within 3000 egp budget",
+  "option under 5000 egp budget"
+ ],
+ "patience": {
+  "median": 1,
+  "most": 3
+ },
+ "style": {
+  "length": {
+   "short": 1.0,
+   "medium": 0.0,
+   "long": 0.0
+  },
+  "language": {
+   "arabic": 0.68,
+   "franco": 0.01,
+   "english": 0.3
+  },
+  "voice_notes": 0.0,
+  "opening": {
+   "voice note": 0.0,
+   "photo or link": 0.29,
+   "price": 0.29,
+   "size": 0.0,
+   "availability": 0.14,
+   "greeting": 0.0,
+   "other": 0.29
+  }
+ },
+ "chats": 7,
+ "won": 0,
+ "lost": 7,
+ "examples": [
+  "بكام لو سمحت",
+  "What’s the price?",
+  "I'm interested. Can you tell me more?",
+  "Hi is this available?"
+ ],
+ "share": 0.023,
+ "arena_weight": 0.052
+}

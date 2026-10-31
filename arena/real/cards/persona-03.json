@@ -1,0 +1,53 @@
+{
+ "id": "persona-03",
+ "worry": "just browsing",
+ "unwinnable": true,
+ "why_unwinnable": "just browsing",
+ "want": [
+  "custom name printing on cleats",
+  "custom stickers for [name] cleats",
+  "custom name stickers for shoes"
+ ],
+ "buy_trigger": [
+  "lower total price including shipping",
+  "seeing examples of finished customization",
+  "discount offer for immediate order"
+ ],
+ "patience": {
+  "median": 0.0,
+  "most": 1
+ },
+ "style": {
+  "length": {
+   "short": 0.83,
+   "medium": 0.17,
+   "long": 0.0
+  },
+  "language": {
+   "arabic": 0.08,
+   "franco": 0.05,
+   "english": 0.78
+  },
+  "voice_notes": 0.0,
+  "opening": {
+   "voice note": 0.0,
+   "photo or link": 0.5,
+   "price": 0.08,
+   "size": 0.0,
+   "availability": 0.0,
+   "greeting": 0.08,
+   "other": 0.33
+  }
+ },
+ "chats": 12,
+ "won": 0,
+ "lost": 12,
+ "examples": [
+  "How much is the customization?",
+  "Can I add emojis ?",
+  "F50 Messi prices",
+  "مرحبا، هل يمكنني الحصول على مزيد من المعلومات حول هذا؟"
+ ],
+ "share": 0.04,
+ "arena_weight": 0.011
+}

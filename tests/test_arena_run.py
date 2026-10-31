@@ -253,7 +253,8 @@ class Parts(Base):
         level = re.compile(r"""["']matches["']\s*:\s*(\d+)\s*,\s*["']wins["']\s*:\s*(\d+)""")
         seen = 0
         for folder, dirs, files in os.walk(REPO):
-            dirs[:] = [d for d in dirs if d not in (".git", "data", "__pycache__")]
+            dirs[:] = [d for d in dirs if d not in (".git", "data", "__pycache__")
+                       and Path(folder, d) != REPO / "arena" / "real"]  # tests never read arena/real/
             for name in files:
                 path = Path(folder) / name
                 if path.suffix not in TEXT or name == ".git":
@@ -284,7 +285,7 @@ class Parts(Base):
         Db(str(db)).close()
         with contextlib.redirect_stdout(io.StringIO()):
             code = run.main(["--matches", "1", "--rounds", "1", "--db", str(db), "--json"], agent_model=Agent(),
-                            customer_model=Customer(buyers={c["worry"] for c in run.load_cards(run.DEFAULT_CARDS)}))
+                            customer_model=Customer(buyers={c["worry"] for c in run.load_cards(run.DEMO_CARDS)}))
         self.assertEqual(code, 0)
         names = sorted(p.name for p in folder.iterdir() if p.name.startswith("arena-"))
         self.assertEqual(names, [run.CALLS_FILE, "arena-calls.lock", run.MATCHES_FILE])
@@ -320,7 +321,7 @@ class Parts(Base):
         agent = Seen()
         with contextlib.redirect_stdout(io.StringIO()):
             run.main(["--matches", "1", "--rounds", "1", "--db", str(db), "--json"], agent_model=agent,
-                     customer_model=Customer(buyers={c["worry"] for c in run.load_cards(run.DEFAULT_CARDS)}))
+                     customer_model=Customer(buyers={c["worry"] for c in run.load_cards(run.DEMO_CARDS)}))
         self.assertTrue(agent.systems)
         self.assertTrue(all(lesson in s for s in agent.systems), agent.systems[0])
 
@@ -382,7 +383,7 @@ class HeldOut(Base):
     cards are spread over worries."""
 
     def test_a_perfect_agent_passes_the_public_level_in_round_one_on_every_seed(self):
-        cards = run.load_cards(run.DEFAULT_CARDS)
+        cards = run.load_cards(run.DEMO_CARDS)
         self.assertTrue(any(c["unwinnable"] for c in cards))  # the demo cards hold unwinnable ones
         for seed in range(10):
             with self.subTest(seed=seed):
@@ -497,7 +498,7 @@ class HistoryLessons(Base):
         agent = Agent()
         with contextlib.redirect_stderr(io.StringIO()) as err, contextlib.redirect_stdout(io.StringIO()):
             code = run.main(["--matches", "1", "--rounds", "1", "--db", str(self.db), "--json"], agent_model=agent,
-                            customer_model=Customer(buyers={c["worry"] for c in run.load_cards(run.DEFAULT_CARDS)}))
+                            customer_model=Customer(buyers={c["worry"] for c in run.load_cards(run.DEMO_CARDS)}))
         return code, err.getvalue(), agent.calls
 
     def test_imported_rows_and_arena_lessons_run(self):

@@ -13,9 +13,10 @@ opening and the persona goes on from there, through the same match as the person
 model call cap. A chat is skipped, never guessed, when it has no worry tag, no card with its
 worry, only a card that will not buy, or no customer words before the store's first reply.
 
-The replay set holds real chat text, so the file must sit outside the repo (DECISIONS item
-17). The demo replays the set built from the made-up chats (demo/make_arena_history.py), never
-real ones.
+Cleaned real chat lines (names, numbers and addresses removed) may sit in the repo (DECISIONS
+item 23; only the original lines stay out): arena/real/replay.jsonl is the cleaned replay set.
+load() still refuses a file inside the repo, so a run names a copy outside it. The tests use the
+set built from the made-up chats (demo/make_arena_history.py) and never read arena/real/.
 """
 import json
 from pathlib import Path

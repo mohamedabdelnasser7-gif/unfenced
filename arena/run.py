@@ -32,11 +32,17 @@ the run. The report gives each round's lessons proposed, passed, refused and han
 gate wins, and the same rows go to the Morning page in the run's item (arena_rounds, or the stuck
 item when it got stuck). With no --db there is no step between rounds.
 
---replay names the persona build's replay.jsonl (outside the repo): once the gate passes, the
-Sales agent replays up to --replay-max real lost chats, each from the customer's real opening
-against the persona card with the chat's worry (arena/replay.py), scored with the same fact
-checks and verdict and counted against the same cap. A lost replay becomes a case too. The demo
-replays the set built from the made-up chats only.
+--replay names the persona build's replay.jsonl: once the gate passes, the Sales agent replays up
+to --replay-max real lost chats, each from the customer's real opening against the persona card
+with the chat's worry (arena/replay.py), scored with the same fact checks and verdict and counted
+against the same cap. A lost replay becomes a case too. Cleaned real chat lines (names, numbers
+and addresses removed) may sit in the repo (DECISIONS item 23): arena/real/replay.jsonl is the
+cleaned replay set, beside the cleaned real cards. arena/replay.py load() still refuses a file
+inside the repo, so a run names a copy outside it.
+
+--cards defaults to the cleaned real cards (DEFAULT_CARDS, arena/real/cards; DECISIONS items 23
+and 40). The made-up set is DEMO_CARDS (demo/personas/cards); the tests use it and never read
+arena/real/.
 
 Model calls: every call of the agent and of the customer counts against the cap a day (Cairo
 day), default 1000, saved in arena-calls.json after each call under a lock (arena-calls.lock), so
@@ -87,7 +93,8 @@ from arena import factcheck, match as match_mod, paths, replay as replay_mod, ve
 from reflection import history as hist  # noqa: E402
 
 AGENT = "sales"
-DEFAULT_CARDS = ROOT / "demo" / "personas" / "cards"
+DEFAULT_CARDS = ROOT / "arena" / "real" / "cards"  # the cleaned real cards (DECISIONS items 23 and 40)
+DEMO_CARDS = ROOT / "demo" / "personas" / "cards"  # the made-up set: the tests use it
 CALLS_FILE, MATCHES_FILE = "arena-calls.json", "arena-matches.jsonl"
 DEFAULT_CAP = 1000
 DEFAULT_ROUNDS = 5

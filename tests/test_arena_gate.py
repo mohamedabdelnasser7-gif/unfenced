@@ -209,7 +209,7 @@ class Gate(unittest.TestCase):
         private.write_text("A private prompt. Your worry is $worry.", encoding="utf-8")
         db = self.dir / "ascent.db"
         Db(str(db)).close()
-        buyers = {c["worry"] for c in run.load_cards(run.DEFAULT_CARDS)}
+        buyers = {c["worry"] for c in run.load_cards(run.DEMO_CARDS)}
         with contextlib.redirect_stdout(io.StringIO()):
             code = run.main(["--matches", "1", "--rounds", "1", "--db", str(db), "--customer-prompt", str(private),
                              "--json"], agent_model=Agent(), customer_model=Customer(buyers=buyers))

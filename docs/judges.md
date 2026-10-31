@@ -1,7 +1,7 @@
 # For judges
 *Created: 2026-10-31. Last updated: 2026-10-31.*
 
-Every model this project calls is a Meta model: Muse Spark on the Meta Model API, or Muse Spark Open on Baseten. You do not need to connect any other account. The store, its orders and its customers are all made up.
+Every model this project calls is a Meta model: Muse Spark on the Meta Model API, or Muse Spark Open on Baseten. You do not need to connect any other account. The store name is made up; the products and prices are real; the practice customers are built from real chats with names, numbers and addresses removed.
 
 ## Setup
 

@@ -785,6 +785,21 @@ class ProductWordsBesideNames(Check):
         self.assertEqual(tag_mod._field("Nike Mercurial size 43", c), "Nike Mercurial size 43")
         self.assertEqual(tag_mod._field("a black jacket", c), "a black jacket")
 
+
+class FloorPattern(unittest.TestCase):
+    """The floor rule reads at most 3 digits before st, nd, rd or th, so a long run of digits is
+    read in linear time (round 3 of the feed, 2026-10-31)."""
+
+    def test_a_long_digit_run_finishes_fast(self):
+        started = time.monotonic()
+        self.assertIsNone(cl.FLOOR.search("1" * 20000))
+        self.assertLess(time.monotonic() - started, 0.1)
+
+    def test_a_floor_is_still_read(self):
+        for text in ("3rd floor", "12th floor", "the 101st floor"):
+            with self.subTest(text=text):
+                self.assertTrue(cl.FLOOR.search(text))
+
 class Examples(unittest.TestCase):
     def test_lines_refused(self):
         for line in ["العنوان: 12 شارع التجربة", "شكرا يا حمادة على الرد", "الكود 12345 مش شغال",

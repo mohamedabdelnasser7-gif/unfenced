@@ -225,7 +225,7 @@ ORDINAL_LA = (r"(?:el\s?)?(?:first|second|third|fourth|fifth|sixth|seventh|eight
               r"|talet|rabe3|khames|sades|sabe3|tamen|tase3|3asher|ardy|ardi)")
 FLOOR = re.compile(LETTER_BEFORE + r"(?:(?:(?:و|ف|ب)?(?:ال)?(?:دور|طابق)\s+" + ORDINAL_AR + r")"
                    r"|(?:(?:el\s?)?(?:dor|floor)\s+" + ORDINAL_LA + r")"
-                   r"|(?:(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|ground|top|\d+(?:st|nd|rd|th))"
+                   r"|(?:(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|ground|top|\d{1,3}(?:st|nd|rd|th))"
                    r"\s+floor))" + NO_LETTER_AFTER, re.IGNORECASE)
 COORDS = re.compile(r"(?<![\d.])-?\d{1,3}\.\d{3,}\s*[,،؛;]?\s*-?\d{1,3}\.\d{3,}(?![\d.])"
                     r"|\d{1,3}\s*°\s*\d{1,2}\s*['′]\s*\d{1,2}(?:\.\d+)?\s*[\"″]?\s*[NSEW]"

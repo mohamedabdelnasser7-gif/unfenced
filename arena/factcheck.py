@@ -7,8 +7,13 @@ price     every amount in the reply (kit/send_check.py prices_in) is a price of 
           the reply names (Elite, Pro; else one the customer's line names) narrows the prices to
           that tier's, and in a clause that names one tier its amounts must be that tier's prices:
           the Pro price given for an Elite boot is a wrong price. An extra (store.extras: the name
-          printing) goes on any product, so its price counts whatever product the reply names, and
-          so do a price plus an extra, with or without one fee (2026-10-31).
+          printing) goes on any product, so a price plus an extra, with or without one fee, counts
+          whatever product the reply names (2026-10-31). The extra's own price counts only in a
+          clause that names the extra (extras_named: its title, type and description words, with
+          their Arabic and Franco spellings), or in a clause that names no product and no tier
+          when the reply names the extra elsewhere (or, naming nothing, the customer's line does):
+          "The Vapor 17 Elite is 400 EGP" fails, "الطباعة 400 جنيه" passes (2026-10-31). A model
+          number in a product's title (the 17 in Vapor 17, the 50 in F50) is never an amount.
 size      a size number after a size word (مقاس 43, size 43, EU 43) fits a size of a product
           the reply names, or of any product when it names none.
 stock     a reply that says a named product (and size, when it gives one) is available while
@@ -96,6 +101,15 @@ SENTENCE = re.compile(r"[^.!?؟\n]+")
 # a clause for the tier rule: cut at an end mark, a new line, ؛ ; ، or a comma that is not inside
 # a number (16,500 stays whole); a decimal point does not end it
 TIER_CLAUSE = re.compile(r"(?:[^.!?؟\n,،;؛]|(?<=\d)[.,](?=\d))+")
+# Arabic and Franco spellings of an English word stem. Used only for a stem an extra's own title,
+# type or description carries (extra_words), so an extra with none of these stems gets none of them.
+STEM_FORMS = {
+    "print": r"[وف]?(?:بال|لل|ال|ب|ل)?طباع[ةه]?|[وف]?[هب]?[نتياأ]{0,2}طبع\w*|[وف]?(?:بال|ال)?مطبوع\w*"
+             r"|\w{0,3}t[ie]?ba3\w*",
+    "name": r"[وف]?(?:بال|لل|ال|ب|ل)?[اإأ]سم(?:ك|كم|كي|ي|ه|ها|نا|ين)?|[ie]sm(?:ak|ek|ik|y|i|o|ena|ko)?",
+    "sticker": r"[وف]?(?:بال|لل|ال|ب|ل)?[اإ]?ستيكر\w*|e?sti(?:c?k|ck)er\w*",
+}
+EXTRA_DESCRIPTION_LETTERS = 5   # a description word this long or longer names its extra ("stickers", not "with")
 
 
 def _words(text):
@@ -115,6 +129,69 @@ def products_named(text, items):
     # a title whose words all sit inside a longer named title ("Phantom" inside "Phantom Club")
     # gives way to the longer one; keep the longest titles only
     return [i for i in out if not any(o is not i and _words(i["title"]) < _words(o["title"]) for o in out)]
+
+
+def _stem(word):
+    for end in ("ing", "ed", "s"):
+        if word.endswith(end) and len(word) - len(end) >= 3:
+            return word[:-len(end)]
+    return word
+
+
+def extra_words(extra, items):
+    """The word stems that name an extra, from its own data: its title words after the store name
+    and its type ("name", "print"), and its description's long words that no other product's title,
+    type or description uses and that are no tier or delivery word ("sticker" from "two stickers")."""
+    def text_words(item, fields):
+        text = " ".join(str(item.get(f) or "") for f in fields).casefold()
+        return re.findall(r"[a-z]+", text.replace(STORE_NAME, ""))
+    others = set()
+    for i in items:
+        if i is not extra:
+            others |= set(text_words(i, ("title", "type", "description")))
+    tiers = {t.casefold() for t in store.tiers()}
+    own = set(text_words(extra, ("title", "type")))
+    own |= {w for w in text_words(extra, ("description",)) if len(w) >= EXTRA_DESCRIPTION_LETTERS
+            and w not in others and w not in tiers and not DELIVERY.fullmatch(w)}
+    return sorted({_stem(w) for w in own if len(w) >= 3})
+
+
+def extras_named(text, extras, items, kind=False):
+    """The extras whose words (extra_words, in English or with their STEM_FORMS spellings) show in text:
+    "printing", "your name", "two stickers", "الطباعة", "اسمك", "استيكرين". With kind, only the words
+    of the extra's type ("Printing": "printing", "الطباعة", not "your name", which an order asks for)."""
+    out = []
+    for e in extras:
+        stems = sorted({_stem(w) for w in re.findall(r"[a-z]+", str(e.get("type") or "").casefold())
+                        if len(w) >= 3}) if kind else extra_words(e, items)
+        forms = [re.escape(s) + r"[a-z]*" for s in stems] + [STEM_FORMS[s] for s in stems if s in STEM_FORMS]
+        if forms and re.search(r"(?<!\w)(?:" + "|".join(forms) + r")(?!\w)", text or "", re.IGNORECASE):
+            out.append(e)
+    return out
+
+
+def model_numbers(items):
+    """For each title number, the pattern of it with the title word it belongs to: "vapor 17", "f50"."""
+    out = []
+    for item in items:
+        words = re.findall(r"[^\W_]+", (item.get("title") or "").casefold())
+        for k, w in enumerate(words):
+            m = re.fullmatch(r"([a-z]*)(\d+)", w)
+            if not m:
+                continue
+            lead = m.group(1) or (words[k - 1] if k and re.fullmatch(r"[a-z]+", words[k - 1]) else "")
+            if lead:
+                out.append(r"(?<!\w)(" + re.escape(lead) + r")[\s-]*" + m.group(2) + r"(?!\d|[.,]\d)")
+    return out
+
+
+def without_model_numbers(text, items):
+    """text with each product's model number dropped where it follows its title word, so "is the
+    Vapor 17" holds no amount 17; the word stays, and so does a price after it ("Vapor 17,500")."""
+    text = (text or "").translate(send_check.EASTERN_DIGITS)
+    for pattern in model_numbers(items):
+        text = re.sub(pattern, r"\1", text, flags=re.IGNORECASE)
+    return text
 
 
 def _governorate_zone(text):
@@ -170,11 +247,13 @@ def check(reply, customer_text="", tool_results=(), orders=()):
     zones = store.delivery().get("zones", [])
     fees = {send_check.amount(z["fee"]) for z in zones if "fee" in z}
     all_tiers = store.tiers()
-    named = products_named(reply, items) or products_named(customer_text, items)
     said = tiers_named(reply, all_tiers) or tiers_named(customer_text, all_tiers)
-    # an extra (the name printing) goes on any product, so a named boot never hides its price
+    # an extra (the name printing) goes on any product, so a named boot never hides its price, and
+    # naming only an extra names no product: the boot it goes on comes from the customer's line or
+    # is any boot ("16,500 plus 400 printing is 16,900")
     extras = store.extras()
-    pool = (named + [e for e in extras if e not in named]) if named else items
+    named = _boots(products_named(reply, items), extras) or _boots(products_named(customer_text, items), extras)
+    pool = (named + extras) if named else items
     prices = {send_check.amount(v["price"]) for i in pool for v in _of_tiers(i.get("variants", []), said)
               if "price" in v}
     extra_prices = {send_check.amount(v["price"]) for e in extras for v in e.get("variants", []) if "price" in v}
@@ -186,13 +265,52 @@ def check(reply, customer_text="", tool_results=(), orders=()):
     allowed = set(prices) | fees | {p + f for p in prices for f in fees if p is not None and f is not None}
     allowed |= _with_extras(prices, extra_prices, fees)
     allowed |= from_tools
+    text = without_model_numbers(reply, items)   # the amounts are read from text, never a model number
     failed, wrong = [], set()
-    for a in send_check.prices_in(reply, sizes, orders):
+    for a in send_check.prices_in(text, sizes, orders):
         if Decimal(str(a)) not in {Decimal(str(x)) for x in allowed if x is not None}:
             wrong.add(Decimal(str(a)))
             failed.append({"check": "price", "why": f"{a} is not a store price, fee or tool amount"})
 
-    for clause in TIER_CLAUSE.findall(reply):
+    # An extra's own price stands only beside the extra: in a clause that names it, or in a clause
+    # that names no product and no tier when the reply names the extra elsewhere (the customer's
+    # line when the reply names nothing). Any other reading of it (a store price, a fee, a sum, a
+    # tool amount) still counts anywhere. A clause that names an extra and no product or tier holds
+    # the extra's prices, fees, sums and tool amounts, and a boot price only beside one of those.
+    base = {send_check.amount(v["price"]) for i in pool if i not in extras
+            for v in _of_tiers(i.get("variants", []), said) if "price" in v}
+    sums = _dec(_with_extras(prices, extra_prices, fees))
+    other = _dec(base | fees | {p + f for p in base for f in fees if p is not None and f is not None}
+                 | from_tools) | sums
+    backdrop = extras_named(reply, extras, items)
+    if not backdrop and not products_named(reply, items):
+        backdrop = extras_named(customer_text, extras, items)
+    for clause in TIER_CLAUSE.findall(text):
+        here = extras_named(clause, extras, items)
+        boot = tiers_named(clause, all_tiers) or _boots(products_named(clause, items), extras)
+        own = _dec(send_check.amount(v["price"]) for e in (here if boot else here or backdrop)
+                   for v in e.get("variants", []) if "price" in v)
+        amounts = [Decimal(str(a)) for a in send_check.prices_in(clause, sizes, orders)]
+        # the extra-only rule reads the extra's type or title, never "your name" alone (an order asks for it)
+        kinds = extras_named(clause, extras, items, kind=True) or [i for i in products_named(clause, items)
+                                                                   if i in extras]
+        if kinds and not boot:
+            ok = own | sums | _dec(fees | from_tools) | {e + f for e in own for f in _dec(fees)}
+            if any(d in ok and d not in _dec(fees | from_tools) for d in amounts):
+                ok |= other
+        else:
+            ok = other | own | {d for d in amounts if d not in _dec(extra_prices)}
+        for d in amounts:
+            if d in wrong or d in ok:
+                continue
+            wrong.add(d)
+            if d in _dec(extra_prices):
+                why = f"{d} is the price of {_names(extras_of(extras, d))}, and its clause does not name it"
+            else:
+                why = f"{d} is not a price of {_names(kinds)}, a fee or a sum with it"
+            failed.append({"check": "price", "why": why})
+
+    for clause in TIER_CLAUSE.findall(text):
         here = tiers_named(clause, all_tiers)
         if len(here) != 1:
             continue
@@ -243,7 +361,7 @@ def check(reply, customer_text="", tool_results=(), orders=()):
         if not DELIVERY.search(sentence):
             continue
         zone_fees = {send_check.amount(z["fee"]) for z in mine if "fee" in z}
-        for a in send_check.prices_in(sentence, sizes, orders):
+        for a in send_check.prices_in(without_model_numbers(sentence, items), sizes, orders):
             if a in prices or a in zone_fees or any(a == x for x in allowed if x not in fees):
                 continue
             failed.append({"check": "delivery", "why": f"{a} is not the delivery fee for {zone or 'any zone'}"})
@@ -317,6 +435,21 @@ def placed(tool_results):
 
 def _label(v):
     return " ".join(x for x in (v.get("tier"), v.get("size")) if x) or "(no size)"
+
+
+def _boots(items, extras):
+    """items without the extras: the products an extra goes on."""
+    return [i for i in items if i not in extras]
+
+
+def _dec(amounts):
+    return {Decimal(str(x)) for x in amounts if x is not None}
+
+
+def extras_of(extras, amount):
+    """The extras with a variant at amount."""
+    return [e for e in extras
+            if any("price" in v and Decimal(str(v["price"])) == amount for v in e.get("variants", []))]
 
 
 def _names(items):

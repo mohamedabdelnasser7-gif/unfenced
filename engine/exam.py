@@ -36,6 +36,12 @@ no claim (None).
 
 Rows saved before the counts existed, and a lesson whose gate made no pairs, keep the count
 columns empty (NULL): "not counted", never zero. ensure() adds the columns to an older database.
+
+A failed gate is kept with the lesson too (new, 2026-10-31; DECISIONS item 50): beside the first
+fail, the fails column keeps every failed row of the result (at most MAX_FAILS, first fail first:
+the situation or rerun, its name, the check and why), so the night study can tell the
+proposer what a failed line broke (engine/study.py). A row that passed, or one saved before the
+column, keeps it empty; fails_of() then reads the first fail alone.
 """
 import json
 import math
@@ -65,6 +71,10 @@ BEGIN SELECT RAISE(ABORT, 'an exam row is never deleted'); END;
 # broke (cases), p_value (mcnemar, NULL when no case changed) and effect (JSON: the fixed and broken
 # case names and the pairs that did not change). All NULL on a row with no counts.
 COUNT_COLUMNS = (("fixed", "INTEGER"), ("broke", "INTEGER"), ("p_value", "REAL"), ("effect", "TEXT"))
+# The failed rows of a gate that failed, added by ensure() like the counts: JSON, a list of
+# {situation, name, part, check, why}. NULL on a row that passed and on rows from before it.
+FAIL_COLUMNS = (("fails", "TEXT"),)
+MAX_FAILS = 10  # failed rows kept on one exam row
 NOT_RUN = "error"  # the check name saved when the exam itself could not run
 ANSWER = "answer"  # the check name of a situation whose answer raised (engine sit)
 RERUN = "arena_rerun"  # the check name of the eval gate's Arena rerun of past wins (arena/gate.py)
@@ -198,7 +208,7 @@ def ensure(db):
     db.script(TABLE)
     with db.tx() as c:
         have = {r[1] for r in c.execute("PRAGMA table_info(lesson_exams)")}
-        for col, kind in COUNT_COLUMNS:
+        for col, kind in COUNT_COLUMNS + FAIL_COLUMNS:
             if col in have:
                 continue
             try:
@@ -209,24 +219,58 @@ def ensure(db):
 
 
 def save(c, agent, lesson_id, result, now=None):
-    """Write the exam a lesson took, with the gate's counts when it has pairs, in the caller's
-    transaction."""
+    """Write the exam a lesson took, with the gate's counts when it has pairs and its failed rows
+    when it failed, in the caller's transaction."""
     first = result.first
     eff = effect(getattr(result, "pairs", None) or [])
     counts = (None, None, None, None) if eff is None else (
         eff["fixed"], eff["broke"], eff["p"], json.dumps({k: eff[k] for k in ("fixed_cases", "broke_cases", "both_right",
                                                                               "both_wrong")}, ensure_ascii=False))
+    fails = None
+    if not result.passed:
+        fails = json.dumps([{"situation": r.situation, "name": r.name, "part": r.part, "check": r.check,
+                             "why": _one_line(r.why)} for r in result.rows if not r.passed][:MAX_FAILS],
+                           ensure_ascii=False)
     c.execute("INSERT INTO lesson_exams (lesson_id, agent, passed, situation, check_name, why, calls, parts, at, "
-              "fixed, broke, p_value, effect) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              "fixed, broke, p_value, effect, fails) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
               (lesson_id, agent, int(result.passed), first.situation if first else None,
                first.check if first else None, first.why if first else None, int(result.calls),
-               json.dumps(result.parts(), ensure_ascii=False), time.time() if now is None else now, *counts))
+               json.dumps(result.parts(), ensure_ascii=False), time.time() if now is None else now, *counts, fails))
 
 
 def of(c, agent, lesson_id):
     """The exam row of one lesson as a dict, or None."""
     r = c.execute("SELECT * FROM lesson_exams WHERE lesson_id = ? AND agent = ?", (lesson_id, agent)).fetchone()
     return None if r is None else dict(r)
+
+
+def fails_of(row):
+    """The failed rows kept on a saved exam row (a dict from of()), each {situation, name, part,
+    check, why}; the first fail alone when the row has no fails column filled (saved before it),
+    [] when it passed or there is none."""
+    if not row or row["passed"]:
+        return []
+    try:
+        kept = json.loads(row.get("fails") or "null")
+    except ValueError:
+        kept = None
+    if isinstance(kept, list) and kept:
+        return [k for k in kept if isinstance(k, dict)]
+    return [{"situation": row.get("situation"), "name": "", "part": "", "check": row.get("check_name") or "",
+             "why": row.get("why") or ""}]
+
+
+def broke_cases(row):
+    """The cases a saved exam row's gate broke (right before the lesson, wrong with it), by name;
+    [] when not counted."""
+    if not row or not row.get("effect"):
+        return []
+    try:
+        eff = json.loads(row["effect"])
+    except ValueError:
+        return []
+    got = eff.get("broke_cases") if isinstance(eff, dict) else None
+    return [str(x) for x in got] if isinstance(got, list) else []
 
 
 def pair_rows(before, after):

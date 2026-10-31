@@ -289,7 +289,7 @@ class Saved(unittest.TestCase):
         db = self.open()  # opened again with today's code
         les = engine_lessons.Lessons(db, PLUG, judge=always_low, exam=counted(False, fixed=6, broke=0))
         cols = [r[1] for r in db.conn.execute("PRAGMA table_info(lesson_exams)")]
-        self.assertEqual(cols[-4:], ["fixed", "broke", "p_value", "effect"])
+        self.assertEqual(cols[-5:], ["fixed", "broke", "p_value", "effect", "fails"])
         row = les.exam_of(old)
         self.assertEqual((row["fixed"], row["p_value"]), (None, None))  # not counted, never zero
         self.assertIsNone(engine_exam.effect_of(row))

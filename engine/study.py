@@ -43,6 +43,14 @@ a lesson card through the agent's own lessons and risk check.
    written but waits for a yes, with the pulled line named on its card, so a pulled line
    never comes back on its own, whatever the switches say.
    The source line names the counts and the first cases with the pattern.
+   A lesson that failed the eval gate is a mistake too (DECISIONS item 50). While it is not live
+   (it waits, or it was pulled after), its line counts like a pulled one: the same line is not
+   written again ("failed the eval gate before") and a line close to it waits for a yes, its card
+   naming the failed line. The proposer and the idea part are given this agent's failed lines,
+   the newest FAILED_GIVEN, each with what it broke (the first fail, the failed checks with why,
+   the cases it broke and the fixed and broken counts, from its exam row), so they write a
+   different try for that pattern. A new try is a new lesson; the failed one is never rewritten
+   and still waits for a person's yes.
 6. Learn across agents. With a fit check and an adapter given, the study reads the other
    agents of the same database, in any field; the ones sharing a field come first, which
    only decides who gets the night's trial places. For each other agent it finds patterns
@@ -81,7 +89,7 @@ from collections import Counter
 
 from engine import exam as exam_mod
 from engine import risk as risk_mod
-from engine.lessons import DAY, IDEA, KEPT, MAX_LEN, PATTERN, PULLED, Lessons, meet, whose
+from engine.lessons import DAY, IDEA, KEPT, MAX_LEN, PATTERN, PULLED, WAITING, Lessons, meet, whose
 from engine.log import Log
 from engine.plug import SLOW
 
@@ -98,6 +106,9 @@ PAST = "none in its window"
 LESSON, KNOWN, FEW_CASES, FEW_SOURCES, NO_GAP = (
     "lesson", "already a lesson", "too few cases", "too few sources", "gap not clear")
 PULLED_BEFORE = "pulled before"
+FAILED_BEFORE = "failed the eval gate before"
+FAILED_GIVEN = 10  # failed lines the proposer and the idea part are given a night, the newest
+FAILS_GIVEN = 3   # failed checks given with each failed line
 CLOSE = 0.85      # how close a line may come to a pulled one before it waits for a yes
 IDEAS = 3         # ideas the idea part may write a night. Not a cap on trials (call 1A): every
                   # low risk lesson still starts. Ideas have no cases behind them and one trial
@@ -156,7 +167,10 @@ class Study:
     new lesson goes against a live one, False when not; each is {lesson, stages}. others:
     the plugs of the other agents in the same database. ideas(plug, sample, limit, known),
     optional: ideas with no past cases behind them, each {lesson, situation, stages}; at most
-    idea_limit a night are written."""
+    idea_limit a night are written. When this agent has lessons that failed the eval gate (see 5),
+    the proposer and the idea part are called with failed=[{lesson, first_fail, fails,
+    broke_cases, fixed, broke}] too, and those lines are left out of known; with none, the call is
+    as above."""
 
     def __init__(self, db, plug, *, proposer, tagger, fit=None, adapter=None, others=(), lessons=None,
                  judge=risk_mod.no_judge, limit=LIMIT, sample=SAMPLE, seed=0, clash=None, ideas=None,
@@ -172,6 +186,7 @@ class Study:
         self.ideas, self.idea_limit = ideas, int(idea_limit)
         self.others = tuple(others)
         self.limit, self.sample, self.seed = int(limit), int(sample), seed
+        self._failed_lines, self._given, self._given_ids = set(), [], set()  # this night's failed lines (see 5)
 
     def run(self, since, until, *, now=None):
         """One night's study of the cases touched in [since, until). now: when new lessons are
@@ -191,9 +206,15 @@ class Study:
         cases = _read(self.plug, self.log.window(since, until), until)
         rep.update(_counts(self.plug, cases))
         mine = self.lessons.mine()
-        known = _known(mine)
-        pulled = _pulled(mine)
-        found = self._find(self.plug, cases, [les["text"] for les in mine], texts, rep["notes"])
+        tries = self._failed_tries(mine)
+        known = _known(mine, {t["lesson_id"] for t in tries})
+        pulled = _pulled(mine) + [(_norm(t["lesson"]), t["lesson"]) for t in tries]
+        self._failed_lines = {t["lesson"] for t in tries}
+        rep["failed_given"] = [t["lesson_id"] for t in tries[:FAILED_GIVEN]]
+        self._given_ids = set(rep["failed_given"])
+        self._given = [{k: v for k, v in t.items() if k != "lesson_id"} for t in tries[:FAILED_GIVEN]]
+        found = self._find(self.plug, cases, [les["text"] for les in mine if les["id"] not in self._given_ids],
+                           texts, rep["notes"], failed=self._given)
         rep["dropped"] = found["dropped"]
         for rec, cand, sample, with_ in found["winners"]:
             if _norm(cand["lesson"]) in known:
@@ -216,6 +237,27 @@ class Study:
         rep["switches"] = self.lessons.switches.reading(at)
         return rep
 
+    def _failed_tries(self, mine):
+        """This agent's lessons that failed the eval gate and are not live (waiting, or pulled after),
+        newest first, each as the parts read it (see 5) with its lesson_id."""
+        out = []
+        for les in reversed(mine):
+            if les["state"] not in (WAITING, PULLED):
+                continue
+            row = self.lessons.exam_of(les["id"])
+            if not row or row["passed"]:
+                continue
+            first = exam_mod.held_line(row)
+            if row.get("why"):
+                first = f'{first}: {row["why"]}'
+            eff = exam_mod.effect_of(row)
+            out.append({"lesson_id": les["id"], "lesson": les["text"], "first_fail": first,
+                        "fails": [{"case": _case_name(f), "check": f.get("check") or "", "why": f.get("why") or ""}
+                                  for f in exam_mod.fails_of(row)[:FAILS_GIVEN]],
+                        "broke_cases": exam_mod.broke_cases(row),
+                        "fixed": None if eff is None else eff["fixed"], "broke": None if eff is None else eff["broke"]})
+        return out
+
     def _ideas(self, cases, known, pulled, texts, rep, since, until):
         """The night's ideas, lessons with no past cases behind them, written after the patterns
         and the lessons from other agents. Each is named in rep["ideas"] as {idea, lesson_id,
@@ -227,7 +269,8 @@ class Study:
         sample = self._pick([c for c in cases if c.status in (GOOD, BAD)])  # the proposer's sample
         try:
             raw = self.ideas(plug, [_view(plug, c, texts, blind=False) for c in sample], self.idea_limit,
-                             [les["text"] for les in self.lessons.mine()])
+                             [les["text"] for les in self.lessons.mine() if les["id"] not in self._given_ids],
+                             **({"failed": self._given} if self._given else {}))
         except Exception as e:  # a failing idea part makes no lesson
             rep["notes"].append(f"{plug.agent}: the idea part failed ({_failed(e)}); no ideas")
             return
@@ -260,8 +303,9 @@ class Study:
             rec["lesson_id"] = card["lesson_id"]
             known[_norm(idea["lesson"])] = KNOWN
 
-    def _find(self, plug, cases, known, texts, notes):
-        """One agent's candidates with their numbers and verdicts, and the winners, strongest first."""
+    def _find(self, plug, cases, known, texts, notes, failed=None):
+        """One agent's candidates with their numbers and verdicts, and the winners, strongest first.
+        failed: this agent's failed lines for the proposer (see 5); None for another agent."""
         found = {"candidates": [], "dropped": [], "winners": []}
         settled = [c for c in cases if c.status in (GOOD, BAD)]
         if not any(c.status == GOOD for c in settled) or not any(c.status == BAD for c in settled):
@@ -269,7 +313,8 @@ class Study:
             return found
         sample = self._pick(settled)
         try:
-            raw = self.proposer(plug, [_view(plug, c, texts, blind=False) for c in sample], self.limit, list(known))
+            raw = self.proposer(plug, [_view(plug, c, texts, blind=False) for c in sample], self.limit, list(known),
+                                **({"failed": failed} if failed else {}))
         except Exception as e:  # a failing proposer makes no lesson
             notes.append(f"{plug.agent}: the proposer failed ({_failed(e)}); no candidates")
             return found
@@ -360,8 +405,10 @@ class Study:
         naming the first fail ("" when it passed or took no exam). Returns the card."""
         against = self._against(cand, rep)
         trial = close is None and against is None
-        if close is not None:  # the yes asker sees which pulled line it comes close to
-            source = f'{source}; close to a pulled line: "{close}"'
+        failed_close = close is not None and close in self._failed_lines
+        if close is not None:  # the yes asker sees which pulled or failed line it comes close to
+            what = "a line that failed the eval gate" if failed_close else "a pulled line"
+            source = f'{source}; close to {what}: "{close}"'
         if origin is None:
             lid = self.lessons.propose(cand["lesson"], cand["stages"], source=source, sources=sources, trial=trial,
                                        kind=kind, now=self._now)
@@ -384,7 +431,8 @@ class Study:
                     "with": rec["with"]["cases"], "without": rec["without"]["cases"],
                     "total": rec["with"]["cases"] + rec["without"]["cases"],
                     "good_with": rec["with"]["good"], "good_without": rec["without"]["good"]},
-                "source": les["source"], "from": origin, "close_to_pulled": close,
+                "source": les["source"], "from": origin, "close_to_pulled": None if failed_close else close,
+                "close_to_failed": close if failed_close else None,
                 "waits_for": turn, "replace": against,
                 "level": None if tr is None else tr["level"],
                 "accept_high": tr is not None and tr["accept_high"] is not None,
@@ -720,12 +768,25 @@ def _close(text, pulled):
     return None
 
 
-def _known(lessons):
-    """{line: why it is not written again}: pulled lines are "pulled before", live ones
-    "already a lesson"; a line both pulled and live is live."""
+def _known(lessons, failed=()):
+    """{line: why it is not written again}: pulled lines are "pulled before", the lines of the
+    lessons named in failed (failed the eval gate, not live) "failed the eval gate before", the
+    others "already a lesson"; a line both pulled or failed and standing is standing."""
+    failed = set(failed)
     known = {_norm(les["text"]): PULLED_BEFORE for les in lessons if les["state"] == PULLED}
-    known.update({_norm(les["text"]): KNOWN for les in lessons if les["state"] != PULLED})
+    known.update({_norm(les["text"]): FAILED_BEFORE for les in lessons if les["id"] in failed})
+    known.update({_norm(les["text"]): KNOWN for les in lessons if les["state"] != PULLED and les["id"] not in failed})
     return known
+
+
+def _case_name(fail):
+    """A failed row kept on an exam row (engine/exam.py fails_of) as one plain case name."""
+    if fail.get("situation") is None:
+        return "the gate could not run"
+    if fail.get("check") == exam_mod.RERUN:
+        return f'rerun of past win {fail.get("name") or fail["situation"]}'
+    name = fail.get("name")
+    return f'situation {fail["situation"]}' + (f" ({name})" if name else "")
 
 
 def line_known(lessons, text):

@@ -10,6 +10,8 @@ calling it with a round's number then:
    round's lost matches only: every other case in the database is out of its window, and no other
    agent is read. All its cases ended not good, so the pattern search, which needs good and not
    good cases, finds nothing; the idea part (at most 3 ideas a study) is what writes lessons here.
+   A lesson the gate failed after an earlier round goes back into this study with what it broke
+   (engine/study.py, step 5; DECISIONS item 50), so the idea part writes a different try.
 2. Puts every new lesson through the eval gate (arena/gate.py: the exam, then the rerun of past
    wins, with the fixed and broken counts and McNemar's p-value). A lesson that would start its
    trial takes it as the night has it take it, before it starts. A lesson that does not take it

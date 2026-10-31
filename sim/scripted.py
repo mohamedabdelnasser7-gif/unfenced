@@ -42,9 +42,10 @@ class _Scripts:
 
 
 class Proposer(_Scripts):
-    """proposer(plug, sample, limit, known): the agent's scripted candidates, without their tags."""
+    """proposer(plug, sample, limit, known, failed=()): the agent's scripted candidates, without
+    their tags; failed lines (engine/study.py) change nothing in a script."""
 
-    def __call__(self, plug, sample, limit, known):
+    def __call__(self, plug, sample, limit, known, failed=()):
         self.calls.append({"agent": plug.agent, "sample": len(sample), "limit": limit, "known": list(known)})
         return [{k: copy.deepcopy(v) for k, v in c.items() if k != "tag"}
                 for c in self.script(plug.agent)["candidates"]]

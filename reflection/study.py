@@ -34,6 +34,9 @@ PROPOSE = (
     "Propose at most {limit} patterns. A pattern is one plain thing an action did or missed that "
     "someone could check case by case. Do not propose one the agent already has as a lesson. Never "
     "copy names, numbers, places or lines from the cases.\n"
+    "When the JSON also has \"failed\", those are lines this agent tried that failed its eval gate, "
+    "each with what it broke. They are mistakes: for each, write a different try for the same pattern "
+    "that avoids what it broke, and never give a failed line again or a small rewording of it.\n"
     "Answer with JSON only: a list of objects with the keys pattern (one line, what the action did or "
     "missed), helps (true if cases with the pattern ended good more often, false if less often), "
     "lesson (one line telling the agent what to do), situation (one line, when it applies) and "
@@ -83,6 +86,9 @@ IDEA = (
     "might help the good result. It needs no past case behind it; each will be tried on a small "
     "share of cases first. Do not suggest one the agent already has as a lesson. Never copy names, "
     "numbers, places or lines from the cases.\n"
+    "When the JSON also has \"failed\", those are lines this agent tried that failed its eval gate, "
+    "each with what it broke. They are mistakes: for each, write a different try for the same pattern "
+    "that avoids what it broke, and never give a failed line again or a small rewording of it.\n"
     "Answer with JSON only: a list of objects with the keys lesson (one line, at most 300 "
     "characters, telling the agent what to do), situation (one line, when it applies) and stages "
     "(a list from {stages}, or [\"all\"]). Answer [] when you have none."
@@ -148,13 +154,15 @@ class _Part:
 
 
 class Proposer(_Part):
-    """proposer(plug, sample, limit, known): a list of candidate objects, [] for anything odd."""
+    """proposer(plug, sample, limit, known, failed=()): a list of candidate objects, [] for anything
+    odd. failed: the agent's lines that failed the eval gate, with what each broke (engine/study.py),
+    sent as data beside the cases when there are any."""
     on_study_route = True
 
-    def __call__(self, plug, sample, limit, known):
+    def __call__(self, plug, sample, limit, known, failed=()):
         system = PROPOSE.format(agent=describe(plug), good=plug.decides.good, limit=int(limit),
                                 stages=json.dumps(list(plug.stages)))
-        got = read_json(self.ask(system, {"cases": sample, "known": list(known)}))
+        got = read_json(self.ask(system, _data(sample, known, failed)))
         return got if isinstance(got, list) else []
 
 
@@ -206,16 +214,25 @@ class Adapter(_Part):
 
 
 class Ideas(_Part):
-    """ideas(plug, sample, limit, known): a list of {lesson, situation, stages}, ideas with no
-    past cases behind them, [] for anything odd. engine/study.py checks each against the plug,
-    holds the cap and writes them as ideas."""
+    """ideas(plug, sample, limit, known, failed=()): a list of {lesson, situation, stages}, ideas
+    with no past cases behind them, [] for anything odd. engine/study.py checks each against the
+    plug, holds the cap and writes them as ideas. failed: as the proposer's."""
     on_study_route = True
 
-    def __call__(self, plug, sample, limit, known):
+    def __call__(self, plug, sample, limit, known, failed=()):
         system = IDEA.format(agent=describe(plug), good=plug.decides.good, limit=int(limit),
                              stages=json.dumps(list(plug.stages)))
-        got = read_json(self.ask(system, {"cases": sample, "known": list(known)}))
+        got = read_json(self.ask(system, _data(sample, known, failed)))
         return got if isinstance(got, list) else []
+
+
+def _data(sample, known, failed):
+    """The proposer's and the idea part's data: the cases and known lines, and the failed lines
+    only when there are any."""
+    data = {"cases": sample, "known": list(known)}
+    if failed:
+        data["failed"] = list(failed)
+    return data
 
 
 def describe(plug):

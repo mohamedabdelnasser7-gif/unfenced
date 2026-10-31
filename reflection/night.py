@@ -26,6 +26,13 @@ McNemar's p-value (engine/exam.py; reported only, pass or fail stays the gate's)
 takes the night's snapshot of the agent's lessons (reflection/snapshots.py); the report names
 it, what changed since the night before, and the command that rolls back to it.
 
+A lesson the gate failed goes back into Reflection (DECISIONS item 50): its exam row keeps every
+failed check with why and the cases it broke (engine/exam.py), and the next night's study gives
+the proposer and the idea part this agent's failed lines with what each broke, so the next try
+is a different line (engine/study.py, step 5). A line close to a failed one waits for a yes, its
+card naming the failed line. The failed lesson itself is never rewritten and never goes live on
+its own: it still waits for a yes on the Morning page.
+
 It prints the night's report in plain lines (--json prints it as data) and saves the whole
 report as JSON next to the database, as night-<agent>-<time>.json (data/ is gitignored).
 The report's links tie each new lesson back to where it came from: every case that had its
@@ -108,8 +115,8 @@ class LinkedStudy(Study):
     """The engine's night study, keeping on each winning candidate the id of every case that
     had its pattern, so the report can link each new lesson to all of its cases."""
 
-    def _find(self, plug, cases, known, texts, notes):
-        found = super()._find(plug, cases, known, texts, notes)
+    def _find(self, plug, cases, known, texts, notes, failed=None):
+        found = super()._find(plug, cases, known, texts, notes, failed=failed)
         for rec, _cand, _sample, with_ in found["winners"]:
             rec["cases_with"] = [c.id for c in with_]
         return found
@@ -444,6 +451,8 @@ def _state(card):
         return f'waits for a yes: {card["exam"]}; a person\'s Yes on its card starts it anyway'
     if card["close_to_pulled"]:
         return f'waits for a yes (close to the pulled line "{card["close_to_pulled"]}")'
+    if card.get("close_to_failed"):  # DECISIONS item 50: close to a line the eval gate failed
+        return f'waits for a yes (close to the line "{card["close_to_failed"]}", which failed the eval gate)'
     if card.get("replace"):
         r = card["replace"]
         return f'waits for a yes: replace lesson {r["lesson_id"]} "{r["line"]}"?'

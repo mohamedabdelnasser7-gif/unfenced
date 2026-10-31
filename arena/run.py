@@ -48,13 +48,15 @@ reruns (arena/gate.py). Both files sit next to the agent's database (--db), with
 item, so the gate reads that agent's own wins and nothing else. --state names their folder
 only for a run with no database (its wins feed no gate); one of the two is needed.
 
-Both sides grow (items 30, 48, 51; arena/grow.py). When the owner's pool of practice customers
-holds cards grown from real chats, the Arena draws from the cards and the grown ones together,
-and a card that beat the agent in training is drawn more often (per loss, grow.LOST_WEIGHT), with
-the unwinnable share and the capped wants held. Each training match's result is counted in the
-pool, practice-<kind>.json in the owner's state folder: the Arena's folder, or the folder above
-it when the Arena's folder holds the agent's plug.json (grow.owner_of). Agents of one kind in one
-owner folder share the pool; a new one starts with zero lessons and faces the same customers.
+Both sides grow (items 30, 48, 51; arena/grow.py). The base cards are split first, and the held
+ids are saved in the owner's pool of practice customers, so the gate keeps the same cards run
+after run while the pool grows; a card grown from real chats and a card that has trained are
+never held out. The cards grown from real chats then join the training cards only. In training
+a card that beat the agent is drawn more often (per loss, grow.LOST_WEIGHT), and each side's
+share and the capped wants are held on the training draws; the gate draws at the weights before
+any loss, its capped wants held on its own. Each training match's result is counted in the pool,
+practice-<kind>.json in the owner's state folder (grow.owner_of). Agents of one kind under one
+owner share the pool; a new one starts with zero lessons and faces the same customers.
 
 --quick is the short run for judges (docs/judges.md): one round of one training match and a gate
 of one match (QUICK_TRUST, in place of --trust), at most QUICK_CALLS model calls in this run on
@@ -87,6 +89,7 @@ DEFAULT_CAP = 1000
 DEFAULT_ROUNDS = 5
 NO_GAIN_ROUNDS = 2
 HELD_OUT_SHARE = 0.3
+GROWN = "grown-"  # the id of a card grown from real chats (arena/grow.py): it trains, never takes the gate
 PUBLIC_TRUST = {"matches": 10, "wins": 10, "zero_failed_checks": True}
 TZ = "Africa/Cairo"
 PASSED, CAP, STUCK, ROUNDS, MODEL_ERROR = "passed", "cap", "stuck", "rounds", "model_error"
@@ -211,19 +214,25 @@ def can_buy(card):
     return not card.get("unwinnable")
 
 
-def split(cards, held_out=None, share=HELD_OUT_SHARE, seed=0):
+def split(cards, held_out=None, share=HELD_OUT_SHARE, seed=0, never=()):
     """(training cards, held-out cards). held_out: card ids; else a seeded share of the cards that
     can buy, one card a worry in a seeded worry order, then a second round, so the gate is spread
     over worries. A card that will not buy is never held out by the draw: the gate only plays cards
-    that can buy (Arena.gate_cards), so a held-out card that cannot would only be lost to training."""
+    that can buy (Arena.gate_cards), so a held-out card that cannot would only be lost to training.
+    A card grown from real chats (grown-...) and a card in never (one that has trained) are never
+    held out, by the draw or by name."""
     ids = [c["id"] for c in cards]
+    never = set(never) | {i for i in ids if i.startswith(GROWN)}
     if held_out:
         unknown = sorted(set(held_out) - set(ids))
         if unknown:
             raise Refused(f"held-out cards not found: {', '.join(unknown)}")
+        trained = sorted(set(held_out) & never)
+        if trained:
+            raise Refused(f"cards grown from real chats or that have trained never take the gate: {', '.join(trained)}")
         held = set(held_out)
     else:
-        winnable = [c for c in cards if can_buy(c)]
+        winnable = [c for c in cards if can_buy(c) and c["id"] not in never]
         if not winnable:
             raise Refused("no card can buy, so no gate match can be won; the Arena needs a card that can buy")
         n = min(max(1, round(share * len(cards))), len(winnable), len(cards) - 1)
@@ -247,6 +256,23 @@ def split(cards, held_out=None, share=HELD_OUT_SHARE, seed=0):
     if not any(can_buy(c) for c in out):
         raise Refused("no held-out card can buy, so no gate match can be won; hold out a card that can buy")
     return train, out
+
+
+def fixed_split(cards, held_out, seed, pool):
+    """split() of the base cards with the owner's pool (arena/grow.py): the cards that have trained
+    are never held out, and the held ids are saved in the pool, so the gate stays the same set run
+    after run while the pool grows. A saved split is used again while the base cards and the seed
+    are the same and none of its cards has trained since; else a new one is drawn and saved."""
+    never = {c["id"] for c in cards if pool.trained(c)}
+    if held_out:
+        return split(cards, held_out, seed=seed, never=never)
+    ids, saved = sorted({c["id"] for c in cards}), pool.split
+    if saved and saved["cards"] == ids and saved["seed"] == seed and not set(saved["held"]) & never:
+        return split(cards, saved["held"], seed=seed, never=never)
+    train, held = split(cards, None, seed=seed, never=never)
+    pool.split = {"cards": ids, "seed": seed, "held": sorted(c["id"] for c in held)}
+    pool.changed = True
+    return train, held
 
 
 def draw(cards, rng):
@@ -282,8 +308,13 @@ class Arena:
         """prompt_file: where the customer prompt was read from (None for the generic one), saved
         with each match beside the prompt's fingerprint, so the eval gate can read it again.
         pool: the owner's practice pool (arena/grow.py), which counts each training match's result."""
-        self.train, self.held = split(cards, held_out, seed=seed)
-        self.gate_cards = [c for c in self.held if can_buy(c)]  # a card that will not buy is no test of the agent
+        if pool is None:
+            self.train, self.held = split(cards, held_out, seed=seed)
+            self.gate_cards = [c for c in self.held if can_buy(c)]  # a card that will not buy is no test of the agent
+        else:  # the base cards split first, then the grown cards and the weights (arena/grow.py decks)
+            from arena import grow
+            _, self.held = fixed_split(cards, held_out, seed, pool)
+            self.train, self.gate_cards = grow.decks(cards, pool, {c["id"] for c in self.held})
         self.calls = calls
         self.agent_model, self.customer_model = calls.model(agent_model), calls.model(customer_model)
         self.trust = trust or dict(PUBLIC_TRUST)
@@ -350,7 +381,7 @@ class Arena:
                 one["training"]["played"] += 1
                 one["training"]["won"] += judged["won"]
                 if self.pool is not None:  # a practice customer that beats the agent comes back more often
-                    self.pool.record(card["id"], judged["won"])
+                    self.pool.record(card, judged["won"])
                 if not judged["won"] and self.learn is not None:
                     one["training"]["cases"].append(self.learn(m, judged, m["id"]))
             for k in range(1, self.trust["matches"] + 1):
@@ -659,7 +690,6 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
         calls = Calls(state / CALLS_FILE, args.cap, limit=QUICK_CALLS if args.quick else None)
         from arena import grow
         practice = grow.for_state(state, AGENT)  # the owner's practice customers, of this agent's kind
-        cards = grow.deck(cards, practice)
         if args.db and not Path(args.db).is_file():
             raise Refused(f"no database at {args.db}")
         made = agent_model is None or customer_model is None  # a real run: the models are made here

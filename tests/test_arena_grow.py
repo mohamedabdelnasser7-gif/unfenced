@@ -105,50 +105,62 @@ def grown_pool(test, owner, chats=ALL):
     return pool, counts, model
 
 
+def train_of(base, pool, held=()):
+    """The training cards grow.decks gives, as {id: weight}."""
+    return {c["id"]: c["arena_weight"] for c in grow.decks(base, pool, set(held))[0]}
+
+
+def lose(pool, card, n):
+    for _ in range(n):
+        pool.record(card, False)
+
+
 class WeightPerLoss(unittest.TestCase):
     def test_each_loss_adds_lost_weight(self):
         pool = grow.Pool(folder(self), "sales")
-        self.assertEqual(pool.weight("persona-01"), 1)
-        pool.record("persona-01", False)
-        pool.record("persona-01", False)
-        pool.record("persona-01", True)
-        self.assertEqual(pool.weight("persona-01"), 1 + 2 * grow.LOST_WEIGHT)
+        c = card(1, "size")
+        self.assertEqual(pool.weight(c), 1)
+        lose(pool, c, 2)
+        pool.record(c, True)
+        self.assertEqual(pool.weight(c), 1 + 2 * grow.LOST_WEIGHT)
 
     def test_a_card_that_beat_the_agent_is_drawn_more_often(self):
         pool = grow.Pool(folder(self), "sales")
-        for _ in range(2):
-            pool.record("persona-01", False)
-        base = [card(1, "size"), card(2, "size")]
-        got = {c["id"]: c["arena_weight"] for c in grow.deck(base, pool)}
+        base = [card(1, "size"), card(2, "price")]
+        lose(pool, base[0], 2)
+        got = train_of(base, pool)
         self.assertAlmostEqual(got["persona-01"] / got["persona-02"], 1 + 2 * grow.LOST_WEIGHT, places=3)
         self.assertEqual(base[0]["arena_weight"], 0.5)  # the base cards are never changed in place
 
-    def test_no_loss_and_no_grown_card_leaves_the_cards_as_they_are(self):
-        base = [card(1, "size"), card(2, "price")]
-        self.assertIs(grow.deck(base, grow.Pool(folder(self), "sales")), base)
+    def test_no_loss_and_no_grown_card_keeps_the_weights(self):
+        base = [card(1, "size", 0.6), card(2, "price", 0.4)]
+        self.assertEqual(train_of(base, grow.Pool(folder(self), "sales")), {"persona-01": 0.6, "persona-02": 0.4})
 
     def test_training_matches_are_counted_and_gate_matches_are_not(self):
         d = folder(self)
         pool = grow.Pool(d, "sales")
-        arena = run.Arena([card(1, "size"), card(2, "size"), card(3, "size")], agent_model=Agent(),
+        arena = run.Arena([card(1, "size"), card(2, "price"), card(3, "trust")], agent_model=Agent(),
                           customer_model=Customer(buyers=()), calls=run.Calls(d / "calls.json", 300, day="2026-10-31"),
                           state=d, trust={"matches": 2, "wins": 2, "zero_failed_checks": True}, matches=3, rounds=1,
                           held_out=["persona-03"], now=lambda: NOW, pool=pool)
         rep = arena.run()
         self.assertEqual(sum(r["played"] for r in pool.played.values()), rep["rounds"][0]["training"]["played"])
         self.assertEqual(sum(r["lost"] for r in pool.played.values()), 3)
-        self.assertNotIn("persona-03", pool.played)
+        self.assertEqual(rep["rounds"][0]["gate"]["played"], 2)
+        self.assertFalse(pool.trained(card(3, "trust")))
 
 
 class CapsHeld(unittest.TestCase):
-    def deck(self, losses, loser="persona-01"):
-        pool = grow.Pool(folder(self), "sales")
-        for _ in range(losses):
-            pool.record(loser, False)
-        base = [dict(card(1, "price", 0.2), want=["name printing on boots"]), card(2, "size", 0.4),
+    def base(self):
+        return [dict(card(1, "price", 0.2), want=["name printing on boots"]), card(2, "size", 0.4),
                 card(3, "trust", 0.2),
                 dict(card(4, "just browsing", 0.2), unwinnable=True, why_unwinnable="just browsing")]
-        return grow.deck(base, pool)
+
+    def deck(self, losses, loser=0):
+        pool = grow.Pool(folder(self), "sales")
+        base = self.base()
+        lose(pool, base[loser], losses)
+        return grow.decks(base, pool, set())[0]
 
     def test_printing_stays_at_most_a_quarter_after_many_losses(self):
         got = self.deck(8)
@@ -157,7 +169,7 @@ class CapsHeld(unittest.TestCase):
         self.assertGreater(printing, 0.2)  # it did grow, up to the cap
 
     def test_the_unwinnable_share_holds(self):
-        for loser in ("persona-01", "persona-04"):  # a winnable card that beats the agent, then an unwinnable one
+        for loser in (0, 3):  # a winnable card that beats the agent, then an unwinnable one
             got = self.deck(8, loser)
             total = sum(c["arena_weight"] for c in got)
             self.assertAlmostEqual(total, 1.0, places=3)
@@ -168,10 +180,9 @@ class CapsHeld(unittest.TestCase):
         pool, _, _ = grown_pool(self, owner)
         base = [dict(card(1, "price", 0.5), want=["name printing on boots"]),
                 dict(card(2, "just browsing", 0.5), unwinnable=True, why_unwinnable="just browsing")]
-        got = grow.deck(base, pool)
+        got = grow.decks(base, pool, set())[0]
         self.assertTrue(any(c["id"].startswith("grown-") for c in got))
         self.assertLessEqual(sum(c["arena_weight"] for c in got if any("printing" in w for w in c["want"])), 0.25)
-
 
     def test_an_owner_recipe_with_no_capped_want_adds_no_cap(self):
         data = json.loads(recipe_mod.EXAMPLE.read_text(encoding="utf-8"))
@@ -179,11 +190,111 @@ class CapsHeld(unittest.TestCase):
         pool = grow.Pool(folder(self), "sales")
         pool.rebuild(recipe_mod.Recipe(data))
         self.assertEqual(pool.capped, [])
-        for _ in range(8):
-            pool.record("persona-01", False)
         base = [dict(card(1, "price", 0.2), want=["name printing on boots"]), card(2, "size", 0.8)]
-        got = {c["id"]: c["arena_weight"] for c in grow.deck(base, pool)}
-        self.assertGreater(got["persona-01"], 0.25)
+        lose(pool, base[0], 8)
+        self.assertGreater(train_of(base, pool)["persona-01"], 0.25)
+
+
+def demo_cards():
+    return [json.loads(p.read_text(encoding="utf-8")) for p in sorted((ROOT / "demo" / "personas" / "cards").glob("*.json"))]
+
+
+def arena_with(test, cards, pool, **kw):
+    d = folder(test)
+    return run.Arena(cards, agent_model=Agent(), customer_model=Customer(buyers=()),
+                     calls=run.Calls(d / "calls.json", 300, day="2026-10-31"), state=d,
+                     trust={"matches": 2, "wins": 2, "zero_failed_checks": True}, matches=1, rounds=1,
+                     now=lambda: NOW, pool=pool, **kw)
+
+
+def share(cards, rx):
+    total = sum(c["arena_weight"] for c in cards)
+    return sum(c["arena_weight"] for c in cards if any(rx.search(w) for w in c["want"])) / total
+
+
+class GateAndTraining(unittest.TestCase):
+    """The base cards split first and the split kept; grown and trained cards never in the gate;
+    the gate at weights before any loss; the caps held on the training draws and on the gate's."""
+
+    def setUp(self):
+        self.base = demo_cards()
+        self.rx = recipe().capped[0][1]
+
+    def test_printing_and_the_unwinnable_share_hold_on_the_training_draws(self):
+        printing = next(c for c in self.base if any(self.rx.search(w) for w in c["want"]))
+        unwinnable = sum(c["arena_weight"] for c in self.base if c["unwinnable"]) / sum(c["arena_weight"] for c in self.base)
+        for seed in range(6):
+            pool = grow.Pool(folder(self), "sales")
+            lose(pool, printing, 50)
+            a = arena_with(self, self.base, pool, seed=seed)
+            self.assertNotIn(printing["id"], [c["id"] for c in a.held])
+            self.assertLessEqual(share(a.train, self.rx), 0.25 + 1e-9, seed)
+            self.assertGreater(share(a.train, self.rx), 0.2, seed)
+            got = sum(c["arena_weight"] for c in a.train if c["unwinnable"]) / sum(c["arena_weight"] for c in a.train)
+            self.assertAlmostEqual(got, unwinnable, places=2)
+            self.assertAlmostEqual(sum(c["arena_weight"] for c in a.gate_cards), 1.0, places=3)
+            self.assertLessEqual(share(a.gate_cards, self.rx), 0.25 + 1e-9)
+
+    def test_the_gate_draws_at_its_weights_before_any_loss(self):
+        pool = grow.Pool(folder(self), "sales")
+        held = {"persona-02", "persona-04"}
+        fresh = {c["id"]: c["arena_weight"] for c in grow.decks(self.base, pool, held)[1]}
+        lose(pool, self.base[1], 10)  # persona-02 lost ten times, in some earlier run
+        got = {c["id"]: c["arena_weight"] for c in grow.decks(self.base, pool, held)[1]}
+        self.assertEqual(got, fresh)
+        self.assertAlmostEqual(got["persona-02"] / got["persona-04"], 0.179 / 0.107, places=3)
+
+    def test_printing_is_capped_on_the_gate_draws_on_their_own(self):
+        pool = grow.Pool(folder(self), "sales")
+        gate = grow.decks(self.base, pool, {"persona-05", "persona-06"})[1]
+        self.assertEqual(sorted(c["id"] for c in gate), ["persona-05", "persona-06"])
+        self.assertLessEqual(share(gate, self.rx), 0.25)
+
+    def test_the_split_stays_the_same_when_other_cards_train(self):
+        pool = grow.Pool(folder(self), "sales")
+        first = sorted(c["id"] for c in arena_with(self, self.base, pool, seed=0).held)
+        self.assertEqual(first, ["persona-01", "persona-02"])
+        pool.record(self.base[3], False)  # persona-04 trains: a fresh draw at seed 0 would now hold persona-06
+        self.assertNotEqual(sorted(c["id"] for c in run.split(self.base, seed=0, never={"persona-04"})[1]), first)
+        self.assertEqual(sorted(c["id"] for c in arena_with(self, self.base, pool, seed=0).held), first)
+
+    def test_the_split_stays_the_same_as_the_pool_grows(self):
+        owner = folder(self)
+        pool = grow.Pool(owner, "sales")
+        first = sorted(c["id"] for c in arena_with(self, self.base, pool).held)
+        pool.save()
+        grown_pool(self, owner)  # the night adds grown cards to the same pool
+        pool = grow.Pool(owner, "sales")
+        self.assertTrue(pool.cards)
+        self.assertEqual(pool.split["held"], first)
+        a = arena_with(self, self.base, pool)
+        self.assertEqual(sorted(c["id"] for c in a.held), first)
+        self.assertFalse(any(c["id"].startswith("grown-") for c in a.held + a.gate_cards))
+        self.assertTrue(any(c["id"].startswith("grown-") for c in a.train))
+
+    def test_a_card_that_has_trained_is_never_held_out(self):
+        pool = grow.Pool(folder(self), "sales")
+        held = [c["id"] for c in arena_with(self, self.base, pool).held]
+        pool.record(next(c for c in self.base if c["id"] == held[0]), True)  # it trained, say with another sibling
+        again = [c["id"] for c in arena_with(self, self.base, pool).held]
+        self.assertNotIn(held[0], again)
+        with self.assertRaises(run.Refused):
+            arena_with(self, self.base, pool, held_out=[held[0]])
+
+    def test_a_grown_card_never_takes_the_gate(self):
+        cards = self.base + [dict(card(9, "size"), id="grown-size")]
+        for seed in range(8):
+            _, held = run.split(cards, seed=seed)
+            self.assertNotIn("grown-size", [c["id"] for c in held])
+        with self.assertRaises(run.Refused):
+            run.split(cards, ["grown-size"])
+
+    def test_a_new_seed_or_new_base_cards_draw_a_new_split(self):
+        pool = grow.Pool(folder(self), "sales")
+        arena_with(self, self.base, pool, seed=0)
+        self.assertEqual(pool.split["seed"], 0)
+        arena_with(self, self.base[:-1], pool, seed=0)
+        self.assertEqual(pool.split["cards"], sorted(c["id"] for c in self.base[:-1]))
 
 
 class WhichChats(unittest.TestCase):
@@ -516,8 +627,7 @@ class FoldedCards(unittest.TestCase):
         items = [{**i, "grown": True} for i in pool.items]
         built, _ = cards_mod.build(items, recipe())
         self.assertEqual(sum(c["grown"] for c in built), len(items))
-        got = grow.deck(built, pool)
-        self.assertFalse(any(c["id"].startswith("grown-") for c in got))
+        self.assertFalse(any(i.startswith("grown-") for i in train_of(built, pool)))
         plain, _ = cards_mod.build(pool.items, recipe())
         self.assertNotIn("grown", plain[0])
 

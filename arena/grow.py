@@ -36,9 +36,13 @@ most 25%) hold for the grown cards as for the first ones. A grown card's id name
 (grown-<worry>, grown-<worry>-no-budget), so it keeps its losses when the pool is rebuilt.
 
 A practice customer that beats the agent comes back more often: the pool counts each card's
-losses in training matches (arena/run.py), and a card is drawn 1 + LOST_WEIGHT times as often per
-loss (deck). Each side, winnable and unwinnable, keeps its share of the draws, and the capped
-wants are held again after the losses are counted, so neither cap moves.
+losses in training matches (arena/run.py), and in training a card is drawn 1 + LOST_WEIGHT times
+as often per loss (decks). Grown cards train only and never take the gate; the gate's cards are
+split off the base cards first and the split is saved in the pool (arena/run.py fixed_split).
+The weights per loss, each side's share and the capped wants apply to the training draws after
+that split; the gate draws at the weights before any loss, with the capped wants held on its own
+draws. So on the training draws and on the gate draws each, printing stays at most 25% and the
+unwinnable share holds.
 
 Pools are per owner (item 51). The pool is practice-<kind>.json in the owner's state folder (in
 data/, which git ignores, or outside the repo). An agent's own folder is the folder of its
@@ -161,14 +165,19 @@ class Pool:
         self.cards = [c for c in (data.get("cards") or []) if _card_ok(c)]
         capped = data.get("capped")  # None until the pool is first built from a recipe
         self.capped = [c for c in capped if _capped_ok(c)] if isinstance(capped, list) else None
+        self.split = data["split"] if _split_ok(data.get("split")) else None  # the gate's held ids (arena/run.py)
         self._keys = {i["read"] for i in self.items if "read" in i}
         self.changed = False
 
-    def weight(self, card_id):
-        return 1 + LOST_WEIGHT * int(self.played.get(str(card_id), {}).get("lost", 0))
+    def weight(self, card):
+        return 1 + LOST_WEIGHT * int(self.played.get(str(card["id"]), {}).get("lost", 0))
 
-    def record(self, card_id, won):
-        row = self.played.setdefault(str(card_id), {"played": 0, "lost": 0})
+    def trained(self, card):
+        """True when the card has played a training match: it is never held out for the gate."""
+        return int(self.played.get(str(card["id"]), {}).get("played", 0)) > 0
+
+    def record(self, card, won):
+        row = self.played.setdefault(str(card["id"]), {"played": 0, "lost": 0})
         row["played"] += 1
         row["lost"] += 0 if won else 1
         self.changed = True
@@ -235,7 +244,7 @@ class Pool:
         tmp = self.path.with_name(self.path.name + ".tmp")
         tmp.write_text(json.dumps({"kind": self.kind, "items": self.items, "read": self.read, "pending": self.pending,
                                    "floor": self.floor, "played": self.played,
-                                   "cards": self.cards, "capped": self.capped}, ensure_ascii=False), encoding="utf-8")
+                                   "cards": self.cards, "capped": self.capped, "split": self.split}, ensure_ascii=False), encoding="utf-8")
         os.chmod(tmp, 0o600)
         tmp.replace(self.path)
         self.changed = False
@@ -247,6 +256,19 @@ class Pool:
 
 def _count(v):
     return isinstance(v, int) and not isinstance(v, bool) and v >= 0
+
+
+MAX_SPLIT = 1000  # base cards a saved split may name
+
+
+def _split_ok(v):
+    """{cards: the base card ids, sorted, seed, held: the ids held out of them}."""
+    if not isinstance(v, dict) or not isinstance(v.get("seed"), int) or isinstance(v["seed"], bool):
+        return False
+    ids, held = v.get("cards"), v.get("held")
+    return (isinstance(ids, list) and isinstance(held, list) and len(ids) <= MAX_SPLIT
+            and all(isinstance(i, str) for i in ids) and ids == sorted(set(ids)) and set(held) <= set(ids)
+            and all(isinstance(i, str) for i in held) and bool(held))
 
 
 def _time(v):
@@ -293,20 +315,28 @@ def example_caps():
     return [{"name": n, "pattern": rx.pattern, "most": m} for n, rx, m in recipe_mod.load(recipe_mod.EXAMPLE).capped]
 
 
-def deck(base, pool):
-    """The cards the Arena draws from: the base cards and the pool's grown ones, each part by its
-    chats, every card's weight times its losses (Pool.weight), each side kept at its share of the
-    draws and the capped wants held (arena/cards.py cap_wants): the owner's recipe's, saved in the
-    pool when it was built, or the example recipe's (item 33) for a pool never built. With no pool, no grown card and no
-    loss counted, the base cards as they are. Base cards built with the pool already in them (a
-    "grown" count on each, arena/personas.py --state) take no grown card again."""
-    if pool is None:
-        return base
+def buys(card):
+    return not card.get("unwinnable")
+
+
+def decks(base, pool, held):
+    """(training cards, gate cards) the Arena draws from, from the base cards, the pool's grown
+    cards and held, the ids of the base cards held out for the gate (arena/run.py fixed_split).
+    Every card starts at its weight with each part (base, grown) by its chats, and the unwinnable
+    share is read off that whole deck. Grown cards train only, never the gate. Training cards:
+    each weight times its losses (Pool.weight), then each side brought back to its share of the
+    training draws and the capped wants held on them (arena/cards.py cap_wants). Gate cards: the
+    held cards that can buy, at their weights before any loss, the capped wants held on the gate
+    draws on their own. The caps are the owner's recipe's, saved in the pool when it was built, or
+    the example recipe's (item 33) for a pool never built. Base cards built with the pool already
+    in them (a "grown" count on each, arena/personas.py --state) take no grown card again. The
+    base cards are never changed in place."""
     folded = any("grown" in c for c in base)
     grown = [] if folded else [dict(c) for c in pool.cards]
-    if not grown and not any(pool.weight(c["id"]) > 1 for c in base):
-        return base
     out = [dict(c) for c in base] + grown
+    for c in out:
+        c.setdefault("unwinnable", False)
+        c.setdefault("want", [])
     parts = ((out[:len(base)], sum(int(c.get("chats") or 1) for c in base)),
              (grown, sum(int(c.get("chats") or 1) for c in grown)))
     total = sum(n for _, n in parts) or 1
@@ -314,16 +344,28 @@ def deck(base, pool):
         mass = sum(max(0.0, float(c["arena_weight"])) for c in cards)
         for c in cards:
             c["arena_weight"] = (max(0.0, float(c["arena_weight"])) / mass * n / total) if mass else 0.0
-    sides = {u: sum(c["arena_weight"] for c in out if bool(c.get("unwinnable")) == u) for u in (False, True)}
-    for c in out:
-        c["arena_weight"] *= pool.weight(c["id"])
-    for u, share in sides.items():
-        mine = [c for c in out if bool(c.get("unwinnable")) == u]
-        mass = sum(c["arena_weight"] for c in mine)
-        for c in mine:
-            c["arena_weight"] = round(c["arena_weight"] / mass * share, 6) if mass else 0.0
-    cards_mod.cap_wants(out, _Caps(pool.capped if pool.capped is not None else example_caps()))
-    return out
+    sides = {u: sum(c["arena_weight"] for c in out if bool(c["unwinnable"]) == u) for u in (False, True)}
+    caps = _Caps(pool.capped if pool.capped is not None else example_caps())
+    train = [c for c in out if c["id"] not in held]
+    for c in train:
+        c["arena_weight"] *= pool.weight(c)
+    _shares(train, sides)
+    cards_mod.cap_wants(train, caps)
+    gate = [c for c in out if c["id"] in held and buys(c)]
+    _shares(gate, {False: 1.0, True: 0.0})
+    cards_mod.cap_wants(gate, caps)
+    return train, gate
+
+
+def _shares(cards, sides):
+    """Each side (winnable, unwinnable) of cards brought to its share of the draws; a side with no
+    card here gives its share to the other, so the draws add up to 1."""
+    mass = {u: sum(c["arena_weight"] for c in cards if bool(c["unwinnable"]) == u) for u in sides}
+    have = {u: share for u, share in sides.items() if mass[u] > 0}
+    whole = sum(have.values())
+    for c in cards:
+        u = bool(c["unwinnable"])
+        c["arena_weight"] = round(c["arena_weight"] / mass[u] * have[u] / whole, 6) if u in have and whole else 0.0
 
 
 # ---- the night: real chats into practice customers

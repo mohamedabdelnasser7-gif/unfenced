@@ -1,0 +1,87 @@
+{
+  "agent": "assistant",
+  "about": "Sorts the user's email, drafts replies in the user's style, books meetings with no clash, turns promises into tasks and writes a short morning brief; nothing goes out without the user's yes.",
+  "case": "One day of the user's email and calendar; the case id is day:YYYY-MM-DD.",
+  "fields": ["personal"],
+  "stages": ["focused", "rushed", "off", "own_mode"],
+  "actions": {
+    "sort": "Put one incoming item in urgent, today, later or ignore, and say whether to tell the user now.",
+    "draft": "Write one reply draft in the user's style; it stays a draft until the user says yes.",
+    "book": "Book or move one meeting on the user's calendar, with no clash and inside the user's rules.",
+    "task": "Turn a promise in a message into a dated task, or a reminder when someone has not replied.",
+    "brief": "Write the short morning summary of the day.",
+    "send": "Send one draft the user said yes to, as the user last saw it; never run by the model."
+  },
+  "results": {
+    "sorted": {"speed": "fast", "shows_in_days": [0, 0], "after": "sort",
+               "about": "The item went into a bucket, told now or not."},
+    "drafted": {"speed": "fast", "shows_in_days": [0, 0], "after": "draft",
+                "about": "A draft was saved for the user to read; nothing went out."},
+    "draft_refused": {"speed": "fast", "shows_in_days": [0, 0], "after": "draft",
+                      "about": "The draft was refused in code, for example to an address the user never wrote to."},
+    "booked": {"speed": "fast", "shows_in_days": [0, 0], "after": "book",
+               "about": "The meeting is on the calendar with no clash and inside the user's rules."},
+    "book_refused": {"speed": "fast", "shows_in_days": [0, 0], "after": "book",
+                     "about": "The booking was refused in code: it clashed or broke one of the user's rules."},
+    "tasked": {"speed": "fast", "shows_in_days": [0, 0], "after": "task",
+               "about": "A dated task was saved."},
+    "briefed": {"speed": "fast", "shows_in_days": [0, 0], "after": "brief",
+                "about": "The morning brief was saved for the user."},
+    "sent": {"speed": "fast", "shows_in_days": [0, 0], "after": "send",
+             "about": "A draft went out after the user's yes, the same text the user said yes to."},
+    "send_refused": {"speed": "fast", "shows_in_days": [0, 0], "after": "send",
+                     "about": "A send was refused in code: no yes for this draft, or the text changed after the yes."},
+    "used": {"speed": "fast", "shows_in_days": [0, 1],
+             "about": "The user used what the assistant made as it was."},
+    "edited": {"speed": "fast", "shows_in_days": [0, 1],
+               "about": "The user changed what the assistant made, then used it."},
+    "ignored": {"speed": "fast", "shows_in_days": [0, 1],
+                "about": "The user left what the assistant made unused."},
+    "corrected": {"speed": "fast", "shows_in_days": [0, 1],
+                  "about": "The user corrected the assistant: the mode, or how a reply should be (for example shorter)."},
+    "urgent_missed": {"speed": "fast", "shows_in_days": [0, 1],
+                      "about": "An urgent item was not put in urgent and told to the user."},
+    "clash": {"speed": "fast", "shows_in_days": [0, 1],
+              "about": "Two meetings overlap on the calendar, or one breaks the user's rules."},
+    "day_clean": {"speed": "fast", "shows_in_days": [0, 1],
+                  "about": "At the end of the day the code found no urgent item missed, no clash, nothing sent without a yes and every promise a task, and the user corrected nothing."}
+  },
+  "causes": {
+    "late_item": "The item arrived after the user's day ended.",
+    "plan_changed": "The user changed the plan of the day after the assistant acted.",
+    "no_signal": "The day gave no sign of the mode the user was in."
+  },
+  "source": {
+    "about": "The day itself. One case is one day of the user's work, so the case id names it.",
+    "known_by": "case"
+  },
+  "harm": {
+    "results": ["urgent_missed", "clash", "corrected"],
+    "about": "A missed urgent item, a clash and a correction count as harm.",
+    "serious": ["urgent_missed"]
+  },
+  "decides": {"good": "day_clean", "bad": ["urgent_missed", "clash", "corrected"]},
+  "risk": {
+    "high": {
+      "about": "High risk for the user: anything that goes out (a send, a forward, a reply to many), any promise or date, meetings moved or cancelled, money, and anyone's personal data.",
+      "words": {
+        "goes_out": ["send", "sent", "forward", "reply all", "cc", "bcc", "auto reply", "publish", "share"],
+        "promise": ["promise", "deadline", "due", "by tomorrow", "by friday", "by monday", "tomorrow", "today",
+                    "next week", "date", "commit", "guarantee"],
+        "calendar": ["cancel", "move", "reschedule", "decline", "accept", "invite", "book"],
+        "money": ["pay", "payment", "invoice", "bank", "transfer", "card", "price", "fee", "refund", "gift card"],
+        "personal_data": ["password", "address", "phone", "mobile", "national id", "account", "login", "code"]
+      },
+      "patterns": {
+        "number": ["[0-9]"],
+        "personal_data": ["@"]
+      },
+      "tools": ["draft", "book", "send"]
+    },
+    "low": {
+      "about": "Low risk: the tone and length of a draft, the order of the brief, how short a reply is in a mode, which items come first."
+    }
+  },
+  "trial": {"fast": {"share": 0.5, "days": 7}, "careful": {"share": 0.2, "days": 14}},
+  "slot": "Lessons from the user's past days:"
+}

@@ -189,7 +189,7 @@ class OneNight(Setup):
         self.env()
         self.run_main()
         rep = json.loads(next(self.dir.glob("night-waterer-*.json")).read_text(encoding="utf-8"))
-        self.assertEqual(sorted(a["agent"] for a in rep["across"]), ["marketing", "sales"])
+        self.assertEqual(sorted(a["agent"] for a in rep["across"]), ["assistant", "marketing", "sales"])
 
 
 def always_low(text, high_about, low_about):

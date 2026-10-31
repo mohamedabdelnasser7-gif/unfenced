@@ -1,0 +1,37 @@
+{
+ "user": "nadia@demo.test",
+ "rules": {
+  "no_meetings_before": "11:00",
+  "no_meetings_after": "18:00"
+ },
+ "events": [
+  {
+   "id": "e1",
+   "date": "2026-11-02",
+   "title": "Team sync",
+   "start": "11:00",
+   "end": "11:30",
+   "with": [
+    "maya@northwind.test"
+   ]
+  },
+  {
+   "id": "e2",
+   "date": "2026-11-02",
+   "title": "Focus time",
+   "start": "14:00",
+   "end": "16:00",
+   "with": []
+  },
+  {
+   "id": "e3",
+   "date": "2026-11-02",
+   "title": "Client call",
+   "start": "16:30",
+   "end": "17:00",
+   "with": [
+    "sara@kitehouse.test"
+   ]
+  }
+ ]
+}

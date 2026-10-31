@@ -128,7 +128,7 @@ class Track:
         """The night's handing over on the study's read cases: {kinds, notes}. kinds: one entry per
         declared kind {to, kind, cases, sources, verdict, why}; notes: the notes handed over, each
         {id, to, kind, text, cases, sources, case_ids, again}. again: this night's note to that agent was
-        handed over before (a rerun), so no new row; the note shown is that earlier one. A note whose
+        handed over before (a rerun), so no new row; the note shown is that earlier one. A note of a kind whose
         cases were all handed over before is not sent again (the night windows overlap)."""
         out = {"kinds": [], "notes": []}
         if not self.kinds:
@@ -182,8 +182,8 @@ class Track:
         ids = [case_key(c.id) for c in got]
         night = night_of(until)
         with self.db.tx() as c:
-            earlier = c.execute("SELECT cases FROM handed_over WHERE from_agent = ? AND to_agent = ? AND night != ?",
-                                (self.plug.agent, h.agent, night)).fetchall()
+            earlier = c.execute("SELECT cases FROM handed_over WHERE from_agent = ? AND to_agent = ? AND kind = ? "
+                                "AND night != ?", (self.plug.agent, h.agent, entry["kind"], night)).fetchall()
         sent = {i for r in earlier for i in json.loads(r["cases"])}
         if sent.issuperset(ids):
             entry["verdict"], entry["why"] = NOT_SENT, "these cases were handed over before"

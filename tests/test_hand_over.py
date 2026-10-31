@@ -350,8 +350,8 @@ class TheRow(Setup):
             with self.db.tx() as c:
                 c.execute("UPDATE handed_over SET text = 'changed' WHERE id = ?", (first["id"],))
 
-    def window(self, since, until):
-        track = handover.Track(self.db, self.plug, spotter=Spotter(), writer=Writer())
+    def window(self, since, until, spotter=None):
+        track = handover.Track(self.db, self.plug, spotter=spotter or Spotter(), writer=Writer())
         return Study(self.db, self.plug, proposer=fk.Proposer(), tagger=fk.Tagger(), lessons=self.lessons,
                      hand_over=track).run(since, until, now=until)["hand_over"]["notes"]
 
@@ -386,6 +386,16 @@ class TheRow(Setup):
         self.assertFalse(later["again"])
         self.assertNotEqual(later["id"], first["id"])
         self.assertEqual(len(handover.received(self.db, TO)), 2)
+
+    def test_a_new_kind_on_cases_sent_before_is_still_sent(self):
+        lost(self.log, 3, "playful", "play")
+        first, = self.window(fk.SINCE, fk.UNTIL)
+
+        def heat(plug, kinds, items):
+            return {it["id"]: "heat" for it in items if "steps" in it}
+        later, = self.window(fk.SINCE + fk.DAY, fk.UNTIL + fk.DAY, spotter=heat)
+        self.assertEqual((later["kind"], later["again"]), ("heat", False))
+        self.assertEqual(sorted(later["case_ids"]), sorted(first["case_ids"]))
 
     def test_a_night_runs_from_noon_to_noon_in_cairo(self):
         noon = 1768989600.0  # 2026-01-21 12:00 in Cairo (UTC+2)

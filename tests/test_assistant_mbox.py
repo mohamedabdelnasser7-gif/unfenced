@@ -189,6 +189,18 @@ class Untrusted(unittest.TestCase):
         self.assertEqual((pic["promises"], pic["style"]["sign_off"]), ([], None))
         self.assertNotIn("IBAN", json.dumps(pic))
 
+    def test_a_file_name_that_cannot_be_decoded_never_stops_the_read(self):
+        for head in ("filename*=undefined''x", "filename*=idna''x"):
+            odd = ("MIME-Version: 1.0\nContent-Type: multipart/mixed; boundary=\"B\"\n")
+            body = ("--B\nContent-Type: text/plain\n\nWe will send it today.\n--B\nContent-Type: text/plain\n"
+                    f"Content-Disposition: inline; {head}\n\nNAMED I'll go today.\n--B--")
+            text = (mail("o@x.test", USER, "s", body, WHEN, "n1@x.test", extra=odd)
+                    + mail(f"Nadia <{USER}>", "o@x.test", "s", "Hi there.", WHEN, "n2@x.test"))
+            pic = read_text(text)
+            self.assertEqual(pic["messages"], {"inbox": 1, "sent": 1, "skipped": 0}, head)
+            self.assertEqual(pic["inbox"]["promised_to_user"], 1, head)
+            self.assertNotIn("NAMED", json.dumps(pic), head)
+
     def test_an_odd_charset_or_a_far_date_never_stops_the_read(self):
         text = (mail("o@x.test", USER, "s", "We will send it today.", WHEN, "c1@x.test",
                      extra='Content-Type: text/plain; charset="idna"\n')

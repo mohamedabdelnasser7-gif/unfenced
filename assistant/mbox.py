@@ -107,6 +107,16 @@ def _when(msg):
     return d
 
 
+def _named(part):
+    """Whether the part carries a file name. A name the email package cannot decode (name*=idna''x,
+    filename*=undefined''x) raises; it still counts as a file name, so one odd mail never stops the
+    read (review round 3)."""
+    try:
+        return part.get_filename() is not None
+    except (LookupError, UnicodeError, ValueError):
+        return True
+
+
 def _parts(msg):
     """The message's leaf parts in order, leaving out an attached message (message/rfc822 or any other
     message type), an attachment and a part with a file name, with every part under them: a mail
@@ -116,7 +126,7 @@ def _parts(msg):
     while stack:
         part = stack.pop()
         if (part.get_content_maintype() == "message" or part.get_content_disposition() == "attachment"
-                or part.get_filename() is not None):
+                or _named(part)):
             continue
         if part.is_multipart():
             stack.extend(reversed(part.get_payload()))

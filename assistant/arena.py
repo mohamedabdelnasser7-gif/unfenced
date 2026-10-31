@@ -35,7 +35,8 @@ kept only in the simulated shape (i01, e1) and dates only as real calendar dates
 snippet or preview, a promise's text) goes through the Arena's cleaner (arena/clean.py) with the
 day's own names (each address's local part and company, the name words of each display name that
 reads as a person's, Latin or Arabic): names, phones, numbers, emails, links and places out, a
-short signature after a sign off cut (never a question or a planted instruction's mark). A real
+short signature after a sign off cut (never a question or a planted instruction's mark), and after
+the cleaner a signature with no sign off line and the names after with, مع or and are masked. A real
 calendar date (years 2000 to 2100) with no other digit beside it is put back, so a promise still
 names its day. A meeting's location becomes [place]. Every address becomes person<n>@practice.test,
 the same person the same address all day, and the user user@practice.test. The writing style and
@@ -102,6 +103,12 @@ SIGN_OFF = re.compile(r"^[ \t]*(?:--|(?:(?:best|kind|warm|warmest)[ \t]+)?regard
                       r"|تحياتي|شكرا|شكراً)[ \t]*[,.!،]?[ \t]*$", re.IGNORECASE | re.MULTILINE)
 SELF_NAMED = re.compile(r"(?:^|(?<=[,.!؟?،\n]))([ \t]*)([^\W\d_]{3,})(?=[ \t]+(?:here|هنا)\b)", re.IGNORECASE)
 FAMILY_AFTER = re.compile(r"(\[name\][ \t]+)(ال[ء-ي]{3,})")  # محمد الشربيني: the ال family name after a masked name
+# met with Bahaa Shalaby, اتكلمت مع بهاء شلبي: up to three name words after with or مع; and Seif after a masked name
+WITH_NAME = re.compile(r"(?<![^\W_])((?:with|مع)[ \t]+)((?:[^\W\d_]{2,}[ \t]+){0,2}[^\W\d_]{2,})", re.IGNORECASE)
+AND_NAME = re.compile(r"(\[name\][ \t]*,?[ \t]+(?:and|و)[ \t]+)((?:[^\W\d_]{2,}[ \t]+){0,2}[^\W\d_]{2,})",
+                      re.IGNORECASE)
+SIG_LINES, SIG_CHARS, SIG_WORDS = 3, 40, 5  # a signature with no sign off: its last lines, each this short
+SIG_WORD = re.compile(r"[^\W\d_]{2,}")
 ROLE_WORDS = frozenset({"info", "sales", "support", "news", "newsletter", "noreply", "no", "reply", "hello", "contact",
                         "team", "admin", "billing", "jobs", "careers", "office", "mail", "notifications", "updates",
                         "user", "me", "hr"})
@@ -257,13 +264,66 @@ def real_date(text):
     return text if FIRST_YEAR <= year <= LAST_YEAR else None
 
 
+def _name_word(w):
+    """A word typed as a name: a capitalised Latin word or an Arabic name word, no stop word."""
+    from arena.clean import ARABIC, arabic_name_like, latin_capital
+    return latin_capital(w) or (bool(ARABIC.search(w)) and arabic_name_like(w))
+
+
+def _mask_run(m):
+    """The name words at the start of a cue's run masked (one [name] for them all), the rest kept."""
+    run = m.group(2)
+    words = list(re.finditer(r"\S+", run))
+    n = 0
+    while n < len(words) and _name_word(words[n].group(0)):
+        n += 1
+    return m.group(1) + "[name]" + run[words[n - 1].end():] if n else m.group(0)
+
+
+def _signature(text):
+    """A signature with no sign off line (Karim, then CEO, Northwind): on the last SIG_LINES lines
+    that read like one (each at most SIG_CHARS characters and SIG_WORDS words, no question mark, not
+    ending a sentence, stopping at a sign off line), each capitalised Latin word and each Arabic word that is no stop word becomes
+    [name]. The first line of a text is never one, so a one line text or an ask stays whole."""
+    from arena.clean import ARABIC, is_stop
+    lines = text.split("\n")
+    filled = [i for i, ln in enumerate(lines) if ln.strip()]
+    block = []
+    for i in reversed(filled[1:]):
+        ln = lines[i].strip()
+        if len(block) == SIG_LINES or len(ln) > SIG_CHARS or len(ln.split()) > SIG_WORDS or QUESTION.search(ln) \
+                or ln.endswith((".", "!", ":", "؛")) or SIGN_OFF.fullmatch(ln):
+            break
+        block.append(i)
+
+    def mask(m):
+        w = m.group(0)
+        if is_stop(w) or not (w[:1].isupper() and w.isascii() or ARABIC.search(w)):
+            return w
+        return "[name]"
+
+    for i in block:
+        if lines[i].strip() != "[name]":
+            lines[i] = SIG_WORD.sub(mask, lines[i])
+    return "\n".join(lines)
+
+
 def _after_names(text):
-    """Two name shapes the Arena's cleaner leaves, masked after it: a name saying who writes (sherbiny
-    here) and an ال family name right after a masked name (محمد الشربيني)."""
+    """Name shapes the Arena's cleaner leaves, masked after it: a name saying who writes (sherbiny
+    here), an ال family name right after a masked name (محمد الشربيني), name words after with or مع
+    (met with Bahaa Shalaby, مع بهاء شلبي) and after and or و that follows a masked name (and Seif),
+    and a signature with no sign off line (_signature)."""
     from arena.clean import arabic_name_like, is_stop, latin_name_like
     text = SELF_NAMED.sub(lambda m: m.group(1) + "[name]" if (latin_name_like(m.group(2))
                           or arabic_name_like(m.group(2))) and not is_stop(m.group(2)) else m.group(0), text)
-    return FAMILY_AFTER.sub(lambda m: m.group(0) if is_stop(m.group(2)) else m.group(1) + "[name]", text)
+    text = FAMILY_AFTER.sub(lambda m: m.group(0) if is_stop(m.group(2)) else m.group(1) + "[name]", text)
+    text = WITH_NAME.sub(_mask_run, text)
+    for _ in range(20):  # and Seif and Omar: each and after a masked name
+        done = AND_NAME.sub(_mask_run, text)
+        if done == text:
+            break
+        text = done
+    return _signature(text)
 
 
 def _sign_off_cut(text, keep=()):

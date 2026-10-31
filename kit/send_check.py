@@ -1,0 +1,756 @@
+"""The send check. Every reply passes it before it goes out, whatever the model decided.
+
+check() returns (passed, feedback). The feedback is written for the model, so a
+failed reply can be retried with it.
+
+Rules (from the store rules, the 27 Oct morning review and Mohamed's calls on 28 Oct):
+1. Script match: Arabic in, Arabic out; Franco in, Latin letters out; English in, English out.
+2. Banned words: الجوز / el goz, مرتاح, sympathy lines.
+3. Style: no em or en dashes, no hyphen with spaces used as a dash, no emoji, no markdown **.
+4. Every number that reads as an amount must exist in the store or delivery data, or in
+   this turn's store results. A number reads as an amount when it sits next to a currency
+   word or sign, when it comes after a price word (سعر, بـ, price, costs, for, is and a few
+   more) or right after a city or governorate (Cairo 70), or when it has 3 or more digits,
+   all of them counted (1.500), with or without any word next to it (a bare 500, or 500
+   days). Left out: sizes, size ranges, dates, times, order numbers (#D12 always; #1234 right
+   after an order word, or in a sentence with no price word or currency; a line that ends in ":"
+   reads on into the next line, and so does one that ends in a cue word when the next line starts
+   with a number or #), a number right after
+   an address word with no price word earlier in the sentence (عمارة 125, Building 125,
+   3emara 125; an address label such as عنوان التوصيل or delivery address is not a price word), Egyptian mobile and landline numbers grouped as phones are written, any number with
+   a + and 8 or more digits (+44 7700 900123), percentages, a number of 1 or 2 digits with a unit after it (2 days, 2 to 3 days), and
+   a year from 1900 to 2099 with a year word or a month right next to it (model 2026, the
+   2026 model, سنة 2026, May 2026) or inside a date (28 Oct 2026). Any other year is an
+   amount, so "Boots: 1999." is refused. After a weak word (is, for, ب), a catalogue size
+   number (43) is read as a size unless a price word comes earlier in the sentence. Decimals
+   count as written, so 1450.99 and 1450,99 are not 1450. An amount in words (next to a
+   currency word, after a price word or ب, or 100 or more after any cue word), or with k or
+   ألف after the digits (1k EGP, 1.5 ألف), is refused, so the model writes it in digits.
+5. No exact stock count. The store tool gives a level (in stock, few left, out), never a number.
+"""
+import functools
+import math
+import re
+import unicodedata
+from decimal import Decimal, InvalidOperation
+
+# Arabic letters only: Arabic punctuation and digits do not count as a script.
+ARABIC = re.compile(r"[\u0621-\u064A\u0671-\u06D3\u06FA-\u06FC\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFC]")
+LATIN = re.compile(r"[A-Za-z]")
+WORD = re.compile(r"[\w\u0600-\u06ff]+", re.UNICODE)
+# Eastern digits, and the Arabic decimal and thousands signs (١٤٥٠٫٥٠ is 1450.50).
+EASTERN_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹٫٬", "01234567890123456789.,")
+# Signs that look like ":" or "=" read as them (fullwidth, small, modifier letter, ratio), and
+# blanks that are neither Unicode spaces nor format characters read as a space when they show
+# as a gap (Hangul fillers, Braille blank) or as nothing when they do not (combining grapheme
+# joiner, variation selectors), red team t261028j round 3, item 4. Built from code points so
+# the source stays plain.
+LOOKALIKES = str.maketrans(
+    {chr(c): ":" for c in (0xFF1A, 0xFE55, 0xFE13, 0xA789, 0x2236, 0x02D0, 0x02F8)}
+    | {chr(c): "=" for c in (0xFF1D, 0xFE66, 0x207C, 0x208C)}
+    | {chr(c): " " for c in (0x115F, 0x1160, 0x3164, 0xFFA0, 0x2800)}
+    | {chr(c): None for c in (0x034F, 0x17B4, 0x17B5, 0x180B, 0x180C, 0x180D, 0x180F,
+                              *range(0xFE00, 0xFE10), *range(0xE0100, 0xE01F0))})
+# WhatsApp emphasis marks (_italic_, *bold*, ~strike~, `mono`). WhatsApp shows _500_ as 500.
+EMPHASIS = re.compile(r"[_*~`]")
+
+# Franco: Egyptian Arabic in Latin letters, with 2 3 5 7 8 9 standing for Arabic sounds.
+FRANCO_DIGIT_WORD = re.compile(r"\b(?=[a-z0-9]*[a-z])(?=[a-z0-9]*[235789])[a-z0-9]{2,}\b")
+ORDINAL = re.compile(r"^\d+(st|nd|rd|th)$")
+FRANCO_WORDS = {
+    "ana", "enta", "enti", "ahlan", "momken", "bs", "bas", "keda", "kda", "ezay", "ezzay", "fe", "fi",
+    "msh", "mesh", "mish", "ya", "el", "w", "wala", "aywa", "la2", "lw", "leh",
+    "tamam", "khalas", "awi", "awy", "ba2a", "kman", "kaman", "delwa2ty", "dlw2ty", "bta3", "beta3",
+    "3ayez", "3ayz", "3andena", "3ndena", "fein", "fen", "emta", "amta", "eih", "agib", "yom",
+}
+
+BANNED = [
+    (re.compile(r"(?:ال|لل|بال)جوز"), "Never write الجوز. Say the price plainly, the number then جنيه."),
+    (re.compile(r"\b(?:el|l|ll|lel|bel)\s?goz\b"), "Never write el goz. Say the price plainly."),
+    (re.compile(r"مرتاح"), "Never use مرتاح or filler like it."),
+]
+SYMPATHY = [
+    "مقدر إن", "مقدر ان", "متضايق", "حقك تزعل", "حقك تضايق", "أنا آسف إنك", "انا اسف انك",
+    "i understand your frustration", "i understand how you feel", "sorry to hear",
+    "sorry for the inconvenience", "i can imagine how", "m2adar", "mtday2", "7a2ak tez3al",
+]
+DASHES = re.compile("[\u2012\u2013\u2014\u2015]")
+
+
+def _ranges(*pairs):
+    return "".join(f"{chr(a)}-{chr(b)}" for a, b in pairs)
+
+
+# Emoji and pictographs, built from code points so the source stays plain.
+EMOJI = re.compile("[" + _ranges((0x1F000, 0x1FAFF), (0x2600, 0x27BF), (0x2B00, 0x2BFF), (0x2300, 0x23FF),
+                                 (0xE0020, 0xE007F)) + chr(0xFE0F) + chr(0x3030) + chr(0x303D) + "]")
+MARKDOWN_BOLD = re.compile(r"\*\*")
+# A hyphen with spaces on both sides. Between two digits it is a range (42 - 45), not a dash.
+SPACED_HYPHEN = re.compile(r"(?<=(\S))[ \t]+-[ \t]+(?=(\S))")
+
+LETTER_BEFORE = r"(?<![^\W\d_])"
+NO_LETTER_AFTER = r"(?![^\W\d_])"
+MASK = chr(1)  # stands in for a number that is not an amount (a size, a date, an order number)
+MONEY = chr(2)  # stands in for a number with a currency next to it, already read as an amount
+
+CURRENCY = (r"(?:جنيهات|جنيهاً|جنيهًا|جنيها|جنيه|جنية|ج\.م|جم|ج|egp|l\.e|le|egyptian\s+pounds?|pounds?"
+            r"|geneh|genih|gneh|gnih|ginih|gnyh|gineh|gineeh|geneeh|ginee|e£|£)")
+# Digits as written, with thousands commas and decimals: 1,510 and 1450.99. A comma with one or
+# two digits after 3 or more digits is a decimal comma: 1450,99 is 1450.99 and 500,00 is 500.
+DIGITS = r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{3,},\d{1,2}(?!\d)|\d+(?:\.\d+)?"
+DECIMAL_COMMA = re.compile(r"\d+,\d{1,2}")
+# 1 to 3 digits, then groups of 3 after a space: 1 150, 10 150. Every Unicode space counts (category Zs:
+# plain, no-break, thin, figure and the rest), so no space lets 1 150 read as 150 (red team t261028j r2).
+THOUSANDS_SPACE = re.compile("[ \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]")
+SPACED_THOUSANDS = re.compile(r"(?<![\d.,])[1-9]\d{0,2}(?:" + THOUSANDS_SPACE.pattern + r"\d{3})+(?!\d)")
+MAX_INT_DIGITS = 20
+NUMBER = rf"({DIGITS})"
+PRICE = re.compile(
+    rf"{NUMBER}\s*{CURRENCY}(?![\w])|(?<![\w]){CURRENCY}{NO_LETTER_AFTER}\s*{NUMBER}", re.IGNORECASE)
+
+# Words after which a number reads as an amount. PRICE_WORDS always name money. WEAK_WORDS
+# (is, for, ب) also come before sizes, so after one of them a catalogue size number (43 from
+# the boot size "43") is read as a size, unless a price word comes earlier in the same sentence.
+PRICE_WORDS = (
+    r"(?:و|ف)?(?:بال|ال|ب)?سعر(?:ه|ها|هم|و)?", r"(?:و|ف)?(?:بال|ال|ب)?تمن(?:ه|ها|هم|و)?",
+    r"(?:و|ف)?(?:ال)?(?:شحن|توصيل|مصاريف|رسوم|اجمالي|إجمالي|مجموع|حساب|مبلغ)",
+    r"(?:el\s?|b)?se3r\w*", r"(?:el\s?)?taman\w*", r"(?:el\s?)?(?:sha7n|tawsil|tawseel|egmaly|egmali)",
+    r"prices?", r"priced", r"pricing", r"costs?", r"costing",
+    r"total", r"subtotal", r"fees?", r"shipping", r"delivery", r"pay", r"charged?", r"charges",
+)
+WEAK_WORDS = (r"بـ", r"ب", r"b", r"bi", r"be", r"for", r"is", r"are", r"at", r"only", r"just")
+CUES = PRICE_WORDS + WEAK_WORDS
+WEAK_CUE = re.compile("(?:" + "|".join(WEAK_WORDS) + ")", re.IGNORECASE)
+PRICE_WORD = re.compile(LETTER_BEFORE + "(?:" + "|".join(PRICE_WORDS) + ")" + NO_LETTER_AFTER, re.IGNORECASE)
+SENTENCE_END = re.compile(r"[.!?؟\n](?!\d)")
+# A line that ends in ":" or "=" goes on to the next line, so "Total:\n#1500" and "الإجمالي:\n#1500"
+# are one sentence (review t261028j round 2, finding 4). A line that ends in a cue word goes on
+# when the next line starts with a number or # ("The total is\n#1500."), and for order numbers
+# whatever the next line is ("Total\nis #1500"). So "Payment: cash on delivery\nAddress: Building
+# 15, Apartment 302" keeps 302 as an address number (review t261028j round 3, finding 1). A line
+# with a price word and no amount goes on when the next line starts with a number or #
+# ("Total comes to\n#1500"). Lines with no letter, digit or # in between are passed over
+# ("Total:\n\n#1500"), red team t261028j round 3, item 4.
+LINE_OPEN = re.compile(r"[:=][^\S\n]*$")
+LINE_CUE_END = re.compile(LETTER_BEFORE + "(?:" + "|".join(CUES) + ")" + NO_LETTER_AFTER + r"[^\S\n]*$",
+                          re.IGNORECASE)
+NUMBER_FIRST = re.compile(r"[^\w#" + MASK + MONEY + r"\n]*[\d#" + MASK + MONEY + "]")
+TEXT_CHAR = re.compile(r"[\w#" + MASK + MONEY + "]")
+FILLER_WORD = r"[^\s\d" + MASK + MONEY + r".!?؟،,;]+"
+CUE_AMOUNT = re.compile(
+    LETTER_BEFORE + "(?P<cue>" + "|".join(CUES) + ")" + NO_LETTER_AFTER
+    + r"(?:\s+" + FILLER_WORD + r"){0,3}?\s*[:=]?\s*(?<![\d.,])(?P<n>" + DIGITS + r")(?![\w%٪])",
+    re.IGNORECASE)
+
+# A 1 or 2 digit number right after a city or governorate reads as a delivery fee ("Cairo 70,
+# Alex 90", "القاهرة 70 والاسكندرية 90").
+PLACES = (
+    r"(?:و|ف)?(?:بال|لل|ال|ب|ل)?(?:قاهر[ةه]|جيز[ةه]|[اإ]سكندري[ةه]|محافظات|محافظ[ةه]|مدن|صعيد|[اأ]قاليم|دلتا"
+    r"|ساحل|غردق[ةه]|[اأ]قصر|[اأ]سوان|[اأ]سيوط|سوهاج|قنا|منيا|فيوم|سويس|[اإ]سماعيلي[ةه]|بورسعيد|بور\s+سعيد"
+    r"|دمياط|منصور[ةه]|طنطا|زقازيق|شرقي[ةه]|غربي[ةه]|دقهلي[ةه]|منوفي[ةه]|قليوبي[ةه]|بحير[ةه]|مطروح|سينا"
+    r"|شرم|عريش|مصر|بني\s+سويف|كفر\s+الشيخ)",
+    r"cairo|alex|alexandria|aswan|luxor|hurghada|sharm|mansoura|tanta|zagazig|ismailia|suez|port\s+said"
+    r"|damietta|fayoum|faiyum|minya|minia|asyut|assiut|sohag|qena|beni\s+suef|sinai|matrouh|delta|sahel|egypt"
+    r"|cities|city|governorates?|provinces?|(?:el\s?)?2ahera|(?:el\s?)?giza|eskendereya|eskenderia|eskendria"
+    r"|iskandaria|(?:el\s?)?mo7afzat|mo7afazat|mohafzat|mo7afza|masr|(?:el\s?)?sa3id",
+)
+PLACE_AMOUNT = re.compile(
+    LETTER_BEFORE + "(?:" + "|".join(PLACES) + ")" + NO_LETTER_AFTER
+    + r"\s*[:=]?\s*(?<![\d.,])(?P<n>" + DIGITS + r")(?![\w%٪])", re.IGNORECASE)
+
+# A standalone number: not glued to letters or digits before it, so codes like NLS0001 and
+# BO-2936845 are not read. Letters after it do not matter (500bs is 500). With 3 or more
+# digits, all of them counted (1.500, 500,50), it is an amount wherever it stands.
+BARE_NUMBER = re.compile(r"(?<![A-Za-z0-9])(?<![A-Z]-)(?P<n>" + DIGITS + r")(?![0-9%٪])")
+BARE_DIGITS = 3
+# Egyptian phone numbers: mobiles (01x, 201x, +201x, 00201x), any number after +20 or 0020,
+# and landlines (02 then 8 digits, 03 then 7, other area codes 0xx then 7). Any other country's
+# number with a + and 8 to 15 digits (+44 7700 900123), the way the order summary shows it.
+PHONE = re.compile(
+    r"(?<![\w+])(?:(?:\+|00)\s?20[ -]?|20|0)1[0125](?:[ -]?\d){8}(?!\d)"
+    r"|(?<![\w+])(?:\+|00)\s?20(?:[ -]?\d){8,10}(?!\d)"
+    r"|(?<![\w+.,])0(?:2(?:[ -]?\d){8}|3(?:[ -]?\d){7}|[4-9]\d(?:[ -]?\d){7})(?!\d)"
+    r"|(?<![\w+])\+\s?[1-9](?:[ -]?\d){7,14}(?!\d)")
+
+SEP = r"(?:-|to|and|or|/|,|،|و|او|أو|لـ|ل|l|w|aw|le)"
+UNITS = (r"(?:days?|yom|youm|ayam|ayyam|أيام|ايام|يومين|يوم|hours?|hrs?|ساعات|ساعة|ساعه|sa3a|sa3at|weeks?"
+         r"|اسبوع|أسبوع|اسابيع|أسابيع|months?|شهور|شهر|minutes?|mins?|دقيقة|دقيقه|دقايق|pairs?|pieces?|pcs"
+         r"|items?|قطعة|قطعه|قطع|7etta|7etat|colou?rs?|ألوان|الوان|لون|sizes?|مقاسات|cm|mm|سم|mb|ميجا|mega"
+         r"|kg|كيلو|am|pm|times|مرات|مرة|مره|years?|سنين|سنة|سنه)")
+# A unit after the number, or a range up to a second number then a unit (2 to 3 days). A range
+# that runs down ("70 to 3 days") is a fee, then a time, so the first number stays an amount.
+UNIT_AFTER = re.compile(rf"\s*(?:{SEP}\s*(?P<to>\d+)\s*)?(?:(?:working|business)\s+)?{UNITS}{NO_LETTER_AFTER}",
+                        re.IGNORECASE)
+# Franco "2 le 3 ayam" (2 to 3 days): this "le" means "to", not the currency LE. So does a
+# lower case "le" before a number of 1 or 2 digits ("mn 42 le 45", "t8ayar le 44").
+LE_RANGE = re.compile(rf"(?<=\d)(\s*)le(?=\s*\d+\s*(?:(?:working|business)\s+)?{UNITS}{NO_LETTER_AFTER})"
+                      r"|(?<![\w.])(?-i:le)(?=\s*\d{1,2}(?![\d.,]?\d))", re.IGNORECASE)
+
+# Numbers that are not amounts: sizes, dates and order numbers.
+BARE_SIZE = re.compile(r"[0-9]+")   # a catalogue size that is only a whole number ("43")
+SIZE_WORDS =r"(?:sizes?|مقاسات|مقاس(?:ه|ها|ك)?|المقاس|بمقاس|ma2as(?:at)?|eu)"
+# "sizes 42, 43 and 44": the list goes on only with numbers of 1 or 2 digits, so "size 43, 500" keeps 500.
+SIZE_CTX = re.compile(
+    rf"{LETTER_BEFORE}{SIZE_WORDS}{NO_LETTER_AFTER}(?:\s*(?:is|are|:|=))?\s*\d+(?:\s*{SEP}\s*\d{{1,2}}(?!\d))*",
+    re.IGNORECASE)
+MONTHS = (r"(?:jan(?:uary)?|feb(?:ruary)?|march|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?"
+          r"|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|يناير|فبراير|مارس|ابريل|أبريل|إبريل|مايو|يونيو|يونيه"
+          r"|يوليو|يوليه|اغسطس|أغسطس|سبتمبر|اكتوبر|أكتوبر|نوفمبر|ديسمبر)")
+# A year inside a date: 28 Oct 2026, Oct 28, 2026, 28/10/2026, 28.10.2026, 2026-10-28.
+DATE_YEAR = r"(?:,?\s*(?:19|20)\d\d(?![\d%٪])(?![.,]\d))?"
+DATES = re.compile(
+    r"(?<!\d)\d{1,2}/\d{1,2}(?:/\d{2,4})?(?!\d)|(?<!\d)\d{4}(?:-\d{1,2}-|/\d{1,2}/)\d{1,2}(?!\d)"
+    r"|(?<![\d.,])(?:0?[1-9]|[12]\d|3[01])\.(?:0?[1-9]|1[0-2])\.(?:19|20)\d\d(?![\d%٪])(?![.,]\d)"
+    r"|(?<!\d)\d{1,2}:\d{2}(?!\d)"
+    rf"|(?<![\d.,])\d{{1,2}}(?:st|nd|rd|th)?(?:\s+of)?\s+{MONTHS}{NO_LETTER_AFTER}{DATE_YEAR}"
+    rf"|{LETTER_BEFORE}{MONTHS}\s+\d{{1,2}}(?:st|nd|rd|th)?(?!\d){DATE_YEAR}", re.IGNORECASE)
+# A year from 1900 to 2099 with a year word or a month right next to it: model 2026, the 2026
+# model, سنة 2026, May 2026. Only the year is masked, so the word stays for the other rules.
+# Mohamed's call, 28 Oct: any other 4 digit number is an amount, so "Boots: 1999." is refused.
+YEAR = r"(?<![\d.,])(?:19|20)\d\d(?![\d%٪])(?![.,]\d)"
+YEAR_WORDS = r"(?:year|models?|(?:ال)?موديل(?:ات)?|(?:ال)?سن[ةه]|sana|sanat)"
+YEAR_CTX = re.compile(
+    rf"{LETTER_BEFORE}(?:{YEAR_WORDS}|{MONTHS}){NO_LETTER_AFTER}\s*:?\s*(?P<a>{YEAR})"
+    rf"|(?P<b>{YEAR})\s*{YEAR_WORDS}{NO_LETTER_AFTER}", re.IGNORECASE)
+# A number right after an address word: عمارة 125, الدور 3, Building 125, Flat 12, 3emara 125. A rule
+# on words, not on the customer's own address text, so an address can never hide an amount in a
+# price line. A number with a currency word is read first, so "عمارة 125 جنيه" is still an amount.
+# Left out on purpose, as they also sit before prices: piece words (قطعة, 2et3a, unit: "سعر القطعة
+# 1450"), shop words (محل, مول: "سعرها في المحل 1450") and zone words (zone, منطقة, manta2a: the
+# delivery data prices by zone).
+ADDRESS_WORDS = (
+    r"(?:و|ف)?(?:بال|لل|ال|ب|ل)?(?:عمار[ةه]|برج|شق[ةه]|دور|طابق|بلوك|فيلا|مبن[ىي]|عقار|منزل|بيت"
+    r"|مجاور[ةه]|حي|شارع|ش|ممر|حار[ةه]|عطف[ةه]|مدخل|بواب[ةه]|مربع|كمبوند)",
+    r"(?:el\s?)?(?:3emara|emara|borg|sha2a|dor|block|villa|share3|mogawra|7ay)",
+    r"building|bldg|block|blk|floor|flr|apartment|apt|villa|street|st|road|rd|district|gate"
+    r"|entrance|plot|tower|house|compound",
+)
+ADDRESS = re.compile(
+    r"(?<!\w)(?:" + "|".join(ADDRESS_WORDS) + r")(?!\w)"
+    r"(?:\s*(?:رقم|rakam|ra2am|number|no\.?|num|#|:|\.)){0,2}\s*\d+(?![.,]?\d)", re.IGNORECASE)
+# An address label is not a price word: "عنوان التوصيل: شقة 302" and "Delivery address: Apartment
+# 302" read as "عنوان" and "address", so the address numbers stay masked (review t261028j round 3, finding 1).
+ADDRESS_LABEL = re.compile(
+    LETTER_BEFORE + r"(?:(?P<ar>(?:و|ف|ب|ل)?(?:ال)?عنوان)\s+(?:ال|لل)?(?:توصيل|شحن)"
+    r"|(?P<fr>(?:el\s?)?3[ae]nwan)\s+(?:el\s?)?(?:tawsil|tawseel|sha7n)"
+    r"|(?:delivery|shipping)\s+(?P<en>address(?:es)?))" + NO_LETTER_AFTER, re.IGNORECASE)
+# Draft orders on Shopify are named #D12, so a letter may sit between # and the digits.
+HASH_NUMBER = re.compile(r"#\s*[A-Za-z]?\d+")   # for the script check only: #D12 is not a word
+# Order numbers (red team t261028j F7): only order shaped numbers are masked. A draft name
+# (#D12) always; # and up to 5 digits (#1042) unless the sentence has a price word or an
+# amount with a currency and no order word stands right before the # ("Total: #1500" is an
+# amount, "Your total for order #1042 is 1450 EGP." keeps the order number). An order word
+# with no # ("طلبك 1500", "Your order 1500") masks nothing.
+DRAFT_NAME = re.compile(r"#\s*[Dd]\d+")
+ORDER_NAME = re.compile(r"#\s*\d{1,5}(?![\d.,]?\d)")
+ORDER_WORD_BEFORE = re.compile(
+    LETTER_BEFORE + r"(?:orders?|اوردر|أوردر|الاوردر|الأوردر|اوردرك|أوردرك|طلب|طلبك|الطلب|طلبية|ordr|el\s?order)"
+    + NO_LETTER_AFTER + r"(?:\s*(?:number|no\.?|num|رقم|rakam|ra2am|:))*\s*$", re.IGNORECASE)
+# An order name a tool gave this turn (#1001 from draft_order or find_order): masked wherever it
+# stands whole, so "اوردرك اتسجل برقم #1001، والإجمالي 1958 جنيه." passes and #1002 still counts
+# (review t261028j round 3, note 1).
+GIVEN_ORDER_NAME = re.compile(r"#?\s*([A-Za-z]{0,3}\d{1,12})")
+# Egyptian numbers are masked only when grouped the way a phone number is written (_mask_phone).
+EG_PREFIX = re.compile(r"(?:\+|00)\s?20[ -]?|20(?=1)")
+PHONE_GROUPS = ([7], [8], [4, 4], [3, 4])
+
+# An amount written in words cannot be checked, so it is refused: next to a currency word, after
+# a price word or ب (glued or not), or, when it is 100 or more, after any cue word.
+# Words for 100 or more: hundred, thousand, the Arabic and Franco hundreds (خمسمية, khomsomeya).
+HUNDREDS = (r"(?:تلت|تلات|ثلاث|ربع|اربع|أربع|خمس|ست|سبع|تمن|تمان|ثمان|تسع)(?:مية|ميه|مائة|مئة)|ميتين|متين|مائتين|مئتين"
+            r"|(?:tolt|tult|talat|rob3|rub3|arba3|khoms|khams|5oms|5ams|sot|set|sett|sob3|sab3|tomn|tamn|tos3|tes3"
+            r"|tis3)(?:o|u|e|a)?\s?(?:meyya|meya|mya|miya|mia)")
+MAGNITUDE_WORDS = (rf"(?:{HUNDREDS}|hundreds?|thousands?|alfein|alfeen|alf|meyya|meya|mya|miya|meteen|metein|mitein"
+                   r"|miteen|mit|ميتين|مية|ميه|مائة|مئة|ميت|ألفين|الفين|ألف|الف|آلاف|الاف|تلاف)")
+NUMBER_WORDS = (rf"(?:{MAGNITUDE_WORDS}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen"
+                r"|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|nos|tolt|rob3|واحد|اتنين|اثنين|تلاتة|ثلاثة"
+                r"|اربعة|أربعة|خمسة|ستة|سبعة|تمانية|ثمانية|تسعة|عشرة|عشرين|تلاتين|ثلاثين|اربعين|أربعين|خمسين"
+                r"|ستين|سبعين|تمانين|ثمانين|تسعين)")
+SPELLED_AMOUNT = re.compile(rf"{NUMBER_WORDS}\s*{CURRENCY}(?![\w])", re.IGNORECASE)
+# Number words in a row: "five hundred", "ميتين وخمسين", "two to three".
+WORD_RUN = (rf"{NUMBER_WORDS}{NO_LETTER_AFTER}"
+            rf"(?:\s*(?:and|or|to|aw|w|le|l|و|او|أو|لـ|ل|-)?\s*{NUMBER_WORDS}{NO_LETTER_AFTER})*")
+WORD_AMOUNT = re.compile(
+    rf"(?:{LETTER_BEFORE}(?:(?P<price>{'|'.join(PRICE_WORDS)})|(?P<weak>{'|'.join(WEAK_WORDS)})){NO_LETTER_AFTER}"
+    rf"(?:\s+{FILLER_WORD}){{0,3}}?\s*[:=]?\s*)?{LETTER_BEFORE}(?P<glued>بـ?)?(?P<words>{WORD_RUN})",
+    re.IGNORECASE)
+MAGNITUDE = re.compile(MAGNITUDE_WORDS + NO_LETTER_AFTER, re.IGNORECASE)
+# "بألف خير", "ألف مرة", "one of", "بمية ساقعة" (with cold water): number words that are not an amount.
+NOT_AN_AMOUNT_AFTER = re.compile(
+    r"\s*(?:خير|سلام[ةه]|شكر|مبروك|مر[ةه]|مرات|ساقع[ةه]?|بارد[ةه]?|سخن[ةه]?|دافي[ةه]?|فاتر[ةه]?|times?|of"
+    r"|salama|shokr|mabrou?k|marr?a)" + NO_LETTER_AFTER, re.IGNORECASE)
+ONE = re.compile(r"one|واحد", re.IGNORECASE)
+# Digits with k or thousand after them (1k, 1.5 ألف) next to a currency or price word cannot be
+# checked either. With the Arabic or Franco word for thousand they are refused anywhere.
+THOUSANDS_WORDS = r"(?:alf|ألف|الف|آلاف|الاف)"
+THOUSANDS = rf"(?:k|thousands?|{THOUSANDS_WORDS})"
+SHORT_AMOUNT = re.compile(
+    rf"{NUMBER}\s*{THOUSANDS}{NO_LETTER_AFTER}\s*{CURRENCY}(?![\w])"
+    rf"|(?<![\w]){CURRENCY}{NO_LETTER_AFTER}\s*{NUMBER}\s*{THOUSANDS}{NO_LETTER_AFTER}"
+    rf"|{LETTER_BEFORE}(?:{'|'.join(CUES)}){NO_LETTER_AFTER}(?:\s+{FILLER_WORD}){{0,3}}?\s*[:=]?\s*{NUMBER}\s*"
+    rf"{THOUSANDS}{NO_LETTER_AFTER}"
+    rf"|(?<![\d.,]){NUMBER}\s*{THOUSANDS_WORDS}{NO_LETTER_AFTER}",
+    re.IGNORECASE)
+
+# An exact stock count, in English, Arabic or Franco.
+STOCK_COUNT = re.compile(
+    r"\d+\s+(?:(?:pairs?|pieces?|items?|units?|more)\s+)?(?:left|remaining|in\s+stock|available)" + NO_LETTER_AFTER
+    + r"|" + LETTER_BEFORE + r"stock\s*(?:of|is|:|=)?\s*\d+"
+    + r"|(?:فاضل|فاضلين|فاضله|فاضلة|باقي|باقى|باقيين|متبقي|متبقى|المتبقي|المتاح|المخزون|الكمية|الكميه|ستوك"
+      r"|fadel|fadl|fadlin|fadleen|ba2y|ba2i|ba2yin|motba2y)\s*(?:منه|منها|منهم|بس|meno|menha|menhom|bs)?\s*\d+"
+    + r"|\d+\s*(?:(?:قطعة|قطعه|قطع|حتة|حتت|بس|7etta|7etat|bs)\s*)?"
+      r"(?:فاضلين|فاضلة|فاضله|فاضل|باقيين|باقي|متبقيين|متبقي|في المخزن|في الستوك|متاحين|موجودين"
+      r"|fadlin|fadleen|fadel|fadl|ba2yin|ba2y|mawgodin|mwgodin|fel stock)",
+    re.IGNORECASE)
+
+AMOUNT_KEYS = frozenset({"price", "fee", "total", "subtotal"})
+AMOUNT_TEXT = re.compile(r"\s*\d[\d,]*(?:\.\d+)?\s*")
+
+
+def detect_script(text):
+    """'arabic', 'franco', 'english', or None when there are no letters."""
+    text = text or ""
+    ar = len(ARABIC.findall(text))
+    la = len(LATIN.findall(text))
+    if ar == 0 and la == 0:
+        return None
+    if ar >= la:
+        return "arabic"
+    return "franco" if looks_franco(text) else "english"
+
+
+def looks_franco(text):
+    words = [w for w in WORD.findall(text.lower()) if not ARABIC.search(w)]
+    digit_words = [w for w in words if FRANCO_DIGIT_WORD.fullmatch(w) and not ORDINAL.match(w)]
+    common = [w for w in words if w in FRANCO_WORDS]
+    return len(digit_words) >= 1 or len(common) >= 2
+
+
+def _script_feedback(reply, customer_text, vocabulary):
+    want = detect_script(customer_text)
+    if want is None:
+        return None
+    reply = HASH_NUMBER.sub(" ", reply)  # an order number is not a word: #D12 is not Franco
+    if want == "arabic":
+        words = WORD.findall(reply)
+        ar = sum(1 for w in words if ARABIC.search(w))
+        latin = sum(1 for w in words if LATIN.search(w) and not ARABIC.search(w)
+                    and w.lower() not in vocabulary and not re.fullmatch(r"[A-Z]{2,}\d+", w))
+        if ar == 0 or latin > ar / 4:
+            return "The customer wrote in Arabic letters. Reply in Egyptian Arabic, in Arabic letters."
+    elif want == "franco":
+        if ARABIC.search(reply):
+            return "The customer wrote in Franco. Reply in Franco, in Latin letters and numbers, no Arabic letters."
+    elif want == "english":
+        if ARABIC.search(reply):
+            return "The customer wrote in English. Reply in English."
+        if looks_franco(reply):
+            return "The customer wrote in English. Reply in plain English, not Franco."
+    return None
+
+
+def _plain(text):
+    """The reply as the number rules read it: Western digits, no invisible format characters
+    (a zero width space splits 500 into 5 and 00), look-alike signs and blanks as ":", "=" and
+    spaces (LOOKALIKES), emphasis marks as spaces (_500_ is 500), and digit groups split by a
+    space joined (1 949 is 1949)."""
+    text = "".join(ch for ch in (text or "") if unicodedata.category(ch) != "Cf")
+    return _join_thousands(EMPHASIS.sub(" ", text.translate(EASTERN_DIGITS).translate(LOOKALIKES)))
+
+
+def _join_thousands(text):
+    """A space used as a thousands separator removed: "الطباعة 1 150 جنيه" reads as 1150, the
+    number the customer sees, not 150 (red team t261028j F6). Digits inside a phone number
+    written the way phone numbers are (+1 202 555 0143) stay as they are."""
+    phones = [m.span() for m in PHONE.finditer(text) if phone_shaped(m.group(0))]
+    return SPACED_THOUSANDS.sub(
+        lambda m: m.group(0) if any(a < m.end() and m.start() < b for a, b in phones)
+        else THOUSANDS_SPACE.sub("", m.group(0)), text)
+
+
+def _amount_digits(raw):
+    """How many digits count toward the bare number rule. After a dot or comma, 1 or 2 digits
+    are a fraction or a date (28.10, 10.30), so only the whole part counts; 3 or more are
+    thousands (1.500, 12,3456), so every digit counts."""
+    head, *tails = re.split(r"[.,]", raw)
+    if all(len(t) <= 2 for t in tails):
+        return len(head)
+    return sum(ch.isdigit() for ch in raw)
+
+
+def _number(raw):
+    """Digits as written, as a number: an int, or a Decimal when there is a fraction (1450.99 is not 1450).
+
+    A decimal comma counts as a point (1450,99 is 1450.99). Past 20 digits the Decimal is kept,
+    so turning it into text never hits Python's 4300 digit limit for ints.
+    """
+    if DECIMAL_COMMA.fullmatch(raw):
+        raw = raw.replace(",", ".")
+    d = Decimal(raw.replace(",", ""))
+    if sum(ch.isdigit() for ch in raw) > MAX_INT_DIGITS:
+        return d
+    return int(d) if d == d.to_integral_value() else d
+
+
+def _unit_after(text, m):
+    """True when a unit follows the number in m (2 days), or a range up to a bigger number and
+    a unit (2 to 3 days). "Shipping 70 to 3 days" is a fee, then a time."""
+    u = UNIT_AFTER.match(text, m.end())
+    return bool(u) and (u.group("to") is None or _number(m.group("n")) <= Decimal(u.group("to")))
+
+
+def _sentence_ends(text, start, end, any_next=False):
+    """SENTENCE_END matches from start to end, less a line end after a line that goes on (_goes_on)."""
+    going_on = _lines_going_on(text, any_next)
+    for e in SENTENCE_END.finditer(text, start, end):
+        if e.group(0) == "\n" and e.start() in going_on:
+            continue
+        yield e
+
+
+@functools.lru_cache(maxsize=16)
+def _lines_going_on(text, any_next):
+    """Where the line ends in text that go on into the next line are (_goes_on), worked out once
+    per text. Each line end reads the last line with text before it and the first one after it,
+    so lines with no letter, digit or # in between are passed over."""
+    lines = text.split("\n")
+    has_text = [TEXT_CHAR.search(line) is not None for line in lines]
+    before, last = [], ""
+    for line, has in zip(lines, has_text):
+        last = line if has else last
+        before.append(last)
+    after, nxt = [""] * len(lines), ""
+    for i in range(len(lines) - 1, -1, -1):
+        nxt = lines[i] if has_text[i] else nxt
+        after[i] = nxt
+    out, pos = set(), -1
+    for i in range(len(lines) - 1):
+        pos += len(lines[i]) + 1   # the "\n" after line i
+        if _goes_on(before[i], after[i + 1], any_next):
+            out.add(pos)
+    return frozenset(out)
+
+
+def _goes_on(line, next_line, any_next):
+    """True when line goes on into next_line: it ends in ":" or "=", or it ends in a cue word or
+    holds a price word with no amount, and next_line starts with a number or #. With any_next, a
+    line that ends in a cue word goes on into any next line."""
+    if LINE_OPEN.search(line):
+        return True
+    cue_end = LINE_CUE_END.search(line) is not None
+    if not (cue_end or _price_word_open(line)):
+        return False
+    return (any_next and cue_end) or NUMBER_FIRST.match(next_line) is not None
+
+
+def _price_word_open(line):
+    """True when the line has a price word and no amount with a currency ("Total comes to")."""
+    return PRICE_WORD.search(line) is not None and MONEY not in line and PRICE.search(line) is None
+
+
+def _price_word_before(text, pos):
+    """True when a price word comes before pos in the same sentence."""
+    start = max((e.end() for e in _sentence_ends(text, 0, pos)), default=0)
+    return PRICE_WORD.search(text, start, pos) is not None
+
+
+def _money_sentence(text, pos):
+    """True when the sentence around pos has a price word or an amount with a currency. A line
+    that ends in a cue word goes on into any next line here, so "Total\nis #1500" is one sentence."""
+    start = max((e.end() for e in _sentence_ends(text, 0, pos, any_next=True)), default=0)
+    end = next((e.start() for e in _sentence_ends(text, pos, len(text), any_next=True)), len(text))
+    return (PRICE_WORD.search(text, start, end) is not None or MONEY in text[start:end]
+            or PRICE.search(text, start, end) is not None)
+
+
+def _given_orders_mask(text, orders):
+    """Each order name in orders (#1001, given by a tool this turn) replaced by MASK where it
+    stands whole: #1001 hides neither #10012 nor an amount with a currency (1001 جنيه)."""
+    for name in orders or ():
+        m = GIVEN_ORDER_NAME.fullmatch(str(name).translate(EASTERN_DIGITS).strip())
+        if m:
+            text = re.sub(r"#\s*" + re.escape(m.group(1)) + r"(?![\d.,]?\d)", MASK, text, flags=re.IGNORECASE)
+    return text
+
+
+def _order_mask(text):
+    """Order numbers replaced by MASK: draft names (#D12) always, and # with up to 5 digits
+    when an order word stands right before it or the sentence names no money (ORDER_NAME)."""
+    text = DRAFT_NAME.sub(MASK, text)
+    return ORDER_NAME.sub(
+        lambda m: MASK if ORDER_WORD_BEFORE.search(text, 0, m.start()) or not _money_sentence(text, m.start())
+        else m.group(0), text)
+
+
+def _mask_phone(m):
+    """MASK for a phone number written the way phone numbers are: one run of digits, or a head
+    of up to 4 digits then 7 or 8, then 4 and 4, or 3 and 4 (010 1234 5678, +20 10 1234 5678,
+    02 2345 6789, 03 4567890). Any other grouping of an Egyptian number ("010 500 12345",
+    "+20 1500 0000 00") stays, so a price cannot hide in a phone shape (red team t261028j F7).
+    Another country's number (+44 7700 900123) is masked as written."""
+    return MASK if phone_shaped(m.group(0)) else m.group(0)
+
+
+def phone_shaped(s):
+    """True when a PHONE match is grouped the way a phone number is written (_mask_phone)."""
+    if s.startswith("+") and not re.match(r"\+\s?20", s):
+        return True
+    prefix = EG_PREFIX.match(s)
+    groups = re.split(r"[ -]", s[prefix.end():] if prefix else s)
+    return len(groups) == 1 or (len(groups[0]) <= 4 and [len(g) for g in groups[1:]] in PHONE_GROUPS)
+
+
+def amount_in_words(text):
+    """True when the text holds an amount written in words that no currency word follows:
+    after a price word or ب ("سعره ألف", "بخمسمية", "التوصيل بسبعين"), or 100 or more after
+    any cue word ("The boots are two hundred"). "ألف شكر" and "for two days" are not amounts."""
+    text = _plain(text)
+    pos = 0
+    while m := WORD_AMOUNT.search(text, pos):
+        pos = m.start() + 1
+        cue = m.group("price") or m.group("weak")
+        if not (cue or m.group("glued")) or NOT_AN_AMOUNT_AFTER.match(text, m.end()):
+            continue
+        if MAGNITUDE.search(m.group("words")):
+            return True
+        strong = m.group("price") or m.group("glued") or (cue or "") in ("ب", "بـ")
+        if strong and not ONE.fullmatch(m.group("words")) and not UNIT_AFTER.match(text, m.end()):
+            return True
+    return False
+
+
+def _size_strings(sizes):
+    """The catalogue's size strings, and the part in brackets of each ("40-45" from "Adult (40-45)")."""
+    out = set()
+    for s in sizes or ():
+        s = str(s).translate(EASTERN_DIGITS).strip()
+        if any(ch.isdigit() for ch in s):
+            out.add(s)
+            out |= {inner.strip() for inner in re.findall(r"\(([^()]*\d[^()]*)\)", s)}
+    return sorted(out, key=len, reverse=True)
+
+
+def _size_numbers(sizes):
+    """Whole numbers the catalogue uses as sizes: 40 to 45 from "Adult (40-45)", 43 from "43".
+
+    Measures like "12x8 cm" are left out.
+    """
+    out = set()
+    for s in _size_strings(sizes):
+        for a, b in re.findall(r"(?<![\dx.])(\d{1,3})\s*-\s*(\d{1,3})(?![\dx.])", s, re.IGNORECASE):
+            lo, hi = int(a), int(b)
+            if lo <= hi <= lo + 40:
+                out.update(range(lo, hi + 1))
+        for n in re.findall(r"(?<![\dx.-])(\d{1,3})(?![\dx.-])(?!\s*(?:cm|mm|سم))", s, re.IGNORECASE):
+            out.add(int(n))
+    return out
+
+
+def _weak_size(text, m, size_numbers):
+    """True when a cue match is a weak word, then a catalogue size number, with no price word
+    earlier in the same sentence ("Black is available in 42 and 43")."""
+    if _number(m.group("n")) not in size_numbers or not WEAK_CUE.fullmatch(m.group("cue")):
+        return False
+    start = max((e.end() for e in _sentence_ends(text, 0, m.start())), default=0)
+    return PRICE_WORD.search(text, start, m.start("n")) is None
+
+
+def _mask(text, sizes=(), orders=()):
+    """The text with phone numbers, sizes, dates, address numbers, order numbers and years
+    with a year word replaced by MASK, so no rule reads them as amounts. An address label reads
+    as its address word (ADDRESS_LABEL). orders: order names a tool gave this turn."""
+    text = _given_orders_mask(text, orders)
+    text = ADDRESS_LABEL.sub(lambda m: m.group("ar") or m.group("fr") or m.group("en"), text)
+    text = PHONE.sub(_mask_phone, text)
+    for s in _size_strings(sizes):
+        # A bare size ("43") is left to the size number rules (_weak_size), so after a price word
+        # it is still an amount ("سعره 43") and a date keeps its day ("Oct 30, 2026").
+        if BARE_SIZE.fullmatch(s):
+            continue
+        # Whole numbers only: the size "Kids 4" never hides part of "Kids 40".
+        text = re.sub(r"(?<!\d)" + re.escape(s) + r"(?!\d)", MASK, text, flags=re.IGNORECASE)
+    for pattern in (SIZE_CTX, DATES):
+        text = pattern.sub(MASK, text)
+    # An address number stays an amount when a price word comes earlier in the sentence
+    # ("سعر التوصيل للبيت 120", "Delivery to your house 120"), as with order numbers (review t261028j 4).
+    text = ADDRESS.sub(lambda m: m.group(0) if _price_word_before(text, m.start()) else MASK, text)
+    return YEAR_CTX.sub(_mask_year, _order_mask(text))
+
+
+def _mask_year(m):
+    """The year in a YEAR_CTX match replaced by MASK, the year word or month kept."""
+    g = "a" if m.group("a") else "b"
+    return m.group(0)[:m.start(g) - m.start()] + MASK + m.group(0)[m.end(g) - m.start():]
+
+
+def prices_in(reply, sizes=(), orders=()):
+    """Every number in the reply that reads as an amount: ints, or Decimals for fractions.
+
+    A number next to a currency word or sign always counts. A number after a price word, or
+    right after a city or governorate (Cairo 70), counts unless it is a size, a date, an
+    order number or has a unit after it (2 days).
+    Any other standalone number of 3 or more digits counts too, unless it is a phone
+    number (+44 7700 900123 too), a percentage, a year with a year word or month next to
+    it, or masked as a size, date, order number (#1234, #D12) or address number (عمارة 125,
+    Building 125).
+    sizes: the catalogue's size strings, so "Adult (40-45)" is never read as an amount, and
+    a size number after a weak word ("is available in 43") is read as a size. A bare size
+    ("43") after a price word ("سعره 43") is still an amount.
+    orders: order names a draft_order or find_order result gave this turn (#1001), read as
+    order numbers wherever they stand whole.
+    """
+    text = LE_RANGE.sub(r"\1to", _plain(reply))
+    out = [_number(m.group(1) or m.group(2)) for m in PRICE.finditer(text)]
+    masked = _mask(PRICE.sub(MONEY, text), sizes, orders)
+    size_numbers = _size_numbers(sizes)
+    counted = set()
+    for m in CUE_AMOUNT.finditer(masked):
+        if _unit_after(masked, m) or _weak_size(masked, m, size_numbers):
+            continue
+        counted.add(m.start("n"))
+        out.append(_number(m.group("n")))
+    for m in PLACE_AMOUNT.finditer(masked):
+        if m.start("n") in counted or _unit_after(masked, m):
+            continue
+        counted.add(m.start("n"))
+        out.append(_number(m.group("n")))
+    for m in BARE_NUMBER.finditer(masked):
+        raw = m.group("n")
+        if m.start("n") in counted or _amount_digits(raw) < BARE_DIGITS:
+            continue
+        out.append(_number(raw))
+    return out
+
+
+def size_number_amounts(amounts, sizes):
+    """Prices and fees that are also catalogue size numbers (45 with the boot sizes "40" to "45").
+
+    After a weak word (is, for, ب) a size number reads as a size, so where prices sit among
+    the size numbers, a wrong price there can pass the send check. Checked at start.
+    """
+    numbers = _size_numbers(sizes)
+    return sorted({a for a in (amount(x) for x in amounts) if a is not None and a in numbers})
+
+
+def stock_counts(reply, sizes=(), orders=()):
+    """Exact stock counts stated in the reply ("3 left", "فاضل 2", "fadel 3").
+
+    A catalogue size number is a size, not a count ("43 available").
+    """
+    masked = _mask(_plain(reply), sizes, orders)
+    size_numbers = _size_numbers(sizes)
+    return [m.group(0) for m in STOCK_COUNT.finditer(masked)
+            if not all(len(n) <= 3 and int(n) in size_numbers for n in re.findall(r"\d+", m.group(0)))]
+
+
+def amount(x):
+    """x as an amount (an int, or a Decimal when it has a fraction), or None for anything
+    that is not a plain finite number. "1450.00" is 1450; "1450.50" stays 1450.50."""
+    if isinstance(x, bool):
+        return None
+    if isinstance(x, str):
+        if not AMOUNT_TEXT.fullmatch(x):
+            return None
+        x = x.replace(",", "").strip()
+    elif not isinstance(x, (int, float)):
+        return None
+    try:
+        f = float(x)
+        if not math.isfinite(f):
+            return None
+        return _number(str(x))
+    except (ValueError, OverflowError, InvalidOperation):
+        return None
+
+
+def amounts_in(obj):
+    """Numbers under the exact keys price, fee, total or subtotal anywhere in a tool result.
+
+    Strings are never parsed as JSON, so free text inside a result adds nothing.
+    """
+    found = set()
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k in AMOUNT_KEYS:
+                for x in (v if isinstance(v, list) else [v]):
+                    n = amount(x)
+                    if n is not None:
+                        found.add(n)
+            if isinstance(v, (dict, list)):
+                found |= amounts_in(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            found |= amounts_in(v)
+    return found
+
+
+def style_problems(text):
+    """Feedback for the house style: banned words, dashes, spaced hyphens, emoji, markdown bold."""
+    return [fb for _, fb in named_style(text)]
+
+
+def named_style(text):
+    """style_problems as (check name, feedback) pairs: banned, dashes, emoji or markdown."""
+    problems = []
+    low = (text or "").lower()
+    for pattern, fix in BANNED:
+        if pattern.search(low):
+            problems.append(("banned", fix))
+    if DASHES.search(text or ""):
+        problems.append(("dashes", "Never use em dashes or en dashes. Use a comma or a full stop."))
+    if any(not (a.isdigit() and b.isdigit()) for a, b in
+           ((m.group(1), m.group(2)) for m in SPACED_HYPHEN.finditer(text or ""))):
+        problems.append(("dashes", "Never use a hyphen with spaces as a dash. Use a comma or a full stop."))
+    if EMOJI.search(text or ""):
+        problems.append(("emoji", "No emoji."))
+    if MARKDOWN_BOLD.search(text or ""):
+        problems.append(("markdown", "No markdown. WhatsApp shows the ** as they are."))
+    return problems
+
+
+def check(reply, customer_text="", amounts=(), vocabulary=frozenset(), sizes=(), orders=()):
+    """(passed, feedback) for one reply.
+
+    amounts: every price and fee in the store and delivery data, plus amounts from this turn's store tools.
+    vocabulary: lowercase words from product names and sizes, allowed in Latin letters inside an Arabic reply.
+    sizes: the catalogue's size strings, so a size is never read as an amount.
+    orders: order names a draft_order or find_order result gave this turn (#1001), so the order
+    the customer just placed or asked about is never read as an amount; any other #number still counts.
+    """
+    problems = named_problems(reply, customer_text, amounts, vocabulary, sizes, orders)
+    if problems:
+        return False, " ".join(dict.fromkeys(fb for _, fb in problems))
+    return True, ""
+
+
+def named_problems(reply, customer_text="", amounts=(), vocabulary=frozenset(), sizes=(), orders=()):
+    """Every rule the reply breaks, as (check name, feedback) pairs, in the order check() gives
+    them; [] when it passes. The names: empty, script, banned, dashes, emoji, markdown, sympathy,
+    amounts, digits and stock. check() is this list joined, so the exam (reflection/exam.py) reads
+    the same rules by name and never keeps a second copy of one."""
+    if not (reply or "").strip():
+        return [("empty", "The reply was empty. Write a reply to the customer.")]
+    problems = []
+    fb = _script_feedback(reply, customer_text, vocabulary)
+    if fb:
+        problems.append(("script", fb))
+    problems += named_style(reply)
+    low = reply.lower()
+    for line in SYMPATHY:
+        if line in low:
+            problems.append(("sympathy", f'Remove the sympathy line ("{line}"). No sympathy lines; just answer.'))
+            break
+    allowed = {n for n in (amount(a) for a in amounts) if n is not None}
+    wrong = sorted({p for p in prices_in(reply, sizes, orders) if p not in allowed})
+    if wrong:
+        nums = ", ".join(s if len(s) <= MAX_INT_DIGITS else s[:MAX_INT_DIGITS] + "..." for s in map(str, wrong))
+        problems.append(("amounts", f"These amounts are not in the store or delivery data: {nums}. "
+                         "Use only prices and fees from tool results, or say you will check with the team. "
+                         "If a number is not a price, say what it is: size 43, 2 days, order #1234, model 2026."))
+    digits = _plain(reply)
+    if SPELLED_AMOUNT.search(digits) or SHORT_AMOUNT.search(digits) or amount_in_words(digits):
+        problems.append(("digits", "Write every amount in digits, the number then جنيه, so it can be checked."))
+    if stock_counts(reply, sizes, orders):
+        problems.append(("stock", "Never give the exact stock count. If the store says few left, say only a few are "
+                         "left; otherwise say it is in stock or out of stock."))
+    return problems

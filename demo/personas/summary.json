@@ -1,0 +1,59 @@
+{
+ "recipe": "own",
+ "recipe_sha256": "9245568b22d2",
+ "model": "scripted (no model call)",
+ "read": {
+  "whatsapp_chats": 26,
+  "instagram_chats": 7,
+  "messages": 153
+ },
+ "not_read": [],
+ "team": {
+  "from": "found",
+  "names": 1
+ },
+ "labels": {
+  "won": 12,
+  "lost": 16,
+  "unclear": 5
+ },
+ "why": {
+  "lost: quiet after the price": 16,
+  "unclear: cancelled after the won sign": 1,
+  "unclear: last customer message is a voice note": 1,
+  "unclear: last customer message not answered": 1,
+  "unclear: no store reply": 1,
+  "unclear: still open": 1,
+  "won: address sent": 3,
+  "won: order confirmed by the customer": 9
+ },
+ "tagging": {
+  "cap": 1000,
+  "limit": null,
+  "picked": 28,
+  "calls": 28,
+  "failed": 0,
+  "bad_answers": 0,
+  "tagged": 28,
+  "not_tagged": 0,
+  "stopped": null,
+  "last_error": null
+ },
+ "cards": {
+  "cards": 8,
+  "unwinnable_cards": 2,
+  "tagged_chats": 28,
+  "unwinnable_chats": 4,
+  "unwinnable_share_real": 0.143,
+  "unwinnable_share_used": 0.143,
+  "capped_wants": [
+   {
+    "name": "name printing",
+    "most": 0.25,
+    "share_real": 0.107,
+    "share_used": 0.107
+   }
+  ]
+ },
+ "replay_chats": 28
+}

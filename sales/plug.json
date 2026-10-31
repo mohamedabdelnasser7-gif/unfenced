@@ -1,0 +1,119 @@
+{
+  "agent": "sales",
+  "about": "Answers a store's customers on WhatsApp and takes orders after a plain yes.",
+  "case": "One WhatsApp chat with one customer; the case id is the chat id.",
+  "fields": ["retail"],
+  "stages": ["asking", "ordering", "my_order", "with_person"],
+  "actions": {
+    "reply": "One answer to a customer message: a reply checked before it goes out, or a fixed line.",
+    "hand_off": "The chat goes to a person on the team.",
+    "order": "An order summary, then the order once the customer says a plain yes."
+  },
+  "results": {
+    "replied": {"speed": "fast", "shows_in_days": [0, 0], "after": "reply",
+                "about": "The reply passed the send check and went out, or a fixed line went out."},
+    "check_failed": {"speed": "fast", "shows_in_days": [0, 0], "after": "reply",
+                     "about": "A draft reply failed the send check and was not sent; one row per blocked reply, with the check's feedback."},
+    "limited": {"speed": "fast", "shows_in_days": [0, 0], "after": "reply",
+                "about": "Over a model call limit: no model call made, one fixed line once per window."},
+    "model_error": {"speed": "fast", "shows_in_days": [0, 0], "after": "reply",
+                    "about": "The model did not answer; the customer was asked to write again."},
+    "turn_failed": {"speed": "fast", "shows_in_days": [0, 0], "after": "reply",
+                    "about": "The code crashed during the turn; the same line went out, and a second in a row hands off."},
+    "handed_off": {"speed": "fast", "shows_in_days": [0, 0], "after": "hand_off",
+                   "about": "A person has the chat now."},
+    "handoff_failed": {"speed": "fast", "shows_in_days": [0, 0], "after": "hand_off",
+                       "about": "No part of the note reached the team, so the chat stayed with the agent and the customer was told the team will reply."},
+    "order_drafted": {"speed": "fast", "shows_in_days": [0, 0], "after": "order",
+                      "about": "draft_order made a summary, with its total."},
+    "order_created": {"speed": "fast", "shows_in_days": [0, 1], "after": "order",
+                      "about": "The customer said yes and the store took the order, with its number, total and COD risk. It settles a case as good; a chat with no order a day after the agent last acted went quiet, which counts as not good."},
+    "person_replied": {"speed": "fast", "shows_in_days": [0, 1],
+                       "about": "A team member's reply reached the customer; its step is the example the reflection reads."},
+    "handed_back": {"speed": "fast", "shows_in_days": [0, 1],
+                    "about": "The team member gave the chat back to the agent."},
+    "relay_failed": {"speed": "fast", "shows_in_days": [0, 1],
+                     "about": "WhatsApp refused a team member's reply, or a customer's message reached no one on the team."},
+    "delivered": {"speed": "slow", "shows_in_days": [2, 7],
+                  "about": "The courier delivered the order (Bosta, optional). Recorded for the team and the delivery cards; it never decides a case."},
+    "refused": {"speed": "slow", "shows_in_days": [2, 7],
+                "about": "The customer refused the order at delivery, or Bosta returned it to the store (Bosta, optional). Recorded; it never decides a case."}
+  },
+  "causes": {
+    "out_of_stock": "The item ran out.",
+    "price": "The price put the customer off.",
+    "area": "The customer's area."
+  },
+  "source": {
+    "about": "The person writing in. One chat is one person, so the chat id names them.",
+    "known_by": "case"
+  },
+  "harm": {
+    "results": ["handed_off"],
+    "about": "A handoff counts as harm. Complaints count too, but they have no result yet; they join this list once one is declared."
+  },
+  "decides": {"good": "order_created", "bad": []},
+  "risk": {
+    "high": {
+      "about": "High risk in this store: any number (a price, a total, a fee, delivery days), any promise (a refund, an exchange, a delivery date), store policy, and a customer's personal data.",
+      "words": {
+        "number": [
+          "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+          "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen",
+          "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
+          "hundred", "thousand", "million", "half", "quarter", "dozen", "double", "twice", "triple", "percent",
+          "price", "cost", "total", "subtotal", "fee", "charge", "shipping", "delivery", "discount", "offer",
+          "sale", "coupon", "promo", "free", "cheap", "expensive", "money", "amount",
+          "egp", "le", "pound", "dollar", "usd", "euro", "riyal", "dirham", "sar", "aed", "kwd", "qar",
+          "wa7ed", "etnen", "itnen", "talata", "tlata", "khamsa", "sitta", "tamanya", "meya", "alf", "nos",
+          "bkam", "bekam", "taman", "shahn", "tawseel", "khasm", "felous", "fulus", "geneh", "gneh", "guineh",
+          "واحد", "اتنين", "اثنين", "تلات", "ثلاث", "اربع", "خمس", "سته", "ستين", "سبع", "تمان", "ثمان", "تسع",
+          "عشر", "ميه", "ميت", "الف", "مليون", "نص", "ضعف", "مرتين",
+          "سعر", "اسعار", "بكام", "تمن", "ثمن", "جنيه", "ج.م", "مصاريف", "رسوم", "شحن", "توصيل", "خصم", "تخفيض",
+          "عرض", "اوفر", "ببلاش", "مجان", "فلوس", "كوبون", "اجمالي", "مجموع"
+        ],
+        "promise": [
+          "promise", "promising", "guarantee", "warranty", "refund", "return", "exchange", "exchanging",
+          "replace", "replacing", "swap", "money back", "deliver", "arrive", "arrival", "tomorrow", "today",
+          "tonight", "within", "deadline", "on time", "date", "day", "week", "hour",
+          "saturday", "sunday", "monday", "tuesday", "wednesday", "thursday", "friday",
+          "bokra", "bukra", "naharda", "enaharda", "estebdal", "tabdeel", "badal", "daman", "madmoun", "madmoon",
+          "وعد", "ضمان", "مضمون", "ضامن", "استرجاع", "ترجيع", "مرتجع", "استرداد", "استبدال", "تبديل", "بدل",
+          "يوصل", "توصل", "وصول", "هيجي", "بكره", "النهارده", "انهارده", "الليله", "خلال", "ميعاد", "موعد",
+          "تاريخ", "يوم", "ايام", "اسبوع", "ساعه"
+        ],
+        "policy": [
+          "policy", "policies", "terms", "condition", "cash on delivery", "cod", "cash", "pay", "payment",
+          "instapay", "visa", "card", "wallet", "invoice", "receipt", "stock", "sold out", "restock",
+          "cancel", "cancellation", "available", "availability",
+          "siasa", "shorot", "kash",
+          "سياسه", "شروط", "دفع", "كاش", "فيزا", "كارت", "انستاباي", "محفظه", "فاتوره", "ايصال", "مخزون",
+          "ستوك", "متاح", "متوفر", "نفد", "خلصان", "الغاء", "لغي"
+        ],
+        "personal_data": [
+          "name", "phone", "mobile", "number", "address", "email", "location", "national id", "id card",
+          "birthday", "age", "password", "account", "instagram", "facebook",
+          "esm", "rakam", "telefon", "mobil",
+          "اسم", "رقم", "ارقام", "تليفون", "تلفون", "موبايل", "عنوان", "ايميل", "لوكيشن", "بطاقه", "قومي",
+          "عمر", "حساب"
+        ]
+      },
+      "patterns": {
+        "number": ["[0-9]", "[%$£€¥]"],
+        "personal_data": ["@"]
+      },
+      "tools": ["store", "delivery", "draft_order", "cod_risk", "find_order", "switch_stage", "handoff", "voice_note"]
+    },
+    "low": {
+      "about": "Low risk: tone, wording, the order of questions, when to ask for the size, greetings."
+    }
+  },
+  "trial": {"fast": {"share": 0.5, "days": 7}, "careful": {"share": 0.2, "days": 14}},
+  "slot": "Lessons from past chats:",
+  "exam": {
+    "situations": "exam/situations.json",
+    "checks": ["script", "banned_words", "style", "amounts", "stock_count", "echo", "bot_line", "handoff", "order",
+               "days_from_tools", "tools", "amount_from_tool", "late_order", "exchange_line", "lookup_line",
+               "rule_change", "cod_unasked", "check_with_team", "no_shop"]
+  }
+}

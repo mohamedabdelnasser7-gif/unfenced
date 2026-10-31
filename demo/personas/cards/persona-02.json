@@ -1,0 +1,50 @@
+{
+ "id": "persona-02",
+ "worry": "price",
+ "unwinnable": false,
+ "why_unwinnable": null,
+ "want": [
+  "football boots",
+  "something from the shop"
+ ],
+ "buy_trigger": [
+  "a lower price or a bundle"
+ ],
+ "patience": {
+  "median": 0,
+  "most": 0
+ },
+ "style": {
+  "length": {
+   "short": 0.6,
+   "medium": 0.4,
+   "long": 0.0
+  },
+  "language": {
+   "arabic": 0.4,
+   "franco": 0.1,
+   "english": 0.5
+  },
+  "voice_notes": 0.0,
+  "opening": {
+   "voice note": 0.0,
+   "photo or link": 0.0,
+   "price": 1.0,
+   "size": 0.0,
+   "availability": 0.0,
+   "greeting": 0.0,
+   "other": 0.0
+  }
+ },
+ "chats": 5,
+ "won": 2,
+ "lost": 3,
+ "examples": [
+  "بكام الجزمة دي؟",
+  "That's a bit expensive, any discount?",
+  "8aly awy, mafeesh discount?",
+  "Too expensive for me, is there a cheaper pair?"
+ ],
+ "share": 0.179,
+ "arena_weight": 0.179
+}

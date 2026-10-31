@@ -1,0 +1,48 @@
+{
+ "id": "persona-06",
+ "worry": "other",
+ "unwinnable": false,
+ "why_unwinnable": null,
+ "want": [
+  "name printing on boots"
+ ],
+ "buy_trigger": [
+  "a quick clear answer"
+ ],
+ "patience": {
+  "median": 0,
+  "most": 0
+ },
+ "style": {
+  "length": {
+   "short": 0.33,
+   "medium": 0.67,
+   "long": 0.0
+  },
+  "language": {
+   "arabic": 0.67,
+   "franco": 0.0,
+   "english": 0.33
+  },
+  "voice_notes": 0.0,
+  "opening": {
+   "voice note": 0.0,
+   "photo or link": 0.0,
+   "price": 0.0,
+   "size": 0.0,
+   "availability": 0.0,
+   "greeting": 0.33,
+   "other": 0.67
+  }
+ },
+ "chats": 3,
+ "won": 2,
+ "lost": 1,
+ "examples": [
+  "ممكن تطبعوا اسم على الجزمة؟",
+  "بتطبعوا أسامي على الجزم؟",
+  "Hi, can you print a name on the boots?"
+ ],
+ "share": 0.107,
+ "arena_weight": 0.107
+}

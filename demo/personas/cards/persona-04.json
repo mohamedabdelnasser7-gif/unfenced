@@ -1,0 +1,49 @@
+{
+ "id": "persona-04",
+ "worry": "trust",
+ "unwinnable": false,
+ "why_unwinnable": null,
+ "want": [
+  "something from the shop",
+  "football boots"
+ ],
+ "buy_trigger": [
+  "proof it is original"
+ ],
+ "patience": {
+  "median": 0,
+  "most": 0
+ },
+ "style": {
+  "length": {
+   "short": 0.0,
+   "medium": 1.0,
+   "long": 0.0
+  },
+  "language": {
+   "arabic": 0.67,
+   "franco": 0.0,
+   "english": 0.33
+  },
+  "voice_notes": 0.0,
+  "opening": {
+   "voice note": 0.0,
+   "photo or link": 0.0,
+   "price": 0.0,
+   "size": 0.0,
+   "availability": 0.0,
+   "greeting": 0.0,
+   "other": 1.0
+  }
+ },
+ "chats": 3,
+ "won": 1,
+ "lost": 2,
+ "examples": [
+  "الجزمة دي أصلية ولا كوبي؟",
+  "دي أصلي ولا تقليد؟",
+  "Are these original or copy?"
+ ],
+ "share": 0.107,
+ "arena_weight": 0.107
+}

@@ -1,0 +1,50 @@
+{
+ "id": "persona-07",
+ "worry": "just browsing",
+ "unwinnable": true,
+ "why_unwinnable": "just browsing",
+ "want": [
+  "a football kit",
+  "something from the shop",
+  "football boots"
+ ],
+ "buy_trigger": [
+  "nothing yet, only looking"
+ ],
+ "patience": {
+  "median": 0,
+  "most": 0
+ },
+ "style": {
+  "length": {
+   "short": 0.33,
+   "medium": 0.67,
+   "long": 0.0
+  },
+  "language": {
+   "arabic": 0.67,
+   "franco": 0.0,
+   "english": 0.33
+  },
+  "voice_notes": 0.0,
+  "opening": {
+   "voice note": 0.0,
+   "photo or link": 0.0,
+   "price": 0.33,
+   "size": 0.0,
+   "availability": 0.33,
+   "greeting": 0.33,
+   "other": 0.0
+  }
+ },
+ "chats": 3,
+ "won": 0,
+ "lost": 3,
+ "examples": [
+  "تمام شكرا، أنا بس بتفرج دلوقتي",
+  "Hi! just looking at the new collection",
+  "حلو، بس بسأل بس دلوقتي"
+ ],
+ "share": 0.107,
+ "arena_weight": 0.107
+}

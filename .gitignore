@@ -1,0 +1,11 @@
+.env
+data/
+__pycache__/
+*.pyc
+*.db
+tests/probes/out/
+arena-calls.json
+arena-calls.json.tmp
+arena-calls.lock
+arena-matches.jsonl
+arena-*-*.json

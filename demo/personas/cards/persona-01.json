@@ -1,0 +1,49 @@
+{
+ "id": "persona-01",
+ "worry": "size",
+ "unwinnable": false,
+ "why_unwinnable": null,
+ "want": [
+  "football boots"
+ ],
+ "buy_trigger": [
+  "a clear size answer"
+ ],
+ "patience": {
+  "median": 0.0,
+  "most": 0
+ },
+ "style": {
+  "length": {
+   "short": 0.17,
+   "medium": 0.83,
+   "long": 0.0
+  },
+  "language": {
+   "arabic": 0.67,
+   "franco": 0.17,
+   "english": 0.17
+  },
+  "voice_notes": 0.06,
+  "opening": {
+   "voice note": 0.0,
+   "photo or link": 0.0,
+   "price": 0.0,
+   "size": 0.83,
+   "availability": 0.17,
+   "greeting": 0.0,
+   "other": 0.0
+  }
+ },
+ "chats": 6,
+ "won": 4,
+ "lost": 2,
+ "examples": [
+  "مقاس 43 متاح؟",
+  "Hi, are these boots true to size?",
+  "عايز الجزمة دي مقاس 41",
+  "عايز الجزمة الكحلي مقاس 44"
+ ],
+ "share": 0.214,
+ "arena_weight": 0.214
+}

@@ -1,0 +1,48 @@
+{
+ "id": "persona-05",
+ "worry": "delivery time",
+ "unwinnable": false,
+ "why_unwinnable": null,
+ "want": [
+  "something from the shop",
+  "football boots"
+ ],
+ "buy_trigger": [
+  "a firm delivery date"
+ ],
+ "patience": {
+  "median": 0,
+  "most": 0
+ },
+ "style": {
+  "length": {
+   "short": 0.33,
+   "medium": 0.67,
+   "long": 0.0
+  },
+  "language": {
+   "arabic": 0.33,
+   "franco": 0.11,
+   "english": 0.56
+  },
+  "voice_notes": 0.0,
+  "opening": {
+   "voice note": 0.0,
+   "photo or link": 0.0,
+   "price": 0.0,
+   "size": 0.0,
+   "availability": 0.0,
+   "greeting": 0.0,
+   "other": 1.0
+  }
+ },
+ "chats": 3,
+ "won": 1,
+ "lost": 2,
+ "examples": [
+  "emta hywsal law talabt el naharda?",
+  "لو طلبت النهاردة هيوصل امتى؟"
+ ],
+ "share": 0.107,
+ "arena_weight": 0.107
+}

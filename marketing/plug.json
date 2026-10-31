@@ -1,0 +1,88 @@
+{
+  "agent": "marketing",
+  "about": "Writes a store's posts from the questions people ask, and answers the comments under them; never spends money without the owner.",
+  "case": "One post on the store's page; the case id is the post id.",
+  "fields": ["marketing"],
+  "stages": ["drafting", "live", "comments"],
+  "actions": {
+    "draft": "Write one post from a question an account asked: its first line, its picture and the call to buy.",
+    "publish": "Put the checked post live on the page.",
+    "answer": "Answer one comment under the post."
+  },
+  "results": {
+    "drafted": {"speed": "fast", "shows_in_days": [0, 0], "after": "draft",
+                "about": "The draft passed the checks."},
+    "draft_blocked": {"speed": "fast", "shows_in_days": [0, 0], "after": "draft",
+                      "about": "A draft failed the checks and was not used; one row per blocked draft, with the check's feedback."},
+    "published": {"speed": "fast", "shows_in_days": [0, 0], "after": "publish",
+                  "about": "The post went live on the page."},
+    "answered": {"speed": "fast", "shows_in_days": [0, 0], "after": "answer",
+                 "about": "The answer passed the checks and went out under the post."},
+    "answer_blocked": {"speed": "fast", "shows_in_days": [0, 0], "after": "answer",
+                       "about": "A draft answer failed the checks and was not sent."},
+    "reported": {"speed": "fast", "shows_in_days": [0, 1],
+                 "about": "Someone reported the post or hid it from their feed."},
+    "sold": {"speed": "slow", "shows_in_days": [3, 4],
+             "about": "At least one sale came through the post's link within 3 days; counted after day 3."},
+    "no_sale": {"speed": "slow", "shows_in_days": [3, 4],
+                "about": "No sale came through the post's link within 3 days."}
+  },
+  "causes": {
+    "payment_down": "The payment page was down, so no one could pay.",
+    "out_of_stock": "The item in the post ran out.",
+    "price_change": "The owner changed the price after the post went live.",
+    "season": "A holiday or the season moved the sales of every post."
+  },
+  "source": {
+    "about": "The account whose question the post answers. Each post starts from one question, so every row of the post names that account.",
+    "known_by": "row"
+  },
+  "harm": {
+    "results": ["reported"],
+    "about": "A report or a hidden post counts as harm. Unfollows count too, but they have no result yet; they join this list once one is declared."
+  },
+  "decides": {"good": "sold", "bad": ["no_sale"]},
+  "risk": {
+    "high": {
+      "about": "High risk on the page: any number (a price, a discount, pieces left), any promise (a delivery date, a refund, a gift), the store's policy, words about other brands, a buyer's personal data, and anything that spends money (ads, a boost, a paid partner).",
+      "words": {
+        "number": [
+          "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+          "twenty", "thirty", "forty", "fifty", "hundred", "thousand", "half", "double", "twice", "percent",
+          "price", "cost", "total", "fee", "charge", "shipping", "discount", "offer", "sale", "coupon", "promo",
+          "free", "cheap", "expensive", "money", "amount", "pieces left", "egp", "pound", "dollar",
+          "bkam", "bekam", "taman", "khasm", "felous", "geneh",
+          "سعر", "بكام", "تمن", "جنيه", "خصم", "عرض", "ببلاش", "مجان", "فلوس", "كوبون"
+        ],
+        "promise": [
+          "promise", "guarantee", "warranty", "refund", "return", "exchange", "gift", "deliver", "delivery",
+          "arrive", "tomorrow", "today", "tonight", "deadline", "last chance", "ends soon", "limited time",
+          "bokra", "naharda", "daman",
+          "وعد", "ضمان", "استرجاع", "استبدال", "هدية", "توصيل", "بكره", "النهارده"
+        ],
+        "policy": [
+          "policy", "terms", "cash on delivery", "cod", "cash", "payment", "card", "wallet", "stock",
+          "sold out", "restock", "cancel", "cancellation",
+          "سياسه", "شروط", "دفع", "كاش", "مخزون", "الغاء"
+        ],
+        "other_brands": ["competitor", "rival", "cheaper than", "better than", "unlike other"],
+        "personal_data": [
+          "name", "phone", "mobile", "address", "email", "location", "landmark", "street", "area", "where you live",
+          "home", "building", "national id", "password", "account number",
+          "رقم", "تليفون", "موبايل", "عنوان", "شارع", "ايميل"
+        ],
+        "spend": ["ads", "advert", "advertising", "boost", "sponsor", "sponsored", "budget", "spend", "paid", "influencer"]
+      },
+      "patterns": {
+        "number": ["[0-9]", "[%$£€]"],
+        "personal_data": ["@", "(?<!ا)مكان"]
+      },
+      "tools": ["catalogue", "price_book", "ads_manager", "publish_post"]
+    },
+    "low": {
+      "about": "Low risk: tone, the order of lines, which picture goes first, the time of day to post, how to answer a question in the comments."
+    }
+  },
+  "trial": {"fast": {"share": 0.5, "days": 7}, "careful": {"share": 0.2, "days": 14}},
+  "slot": "Lessons from past posts:"
+}

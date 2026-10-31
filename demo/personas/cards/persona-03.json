@@ -1,0 +1,49 @@
+{
+ "id": "persona-03",
+ "worry": "cash on delivery",
+ "unwinnable": false,
+ "why_unwinnable": null,
+ "want": [
+  "something from the shop"
+ ],
+ "buy_trigger": [
+  "paying cash on delivery"
+ ],
+ "patience": {
+  "median": 0.0,
+  "most": 0
+ },
+ "style": {
+  "length": {
+   "short": 0.25,
+   "medium": 0.75,
+   "long": 0.0
+  },
+  "language": {
+   "arabic": 0.62,
+   "franco": 0.0,
+   "english": 0.38
+  },
+  "voice_notes": 0.0,
+  "opening": {
+   "voice note": 0.0,
+   "photo or link": 0.0,
+   "price": 0.0,
+   "size": 0.0,
+   "availability": 0.0,
+   "greeting": 0.0,
+   "other": 1.0
+  }
+ },
+ "chats": 4,
+ "won": 2,
+ "lost": 2,
+ "examples": [
+  "ينفع الدفع عند الاستلام؟",
+  "Can I pay cash on delivery?",
+  "الدفع كاش عند الاستلام ولا لازم تحويل؟",
+  "ينفع cash on delivery؟"
+ ],
+ "share": 0.143,
+ "arena_weight": 0.143
+}

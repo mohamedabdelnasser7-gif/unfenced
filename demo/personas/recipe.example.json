@@ -1,0 +1,16 @@
+{
+ "about": "The shape of a persona recipe, with stand-in text only. The real recipe is private, lives outside this repo and is given with --recipe. arena/recipe.py explains each key.",
+ "prompt": "This example only shows the shape of a recipe; the real prompt is private and given with --recipe. A prompt must hold {worries} and ask for want, worry, buy_trigger, patience and no_budget.",
+ "worries": [
+  {"name": "size", "words": ["مقاس", "size"]},
+  {"name": "price", "words": ["بكام", "price"]},
+  {"name": "cash on delivery", "words": ["كاش", "cash"]},
+  {"name": "trust", "words": ["اصلي", "original"]},
+  {"name": "delivery time", "words": ["امتى", "when"]},
+  {"name": "just browsing", "words": ["بتفرج", "just looking"]},
+  {"name": "other", "words": []}
+ ],
+ "unwinnable": ["just browsing"],
+ "fallback": "other",
+ "capped_wants": [{"name": "name printing", "words": ["طباعة", "printing"], "most": 0.25}]
+}

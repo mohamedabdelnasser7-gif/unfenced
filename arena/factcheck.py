@@ -11,9 +11,12 @@ price     every amount in the reply (kit/send_check.py prices_in) is a price of 
           whatever product the reply names (2026-10-31). The extra's own price counts only in a
           clause that names the extra (extras_named: its title, type and description words, with
           their Arabic and Franco spellings), or in a clause that names no product and no tier
-          when the reply names the extra elsewhere (or, naming nothing, the customer's line does):
-          "The Vapor 17 Elite is 400 EGP" fails, "الطباعة 400 جنيه" passes (2026-10-31). A model
-          number in a product's title (the 17 in Vapor 17, the 50 in F50) is never an amount.
+          when the reply names the extra elsewhere (or, naming nothing, the customer's line does)
+          and its sentence names no boot and no tier: "The Vapor 17 Elite is 400 EGP" fails,
+          "الطباعة 400 جنيه" passes (2026-10-31). For this rule a colon cuts a clause too, and a
+          clause that names no product and no tier takes those of the clauses before it in its
+          sentence (red team round 2). A model number in a product's title (the 17 in Vapor 17,
+          the 50 in F50) is never an amount, unless a currency or thousands word follows it.
 size      a size number after a size word (مقاس 43, size 43, EU 43) fits a size of a product
           the reply names, or of any product when it names none.
 stock     a reply that says a named product (and size, when it gives one) is available while
@@ -101,6 +104,11 @@ SENTENCE = re.compile(r"[^.!?؟\n]+")
 # a clause for the tier rule: cut at an end mark, a new line, ؛ ; ، or a comma that is not inside
 # a number (16,500 stays whole); a decimal point does not end it
 TIER_CLAUSE = re.compile(r"(?:[^.!?؟\n,،;؛]|(?<=\d)[.,](?=\d))+")
+# For the extra price rule: a sentence (a decimal point does not end it), and its clauses, cut as
+# above and at a colon too ("The Vapor 17 Elite with printing: 400 EGP"), but not at one inside a
+# time or a number (10:30)
+PRICE_SENTENCE = re.compile(r"(?:[^.!?؟\n]|(?<=\d)\.(?=\d))+")
+EXTRA_CLAUSE = re.compile(r"(?:[^.!?؟\n,،;؛:]|(?<=\d)[.,:](?=\d))+")
 # Arabic and Franco spellings of an English word stem. Used only for a stem an extra's own title,
 # type or description carries (extra_words), so an extra with none of these stems gets none of them.
 STEM_FORMS = {
@@ -181,14 +189,21 @@ def model_numbers(items):
                 continue
             lead = m.group(1) or (words[k - 1] if k and re.fullmatch(r"[a-z]+", words[k - 1]) else "")
             if lead:
-                out.append(r"(?<!\w)(" + re.escape(lead) + r")[\s-]*" + m.group(2) + r"(?!\d|[.,]\d)")
+                out.append(r"(?<!\w)(" + re.escape(lead) + r")[\s-]*" + m.group(2) + MODEL_NUMBER_END)
     return out
+
+
+# A model number ends where no digit, decimal or thousands group follows, and no currency or thousands
+# word: "Vapor 17 EGP" and "Vapor 17k" are amounts (red team round 2, R2-7)
+MODEL_NUMBER_END = (r"(?!\d|[.,]\d|\s*(?:" + send_check.CURRENCY + "|" + send_check.THOUSANDS + ")"
+                    + send_check.NO_LETTER_AFTER + ")")
 
 
 def without_model_numbers(text, items):
     """text with each product's model number dropped where it follows its title word, so "is the
-    Vapor 17" holds no amount 17; the word stays, and so does a price after it ("Vapor 17,500")."""
-    text = (text or "").translate(send_check.EASTERN_DIGITS)
+    Vapor 17" holds no amount 17; the word stays, and so does a price after it ("Vapor 17,500",
+    "Vapor 17،500") or a currency or thousands word ("Vapor 17 EGP")."""
+    text = send_check.western_digits(text)
     for pattern in model_numbers(items):
         text = re.sub(pattern, r"\1", text, flags=re.IGNORECASE)
     return text
@@ -285,15 +300,13 @@ def check(reply, customer_text="", tool_results=(), orders=()):
     backdrop = extras_named(reply, extras, items)
     if not backdrop and not products_named(reply, items):
         backdrop = extras_named(customer_text, extras, items)
-    for clause in TIER_CLAUSE.findall(text):
+    for clause, boot, kinds, sentence_boot in _extra_clauses(text, items, extras, all_tiers):
         here = extras_named(clause, extras, items)
-        boot = tiers_named(clause, all_tiers) or _boots(products_named(clause, items), extras)
-        own = _dec(send_check.amount(v["price"]) for e in (here if boot else here or backdrop)
+        # the backdrop holds an extra's price only in a sentence that names no boot and no tier: "The
+        # Vapor 17 Elite, with printing, is 400 EGP" fails (red team round 2, R2-1)
+        own = _dec(send_check.amount(v["price"]) for e in (here if sentence_boot else here or backdrop)
                    for v in e.get("variants", []) if "price" in v)
         amounts = [Decimal(str(a)) for a in send_check.prices_in(clause, sizes, orders)]
-        # the extra-only rule reads the extra's type or title, never "your name" alone (an order asks for it)
-        kinds = extras_named(clause, extras, items, kind=True) or [i for i in products_named(clause, items)
-                                                                   if i in extras]
         if kinds and not boot:
             ok = own | sums | _dec(fees | from_tools) | {e + f for e in own for f in _dec(fees)}
             if any(d in ok and d not in _dec(fees | from_tools) for d in amounts):
@@ -314,7 +327,7 @@ def check(reply, customer_text="", tool_results=(), orders=()):
         here = tiers_named(clause, all_tiers)
         if len(here) != 1:
             continue
-        mine = products_named(clause, items) or pool
+        mine = _boots(products_named(clause, items), extras) or pool   # the printing beside a boot names no price
         ok = {send_check.amount(v["price"]) for i in mine for v in _of_tiers(i.get("variants", []), here)
               if "price" in v and v.get("tier")}
         ok |= fees | {p + f for p in ok for f in fees if p is not None and f is not None} | from_tools \
@@ -378,6 +391,30 @@ def check(reply, customer_text="", tool_results=(), orders=()):
     if claims_order(reply) and not placed(tool_results):
         failed.append({"check": "order", "why": "the reply says the order is placed, but no tool placed one"})
     return failed
+
+
+def _extra_clauses(text, items, extras, all_tiers):
+    """(clause, boot, kinds, sentence_boot) for each clause of text the extra price rule reads
+    (EXTRA_CLAUSE, inside each PRICE_SENTENCE). boot: the tiers or boots the clause names; kinds:
+    the extras it names by their type or title, never by "your name" alone (an order asks for it).
+    A clause that names no product (boot or extra) and no tier takes the boots, tiers and kinds of
+    the clauses before it in its sentence: in "Vapor Elite, 400 EGP, with your name" the 400 sits
+    beside the boot (red team round 2, R2-1). sentence_boot: the sentence names a boot or a tier."""
+    out = []
+    for sentence in PRICE_SENTENCE.findall(text):
+        sentence_boot = bool(tiers_named(sentence, all_tiers) or _boots(products_named(sentence, items), extras))
+        seen_boot, seen_kinds = [], []
+        for clause in EXTRA_CLAUSE.findall(sentence):
+            named = products_named(clause, items)
+            boot = list(tiers_named(clause, all_tiers)) or _boots(named, extras)
+            kinds = extras_named(clause, extras, items, kind=True) or [i for i in named if i in extras]
+            if boot or kinds or extras_named(clause, extras, items):
+                seen_boot += boot
+                seen_kinds += kinds
+            else:
+                boot, kinds = list(seen_boot), list(seen_kinds)
+            out.append((clause, boot, kinds, sentence_boot))
+    return out
 
 
 def _with_extras(prices, extra_prices, fees):

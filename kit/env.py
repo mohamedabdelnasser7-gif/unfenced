@@ -2,7 +2,8 @@
 
 Values already set in the environment win. Nothing is ever printed. An unquoted value ends
 before an inline comment (a space or tab, then #): KEY=abc # mine gives abc. A quoted value is
-kept as written between its quotes.
+kept as written between its quotes, and an inline comment after the closing quote is cut:
+KEY='abc' # mine gives abc.
 """
 import os
 import re
@@ -11,6 +12,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 _LINE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$")
 _COMMENT = re.compile(r"\s+#.*$")
+# a quoted value: the first closing quote that ends the line or has an inline comment after it
+_QUOTED = re.compile(r"([\"'])(.*?)\1(?:\s+#.*)?")
 
 
 def load(path=None):
@@ -26,8 +29,9 @@ def load(path=None):
         if not m:
             continue
         name, value = m.group(1), m.group(2)
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
+        quoted = _QUOTED.fullmatch(value)
+        if quoted:  # an inline comment after the closing quote is cut first (red team round 2, R2-5)
+            value = quoted.group(2)
         elif value[:1] not in ("\"", "'"):
             # " # mine" after the = (the space went before group 2) is a comment with no value
             spaced = value.startswith("#") and line[m.start(2) - 1].isspace()

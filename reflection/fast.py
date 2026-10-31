@@ -37,7 +37,9 @@ then, last) and "once" are not numbers here: the order of questions is what most
 Only the fast note guard changed: the lessons' risk check still reads the plug's whole high list.
 
 Every writer call is a model call, so it is counted in kit/limits.py under LIMIT_KEY, like a
-customer: over a limit, the ending gets no note, and the sweep goes on.
+customer. A sweep stops once the writer is over a limit (FastNotes.sweep), so the endings left
+wait for the next sweep instead of losing their note (review round 2); a call refused all the
+same (another sweep took the last one first) gets no note, and the sweep goes on.
 """
 import json
 
@@ -84,6 +86,8 @@ _NEVER_WORDS = {
         "sabein", "sabeen", "tamanin", "tamaneen", "tesein", "tesseen", "tesin", "tiseen", "meyten",
         "miten", "mitein", "meteen", "toltomeya", "tultumeya", "khomsomeya", "sottomeya", "tomnomeya",
         "alfen", "alfein", "alfeen", "alaf", "alaaf", "malyoon", "milyon",
+        # more Franco spellings (red team round 2, R2-4)
+        "etneen", "itneen", "ethnein", "wahed", "ashreen", "settin", "mia", "mitin", "arbaein", "roba",
         "واحد", "اتنين", "اثنين", "تلات", "ثلاث", "اربع", "خمس", "سته", "ستين", "سبع", "تمان", "ثمان", "تسع",
         "عشر", "ميه", "ميت", "مائه", "الف", "مليون", "نص", "ربع", "ضعف", "مرتين",
         # Arabic teens a shorter word above does not hold (خمستاشر holds خمس, عشرين holds عشر)
@@ -94,7 +98,8 @@ _NEVER_WORDS = {
         "geneh", "gneh", "guineh", "جنيه", "ج.م", "دولار", "ريال", "درهم"),
     "discount": (
         "discount", "coupon", "promo", "voucher", "free", "freebie", "rebate", "cashback", "markdown",
-        "bargain", "cheaper", "money off", "khasm", "خصم", "تخفيض", "ببلاش", "مجان", "كوبون", "اوفر"),
+        "bargain", "cheaper", "money off", "complimentary", "gift", "on us", "on the house", "khasm",
+        "خصم", "تخفيض", "ببلاش", "مجان", "كوبون", "اوفر"),
     "promise": (
         "promise", "guarantee", "warranty", "refund", "money back", "exchange", "replacement", "assure",
         "pledge", "on time", "daman", "madmoun", "madmoon", "estebdal", "tabdeel",
@@ -103,20 +108,25 @@ _NEVER_WORDS = {
         "today", "tomorrow", "tonight", "yesterday", "weekend", "monday", "tuesday", "wednesday", "thursday",
         "friday", "saturday", "sunday", "january", "february", "april", "june", "july", "august",
         "september", "october", "november", "december", "deadline", "within", "same day", "next day",
-        "minute", "hour", "day", "week", "month", "year", "bokra", "bukra", "naharda", "enaharda",
+        "minute", "hour", "day", "week", "month", "year", "morning", "afternoon", "evening", "noon",
+        "midnight", "bokra", "bukra", "naharda", "enaharda",
         "بكره", "النهارده", "انهارده", "الليله", "خلال", "ميعاد", "موعد", "تاريخ", "يوم", "ايام", "اسبوع",
         "ساعه", "شهر"),
     "payment": (
         "deposit", "transfer", "transferred", "transferring", "instapay", "wallet", "card", "upfront",
         "up front", "installment", "instalment", "prepay", "prepaid", "in advance", "bank", "iban",
-        "vodafone cash", "عربون", "تحويل", "انستاباي", "قسط", "تقسيط"),
+        "vodafone cash", "vodafone", "fawry", "meeza", "mastercard", "visa", "paypal",
+        "عربون", "تحويل", "انستاباي", "قسط", "تقسيط"),
     "personal_data": (
         "password", "national id", "id number", "account", "passport", "otp", "cvv", "verification code",
         "رقم قومي", "قومي", "باسورد", "كلمه السر"),
     "policy": (
         "negotiable", "negotiate", "negotiating", "negotiation", "include", "including", "inclusive",
-        "covered", "reserve"),
+        "covered", "cover", "reserve", "final"),
 }
+# a word that opens a new clause, so a verb after it is not the topic's own
+_NOT_A_CLAUSE = (r"(?!(?:once|when|whenever|if|after|before|until|unless|then|as|so|and|but|or|because|while"
+                 r"|they|you|we|he|she|it|i)\b)")
 _NEVER_PATTERNS = (
     ("discount", r"\bon\s+sale\b"),
     ("discount", r"\b(?:lower|lowest|reduce|reduced|cut|drop|special|best|better|cheaper|knock)\s+"
@@ -124,9 +134,22 @@ _NEVER_PATTERNS = (
     ("discount", r"\boff\s+the\s+(?:price|total|cost)\b"),
     ("promise", r"\bwill\s+(?:arrive|reach|come|get\s+there|be\s+delivered|ship)\b"),
     ("promise", r"\bdeliver(?:ed|s)?\s+(?:by|within|on|in|before)\b"),
-    # what a topic is: a note may say when to bring the price up, never what it is or holds
-    ("policy", r"\b(?:price|cost|total|delivery|shipping|fee|charge)s?\s+(?:is|are|was|were|will|includes?|"
-               r"included|including|covers?|covered|comes?|stays?|has|have|can|goes|gets)\b"),
+    # what a topic is: a note may say when to bring the price up, never what it is or holds; with 's or
+    # n't, and with up to two words between ("the price for this pair is", "delivery's", "shipping
+    # isn't"; review round 2); a word between never opens a new clause ("delivery once they are ready")
+    ("policy", r"\b(?:price|cost|total|delivery|shipping|fee|charge)s?(?:['’]s\b|\s+(?:" + _NOT_A_CLAUSE + r"[a-z]+\s+){0,2}?"
+               r"(?:is|are|was|were|will|wo|does|do|did|ca|can|includes?|included|including|covers?|covered"
+               r"|comes?|stays?|has|have|goes|gets)(?:n['’]?t)?\b)"),
+    # red team and review round 2: paraphrases that passed
+    ("promise", r"\btak(?:e|es|ing|en)\s+(?:(?:it|them|that|this|those|the\s+[a-z]+)\s+)?back\b"),
+    ("discount", r"\b(?:go|goes|going|come|comes|coming|move|get)\s+(?:a\s+(?:bit|little)\s+)?(?:lower|down)\b"),
+    ("discount", r"\b(?:price|cost|total|fee)s?\s+(?:[a-z]+\s+){0,2}?(?:drops?|dropped|dropping)\b"),
+    ("discount", r"\bno\s+(?:[a-z]+\s+)?(?:fee|charge|cost)s?\b"),
+    ("discount", r"\b(?:won['’]?t|will\s+not|doesn['’]?t|does\s+not|wouldn['’]?t|would\s+not)\s+cost\b"),
+    ("discount", r"\b(?:isn['’]?t|is\s+not|aren['’]?t|are\s+not|not|never)\s+charged\b"),
+    ("policy", r"\blast\s+(?:pair|piece|item|unit)s?\b"),
+    ("discount", r"\bthrow(?:s|ing|n)?\s+(?:it\s+|them\s+)?in\b|\broom\s+to\s+(?:move|negotiate)\b"
+                 r"|\b(?:do|go)\s+better\s+than\b"),
 )
 
 
@@ -265,3 +288,21 @@ class FastNotes(engine_fast.FastNotes):
     def for_prompt(self, chat_id, now=None):
         """This chat's note under HEADING, for the end of its prompt; "" when it has none."""
         return engine_fast.slot(self.hand(chat_id, now=now), HEADING)
+
+    def sweep(self, now=None, limit=engine_fast.MAX_PER_SWEEP):
+        """The engine's sweep, one row at a time, stopping before a row once the writer is over its
+        model call limit: those endings keep no row, so the next sweep writes their notes (review
+        round 2). Limits that cannot answer do not stop it (the writer's own call then fails)."""
+        out = []
+        while len(out) < limit and not self._writer_over():
+            got = super().sweep(now, limit=1)
+            if not got:
+                break
+            out += got
+        return out
+
+    def _writer_over(self):
+        try:
+            return self.limits.over(LIMIT_KEY) is not None
+        except Exception:
+            return False

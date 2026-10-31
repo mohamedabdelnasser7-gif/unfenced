@@ -46,6 +46,14 @@ LATIN = re.compile(r"[A-Za-z]")
 WORD = re.compile(r"[\w\u0600-\u06ff]+", re.UNICODE)
 # Eastern digits, and the Arabic decimal and thousands signs (١٦٥٠٠٫٥٠ is 16500.50).
 EASTERN_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹٫٬", "01234567890123456789.,")
+# The Arabic comma between two digits is a thousands comma: 16،500 is 16,500 (red team round 2, R2-7)
+ARABIC_COMMA_IN_NUMBER = re.compile(r"(?<=\d)" + "\N{ARABIC COMMA}" + r"(?=\d)")
+
+
+def western_digits(text):
+    """text with Eastern digits as Western ones, the Arabic decimal and thousands signs as . and ,
+    and an Arabic comma between two digits as a thousands comma."""
+    return ARABIC_COMMA_IN_NUMBER.sub(",", (text or "").translate(EASTERN_DIGITS))
 # Signs that look like ":" or "=" read as them (fullwidth, small, modifier letter, ratio), and
 # blanks that are neither Unicode spaces nor format characters read as a space when they show
 # as a gap (Hangul fillers, Braille blank) or as nothing when they do not (combining grapheme
@@ -399,7 +407,7 @@ def _plain(text):
     spaces (LOOKALIKES), emphasis marks as spaces (_500_ is 500), and digit groups split by a
     space joined (1 949 is 1949)."""
     text = "".join(ch for ch in (text or "") if unicodedata.category(ch) != "Cf")
-    return _join_thousands(EMPHASIS.sub(" ", text.translate(EASTERN_DIGITS).translate(LOOKALIKES)))
+    return _join_thousands(EMPHASIS.sub(" ", western_digits(text.translate(LOOKALIKES))))
 
 
 def _join_thousands(text):

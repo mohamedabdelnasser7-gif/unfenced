@@ -646,7 +646,8 @@ class Sales(unittest.TestCase):
 
     def test_each_writer_call_is_metered_and_over_the_limit_writes_no_note(self):
         """Review and red team round 1: the writer's calls count in kit/limits.py under one key."""
-        limits = Limits(self.db, per_customer=1, window=3600)
+        limits = Limits(self.db, per_customer=1, window=3600, clock=lambda: self.now)
+        self.writer_model.script.append(say(json.dumps({"note": TONE})))  # a second note for later
         fast = sales_fast.FastNotes(self.db, self.chats, writer=sales_fast.Writer(model=self.writer_model),
                                     limits=limits)
         self.quiet_chat()
@@ -654,13 +655,36 @@ class Sales(unittest.TestCase):
         self.assertEqual(len(self.writer_model.calls), 1)
         self.turn(customer=self.OTHER)
         self.later(DAY + 60)
-        row, = fast.sweep()  # a second ending inside the window: over the limit, never a crash
-        self.assertEqual((row["text"], row["why"]), (None, "the writer failed: over the model call limit (customer)"))
+        with self.db.tx() as c:  # the first call made a minute ago, so the window still holds it
+            c.execute("UPDATE model_calls SET at = ?", (self.now - 60,))
+        # a second ending inside the window: the sweep stops, writes no row, never crashes (review round 2)
+        self.assertEqual(fast.sweep(), [])
         self.assertEqual(len(self.writer_model.calls), 1)
+        self.assertEqual(count(self.db, "fast_notes"), 1)
         with self.db.tx() as c:
             self.assertEqual([r["customer"] for r in c.execute("SELECT customer FROM model_calls")],
                              [sales_fast.LIMIT_KEY])
         self.assertEqual(sales_fast.LIMIT_KEY, "reflection:fast")
+        self.later(3600)  # past the window, the next sweep writes that ending's note
+        self.assertEqual([w["text"] for w in fast.sweep()], [TONE])
+        self.assertEqual(len(self.writer_model.calls), 2)
+
+    def test_a_sweep_stops_at_the_limit_and_the_rest_wait(self):
+        """Review round 2, item 5: two endings, one call left: one note now, the other next sweep."""
+        limits = Limits(self.db, per_customer=1, window=3600, clock=lambda: self.now)
+        self.writer_model.script.append(say(json.dumps({"note": TONE})))  # a second note for later
+        fast = sales_fast.FastNotes(self.db, self.chats, writer=sales_fast.Writer(model=self.writer_model),
+                                    limits=limits)
+        self.turn()
+        self.turn(customer=self.OTHER)
+        self.later(DAY + 60)
+        self.assertEqual(len(fast.sweep()), 1)
+        self.assertEqual(fast.sweep(), [])
+        self.assertEqual(count(self.db, "fast_notes"), 1)
+        self.later(3601)
+        row, = fast.sweep()
+        self.assertEqual(row["text"], TONE)
+        self.assertEqual(count(self.db, "fast_notes"), 2)
 
     def test_limits_that_fail_never_crash_the_sweep(self):
         class Down:

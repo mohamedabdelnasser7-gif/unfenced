@@ -23,9 +23,11 @@ The guard, in code, before a note is saved (guard()): one line of at most NOTE_L
 none of the risk check's core marks (a link, a phone number or a handle); no number of any kind:
 a digit in any script, a numeral sign or a fraction (each reads as a digit in the risk check's
 normal form), a percent or a money sign (NUMBERS, for every agent); none of the never marks;
-and no run of COPY_RUN words in a row copied from the source's own words, read in the same
-normal form. The never marks are what a note may never state, given by the agent as a Risk
-(words, patterns and tools; never=). With none given they are the plug's whole high risk list,
+no run of COPY_RUN words in a row copied from the source's own words, read in the same
+normal form; and no word written with a capital (past a sentence's first word) that the source's
+own words hold, so a name the source gave never reaches a note ("Ask Ahmed", red team round 2).
+The never marks are what a note may never state, given by the agent as a Risk (words, patterns
+and tools; never=). With none given they are the plug's whole high risk list,
 the strict default. An agent gives its own when its high list also holds words a note needs
 to name a topic: a note may say what to talk about, never state a figure, a cut, a promise or
 a date. A note that fails is not saved as a note: its row keeps only why, so the same ending is
@@ -58,6 +60,7 @@ after, so a note can never loosen a check.
 import dataclasses
 import re
 import time
+import unicodedata
 
 from engine import risk as risk_mod
 from engine.log import Log, case_key, is_history, source_key
@@ -114,6 +117,7 @@ BEFORE UPDATE ON fast_notes WHEN OLD.closed_at IS NOT NULL
 BEGIN SELECT RAISE(ABORT, 'a closed fast note stays closed'); END;
 """
 _WORDS = re.compile(r"\w+")
+_NAME_WORD = re.compile(r"[^\W\d_]+")  # a word of letters only
 
 
 class FastNotes:
@@ -367,7 +371,35 @@ def guard(text, plug, theirs=(), never=None):
     found += risk_mod.code_check(text, dataclasses.replace(marks, patterns=NUMBERS + tuple(marks.patterns)))
     if any(_runs(text) & _runs(t) for t in theirs if isinstance(t, str)):
         found.append(f"copies {COPY_RUN} or more words in a row from the source's own words")
+    names = _capitalised(text) & _their_words(theirs)
+    if names:
+        found.append("names a word from the source's own words: " + ", ".join(sorted(names)))
     return found
+
+
+def _capitalised(text):
+    """The words of text written with a capital first letter, other than a sentence's first word
+    ("Ask Ahmed first" gives ahmed), in the normal form. Hidden characters and marks are dropped and
+    look alike letters read as Latin first, keeping their case, so neither hides a capital."""
+    plain = unicodedata.normalize("NFKD", (text or "").translate(risk_mod._LATIN))
+    plain = "".join(ch for ch in plain if unicodedata.category(ch) != "Cf" and ch not in risk_mod._BLANKS
+                    and not unicodedata.category(ch).startswith("M")).translate(risk_mod._LATIN)
+    def opens(m):  # a sentence's first word has a capital anyway
+        before = plain[:m.start()].rstrip(" \t\"'“”‘’(")
+        return not before or before[-1] in ".!?;:؟"
+    return {risk_mod.normalize(m.group(0)) for m in _NAME_WORD.finditer(plain)
+            if len(m.group(0)) > 1 and m.group(0)[0].isupper() and not opens(m)}
+
+
+def _their_words(theirs):
+    """Every word of the source's own turns, in the four forms the risk check reads."""
+    words = set()
+    for t in theirs:
+        if isinstance(t, str):
+            for letters in (False, True):
+                for hidden in ("", " "):
+                    words.update(_WORDS.findall(risk_mod.normalize(t, hidden, letters)))
+    return words
 
 
 def slot(note, heading):

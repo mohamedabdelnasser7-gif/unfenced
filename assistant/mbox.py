@@ -4,7 +4,9 @@ export (Inbox and Sent) in, a picture of the user out. Patterns only.
     python3 -I assistant/mbox.py --user ADDRESS --out PICTURE.json FILE.mbox [FILE.mbox ...]
 
 A message is the user's (Sent) by is_sent: a message with Gmail labels (X-Gmail-Labels) is Sent
-only when they hold Sent and neither Inbox nor Spam, whatever its From says; with no labels, a
+only when they hold Sent and neither Inbox nor Spam, whatever its From says, and the label line
+sits above the first Received, Delivered-To or Return-Path line (below them, the sender wrote it,
+so the message is Inbox); with no labels, a
 message that was delivered to someone (Delivered-To or Received) is Inbox, and only then does a
 From of the user's address make it Sent. A forged From alone never makes an outside mail the
 user's. Any other message is Inbox. Inbox and Sent may come as two files or one. Messages are
@@ -27,9 +29,14 @@ quoted text inside the user's replies is cut before anything is kept.
 
 Safety: the file is untrusted. It is read as bytes, capped (MAX_BYTES for all the files together,
 MAX_MESSAGES in all, MAX_BODY characters a message), only text/plain parts are decoded, a part
-over MAX_PART raw characters is skipped before it is decoded, attachments are skipped, an odd
-charset or date is read as UTF-8 or no date, and a message that cannot be parsed is counted as
-skipped. Nothing in it is run or followed.
+over MAX_PART raw characters is skipped before it is decoded, attachments, attached messages, parts
+with a file name and every part under them are skipped, an odd charset or date is read as UTF-8 or
+no date, and a message that cannot be parsed is counted as skipped. Nothing in it is run or
+followed. Known gap: a body line that looks exactly like an envelope line (From, a sender, then a
+full mbox date) and was not escaped as ">From" by the exporter still starts a new message there;
+the rest of that body is read as one more message, so an outside mail built that way can have its
+tail counted as the user's when the tail starts with the user's From and no delivery lines (red
+team round 1, R7; real exporters escape such lines).
 """
 import argparse
 import collections
@@ -41,6 +48,7 @@ import json
 import re
 import statistics
 import sys
+import unicodedata
 from pathlib import Path
 
 MAX_BYTES = 200 * 1024 * 1024
@@ -58,7 +66,11 @@ SPLIT = re.compile(rb"(?:\A|\r?\n)From [^ \t\r\n]+[ \t]+(?:Mon|Tue|Wed|Thu|Fri|S
                    rb"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[ \t]+[0-9]{1,2}[ \t]+"
                    rb"[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?[ \t]+(?:[+-][0-9]{4}[ \t]+|[A-Za-z]{2,5}[ \t]+)?"
                    rb"[0-9]{4}[ \t]*\r?\n")
-QUOTE_START = re.compile(r"^(on .{3,200} wrote:|-{2,} ?original message ?-{2,}|from: .+)$", re.IGNORECASE)
+# A quote header: everything from it on is someone else's mail. English Gmail and Outlook headers, a line of
+# underscores (Outlook's), the Arabic Outlook header lines (from, to, sent, subject) and an Arabic
+# Gmail "wrote:" line, its name before or after the word (red team round 2, R2-3).
+QUOTE_START = re.compile(r"^(on .{3,200} wrote:|-{2,} ?original message ?-{2,}|from: .+|_{5,}"
+                         r"|(?:من|إلى|الى|تاريخ الإرسال|الموضوع) ?:.*|.{0,200}(?<!\w)كتبت?(?!\w).{0,200}:)$", re.IGNORECASE)
 GREETINGS = ("hi", "hey", "hello", "dear", "good morning", "morning")
 PROMISE = re.compile(r"\b(i'll|i will|i can get|let me|i'm going to|will send|will get back|will reply|will share)\b",
                      re.IGNORECASE)
@@ -67,6 +79,9 @@ WHEN = re.compile(r"\b(today|tonight|tomorrow|monday|tuesday|wednesday|thursday|
 TO_USER = re.compile(r"\b(i'll|i will|we will|we'll)\b", re.IGNORECASE)
 SENTENCE = re.compile(r"[^.!?\n]+[.!?]?")
 WORD = re.compile(r"\w+", re.UNICODE)
+# Lines a mail server adds on delivery. Gmail writes its own label line above them, so a label line
+# below the first of them was written by the sender.
+TRACE_HEADERS = ("received", "delivered-to", "return-path")
 
 
 class Refused(ValueError):
@@ -92,13 +107,28 @@ def _when(msg):
     return d
 
 
-def _text(msg):
-    """The text/plain parts, decoded, capped; attachments skipped."""
-    out = []
-    for part in msg.walk() if msg.is_multipart() else [msg]:
-        if part.get_content_maintype() == "multipart" or part.get_content_type() != "text/plain":
+def _parts(msg):
+    """The message's leaf parts in order, leaving out an attached message (message/rfc822 or any other
+    message type), an attachment and a part with a file name, with every part under them: a mail
+    forwarded as an attachment is someone else's words (red team round 2, R2-2). No recursion, so a
+    deep nesting cannot overflow the stack."""
+    stack = [msg]
+    while stack:
+        part = stack.pop()
+        if (part.get_content_maintype() == "message" or part.get_content_disposition() == "attachment"
+                or part.get_filename() is not None):
             continue
-        if part.get_content_disposition() == "attachment":
+        if part.is_multipart():
+            stack.extend(reversed(part.get_payload()))
+            continue
+        yield part
+
+
+def _text(msg):
+    """The text/plain parts, decoded, capped; attachments skipped (_parts)."""
+    out = []
+    for part in _parts(msg):
+        if part.get_content_type() != "text/plain":
             continue
         payload = part.get_payload()
         if isinstance(payload, str) and len(payload) > MAX_PART:
@@ -117,7 +147,7 @@ def own_text(body):
     """The user's own words in a reply: quoted lines and everything after a quote header cut."""
     keep = []
     for line in body.splitlines():
-        s = line.strip()
+        s = "".join(ch for ch in line if unicodedata.category(ch) != "Cf").strip()  # no direction marks
         if s.startswith(">") or QUOTE_START.match(s):
             if QUOTE_START.match(s):
                 break
@@ -129,6 +159,10 @@ def own_text(body):
 def is_sent(msg, user):
     """Is the message the user's own (see the module lines)? user: the address, casefolded."""
     labels = msg.get("X-Gmail-Labels")
+    names = [str(k).casefold() for k in msg.keys()]
+    trace = [i for i, k in enumerate(names) if k in TRACE_HEADERS]
+    if labels is not None and trace and names.index("x-gmail-labels") > trace[0]:
+        return False  # a label line below the delivery lines came inside an outside mail (review round 2)
     if labels is not None:  # Gmail's own labels, and nothing else
         got = {x.strip() for x in str(labels).casefold().split(",")}
         return "sent" in got and not got & {"inbox", "spam"}

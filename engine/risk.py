@@ -40,7 +40,8 @@ counts as hidden. Every text is read in four forms: hidden characters dropped or
 spaces, and numeral signs read as digits or as the letters they look like (a small Roman
 one is an i, a Roman fifty an l), so a numeral sign inside a word cannot hide it either.
 A word in Latin letters matches as a
-whole word, with an English ending (s, es, ed, d, ing, ly); a word in another script
+whole word, with an English ending (s, es, ed, d, ing, ly; a final l or p may double before
+ed or ing, as in cancelled and swapped); a word in another script
 matches anywhere, since letters join on to it there. The plug's words take the same
 form, so a look alike in the list matches the plain word too. Patterns are regular
 expressions over the same normal form.
@@ -235,7 +236,9 @@ def _word(word):
     w = normalize(word)
     if w.isascii():
         body = r"\s+".join(re.escape(part) for part in w.split())
-        return re.compile(r"(?<![a-z0-9_])" + body + _ENDING + r"(?![a-z0-9_])")
+        # a final l or p doubles before ed and ing: cancelled, swapped (red team round 2, R2-4)
+        ending = _ENDING if not w.endswith(("l", "p")) else r"(?:" + w[-1] + r"(?:ed|ing)|s|es|ed|d|ing|ly)?"
+        return re.compile(r"(?<![a-z0-9_])" + body + ending + r"(?![a-z0-9_])")
     return re.compile(re.escape(w))
 
 

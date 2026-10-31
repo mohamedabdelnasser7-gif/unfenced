@@ -303,7 +303,7 @@ class Replay(unittest.TestCase):
         self.assertTrue(out.startswith("Recorded replay: no key and no network."))
         self.assertIn("Arena run (SCRIPTED, not a model run)", out)
         self.assertIn("Sales chat (SCRIPTED, not a model run)", out)
-        self.assertIn("    customer: How much are the Football Boots, Black?", out)
+        self.assertIn("    customer: How much is the Mercurial Vapor 17 Elite?", out)
         self.assertIn("    agent:    ", out)
 
     def test_the_shipped_files_carry_their_provenance_and_say_scripted(self):

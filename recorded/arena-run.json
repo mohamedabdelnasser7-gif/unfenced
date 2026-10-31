@@ -3,7 +3,7 @@
  "kind": "arena",
  "scripted": true,
  "label": "SCRIPTED: made by recorded/record.py --scripted with scripted stand-in models. No model was called; this shows the shape of a run, not what Muse Spark says.",
- "recorded_at": "2026-10-31T03:57:57.450+00:00",
+ "recorded_at": "2026-10-31T11:30:01.012+00:00",
  "command": "python3 -I recorded/record.py --scripted",
  "models": [
   {
@@ -19,7 +19,7 @@
  ],
  "report": {
   "agent": "sales",
-  "run": "20261031T035757",
+  "run": "20261031T113000",
   "stopped": "passed",
   "trust": {
    "matches": 1,
@@ -64,126 +64,17 @@
  },
  "matches": [
   {
-   "card": "persona-07",
-   "worry": "just browsing",
-   "unwinnable": true,
-   "seed": "20261031T035757-r1-t01",
-   "opening": "availability",
-   "turns": [
-    {
-     "n": 1,
-     "customer": "How much are the Football Boots, Black?",
-     "replies": [
-      "The Football Boots, Black are 1450 EGP."
-     ],
-     "outcome": "replied",
-     "tools": [],
-     "failed": [],
-     "order": false
-    },
-    {
-     "n": 2,
-     "customer": "ok I'll take it. Demo Buyer, 12 Tahrir St, Dokki, Giza",
-     "replies": [
-      "Your order: Football Boots, Black size 43 x1, total 1510 EGP with delivery. Confirm?"
-     ],
-     "outcome": "replied",
-     "tools": [
-      "switch_stage",
-      "draft_order"
-     ],
-     "failed": [],
-     "order": false
-    },
-    {
-     "n": 3,
-     "customer": "yes",
-     "replies": [
-      "Thanks, order #1001 is placed."
-     ],
-     "outcome": "replied",
-     "tools": [
-      "draft_order"
-     ],
-     "failed": [],
-     "order": true
-    }
-   ],
-   "ended": "order",
-   "order": true,
-   "id": "20261031T035757-r1-t01",
-   "won": true,
-   "why": "order placed on the customer's yes",
-   "quote": {
-    "turn": 3,
-    "who": "customer",
-    "text": "yes"
-   },
-   "persona": {
-    "id": "persona-07",
-    "worry": "just browsing",
-    "unwinnable": true,
-    "why_unwinnable": "just browsing",
-    "want": [
-     "a football kit",
-     "something from the shop",
-     "football boots"
-    ],
-    "buy_trigger": [
-     "nothing yet, only looking"
-    ],
-    "patience": {
-     "median": 0,
-     "most": 0
-    },
-    "style": {
-     "length": {
-      "short": 0.33,
-      "medium": 0.67,
-      "long": 0.0
-     },
-     "language": {
-      "arabic": 0.67,
-      "franco": 0.0,
-      "english": 0.33
-     },
-     "voice_notes": 0.0,
-     "opening": {
-      "voice note": 0.0,
-      "photo or link": 0.0,
-      "price": 0.33,
-      "size": 0.0,
-      "availability": 0.33,
-      "greeting": 0.33,
-      "other": 0.0
-     }
-    },
-    "chats": 3,
-    "won": 0,
-    "lost": 3,
-    "examples": [
-     "تمام شكرا، أنا بس بتفرج دلوقتي",
-     "Hi! just looking at the new collection",
-     "حلو، بس بسأل بس دلوقتي"
-    ],
-    "share": 0.107,
-    "arena_weight": 0.107
-   },
-   "prompt_sha": "1f6fbfdf61bb29cc68aee491678737ccbcb814078aad40e7d0a520ab617ca7fb",
-   "prompt_file": null
-  },
-  {
-   "card": "persona-01",
-   "worry": "size",
+   "card": "persona-03",
+   "worry": "cash on delivery",
    "unwinnable": false,
-   "seed": "20261031T035757-r1-g01",
-   "opening": "size",
+   "seed": "20261031T113000-r1-t01",
+   "opening": "other",
    "turns": [
     {
      "n": 1,
-     "customer": "How much are the Football Boots, Black?",
+     "customer": "How much is the Mercurial Vapor 17 Elite?",
      "replies": [
-      "The Football Boots, Black are 1450 EGP."
+      "The Mercurial Vapor 17 Elite is 16,500 EGP."
      ],
      "outcome": "replied",
      "tools": [],
@@ -194,7 +85,7 @@
      "n": 2,
      "customer": "ok I'll take it. Demo Buyer, 12 Tahrir St, Dokki, Giza",
      "replies": [
-      "Your order: Football Boots, Black size 43 x1, total 1510 EGP with delivery. Confirm?"
+      "Your order: Mercurial Vapor 17 Elite size 43 x1, total 16560 EGP with delivery. Confirm?"
      ],
      "outcome": "replied",
      "tools": [
@@ -220,7 +111,7 @@
    ],
    "ended": "order",
    "order": true,
-   "id": "20261031T035757-r1-g01",
+   "id": "20261031T113000-r1-t01",
    "won": true,
    "why": "order placed on the customer's yes",
    "quote": {
@@ -229,15 +120,15 @@
     "text": "yes"
    },
    "persona": {
-    "id": "persona-01",
-    "worry": "size",
+    "id": "persona-03",
+    "worry": "cash on delivery",
     "unwinnable": false,
     "why_unwinnable": null,
     "want": [
-     "football boots"
+     "something from the shop"
     ],
     "buy_trigger": [
-     "a clear size answer"
+     "paying cash on delivery"
     ],
     "patience": {
      "median": 0.0,
@@ -245,37 +136,146 @@
     },
     "style": {
      "length": {
-      "short": 0.17,
-      "medium": 0.83,
+      "short": 0.25,
+      "medium": 0.75,
       "long": 0.0
      },
      "language": {
-      "arabic": 0.67,
-      "franco": 0.17,
-      "english": 0.17
+      "arabic": 0.62,
+      "franco": 0.0,
+      "english": 0.38
      },
-     "voice_notes": 0.06,
+     "voice_notes": 0.0,
      "opening": {
       "voice note": 0.0,
       "photo or link": 0.0,
       "price": 0.0,
-      "size": 0.83,
-      "availability": 0.17,
+      "size": 0.0,
+      "availability": 0.0,
+      "greeting": 0.0,
+      "other": 1.0
+     }
+    },
+    "chats": 4,
+    "won": 2,
+    "lost": 2,
+    "examples": [
+     "ينفع الدفع عند الاستلام؟",
+     "Can I pay cash on delivery?",
+     "الدفع كاش عند الاستلام ولا لازم تحويل؟",
+     "ينفع cash on delivery؟"
+    ],
+    "share": 0.143,
+    "arena_weight": 0.143
+   },
+   "prompt_sha": "1f6fbfdf61bb29cc68aee491678737ccbcb814078aad40e7d0a520ab617ca7fb",
+   "prompt_file": null
+  },
+  {
+   "card": "persona-02",
+   "worry": "price",
+   "unwinnable": false,
+   "seed": "20261031T113000-r1-g01",
+   "opening": "price",
+   "turns": [
+    {
+     "n": 1,
+     "customer": "How much is the Mercurial Vapor 17 Elite?",
+     "replies": [
+      "The Mercurial Vapor 17 Elite is 16,500 EGP."
+     ],
+     "outcome": "replied",
+     "tools": [],
+     "failed": [],
+     "order": false
+    },
+    {
+     "n": 2,
+     "customer": "ok I'll take it. Demo Buyer, 12 Tahrir St, Dokki, Giza",
+     "replies": [
+      "Your order: Mercurial Vapor 17 Elite size 43 x1, total 16560 EGP with delivery. Confirm?"
+     ],
+     "outcome": "replied",
+     "tools": [
+      "switch_stage",
+      "draft_order"
+     ],
+     "failed": [],
+     "order": false
+    },
+    {
+     "n": 3,
+     "customer": "yes",
+     "replies": [
+      "Thanks, order #1001 is placed."
+     ],
+     "outcome": "replied",
+     "tools": [
+      "draft_order"
+     ],
+     "failed": [],
+     "order": true
+    }
+   ],
+   "ended": "order",
+   "order": true,
+   "id": "20261031T113000-r1-g01",
+   "won": true,
+   "why": "order placed on the customer's yes",
+   "quote": {
+    "turn": 3,
+    "who": "customer",
+    "text": "yes"
+   },
+   "persona": {
+    "id": "persona-02",
+    "worry": "price",
+    "unwinnable": false,
+    "why_unwinnable": null,
+    "want": [
+     "something from the shop",
+     "football boots"
+    ],
+    "buy_trigger": [
+     "a lower price or a bundle"
+    ],
+    "patience": {
+     "median": 0,
+     "most": 0
+    },
+    "style": {
+     "length": {
+      "short": 0.6,
+      "medium": 0.4,
+      "long": 0.0
+     },
+     "language": {
+      "arabic": 0.4,
+      "franco": 0.1,
+      "english": 0.5
+     },
+     "voice_notes": 0.0,
+     "opening": {
+      "voice note": 0.0,
+      "photo or link": 0.0,
+      "price": 1.0,
+      "size": 0.0,
+      "availability": 0.0,
       "greeting": 0.0,
       "other": 0.0
      }
     },
-    "chats": 6,
-    "won": 4,
-    "lost": 2,
+    "chats": 5,
+    "won": 2,
+    "lost": 3,
     "examples": [
-     "مقاس 43 متاح؟",
-     "Hi, are these boots true to size?",
-     "عايز الجزمة دي مقاس 41",
-     "عايز الجزمة الكحلي مقاس 44"
+     "بكام الجزمة دي؟",
+     "That's a bit expensive, any discount?",
+     "8aly awy, mafeesh discount?",
+     "Too expensive for me, is there a cheaper pair?"
     ],
-    "share": 0.214,
-    "arena_weight": 0.214
+    "share": 0.179,
+    "arena_weight": 0.179
    },
    "prompt_sha": "1f6fbfdf61bb29cc68aee491678737ccbcb814078aad40e7d0a520ab617ca7fb",
    "prompt_file": null
@@ -286,36 +286,36 @@
    "n": 1,
    "role": "customer",
    "effort": "low",
-   "started": "2026-10-31T03:57:57.429+00:00",
+   "started": "2026-10-31T11:30:00.993+00:00",
    "route": "scripted",
    "model": "scripted-buyer",
-   "ended": "2026-10-31T03:57:57.429+00:00",
+   "ended": "2026-10-31T11:30:00.993+00:00",
    "output": {
     "role": "assistant",
-    "content": "How much are the Football Boots, Black?"
+    "content": "How much is the Mercurial Vapor 17 Elite?"
    }
   },
   {
    "n": 2,
    "role": "agent",
    "effort": "medium",
-   "started": "2026-10-31T03:57:57.430+00:00",
+   "started": "2026-10-31T11:30:00.994+00:00",
    "route": "scripted",
    "model": "scripted-seller",
-   "ended": "2026-10-31T03:57:57.430+00:00",
+   "ended": "2026-10-31T11:30:00.994+00:00",
    "output": {
     "role": "assistant",
-    "content": "The Football Boots, Black are 1450 EGP."
+    "content": "The Mercurial Vapor 17 Elite is 16,500 EGP."
    }
   },
   {
    "n": 3,
    "role": "customer",
    "effort": "low",
-   "started": "2026-10-31T03:57:57.435+00:00",
+   "started": "2026-10-31T11:30:00.998+00:00",
    "route": "scripted",
    "model": "scripted-buyer",
-   "ended": "2026-10-31T03:57:57.435+00:00",
+   "ended": "2026-10-31T11:30:00.998+00:00",
    "output": {
     "role": "assistant",
     "content": "ok I'll take it. Demo Buyer, 12 Tahrir St, Dokki, Giza"
@@ -325,10 +325,10 @@
    "n": 4,
    "role": "agent",
    "effort": "medium",
-   "started": "2026-10-31T03:57:57.436+00:00",
+   "started": "2026-10-31T11:30:00.998+00:00",
    "route": "scripted",
    "model": "scripted-seller",
-   "ended": "2026-10-31T03:57:57.436+00:00",
+   "ended": "2026-10-31T11:30:00.998+00:00",
    "output": {
     "role": "assistant",
     "content": null,
@@ -348,10 +348,10 @@
    "n": 5,
    "role": "agent",
    "effort": "medium",
-   "started": "2026-10-31T03:57:57.436+00:00",
+   "started": "2026-10-31T11:30:00.998+00:00",
    "route": "scripted",
    "model": "scripted-seller",
-   "ended": "2026-10-31T03:57:57.436+00:00",
+   "ended": "2026-10-31T11:30:00.998+00:00",
    "output": {
     "role": "assistant",
     "content": null,
@@ -361,7 +361,7 @@
       "type": "function",
       "function": {
        "name": "draft_order",
-       "arguments": "{\"items\": [{\"product\": \"Beyond the Limits Football Boots, Black\", \"size\": \"43\", \"quantity\": 1}], \"name\": \"Demo Buyer\", \"governorate\": \"Giza\", \"address\": \"12 Tahrir St, Dokki\"}"
+       "arguments": "{\"items\": [{\"product\": \"Nike Mercurial Vapor 17\", \"tier\": \"Elite\", \"size\": \"43\", \"quantity\": 1}], \"name\": \"Demo Buyer\", \"governorate\": \"Giza\", \"address\": \"12 Tahrir St, Dokki\"}"
       }
      }
     ]
@@ -371,23 +371,23 @@
    "n": 6,
    "role": "agent",
    "effort": "medium",
-   "started": "2026-10-31T03:57:57.437+00:00",
+   "started": "2026-10-31T11:30:00.999+00:00",
    "route": "scripted",
    "model": "scripted-seller",
-   "ended": "2026-10-31T03:57:57.437+00:00",
+   "ended": "2026-10-31T11:30:00.999+00:00",
    "output": {
     "role": "assistant",
-    "content": "Your order: Football Boots, Black size 43 x1, total 1510 EGP with delivery. Confirm?"
+    "content": "Your order: Mercurial Vapor 17 Elite size 43 x1, total 16560 EGP with delivery. Confirm?"
    }
   },
   {
    "n": 7,
    "role": "customer",
    "effort": "low",
-   "started": "2026-10-31T03:57:57.439+00:00",
+   "started": "2026-10-31T11:30:01.001+00:00",
    "route": "scripted",
    "model": "scripted-buyer",
-   "ended": "2026-10-31T03:57:57.439+00:00",
+   "ended": "2026-10-31T11:30:01.001+00:00",
    "output": {
     "role": "assistant",
     "content": "yes"
@@ -397,10 +397,10 @@
    "n": 8,
    "role": "agent",
    "effort": "medium",
-   "started": "2026-10-31T03:57:57.439+00:00",
+   "started": "2026-10-31T11:30:01.001+00:00",
    "route": "scripted",
    "model": "scripted-seller",
-   "ended": "2026-10-31T03:57:57.439+00:00",
+   "ended": "2026-10-31T11:30:01.001+00:00",
    "output": {
     "role": "assistant",
     "content": null,
@@ -410,7 +410,7 @@
       "type": "function",
       "function": {
        "name": "draft_order",
-       "arguments": "{\"items\": [{\"product\": \"Beyond the Limits Football Boots, Black\", \"size\": \"43\", \"quantity\": 1}], \"name\": \"Demo Buyer\", \"governorate\": \"Giza\", \"address\": \"12 Tahrir St, Dokki\", \"confirm\": \"SSZBB\"}"
+       "arguments": "{\"items\": [{\"product\": \"Nike Mercurial Vapor 17\", \"tier\": \"Elite\", \"size\": \"43\", \"quantity\": 1}], \"name\": \"Demo Buyer\", \"governorate\": \"Giza\", \"address\": \"12 Tahrir St, Dokki\", \"confirm\": \"SMSWM\"}"
       }
      }
     ]
@@ -420,10 +420,10 @@
    "n": 9,
    "role": "agent",
    "effort": "medium",
-   "started": "2026-10-31T03:57:57.441+00:00",
+   "started": "2026-10-31T11:30:01.003+00:00",
    "route": "scripted",
    "model": "scripted-seller",
-   "ended": "2026-10-31T03:57:57.441+00:00",
+   "ended": "2026-10-31T11:30:01.003+00:00",
    "output": {
     "role": "assistant",
     "content": "Thanks, order #1001 is placed."
@@ -433,36 +433,36 @@
    "n": 10,
    "role": "customer",
    "effort": "low",
-   "started": "2026-10-31T03:57:57.443+00:00",
+   "started": "2026-10-31T11:30:01.005+00:00",
    "route": "scripted",
    "model": "scripted-buyer",
-   "ended": "2026-10-31T03:57:57.443+00:00",
+   "ended": "2026-10-31T11:30:01.005+00:00",
    "output": {
     "role": "assistant",
-    "content": "How much are the Football Boots, Black?"
+    "content": "How much is the Mercurial Vapor 17 Elite?"
    }
   },
   {
    "n": 11,
    "role": "agent",
    "effort": "medium",
-   "started": "2026-10-31T03:57:57.443+00:00",
+   "started": "2026-10-31T11:30:01.005+00:00",
    "route": "scripted",
    "model": "scripted-seller",
-   "ended": "2026-10-31T03:57:57.443+00:00",
+   "ended": "2026-10-31T11:30:01.005+00:00",
    "output": {
     "role": "assistant",
-    "content": "The Football Boots, Black are 1450 EGP."
+    "content": "The Mercurial Vapor 17 Elite is 16,500 EGP."
    }
   },
   {
    "n": 12,
    "role": "customer",
    "effort": "low",
-   "started": "2026-10-31T03:57:57.445+00:00",
+   "started": "2026-10-31T11:30:01.006+00:00",
    "route": "scripted",
    "model": "scripted-buyer",
-   "ended": "2026-10-31T03:57:57.445+00:00",
+   "ended": "2026-10-31T11:30:01.006+00:00",
    "output": {
     "role": "assistant",
     "content": "ok I'll take it. Demo Buyer, 12 Tahrir St, Dokki, Giza"
@@ -472,10 +472,10 @@
    "n": 13,
    "role": "agent",
    "effort": "medium",
-   "started": "2026-10-31T03:57:57.445+00:00",
+   "started": "2026-10-31T11:30:01.007+00:00",
    "route": "scripted",
    "model": "scripted-seller",
-   "ended": "2026-10-31T03:57:57.445+00:00",
+   "ended": "2026-10-31T11:30:01.007+00:00",
    "output": {
     "role": "assistant",
     "content": null,
@@ -495,10 +495,10 @@
    "n": 14,
    "role": "agent",
    "effort": "medium",
-   "started": "2026-10-31T03:57:57.446+00:00",
+   "started": "2026-10-31T11:30:01.007+00:00",
    "route": "scripted",
    "model": "scripted-seller",
-   "ended": "2026-10-31T03:57:57.446+00:00",
+   "ended": "2026-10-31T11:30:01.007+00:00",
    "output": {
     "role": "assistant",
     "content": null,
@@ -508,7 +508,7 @@
       "type": "function",
       "function": {
        "name": "draft_order",
-       "arguments": "{\"items\": [{\"product\": \"Beyond the Limits Football Boots, Black\", \"size\": \"43\", \"quantity\": 1}], \"name\": \"Demo Buyer\", \"governorate\": \"Giza\", \"address\": \"12 Tahrir St, Dokki\"}"
+       "arguments": "{\"items\": [{\"product\": \"Nike Mercurial Vapor 17\", \"tier\": \"Elite\", \"size\": \"43\", \"quantity\": 1}], \"name\": \"Demo Buyer\", \"governorate\": \"Giza\", \"address\": \"12 Tahrir St, Dokki\"}"
       }
      }
     ]
@@ -518,23 +518,23 @@
    "n": 15,
    "role": "agent",
    "effort": "medium",
-   "started": "2026-10-31T03:57:57.446+00:00",
+   "started": "2026-10-31T11:30:01.008+00:00",
    "route": "scripted",
    "model": "scripted-seller",
-   "ended": "2026-10-31T03:57:57.446+00:00",
+   "ended": "2026-10-31T11:30:01.008+00:00",
    "output": {
     "role": "assistant",
-    "content": "Your order: Football Boots, Black size 43 x1, total 1510 EGP with delivery. Confirm?"
+    "content": "Your order: Mercurial Vapor 17 Elite size 43 x1, total 16560 EGP with delivery. Confirm?"
    }
   },
   {
    "n": 16,
    "role": "customer",
    "effort": "low",
-   "started": "2026-10-31T03:57:57.448+00:00",
+   "started": "2026-10-31T11:30:01.009+00:00",
    "route": "scripted",
    "model": "scripted-buyer",
-   "ended": "2026-10-31T03:57:57.448+00:00",
+   "ended": "2026-10-31T11:30:01.009+00:00",
    "output": {
     "role": "assistant",
     "content": "yes"
@@ -544,10 +544,10 @@
    "n": 17,
    "role": "agent",
    "effort": "medium",
-   "started": "2026-10-31T03:57:57.448+00:00",
+   "started": "2026-10-31T11:30:01.009+00:00",
    "route": "scripted",
    "model": "scripted-seller",
-   "ended": "2026-10-31T03:57:57.448+00:00",
+   "ended": "2026-10-31T11:30:01.009+00:00",
    "output": {
     "role": "assistant",
     "content": null,
@@ -557,7 +557,7 @@
       "type": "function",
       "function": {
        "name": "draft_order",
-       "arguments": "{\"items\": [{\"product\": \"Beyond the Limits Football Boots, Black\", \"size\": \"43\", \"quantity\": 1}], \"name\": \"Demo Buyer\", \"governorate\": \"Giza\", \"address\": \"12 Tahrir St, Dokki\", \"confirm\": \"JMWGJ\"}"
+       "arguments": "{\"items\": [{\"product\": \"Nike Mercurial Vapor 17\", \"tier\": \"Elite\", \"size\": \"43\", \"quantity\": 1}], \"name\": \"Demo Buyer\", \"governorate\": \"Giza\", \"address\": \"12 Tahrir St, Dokki\", \"confirm\": \"XRJQK\"}"
       }
      }
     ]
@@ -567,10 +567,10 @@
    "n": 18,
    "role": "agent",
    "effort": "medium",
-   "started": "2026-10-31T03:57:57.449+00:00",
+   "started": "2026-10-31T11:30:01.010+00:00",
    "route": "scripted",
    "model": "scripted-seller",
-   "ended": "2026-10-31T03:57:57.449+00:00",
+   "ended": "2026-10-31T11:30:01.010+00:00",
    "output": {
     "role": "assistant",
     "content": "Thanks, order #1001 is placed."

@@ -37,11 +37,11 @@ SCRIPTED_LABEL = ("SCRIPTED: made by recorded/record.py --scripted with scripted
                   "No model was called; this shows the shape of a run, not what Muse Spark says.")
 REAL_LABEL = "Recorded from a real run of recorded/record.py on Muse Spark (routes and model ids in the trace)."
 
-PRICE = "The Football Boots, Black are 1450 EGP."
+PRICE = "The Mercurial Vapor 17 Elite is 16,500 EGP."
 BUY = "ok I'll take it. Demo Buyer, 12 Tahrir St, Dokki, Giza"
-ORDER = {"items": [{"product": "Beyond the Limits Football Boots, Black", "size": "43", "quantity": 1}],
+ORDER = {"items": [{"product": "Nike Mercurial Vapor 17", "tier": "Elite", "size": "43", "quantity": 1}],
          "name": "Demo Buyer", "governorate": "Giza", "address": "12 Tahrir St, Dokki"}
-SALES_LINES = ("How much are the Football Boots, Black?", BUY, "yes")
+SALES_LINES = ("How much is the Mercurial Vapor 17 Elite?", BUY, "yes")
 
 
 def now():
@@ -75,7 +75,7 @@ class ScriptedSeller:
             if res.get("next_stage") == "ordering":
                 return _tool_call("draft_order", ORDER, self.n)
             if res.get("step") == "summary":
-                return _say(f"Your order: Football Boots, Black size 43 x1, total {res['total']} EGP with delivery. "
+                return _say(f"Your order: Mercurial Vapor 17 Elite size 43 x1, total {res['total']} EGP with delivery. "
                             "Confirm?")
             if res.get("step") == "created":
                 return _say(f"Thanks, order {res['order']} is placed.")

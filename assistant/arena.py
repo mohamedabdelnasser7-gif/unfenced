@@ -44,7 +44,6 @@ Model calls go through kit/model.py (Muse Spark Open) and count against the Aren
 cap, stops the gate; that day is dropped, never a loss.
 """
 import argparse
-import copy
 import datetime
 import json
 import random
@@ -76,6 +75,12 @@ ISO_DATE = re.compile(r"(?<![0-9])[0-9]{4}-[0-9]{2}-[0-9]{2}(?![0-9])")
 KEEP = "\x01"  # where a kept date waits while the text is cleaned; taken out of every text first
 NEAR = 16      # a kept date has no other digit this close: the number cleaner joins digits up to 12 signs apart
 MAX_TEXT = 20000  # the longest text cleaned; the rest is dropped
+MAX_EVENTS, MAX_CALENDAR, MAX_PEOPLE, MAX_CONTACTS = 500, 100, 50, 500  # the most of each a cleaned day keeps
+TIME_SHAPE = re.compile(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]")
+ID_SHAPE = re.compile(r"[a-z]{1,3}[0-9]{1,3}")  # i01, e1: the shape a simulated day's ids have
+MODE_SHAPE = re.compile(r"[a-z]{2,20}")
+ITEM_KINDS = ("email", "meeting_request", "sent")
+DEFAULT_LIKES = {"rushed_words": 30, "focused_words": 120, "brief_words": 90}
 
 
 def load_trust(path):
@@ -209,47 +214,155 @@ def _clean_text(text, clean):
     return "".join(p + (kept[i] if i < len(kept) else "") for i, p in enumerate(parts))
 
 
+def _time(v):
+    return v if isinstance(v, str) and TIME_SHAPE.fullmatch(v) else None
+
+
+def _count(v):
+    return v if isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 100000 else None
+
+
+def _number(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= 100000 else None
+
+
+def _mode(v):
+    return v if isinstance(v, str) and MODE_SHAPE.fullmatch(v) else None
+
+
+def _list(v, cap):
+    return v[:cap] if isinstance(v, list) else []
+
+
+class _Ids:
+    """Ids kept only when they match ID_SHAPE and are new in the day; any other gets a fresh one."""
+
+    def __init__(self, prefix):
+        self.prefix, self.seen, self.n = prefix, set(), 0
+
+    def __call__(self, v):
+        if not (isinstance(v, str) and ID_SHAPE.fullmatch(v)) or v in self.seen:
+            while True:
+                self.n += 1
+                v = f"{self.prefix}{self.n}"
+                if v not in self.seen:
+                    break
+        self.seen.add(v)
+        return v
+
+
 def clean_day(day):
-    """A finished day, cleaned to join the pool (see the module lines). Raises ValueError when it is
-    not shaped like a simulated day."""
+    """A finished day, rebuilt from an allow-list to join the pool (see the module lines): only the
+    keys a simulated day has, each of its type; every other key is dropped and every text left is
+    cleaned. Raises ValueError when it is not shaped like a simulated day."""
     from arena.clean import clean
     if not isinstance(day, dict) or not isinstance(day.get("events"), list) or not isinstance(day.get("hidden"), dict):
         raise ValueError("a finished day has events and hidden answers, like a simulated one")
-    day = copy.deepcopy(day)
-    user = str(day.get("user") or "").strip().casefold()
-    names = {}
+    date = real_date(day.get("date"))
+    if date is None:
+        raise ValueError("a finished day has a real calendar date")
+    user = day.get("user").strip().casefold() if isinstance(day.get("user"), str) else ""
+    people = {}
 
     def addr(a):
         if not isinstance(a, str):
-            return a
+            return None
         key = a.strip().casefold()
         if key == user:
             return PRACTICE_USER
-        return names.setdefault(key, f"person{len(names) + 1}@practice.test")
+        return people.setdefault(key, f"person{len(people) + 1}@practice.test")
 
-    day["user"] = PRACTICE_USER
-    day["contacts"] = [addr(a) for a in day.get("contacts", [])]
-    for ev in day.get("calendar", []):
-        ev["with"] = [addr(a) for a in ev.get("with", [])]
-        ev["title"] = _clean_text(ev.get("title"), clean)
-    for e in day["events"]:
-        for k in ("from", "to"):
-            if k in e:
-                e[k] = addr(e[k])
-        if "cc" in e:
-            e["cc"] = [addr(a) for a in e["cc"]]
-        for k in TEXTS:
-            if k in e:
-                e[k] = _clean_text(e[k], clean)
-        trap = (e.get("hidden") or {}).get("trap")
-        if trap:
-            mark = _clean_text(str(trap.get("marker", "")), clean).strip()
-            keep = mark and "[" not in mark and mark.casefold() in str(e.get("body", "")).casefold()
-            e["hidden"]["trap"] = {"marker": mark} if keep else None
-    day.pop("seed", None)
-    day.pop("style", None)
-    day["id"] = f"real-{day.get('date')}"
-    return day
+    def addrs(v, cap=MAX_PEOPLE):
+        return [x for x in map(addr, _list(v, cap)) if x]
+
+    def text(v):
+        return _clean_text(v, clean)
+
+    rules = day.get("rules") if isinstance(day.get("rules"), dict) else {}
+    start = day.get("start_modes") if isinstance(day.get("start_modes"), dict) else {}
+    out = {"id": f"real-{date}", "date": date, "user": PRACTICE_USER,
+           "rules": {k: rules[k] for k in simday.DEFAULT_RULES if _time(rules.get(k))},
+           "start_modes": {"work_start": _time(start.get("work_start")) or simday.DEFAULT_START["work_start"],
+                           "work_end": _time(start.get("work_end")) or simday.DEFAULT_START["work_end"],
+                           "short_reply_words": _count(start.get("short_reply_words"))
+                           or simday.DEFAULT_START["short_reply_words"]},
+           "contacts": addrs(day.get("contacts"), MAX_CONTACTS)}
+
+    cal_ids, calendar = _Ids("c"), []
+    for ev in _list(day.get("calendar"), MAX_CALENDAR):
+        if not isinstance(ev, dict) or not (_time(ev.get("start")) and _time(ev.get("end"))):
+            continue
+        row = {"id": cal_ids(ev.get("id")), "title": text(ev.get("title")), "start": ev["start"], "end": ev["end"],
+               "with": addrs(ev.get("with"))}
+        if isinstance(ev.get("focus"), bool):
+            row["focus"] = ev["focus"]
+        for k in ("location", "notes"):
+            if isinstance(ev.get(k), str):
+                row[k] = text(ev[k])
+        calendar.append(row)
+    out["calendar"] = calendar
+
+    item_ids, events = _Ids("n"), []
+    for e in _list(day.get("events"), MAX_EVENTS):
+        if not isinstance(e, dict) or not _time(e.get("at")) or e.get("type") not in ("item", "user_says", "signal"):
+            continue
+        row = {"type": e["type"], "at": e["at"]}
+        o = e.get("order")
+        if isinstance(o, int) and not isinstance(o, bool) and -9 <= o <= 9:
+            row["order"] = o
+        if e["type"] == "user_says":
+            row["text"] = text(e.get("text"))
+        elif e["type"] == "signal":
+            for k in ("reply_words", "reply_minutes"):
+                if _number(e.get(k)) is not None:
+                    row[k] = e[k]
+            for k in ("in_meeting", "focus_block"):
+                if isinstance(e.get(k), bool):
+                    row[k] = e[k]
+        else:
+            row.update({"id": item_ids(e.get("id")),
+                        "kind": e.get("kind") if e.get("kind") in ITEM_KINDS else "email"})
+            for k in ("from", "to", "reply_to"):
+                if addr(e.get(k)):
+                    row[k] = addr(e[k])
+            if "cc" in e:
+                row["cc"] = addrs(e["cc"])
+            for k in ("subject", "body", "from_name", "snippet", "preview"):
+                if isinstance(e.get(k), str):
+                    row[k] = text(e[k])
+            for k in ("start", "end"):
+                if _time(e.get(k)):
+                    row[k] = e[k]
+            row["hidden"] = _clean_hidden(e.get("hidden"), row.get("body", ""), text)
+        events.append(row)
+    out["events"] = events
+
+    hid = day["hidden"]
+    timeline = [{"from": s["from"], "mode": s["mode"]} for s in _list(hid.get("timeline"), MAX_EVENTS)
+                if isinstance(s, dict) and _time(s.get("from")) and _mode(s.get("mode"))]
+    likes = hid.get("likes") if isinstance(hid.get("likes"), dict) else {}
+    out["hidden"] = {"timeline": timeline,
+                     "likes": {k: _count(likes.get(k)) or v for k, v in DEFAULT_LIKES.items()},
+                     "own_mode": _mode(hid.get("own_mode"))}
+    return out
+
+
+def _clean_hidden(hid, body, text):
+    """An item's hidden answers, by allow-list: urgent and reply as yes or no, a promise's real due
+    date and cleaned text, a planted instruction's mark only when it still reads in its cleaned email."""
+    hid = hid if isinstance(hid, dict) else {}
+    out = {"urgent": hid.get("urgent") is True, "reply": hid.get("reply") is True, "promise": None, "trap": None}
+    p = hid.get("promise")
+    if isinstance(p, dict) and real_date(p.get("due")):
+        out["promise"] = {"due": p["due"]}
+        if isinstance(p.get("text"), str):
+            out["promise"]["text"] = text(p["text"])
+    trap = hid.get("trap")
+    if isinstance(trap, dict) and isinstance(trap.get("marker"), str):
+        mark = text(trap["marker"]).strip()
+        if mark and "[" not in mark and mark.casefold() in body.casefold():
+            out["trap"] = {"marker": mark}
+    return out
 
 
 def take_finished(state):

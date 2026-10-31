@@ -2,7 +2,8 @@
 its clause or sentence names, never one named elsewhere (review finding 2, F3, F12; red team item
 2); a clause that names the boot before the extra does not hold the extra's price (red team item
 1). A fast note's first word counts as a name only when the source wrote it with a capital outside
-its own sentence starts (review finding 5). Made-up text against the demo store data; no model,
+its own sentence starts (review finding 5), and a place of more words passes only whole (red team
+item 3). Made-up text against the demo store data; no model,
 no network."""
 import copy
 import unittest
@@ -179,6 +180,51 @@ class FirstWordNames(unittest.TestCase):
 
     def test_a_name_past_the_first_word_still_counts_in_small_letters(self):
         self.assertIn(NAMED + "ahmed", note_guard("Ask Ahmed for his size first.", ["ahmed here, which size?"]))
+
+
+ZONES = {"zones": [{"area": "Cairo and Giza", "fee": "60"}, {"area": "Sayeda Zeinab, El Rehab", "fee": "60"},
+                   {"area": "Sheikh Zayed & Badr City", "fee": "60"}, {"area": "Nasr City / Ain Shams", "fee": "60"}]}
+
+
+class PlacePhrases(unittest.TestCase):
+    """Red team item 3: a place of more words lets its words through only together, so a first
+    name inside a district name (Zeinab, Zayed, Nasr, Shams) is still refused."""
+
+    def setUp(self):
+        clean_env(self)
+        patcher = mock.patch.object(store, "delivery", lambda *a, **k: copy.deepcopy(ZONES))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_the_sales_places_are_cut_at_and_and_commas_and_kept_whole(self):
+        known = sales_fast.known()
+        for place in ("Cairo", "Giza", "Sayeda Zeinab", "El Rehab", "Sheikh Zayed", "Badr City", "Nasr City",
+                      "Ain Shams"):
+            self.assertIn(place, known)
+        for word in ("Zeinab", "Zayed", "Nasr", "Shams", "Rehab", "Badr"):
+            self.assertNotIn(word, known)
+
+    def test_a_first_name_inside_a_place_name_is_refused(self):
+        for name, text in (("Zeinab", "Ask Zeinab about the size before the price."),
+                           ("Zayed", "Ask Zayed about the size."), ("Nasr", "Ask Nasr about the size."),
+                           ("Shams", "Ask Shams what size she wears."), ("Rehab", "Ask what Rehab wants before the price.")):
+            self.assertIn(NAMED + name.lower(), note_guard(text, [f"hi I am {name}, how much"]), text)
+
+    def test_the_whole_place_the_customer_typed_passes(self):
+        for text in ("Ask if Sheikh Zayed is where they want delivery.", "Mention delivery to Nasr City after the size.",
+                     "Ask if El-Rehab is the delivery place.", "Confirm Cairo for delivery, then ask the size."):
+            self.assertEqual(note_guard(text, ["I live in Sheikh Zayed, Nasr City, El Rehab or Cairo"]), [], text)
+
+    def test_the_name_beside_its_place_is_still_refused(self):
+        theirs = ["I am Zayed from Sheikh Zayed"]
+        self.assertIn(NAMED + "zayed", note_guard("Ask Zayed if Sheikh Zayed is close.", theirs))
+        # a sentence end between the two words breaks the place
+        self.assertIn(NAMED + "sheikh, zayed", note_guard("Ask about Sheikh. Zayed wants the size.", theirs))
+
+    def test_any_agents_known_phrase_works_the_same_in_the_engine(self):
+        self.assertTrue(engine_fast.guard("Ask Zayed about the size.", SALES, ["I am Zayed"], known=("Sheikh Zayed",)))
+        self.assertEqual(engine_fast.guard("Ask if Sheikh Zayed is close.", SALES, ["I am in Sheikh Zayed"],
+                                           known=("Sheikh Zayed",)), [])
 
 
 if __name__ == "__main__":

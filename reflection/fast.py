@@ -36,7 +36,8 @@ more than one line and three or more words in a row copied from the customer. Or
 then, last) and "once" are not numbers here: the order of questions is what most notes are about.
 Only the fast note guard changed: the lessons' risk check still reads the plug's whole high list.
 The engine's name check lets known() through: the topic words, the catalogue's words and the
-delivery places, so a note may name the Vapor or Cairo the customer typed, never their name.
+delivery places, so a note may name the Vapor or Cairo the customer typed, never their name. A
+place of more words passes only whole ("Sheikh Zayed", never "Zayed" alone).
 
 Every writer call is a model call, so it is counted in kit/limits.py under LIMIT_KEY, like a
 customer. A sweep stops once the writer is over a limit (FastNotes.sweep), so the endings left
@@ -44,6 +45,7 @@ wait for the next sweep instead of losing their note (review round 2); a call re
 same (another sweep took the last one first) gets no note, and the sweep goes on.
 """
 import json
+import re
 
 from engine import fast as engine_fast
 from engine.plug import Risk
@@ -186,10 +188,17 @@ def known():
     """The Sales agent's own words a note may name although the customer typed them (the engine's
     name check, review round 3): the topic words, the catalogue's product, tier and size words
     (Nike, Vapor, Elite, Pro) and the delivery places (Cairo). Read from the store each time, so a
-    product added later counts; the store's own cache keeps it cheap."""
-    places = {w for zone in store.delivery().get("zones", []) if isinstance(zone, dict)
-              for w in str(zone.get("area", "")).split()}
+    product added later counts; the store's own cache keeps it cheap. A zone's area is cut into its
+    places at "and", "&", "/" and commas ("Cairo and Giza" gives Cairo and Giza), and each place stays
+    whole, so a place of more words ("Sheikh Zayed") lets its words through only together, never a
+    first name like Zayed alone (red team gatefb round 1, item 3)."""
+    places = {p.strip() for zone in store.delivery().get("zones", []) if isinstance(zone, dict)
+              for p in _PLACE_CUT.split(str(zone.get("area", ""))) if p.strip()}
     return frozenset(TOPIC_WORDS) | store.vocabulary() | places
+
+
+# where a delivery zone's area lists its places: "Cairo and Giza", "Nasr City, Heliopolis", "A & B", "A / B"
+_PLACE_CUT = re.compile(r"\s+and\s+|[,&/،]", re.IGNORECASE)
 
 WRITE = (
     "You are Reflection, the part of an AI agent's system that looks back at its work. One of the "

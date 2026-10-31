@@ -32,7 +32,8 @@ first" passes after "let me think" and "Ahmed wants" is refused after "I am Ahme
 gatefb round 1, finding 5). The agent's own words pass that check:
 the words its plug writes with a capital and the words the agent gives (known=: its catalogue,
 its places, its topic words), so a note may name a product or a place the source typed (review
-round 3). The never marks are what a note may never state, given by the agent as a Risk (words,
+round 3). An entry of more than one word passes only where the note writes it whole: "Sheikh
+Zayed" passes, "Ask Zayed" does not (red team gatefb round 1, item 3). The never marks are what a note may never state, given by the agent as a Risk (words,
 patterns and tools; never=). With none given they are the plug's whole high risk list, the
 strict default. An agent gives its own when its high list also holds words a note needs
 to name a topic: a note may say what to talk about, never state a figure, a cut, a promise or
@@ -152,7 +153,8 @@ class FastNotes:
     reader(case id): the case's turns, a list of {"from", "text"} or {"from", "tools"}; optional.
     never: the marks a note may never carry, a plug.Risk; the plug's high risk list when left out.
     known(): the agent's own words a note may name although the source wrote them (its catalogue,
-    its places), read at each check; optional. When it fails, no words pass (the stricter way)."""
+    its places; an entry of more words is a phrase), read at each check; optional. When it fails,
+    no words pass (the stricter way)."""
 
     def __init__(self, db, plug, *, writer=None, reader=None, keep_days=KEEP_DAYS, never=None, known=None):
         if not keep_days > 0:
@@ -401,7 +403,8 @@ def guard(text, plug, theirs=(), never=None, known=()):
     """Why a note may not be given, as plain lines; [] when it may. theirs: the source's own words.
     never: the marks a note may never carry (a plug.Risk); the plug's high risk list when None.
     The core marks and NUMBERS are checked either way. known: the agent's own words (texts) a note
-    may name although the source wrote them; the words the plug writes with a capital pass too."""
+    may name although the source wrote them, an entry of more words only where the note writes it
+    whole; the words the plug writes with a capital pass too."""
     if not isinstance(text, str) or not text.strip():
         return ["not one line of text"]
     if len(text.splitlines()) > 1:  # every line break Python knows: \n, \r, U+2028, U+0085 and more
@@ -415,21 +418,25 @@ def guard(text, plug, theirs=(), never=None, known=()):
         found.append(f"copies {COPY_RUN} or more words in a row from the source's own words")
     # a word at a sentence start has a capital anyway, so it counts only when the source wrote it
     # with a capital outside its own sentence starts (review gatefb round 1, finding 5)
-    later = _capitalised(text, starts=False)
-    names = ((later & _their_words(theirs)) | ((_capitalised(text) - later) & _their_capitals(theirs))) \
-        - _own_words(plug, known)
+    phrases = _phrases(known)
+    later = _capitalised(text, starts=False, phrases=phrases)
+    names = ((later & _their_words(theirs))
+             | ((_capitalised(text, phrases=phrases) - later) & _their_capitals(theirs))) - _own_words(plug, known)
     if names:
         found.append("names a word from the source's own words: " + ", ".join(sorted(names)))
     return found
 
 
 def _own_words(plug, known):
-    """The agent's own words, in the normal form: every word of known, and every word the plug's
-    own texts write with a capital (a channel or a partner the plug names)."""
+    """The agent's own words, in the normal form: every entry of known that is one word, and every
+    word the plug's own texts write with a capital (a channel or a partner the plug names). An
+    entry of more words is a phrase (_phrases), never its single words."""
     words = set()
     for w in known:
         if isinstance(w, str):
-            words.update(_WORDS.findall(risk_mod.normalize(w)))
+            got = _WORDS.findall(risk_mod.normalize(w))
+            if len(got) == 1:
+                words.update(got)
     texts = [plug.about, plug.case, plug.source.about, plug.harm.about, *plug.actions.values(),
              *plug.causes.values(), *(r.about for r in plug.results.values())]
     for t in texts:
@@ -438,12 +445,22 @@ def _own_words(plug, known):
     return words
 
 
-def _capitalised(text, openers=OPENERS, starts=True, hidden=""):
+def _phrases(known):
+    """The entries of known of more than one word, each as its words in the normal form: a place
+    like "Sheikh Zayed" or "El Rehab" (red team gatefb round 1, item 3)."""
+    runs = (tuple(_WORDS.findall(risk_mod.normalize(w))) for w in known if isinstance(w, str))
+    return {r for r in runs if len(r) > 1}
+
+
+def _capitalised(text, openers=OPENERS, starts=True, hidden="", phrases=()):
     """The words of text written with a capital first letter, in the normal form, other than a
     sentence's first word that is on openers ("Ask Ahmed first" and "Ahmed wants" both give ahmed).
     starts False: no sentence's first word at all. A sentence starts the text, a line and every
-    part after one of ".!?;:؟". Hidden characters (read as hidden) and marks are dropped and look
-    alike letters read as Latin first, keeping their case, so neither hides a capital."""
+    part after one of ".!?;:؟". phrases: word runs (each a tuple of words in the normal form) left
+    out where the text writes the whole run, with only spaces or dashes between its words, so
+    "Sheikh Zayed" leaves out both words and "Ask Zayed" leaves out neither. Hidden characters
+    (read as hidden) and marks are dropped and look alike letters read as Latin first, keeping
+    their case, so neither hides a capital."""
     plain = unicodedata.normalize("NFKD", (text or "").translate(risk_mod._LATIN))
     plain = "".join((hidden if unicodedata.category(ch) == "Cf" or ch in risk_mod._BLANKS else ch) for ch in plain
                     if not unicodedata.category(ch).startswith("M")).translate(risk_mod._LATIN)
@@ -451,8 +468,21 @@ def _capitalised(text, openers=OPENERS, starts=True, hidden=""):
         before = plain[:m.start()].rstrip(" \t\"'“”‘’(")
         first = not before or before[-1] in _SENTENCE_ENDS
         return first and (not starts or risk_mod.normalize(m.group(0)) in openers)
-    return {risk_mod.normalize(m.group(0)) for m in _NAME_WORD.finditer(plain)
-            if len(m.group(0)) > 1 and m.group(0)[0].isupper() and not skip(m)}
+    found = list(_NAME_WORD.finditer(plain))
+    norms = [risk_mod.normalize(m.group(0)) for m in found]
+    covered = set()
+    for p in phrases:
+        for i in range(len(found) - len(p) + 1):
+            if tuple(norms[i:i + len(p)]) == p and all(
+                    _joins(plain[found[j].end():found[j + 1].start()]) for j in range(i, i + len(p) - 1)):
+                covered.update(range(i, i + len(p)))
+    return {norms[i] for i, m in enumerate(found)
+            if i not in covered and len(m.group(0)) > 1 and m.group(0)[0].isupper() and not skip(m)}
+
+
+def _joins(gap):
+    """The text between two words of a phrase is only spaces or dashes: "Sheikh Zayed", "El-Rehab"."""
+    return bool(gap) and all(ch in " \t" or unicodedata.category(ch) in ("Pd", "Zs") for ch in gap)
 
 
 def _their_capitals(theirs):

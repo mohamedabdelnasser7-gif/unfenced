@@ -4,6 +4,7 @@ meeting prep notes that never go anywhere."""
 import contextlib
 import io
 import json
+import re
 import tempfile
 import time
 import unittest
@@ -134,6 +135,16 @@ class FinishedDaysReachTheArena(unittest.TestCase):
         self.assertIsNone(next(e for e in out["events"] if e.get("id") == trap["id"])["hidden"]["trap"])
         _, _, judged = arena.play_day(out, model=Helper())
         self.assertIn("won", judged)
+
+    def test_only_a_real_calendar_date_standing_alone_is_kept(self):
+        from arena.clean import clean
+        for text in ("code 1234-56-78 here", "pin 0100-00-00 now", "Order 2026-11-0212345 is ready",
+                     "call 2026-10-31 0100 please", "0100 2026-10-31", "pin 9999-99-99"):
+            out = arena._clean_text(text, clean)
+            self.assertFalse(re.search(r"[0-9]{4}", out), (text, out))
+        self.assertEqual(arena._clean_text("I will send it by 2026-11-05.", clean), "I will send it by 2026-11-05.")
+        self.assertEqual(arena._clean_text("from 2026-11-01 to 2026-11-03", clean), "from 2026-11-01 to 2026-11-03")
+        self.assertEqual((arena.real_date("2026-02-30"), arena.real_date("2026-02-28")), (None, "2026-02-28"))
 
     def test_the_night_sends_the_finished_days_to_the_arena(self):
         folder, state = tmp(self), tmp(self)

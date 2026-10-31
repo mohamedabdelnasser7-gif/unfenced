@@ -45,6 +45,7 @@ cap, stops the gate; that day is dropped, never a loss.
 """
 import argparse
 import copy
+import datetime
 import json
 import random
 import re
@@ -70,7 +71,11 @@ LOST_WEIGHT = 3
 POOL_SIZE = 50
 PRACTICE_USER = "user@practice.test"
 TEXTS = ("subject", "body", "title", "text")
-ISO_DATE = re.compile(r"\b[0-9]{4}-[0-9]{2}-[0-9]{2}\b")
+DATE_SHAPE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+ISO_DATE = re.compile(r"(?<![0-9])[0-9]{4}-[0-9]{2}-[0-9]{2}(?![0-9])")
+KEEP = "\x01"  # where a kept date waits while the text is cleaned; taken out of every text first
+NEAR = 16      # a kept date has no other digit this close: the number cleaner joins digits up to 12 signs apart
+MAX_TEXT = 20000  # the longest text cleaned; the rest is dropped
 
 
 def load_trust(path):
@@ -164,17 +169,44 @@ def worth_practising(row):
     return bool(row.get("corrected")) or bool(row.get("failed"))
 
 
+def real_date(text):
+    """The text when it is a real calendar date in YYYY-MM-DD form, else None."""
+    if not isinstance(text, str) or not DATE_SHAPE.fullmatch(text):
+        return None
+    try:
+        datetime.date.fromisoformat(text)
+    except ValueError:
+        return None
+    return text
+
+
 def _clean_text(text, clean):
-    """One text through the Arena's cleaner, its YYYY-MM-DD dates kept as they are."""
+    """One text through the Arena's cleaner, whole, so its number cleaner sees every digit. Only a
+    real calendar date (YYYY-MM-DD) with no other digit within NEAR characters is put back, so a
+    promise still names its day; any other run of digits shaped like a date (0100-00-00,
+    1234-56-78) or a date beside more digits is cleaned like any number."""
+    from arena.clean import normalize
     if not isinstance(text, str):
-        return text
-    out, last = [], 0
-    for m in ISO_DATE.finditer(text):
-        out.append(clean(text[last:m.start()]) if m.start() > last else "")
-        out.append(m.group(0))
+        return ""
+    text = normalize(text[:MAX_TEXT]).replace(KEEP, "")
+    dates = [m for m in ISO_DATE.finditer(text) if real_date(m.group(0))]
+    bare = list(text)
+    for m in dates:
+        bare[m.start():m.end()] = " " * (m.end() - m.start())
+    bare = "".join(bare)
+    kept, out, last = [], [], 0
+    for m in dates:
+        near = bare[max(0, m.start() - NEAR):m.start()] + " " + bare[m.end():m.end() + NEAR]
+        if any(ch.isdigit() for ch in near):
+            continue
+        out += [text[last:m.start()], KEEP]
+        kept.append(m.group(0))
         last = m.end()
-    out.append(clean(text[last:]) if last < len(text) or not out else "")
-    return "".join(out)
+    cleaned = clean("".join(out) + text[last:])
+    parts = cleaned.split(KEEP)
+    if len(parts) != len(kept) + 1:  # the cleaner took a whole message (an address): no date comes back
+        return "".join(parts)
+    return "".join(p + (kept[i] if i < len(kept) else "") for i, p in enumerate(parts))
 
 
 def clean_day(day):

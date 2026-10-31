@@ -48,7 +48,10 @@ case counts come from the study's card in the saved night reports. Ties go to th
 more cases, then the older lesson. A card with no numbers (adapted from a kept lesson, or with
 no saved report) comes after every card with numbers, the oldest first. A "replace it?" card
 shows its own line and each live line it would pull. An agent with no plug in the repo is
-shown without buttons, and its lessons are not cards.
+shown without buttons, and its lessons are not cards. A card whose lesson took the gate with its
+counts (engine/exam.py, DECISIONS item 27) says in one line how many cases it fixed and broke,
+and McNemar's p-value in words only (likely a real gain, likely real harm, could be chance, or
+nothing changed); it ranks nothing and asks nothing (item 35).
 
 The unclear cards. A trial that ended with too few settled cases or sources on a side to
 tell is unclear (engine/trial.py): the lesson is given in no case and waits for a person.
@@ -533,7 +536,7 @@ class Morning:
         self.plugs = {p.agent: p for p in plugs}
         self.db.script(lessons_mod.SCHEMA)
         self.db.script(switches_mod.SCHEMA)
-        self.db.script(exam_mod.TABLE)
+        exam_mod.ensure(self.db)  # the table, and the gate count columns on an older database
         trial_mod.ready(self.db)
         self.lessons = {a: Lessons(self.page, p, judge=judge) for a, p in self.plugs.items()}
         # made here, not in an answer: making Lessons, Log or the marks table runs a script, which commits
@@ -970,6 +973,7 @@ class Morning:
         card = les["state"] == WAITING and (les["yes_at"] is None or bool(held)) and not queued
         report = k.cards.get(les["id"]) or {}
         item = dict(les, card=card, exam=held, queued=queued, ahead=ahead or [], numbers=_numbers(report),
+                    gate=exam_mod.effect_of(k.exams.get(les["id"])),  # fixed and broke in the gate, or None
                     accept_high=None if t is None else t["accept_by"],
                     replaces=[_short(k.by_id.get(i), i) for i in k.replaces.get(les["id"], [])],
                     cases=list((k.links.get(les["id"]) or {}).get("cases") or []))
@@ -1490,6 +1494,8 @@ def _card_html(n, item, token):
         out.append(f'<p class="why">Replace it? It would pull lesson {_a(r["id"])}: '
                    f'<span class="old" dir="auto">{h(r["text"])}</span></p>')
     out.append(f'<p class="why">{h(item["why"])}</p>')
+    if item.get("gate"):
+        out.append(f'<p class="gain">{h(gate_line(item["gate"]))}</p>')
     n_ = item["numbers"]
     if n_:
         good = _good_word(item)
@@ -1520,6 +1526,12 @@ def _card_html(n, item, token):
     if body:
         out.append(f'<details class="more-l"><summary>More on this lesson</summary><div class="ml-in">{body}</div></details>')
     return "\n".join(out)
+
+
+def gate_line(eff):
+    """A card's gate counts in one plain line, the p-value in words, no number to read:
+    "Checked before use: fixed 3, broke 0. Could be chance." """
+    return f'Checked before use: fixed {eff["fixed"]}, broke {eff["broke"]}. {_cap(eff["words"])}.'
 
 
 def _trial_words(item):

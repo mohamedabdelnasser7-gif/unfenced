@@ -245,7 +245,7 @@ class Lessons:
         self.judge = judge
         self.examiner = exam
         self.db.script(SCHEMA)
-        self.db.script(exam_mod.TABLE)
+        exam_mod.ensure(self.db)  # the table, and the gate count columns on an older database
         self.switches = switches_mod.Switches(db, plug)
         with self.db.tx() as c:  # a trials table from before these columns gets them empty
             have = {r["name"] for r in c.execute("PRAGMA table_info(trials)")}

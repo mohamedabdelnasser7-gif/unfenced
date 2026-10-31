@@ -355,16 +355,41 @@ def run(plug, model, *, kept=None, lesson=None, stop_at_first=False, sits=None):
 
 class Examiner:
     """The gate before a trial (engine Lessons(exam=...)): runs the exam with the new line added and
-    stops at the first fail. The model is made at the first call when none is given."""
+    stops at the first fail. The model is made at the first call when none is given.
 
-    def __init__(self, plug, kept=None, model=None):
-        self.plug, self.kept, self.model = plug, kept, model
+    count=True (the gate the night and the page use, night.sales_exam): it also gives the gate's
+    counts (engine/exam.py Pair, DECISIONS item 27). The exam then runs every situation with the
+    new line (no stop at the first fail, so the counts cover the whole exam; pass or fail is the
+    same, a pass still needs every situation right) and pairs each with a run of the same
+    situations with the kept lessons only. That run is made once for each set of kept lessons and
+    reused for the next lessons it examines; its model calls count on the exam that made it."""
+
+    def __init__(self, plug, kept=None, model=None, *, count=False):
+        self.plug, self.kept, self.model, self.count = plug, kept, model, count
+        self._without = {}  # {the kept lesson ids: the exam run without a new line}
 
     def __call__(self, text, tags):
         if self.model is None:
             from kit import model as model_mod
             self.model = model_mod.Model()
-        return run(self.plug, self.model, kept=self.kept, lesson=(text, tuple(tags)), stop_at_first=True)
+        lesson = (text, tuple(tags))
+        if not self.count:
+            return run(self.plug, self.model, kept=self.kept, lesson=lesson, stop_at_first=True)
+        sits = situations(self.plug)
+        key = self._kept_ids()
+        without, made = self._without.get(key), 0
+        if without is None:
+            without = self._without[key] = run(self.plug, self.model, kept=self.kept, lesson=None, sits=sits)
+            made = int(without.calls)
+        got = run(self.plug, self.model, kept=self.kept, lesson=lesson, sits=sits)
+        return engine_exam.Result(passed=got.passed, rows=got.rows, calls=int(got.calls) + made,
+                                  pairs=engine_exam.pair_rows(without.rows, got.rows))
+
+    def _kept_ids(self):
+        """The ids of the kept lessons the exam hands now: the key of the run without a new line."""
+        if self.kept is None:
+            return ()
+        return tuple(sorted(p["id"] for p in self.kept.live() if p["state"] == engine_lessons.KEPT))
 
 
 def report(result, n=None):

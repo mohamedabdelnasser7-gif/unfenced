@@ -19,6 +19,11 @@ fact checks off), when it has no prompt fingerprint, or when the prompt it was p
 be had again (the generic prompt by its fingerprint, else the file saved with the match, read
 again and refused unless its fingerprint is the same). Each skipped win is an "arena skipped" row
 that passes, and skipped_note() says it in one plain line for the night report and the page.
+
+The counts (DECISIONS item 27, engine/exam.py Pair): the result keeps the exam's pairs and adds
+one for each rerun the verdict judged, right before (it was a win) and right after only when it
+is won again. So a rerun can add to "broke", never to "fixed"; a rerun that never got judged (no
+persona card, the cap, a model error) is no pair, and it still holds the lesson as above.
 """
 from engine import exam as engine_exam
 from arena import factcheck, match as match_mod, run as run_mod, verdict
@@ -104,6 +109,7 @@ class Gate:
             return result
         from reflection.exam import _Lessons
         rows, before = list(result.rows), self.calls.taken
+        pairs = list(getattr(result, "pairs", None) or [])  # the exam's, then one a rerun judged
         rows += [engine_exam.Row(None, str(w.get("id")), SKIPPED, True, "", why) for w, why in self.skipped]
         for i, (past, prompt) in enumerate(self.reruns, 1):
             persona = past.get("persona")
@@ -130,11 +136,13 @@ class Gate:
             q = judged["quote"]
             why = "" if judged["won"] else f"was won, now lost: {judged['why']} (turn {q['turn']}, {q['who']}: {q['text']})"
             rows.append(engine_exam.Row(i, str(past.get("id")), PART, judged["won"], "" if judged["won"] else CHECK, why))
+            pairs.append(engine_exam.Pair(f"rerun {past.get('id')}", True, bool(judged["won"])))  # won before: a past win
             if not judged["won"]:
                 break
         n_arena = sum(r.part == PART for r in rows[len(result.rows):])
         passed = all(r.passed for r in rows) and n_arena == len(self.reruns)
-        return engine_exam.Result(passed=passed, rows=rows, calls=int(result.calls) + self.calls.taken - before)
+        return engine_exam.Result(passed=passed, rows=rows, calls=int(result.calls) + self.calls.taken - before,
+                                  pairs=pairs)
 
 
 class Fresh:

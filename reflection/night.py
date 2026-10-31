@@ -20,7 +20,9 @@ kept, pulled or paused on its own cases, serious results ping, and lessons waiti
 start on the stages that came free. The study then writes the night's new lessons. For the
 Sales agent, whose plug names an exam (reflection/exam.py), each new lesson that would start its
 trial takes the exam first, on Muse Spark Open: a fail holds it, waiting for a yes, and its card
-names the first fail; the report counts the exam's runs, model calls and held lessons. Last, it
+names the first fail; the report counts the exam's runs, model calls and held lessons. Each card
+whose lesson took the gate with its counts names, under it, the cases it fixed and broke and
+McNemar's p-value (engine/exam.py; reported only, pass or fail stays the gate's). Last, it
 takes the night's snapshot of the agent's lessons (reflection/snapshots.py); the report names
 it, what changed since the night before, and the command that rolls back to it.
 
@@ -41,6 +43,7 @@ import sys
 import time
 from pathlib import Path
 
+from engine import exam as engine_exam
 from engine import plug as plug_mod
 from engine.lessons import TRYING
 from engine.lessons import Lessons as EngineLessons
@@ -190,6 +193,10 @@ def night(db, plug, *, days=None, until=None, others=None, judge=None, proposer=
     rep["exam"] = None if counted is None else {"runs": counted.runs, "calls": counted.calls, "held": counted.held}
     if counted is not None and counted.skipped:
         rep["exam"]["skipped"] = {why: len(ids) for why, ids in sorted(counted.skipped.items())}
+    for card in rep["cards"]:  # the gate's counts on each card whose lesson took a counted gate
+        eff = engine_exam.effect_of(lessons.exam_of(card["lesson_id"])) if card.get("lesson_id") is not None else None
+        if eff is not None:
+            card["gate"] = eff
     return rep
 
 
@@ -225,7 +232,9 @@ def sales_exam(plug, db=None):
         return None
     from reflection import exam as exam_mod
     from arena import gate  # the eval gate: the exam, then the Arena rerun of past wins (DECISIONS item 8)
-    return lambda lessons: gate.wrap(exam_mod.Examiner(plug, kept=lessons, model=model_mod.Model()), lessons, db=db)
+    # count=True: the gate also counts the cases each lesson fixed and broke (DECISIONS item 27)
+    return lambda lessons: gate.wrap(exam_mod.Examiner(plug, kept=lessons, model=model_mod.Model(), count=True),
+                                     lessons, db=db)
 
 
 def _judge_label(judge):
@@ -270,6 +279,8 @@ def text(rep, plug):
         if card.get("idea"):
             came = f' ({card["idea"]["whose"]} idea, {card["idea"]["sure"]})'
         lines.append(f'    - "{card["change"]}"{came}: {_state(card)}')
+        if card.get("gate"):
+            lines.append("      " + engine_exam.effect_line(card["gate"]))
     if rep.get("ideas"):
         lines.append(f'  ideas {len(rep["ideas"])}')
         lines.extend(f'    - "{i["idea"]}": ' + (f'lesson {i["lesson_id"]}' if i["lesson_id"] is not None else i["why"])

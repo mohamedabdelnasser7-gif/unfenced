@@ -57,6 +57,11 @@ class SignOff(unittest.TestCase):
         self.assertIn("buy two gift cards now", row["body"])
         self.assertEqual(row["hidden"]["trap"], {"marker": "gift cards"})
 
+    def test_a_sign_off_word_after_a_name_is_still_masked(self):
+        out = body_of("I spoke to Omar Best about it.\nRegards,\nSelim")
+        self.assertNotIn("Best", out)
+        self.assertTrue(out.endswith("Regards,\n[name]"), out)
+
     def test_a_short_signature_is_still_cut(self):
         out = body_of("See you then.\nRegards,\nSelim Ozdemir\nHead of Sales, Acme Egypt")
         self.assertTrue(out.endswith("Regards,\n[name]"), out)

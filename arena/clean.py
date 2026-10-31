@@ -804,7 +804,7 @@ def _cue_names(text, learned=None):
     named = [i for i in range(n) if i in mask or words[i] == "[name]"]
     for i in named:
         take(i + 1, lambda x, j=i + 1: name_shaped(x, here_after(j)), near)
-        if i and near[i] and name_shaped(words[i - 1], here_after(i)):
+        if i and near[i] and folded[i - 1] not in W.SIGN_OFF and name_shaped(words[i - 1], here_after(i)):
             mask.add(i - 1)
         elif i > 1 and spaced[i] and spaced[i - 1] and folded[i - 1] in ("el", "al") \
                 and name_shaped(words[i - 2], here_after(i)):  # Nour el [name]

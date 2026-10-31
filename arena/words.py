@@ -106,7 +106,6 @@ gay ray7 nazel barra gowa ha5od hatlob otlob akkedly eb3at gazma ma2as lon se3r 
 salam ahlan el7amdolelah full name what where when how who which why can could will should do does did
 have has had get got send sent call message msg dm thx
 work home house office email mail gmail inbox kindly check
-regards best cheers sincerely warmly kind yours
 """
 PRODUCT_LA = """
 jacket jackets hoodie jersey shirt tshirt shorts pants bag cap dress leather waterproof original
@@ -149,6 +148,8 @@ DETACHED = ("ل",)  # ل or لـ written apart from the name: ابعتها لـ 
 DELIVERY_VERBS = frozenset("""ابعتها ابعتوها ابعته ابعتوه ابعتيها وصلها وصلوها وصله وصلوه هاتها هاته سلمها سلمه
 سلموها سلموه""".split())
 # Names a weak cue or a lone ل never takes: they are everyday words once folded (على, منى, منه, ايه).
+# Sign off words: never a surname before a [name] (Regards,\n[name]), still one after it (Omar Best).
+SIGN_OFF = frozenset("regards best cheers sincerely warmly kind yours thanks".split())
 NOT_AFTER_WEAK = ("علي", "مني", "منه", "ايه", "لينا", "عند")
 
 # ---- the sets clean.py reads, every word folded

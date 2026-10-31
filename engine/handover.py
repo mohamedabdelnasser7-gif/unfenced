@@ -25,8 +25,10 @@ Each night, with a spotter and a writer given (engine/study.py, Study(hand_over=
    free to name the topic. A writer that fails, gives nothing or is refused sends no note that
    night; the report says why. The counts and the case ids sit beside the line, added in code.
 5. Hand over. The note is saved as a row of the handed_over table, which the receiving agent
-   reads (received()), and named in the night's report. A row is never rewritten, and one window of
-   one agent hands one note to one receiving agent once (a rerun of the same night writes none).
+   reads (received()), and named in the night's report. A row is never rewritten, and no two notes
+   from one agent to one receiving agent have windows that overlap: a rerun of the same night, a
+   second run a few minutes later (the runner sets until to the time it runs) or a night whose
+   window takes in part of an earlier note's window writes none (the table refuses it).
 
 The sort. Every line the study would write as a lesson (a pattern, an adapted lesson, an idea)
 is asked first (sort()): a line that is one of the plug's kinds is not written; it is handed
@@ -73,6 +75,11 @@ CREATE INDEX IF NOT EXISTS handed_over_to ON handed_over (to_agent, id);
 CREATE TRIGGER IF NOT EXISTS handed_over_never_rewritten
 BEFORE UPDATE ON handed_over
 BEGIN SELECT RAISE(ABORT, 'a handed over note is never rewritten'); END;
+CREATE TRIGGER IF NOT EXISTS handed_over_one_note_a_window
+BEFORE INSERT ON handed_over
+WHEN EXISTS (SELECT 1 FROM handed_over WHERE from_agent = NEW.from_agent AND to_agent = NEW.to_agent
+             AND since < NEW.until AND until > NEW.since)
+BEGIN SELECT RAISE(IGNORE); END;
 """
 
 
@@ -115,8 +122,9 @@ class Track:
     def night(self, cases, texts, since, until, *, now, notes):
         """The night's handing over on the study's read cases: {kinds, notes}. kinds: one entry per
         declared kind {to, kind, cases, sources, verdict, why}; notes: the notes handed over, each
-        {id, to, kind, text, cases, sources, case_ids, again}. again: this window's note was handed
-        over before (a rerun), so no new row."""
+        {id, to, kind, text, cases, sources, case_ids, again}. again: a note whose window overlaps
+        this one was handed over before (a rerun, or a run soon after), so no new row; the note
+        shown is that earlier one."""
         out = {"kinds": [], "notes": []}
         if not self.kinds:
             return out
@@ -190,8 +198,9 @@ class Track:
                 row = {"id": cur.lastrowid, "kind": entry["kind"], "text": text, "cases": ids,
                        "sources": entry["sources"]}
             else:
-                row = _row(c.execute("SELECT * FROM handed_over WHERE from_agent = ? AND to_agent = ? AND until = ?",
-                                     (self.plug.agent, h.agent, float(until))).fetchone())
+                row = _row(c.execute("SELECT * FROM handed_over WHERE from_agent = ? AND to_agent = ? AND since < ? "
+                                     "AND until > ? ORDER BY id DESC LIMIT 1",
+                                     (self.plug.agent, h.agent, float(until), float(since))).fetchone())
         return {"id": row["id"], "to": h.agent, "kind": row["kind"], "text": row["text"], "cases": len(row["cases"]),
                 "sources": row["sources"], "case_ids": list(row["cases"]), "again": cur.rowcount != 1}
 

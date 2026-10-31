@@ -292,6 +292,46 @@ class TheRow(Setup):
             with self.db.tx() as c:
                 c.execute("UPDATE handed_over SET text = 'changed' WHERE id = ?", (first["id"],))
 
+    def window(self, since, until):
+        track = handover.Track(self.db, self.plug, spotter=Spotter(), writer=Writer())
+        return Study(self.db, self.plug, proposer=fk.Proposer(), tagger=fk.Tagger(), lessons=self.lessons,
+                     hand_over=track).run(since, until, now=until)["hand_over"]["notes"]
+
+    def test_a_second_run_minutes_later_writes_no_second_note(self):
+        lost(self.log, 3, "playful", "play")
+        first, = self.window(fk.SINCE, fk.UNTIL)
+        again, = self.window(fk.SINCE + 300, fk.UNTIL + 300)
+        self.assertEqual((first["again"], again["again"], again["id"]), (False, True, first["id"]))
+        self.assertEqual(len(handover.received(self.db, TO)), 1)
+
+    def test_an_overlapping_window_writes_none_and_the_next_window_writes_one(self):
+        lost(self.log, 3, "playful", "play")
+        first, = self.window(fk.SINCE, fk.UNTIL)
+        half = fk.DAY / 2
+        again, = self.window(fk.SINCE + half, fk.UNTIL + half)  # starts half a day into the first window
+        self.assertEqual((again["again"], again["id"]), (True, first["id"]))
+        inside, = self.window(fk.SINCE + half, fk.UNTIL - fk.DAY)  # wholly inside the first window
+        self.assertEqual((inside["again"], inside["id"]), (True, first["id"]))
+        for n in range(3):  # the next window starts where the first one ends
+            fk.case(self.log, f"next{n}", "water", "soaked", "wilted", at=fk.UNTIL + fk.DAY, stage="seedling",
+                    moment="playful", note=f"next round {n}")
+        later, = self.window(fk.UNTIL, 2 * fk.UNTIL - fk.SINCE)
+        self.assertFalse(later["again"])
+        self.assertNotEqual(later["id"], first["id"])
+        self.assertEqual(sorted(later["case_ids"]), ["next0", "next1", "next2"])
+        self.assertEqual(len(handover.received(self.db, TO)), 2)
+
+    def test_the_table_itself_refuses_an_overlapping_window(self):
+        handover.Track(self.db, self.plug, spotter=Spotter(), writer=Writer())
+        sql = ("INSERT INTO handed_over (from_agent, to_agent, kind, text, cases, sources, since, until, written_at) "
+               "VALUES (?, ?, 'playful', 'A line.', '[]', 3, ?, ?, 0)")
+        with self.db.tx() as c:
+            self.assertEqual(c.execute(sql, ("waterer", TO, 0.0, 10.0)).rowcount, 1)
+            self.assertEqual(c.execute(sql, ("waterer", TO, 9.0, 19.0)).rowcount, 0)  # overlaps
+            self.assertEqual(c.execute(sql, ("waterer", "other", 9.0, 19.0)).rowcount, 1)  # another receiver
+            self.assertEqual(c.execute(sql, ("waterer", TO, 10.0, 20.0)).rowcount, 1)  # starts where it ends
+        self.assertEqual([(n["since"], n["until"]) for n in handover.received(self.db, TO)], [(0.0, 10.0), (10.0, 20.0)])
+
     def test_a_failing_spotter_hands_nothing_over(self):
         lost(self.log, 3, "playful", "play")
         rep = self.study(spotter=Spotter(fail=True))
@@ -356,6 +396,14 @@ class TheNightAndTheMorning(Setup):
         self.assertTrue(lines[0].startswith(f'  note to {TO}: "{LINE}" (playful, 3 cases from 3 sources: '), lines[0])
         for cid in ("play0", "play1", "play2"):
             self.assertIn(cid, lines[0])
+
+    def test_two_runs_of_one_night_minutes_apart_hand_over_one_note(self):
+        first = self.night(spotter=Spotter(), note_writer=Writer())["hand_over"]["notes"]
+        again = night.night(self.db, self.plug, until=fk.UNTIL + 300, days=30, others=[], judge=always_low,
+                            proposer=fk.Proposer(), tagger=fk.Tagger(), spotter=Spotter(),
+                            note_writer=Writer())["hand_over"]["notes"]
+        self.assertEqual([(n["id"], n["again"]) for n in first + again], [(1, False), (1, True)])
+        self.assertEqual(len(handover.received(self.db, TO)), 1)
 
     def test_scripted_parts_hand_nothing_over(self):
         rep = self.night()

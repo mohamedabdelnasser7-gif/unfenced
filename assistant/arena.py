@@ -23,12 +23,20 @@ times the user corrected the assistant and which checks the code found failed. A
 Reflection (reflection/night.py) runs take_finished: a day worth practising (the user corrected
 something, or the code found a miss: an urgent item, a clash or any other check) is cleaned
 (clean_day) and joins the pool once; an easy day (won, nothing corrected) is skipped. The file is
-then removed, so the uncleaned days do not stay on disk after the night read them.
+then removed, so the uncleaned days do not stay on disk after the night read them; a file the
+night cannot read as a whole is moved aside instead, never read again. Both steps wait for the
+live day runner: nothing calls keep_finished yet, so the night finds no file and adds nothing.
 
-clean_day uses the Arena's cleaner (arena/clean.py) on every text (subjects, bodies, titles, the
-user's own words): names, phones, numbers, emails, links and places out; dates in YYYY-MM-DD form
-are kept, so a promise still names its day. Every address becomes person<n>@practice.test, the
-same person the same address all day, and the user user@practice.test. The writing style is
+clean_day rebuilds the day from an allow-list: only the keys a simulated day has, each of its
+type (times HH:MM, counts as numbers, yes or no as booleans); every other key is dropped, ids are
+kept only in the simulated shape (i01, e1) and dates only as real calendar dates. Every text kept
+(subjects, bodies, titles, the user's own words, calendar notes, a sender's display name, a
+snippet or preview, a promise's text) goes through the Arena's cleaner (arena/clean.py) with the
+day's own names (each address's local part and company, each display name, Latin or Arabic):
+names, phones, numbers, emails, links and places out, a signature after a sign off cut. A real
+calendar date with no other digit beside it is put back, so a promise still names its day. A
+meeting's location becomes [place]. Every address becomes person<n>@practice.test, the same
+person the same address all day, and the user user@practice.test. The writing style and seed are
 dropped. A planted instruction's mark is kept only when it still reads in its cleaned email.
 
 close_day writes a played day's results to the engine log, so the night study reads them: a

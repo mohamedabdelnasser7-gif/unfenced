@@ -82,7 +82,6 @@ FINISHED_FILE = "finished-days.jsonl"
 LOST_WEIGHT = 3
 POOL_SIZE = 50
 PRACTICE_USER = "user@practice.test"
-TEXTS = ("subject", "body", "title", "text")
 DATE_SHAPE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 ISO_DATE = re.compile(r"(?<![0-9])[0-9]{4}-[0-9]{2}-[0-9]{2}(?![0-9])")
 KEEP = "\x01"  # where a kept date waits while the text is cleaned; taken out of every text first

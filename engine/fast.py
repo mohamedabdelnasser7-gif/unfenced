@@ -29,7 +29,10 @@ source gave never reaches a note ("Ask Ahmed", red team round 2). A sentence's f
 capital anyway: it is checked unless it is one of OPENERS ("Ahmed wants", review round 3), and
 only against the words the source wrote with a capital outside its own sentence starts, so "Think
 first" passes after "let me think" and "Ahmed wants" is refused after "I am Ahmed" (review
-gatefb round 1, finding 5). The agent's own words pass that check:
+gatefb round 1, finding 5), or gave as a name at a start ("Ahmed" alone, "Ahmed here", "Mona: do
+you have") and never wrote in small letters (red team gatefb round 2, item C). In a note ";" and
+":" start no sentence, and a hidden character is read as nothing and as a space (review gatefb
+round 2, finding 3; red team gatefb round 2, item E). The agent's own words pass that check:
 the words its plug writes with a capital and the words the agent gives (known=: its catalogue,
 its places, its topic words), so a note may name a product or a place the source typed (review
 round 3). An entry of more than one word passes only where the note writes it whole: "Sheikh
@@ -125,8 +128,17 @@ BEGIN SELECT RAISE(ABORT, 'a closed fast note stays closed'); END;
 """
 _WORDS = re.compile(r"\w+")
 _NAME_WORD = re.compile(r"[^\W\d_]+")  # a word of letters only
-# What a sentence starts after: its end marks and every line break Python knows (a note has none)
+# What a sentence of the source's turns starts after: its end marks and every line break Python knows
 _SENTENCE_ENDS = ".!?;:؟\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"
+# What a sentence of a note starts after: no ";" or ":", so "Ask the size; Ahmed wants it" reads Ahmed
+# past its sentence start (review gatefb round 2, finding 3)
+_NOTE_ENDS = _SENTENCE_ENDS.replace(";", "").replace(":", "")
+# After a word that opens a source's turn, line or sentence, what makes it a name the source gave
+# rather than a capital it has anyway: "here", "speaking" or "from", a comma, a colon, a sentence end,
+# or the end of the line or the turn ("Ahmed here", "Mona: do you have", "Youssef. Which one?"; red team
+# gatefb round 2, item C)
+_INTRO_AFTER = re.compile(r"[\"'“”‘’)\]]*(?:[^\S\n]+(?:here|speaking|from)(?![^\W\d_])|[^\S\n]*(?:[,،:;.!?؟\n\r\v\f\x1c-\x1e\x85  ]|$))",
+                          re.IGNORECASE)
 # The words a note's sentence may open with although the source wrote them too: the verbs a note
 # leads with (the writer is told to write an aim from the agent's side) and the small words a
 # sentence starts with. A named list because no list of the writer's verbs exists in the data, and
@@ -417,11 +429,16 @@ def guard(text, plug, theirs=(), never=None, known=()):
     if any(_runs(text) & _runs(t) for t in theirs if isinstance(t, str)):
         found.append(f"copies {COPY_RUN} or more words in a row from the source's own words")
     # a word at a sentence start has a capital anyway, so it counts only when the source wrote it
-    # with a capital outside its own sentence starts (review gatefb round 1, finding 5)
+    # with a capital outside its own sentence starts (review gatefb round 1, finding 5). The note is
+    # read with a hidden character as nothing and as a space, so neither fuses two words past the
+    # check (red team gatefb round 2, item E).
     phrases = _phrases(known)
-    later = _capitalised(text, starts=False, phrases=phrases)
+    later, every = set(), set()
+    for hidden in ("", " "):
+        later |= _capitalised(text, starts=False, hidden=hidden, phrases=phrases, ends=_NOTE_ENDS)
+        every |= _capitalised(text, hidden=hidden, phrases=phrases, ends=_NOTE_ENDS)
     names = ((later & _their_words(theirs))
-             | ((_capitalised(text, phrases=phrases) - later) & _their_capitals(theirs))) - _own_words(plug, known)
+             | ((every - later) & _their_capitals(theirs))) - _own_words(plug, known)
     if names:
         found.append("names a word from the source's own words: " + ", ".join(sorted(names)))
     return found
@@ -452,22 +469,32 @@ def _phrases(known):
     return {r for r in runs if len(r) > 1}
 
 
-def _capitalised(text, openers=OPENERS, starts=True, hidden="", phrases=()):
+def _plain(text, hidden=""):
+    """text with hidden characters read as hidden and marks dropped, look alike letters read as Latin
+    first, keeping their case."""
+    plain = unicodedata.normalize("NFKD", (text or "").translate(risk_mod._LATIN))
+    return "".join((hidden if unicodedata.category(ch) == "Cf" or ch in risk_mod._BLANKS else ch) for ch in plain
+                   if not unicodedata.category(ch).startswith("M")).translate(risk_mod._LATIN)
+
+
+def _opens(plain, at, ends=_SENTENCE_ENDS):
+    """True when the word at at opens plain, a line or a sentence (after one of ends)."""
+    before = plain[:at].rstrip(" \t\"'“”‘’(")
+    return not before or before[-1] in ends
+
+
+def _capitalised(text, openers=OPENERS, starts=True, hidden="", phrases=(), ends=_SENTENCE_ENDS):
     """The words of text written with a capital first letter, in the normal form, other than a
     sentence's first word that is on openers ("Ask Ahmed first" and "Ahmed wants" both give ahmed).
     starts False: no sentence's first word at all. A sentence starts the text, a line and every
-    part after one of ".!?;:؟". phrases: word runs (each a tuple of words in the normal form) left
+    part after one of ends (".!?;:؟" for the source; a note's leave out ";" and ":"). phrases: word runs (each a tuple of words in the normal form) left
     out where the text writes the whole run, with only spaces or dashes between its words, so
     "Sheikh Zayed" leaves out both words and "Ask Zayed" leaves out neither. Hidden characters
     (read as hidden) and marks are dropped and look alike letters read as Latin first, keeping
     their case, so neither hides a capital."""
-    plain = unicodedata.normalize("NFKD", (text or "").translate(risk_mod._LATIN))
-    plain = "".join((hidden if unicodedata.category(ch) == "Cf" or ch in risk_mod._BLANKS else ch) for ch in plain
-                    if not unicodedata.category(ch).startswith("M")).translate(risk_mod._LATIN)
+    plain = _plain(text, hidden)
     def skip(m):  # a sentence's first word has a capital anyway: only an opener passes there
-        before = plain[:m.start()].rstrip(" \t\"'“”‘’(")
-        first = not before or before[-1] in _SENTENCE_ENDS
-        return first and (not starts or risk_mod.normalize(m.group(0)) in openers)
+        return _opens(plain, m.start(), ends) and (not starts or risk_mod.normalize(m.group(0)) in openers)
     found = list(_NAME_WORD.finditer(plain))
     norms = [risk_mod.normalize(m.group(0)) for m in found]
     covered = set()
@@ -488,9 +515,27 @@ def _joins(gap):
 def _their_capitals(theirs):
     """The words the source's own turns write with a capital outside their sentence starts, in the
     normal form, with a hidden character read both ways: "I am Ahmed" gives ahmed, "Recommend one"
-    and "hi. Look here" give nothing. A sentence's first word in a note counts only against these."""
-    return {w for t in theirs if isinstance(t, str) for hidden in ("", " ")
-            for w in _capitalised(t, starts=False, hidden=hidden)}
+    and "hi. Look at it" give nothing. A sentence's first word in a note counts only against these.
+    A word the source gave as its name at a start counts too (_introduced), unless the source also
+    wrote it in small letters (red team gatefb round 2, item C)."""
+    out, intro, small = set(), set(), set()
+    for t in theirs:
+        if isinstance(t, str):
+            for hidden in ("", " "):
+                out |= _capitalised(t, starts=False, hidden=hidden)
+                plain = _plain(t, hidden)
+                intro |= _introduced(plain)
+                small |= {risk_mod.normalize(m.group(0)) for m in _NAME_WORD.finditer(plain) if m.group(0)[0].islower()}
+    return out | (intro - small)
+
+
+def _introduced(plain):
+    """The words of one source turn (read by _plain) that stand as a name: the turn's only word
+    ("Ahmed", "AHMED"), or a word that _INTRO_AFTER follows ("Ahmed here", "Mona: do you have", "Karim
+    speaking", "hi! Youssef."). Only a start matters: a capital past one counts anyway, and the
+    caller leaves out every word the source wrote in small letters, so these here too."""
+    found = [m for m in _NAME_WORD.finditer(plain) if len(m.group(0)) > 1]
+    return {risk_mod.normalize(m.group(0)) for m in found if len(found) == 1 or _INTRO_AFTER.match(plain, m.end())}
 
 
 def _their_words(theirs):

@@ -2,11 +2,16 @@
 holds an add-on amount only for an extra named before it (review finding 1); a boot first holds the
 extra's price unless a joining word sits between them (review finding 5); an extra first holds it
 only as the clause's subject (red team item A); an add-on word counts only before an allowed word or
-the clause end (review finding 2, red team item B). Made-up text against the demo store data; no
-model, no network."""
+the clause end (review finding 2, red team item B). Fast notes: a name the customer gave at a start
+counts (red team item C); ";" and ":" start no note sentence (review finding 3); a note is read with
+a hidden character both ways (red team item E). Made-up text against the demo store data; no model,
+no network."""
 import unittest
 
 from arena import factcheck
+from engine import fast as engine_fast
+from reflection import PLUG as SALES
+from reflection import fast as sales_fast
 from tests.fake_model import clean_env
 
 AC = chr(0x60C)  # the Arabic comma
@@ -15,6 +20,14 @@ ZW = chr(0x200B)  # a zero width space, a hidden character
 
 def checks(reply, customer=""):
     return [f["check"] for f in factcheck.check(reply, customer)]
+
+
+def note_guard(text, theirs=(), known=None):
+    return engine_fast.guard(text, SALES, list(theirs), never=sales_fast.NEVER,
+                             known=sales_fast.known() if known is None else known)
+
+
+NAMED = "names a word from the source's own words: "
 
 
 class AddOnInABootClause(unittest.TestCase):
@@ -149,6 +162,69 @@ class AddOnAllowList(unittest.TestCase):
                          ["price"])
         self.assertEqual(checks("If you add printing, the Vapor 17 Elite is 400 EGP more" + ZW + "or less."), ["price"])
         self.assertEqual(checks("The Vapor 17 El" + ZW + "ite with printing is 400 EGP."), ["price"])
+
+
+class NamesGivenAtAStart(unittest.TestCase):
+    """Red team item C: a name the customer gave at a start (a one-word turn, or a turn-opening word
+    followed by "here", a comma, a colon or the turn end) counts as written with a capital, unless
+    the customer also wrote it in small letters."""
+
+    def setUp(self):
+        clean_env(self)
+
+    def test_a_name_given_at_a_start_is_refused_at_a_notes_start(self):
+        for cust in ("Ahmed", "AHMED", "\"Ahmed\"", "Ahmed here, size forty two please", "hi\nAhmed here, how much",
+                     "hi! Ahmed here, how much?", "Hello. Ahmed from Giza. how much?", "salam; Ahmed here",
+                     "Hi: Ahmed", "hi." + ZW + "Ahmed here", "\U0001F44B Ahmed here", "Ahmed here. Which size?",
+                     "Karim speaking. size?", "Mona: do you have the Elite?", "Youssef. Price?"):
+            name = next(w for w in ("Ahmed", "Karim", "Mona", "Youssef") if w.lower() in cust.lower())
+            for text in (f"{name} wants the Elite; ask the size.", f"Ask the size first. {name} wants the Elite."):
+                self.assertIn(NAMED + name.lower(), note_guard(text, ["what sizes do you have?", cust]),
+                              (cust, text))
+
+    def test_a_one_word_turn_counts_whatever_follows_it(self):
+        self.assertIn(NAMED + "ahmed", note_guard("Ahmed wants the Elite.", ["Ahmed \U0001F44B"]))
+
+    def test_a_hidden_character_inside_the_given_name_is_read_as_nothing_too(self):
+        self.assertIn(NAMED + "ahmed", note_guard("Ahmed wants the Elite.", ["Ah" + ZW + "med here"]))
+
+    def test_a_name_the_customer_also_wrote_in_small_letters_stays_exempt(self):
+        self.assertEqual(note_guard("Ahmed wants the Elite.", ["Ahmed", "yes ahmed"]), [])
+        self.assertEqual(note_guard("Ahmed wants the Elite; ask the size.", ["ahmed here"]), [])
+
+    def test_a_word_opening_a_turn_before_other_words_still_does_not_count(self):
+        self.assertEqual(note_guard("Recommend a tier, then mention delivery.", ["Recommend a light boot"]), [])
+        self.assertEqual(note_guard("Look at what they asked before the price.", ["Look at the photos please"]), [])
+
+
+class NoteSentenceEnds(unittest.TestCase):
+    """Review finding 3: in a note ";" and ":" start no sentence; in the customer's words they still do."""
+
+    def setUp(self):
+        clean_env(self)
+
+    def test_a_name_after_a_semicolon_or_colon_in_a_note_is_checked_past_the_start(self):
+        for text in ("Ask the size first; Ahmed wants the Elite.", "Ask the size first: Ahmed wants the Elite."):
+            self.assertIn(NAMED + "ahmed", note_guard(text, ["ahmed here"]), text)
+
+    def test_a_word_after_a_semicolon_or_colon_in_the_customers_words_is_a_sentence_start(self):
+        for cust in ("hi; Recommend a light boot", "hi: Recommend a light boot"):
+            self.assertEqual(note_guard("Recommend a tier, then mention delivery.", [cust]), [], cust)
+
+
+class HiddenCharactersInANote(unittest.TestCase):
+    """Red team item E: a note is read with a hidden character as nothing and as a space."""
+
+    def setUp(self):
+        clean_env(self)
+
+    def test_a_hidden_character_neither_fuses_nor_splits_a_name(self):
+        self.assertIn(NAMED + "ahmed", note_guard("Ask" + ZW + "Ahmed about the size.", ["hi I am Ahmed"]))
+        self.assertIn(NAMED + "ahmed", note_guard("Ask Ah" + ZW + "med about the size.", ["hi I am Ahmed"]))
+
+    def test_any_space_between_a_places_words_keeps_it_whole(self):  # mutant ef12
+        text = "Ask if Sheikh" + chr(0x1680) + "Zayed is close."
+        self.assertEqual(engine_fast.guard(text, SALES, ["I am in Sheikh Zayed"], known=("Sheikh Zayed",)), [])
 
 
 if __name__ == "__main__":

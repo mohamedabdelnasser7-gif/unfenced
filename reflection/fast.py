@@ -21,21 +21,30 @@ or a timeout writes no note, and the engine's guard checks what comes back befor
 What a note may say (root call, 2026-10-31). Most chats that end without an order go quiet right
 after the price, so the note that matters most is about the price. The plug's high risk list
 holds "price", "delivery" and the like as words, so with the plug's list as the guard those notes
-were all dropped. The guard here uses NEVER instead: a note may name a topic (TOPICS: the price,
-the size, delivery) and say when or how to bring it up, but it never states a number of any kind
+were all dropped. The guard here uses NEVER instead: the plug's whole high list (words, patterns
+and tools) minus the topic words only (TOPIC_WORDS: price, cost, total, delivery, shipping, fee,
+charge, size), plus more groups of its own. So a note may name a topic (TOPICS: the price, the
+size, delivery) and say when or how to bring it up, but it never states a number of any kind
 (digits in any script, a numeral sign or a fraction, a percent or money sign, a number word in
-English, Arabic or Franco), an amount or a currency, a discount or anything free, a promise (a
-refund, an exchange, a guarantee, a delivery that will come), or a date, a day or a time. The
-engine still refuses a link, a phone number, a handle and three or more words in a row copied
-from the customer. Ordinals (first, then, last) and "once" are not numbers here: the order of
-questions is what most notes are about. Only the fast note guard changed: the lessons' risk
-check still reads the plug's whole high list.
+English, Arabic or Franco, teens, tens and hundreds too), an amount or a currency, a discount or
+anything free, a promise (a refund, an exchange, a guarantee, a delivery that will come), what a
+topic is or includes ("the price is ...", "shipping is covered"), store policy (returns, stock,
+cancelling), a way to pay (a deposit, a transfer, a card, an installment) or anyone's personal
+data (a name, a password, a national id, an account), or a date, a day or a time (root call,
+2026-10-31, after the red team round). The engine still refuses a link, a phone number, a handle,
+more than one line and three or more words in a row copied from the customer. Ordinals (first,
+then, last) and "once" are not numbers here: the order of questions is what most notes are about.
+Only the fast note guard changed: the lessons' risk check still reads the plug's whole high list.
+
+Every writer call is a model call, so it is counted in kit/limits.py under LIMIT_KEY, like a
+customer: over a limit, the ending gets no note, and the sweep goes on.
 """
 import json
 
 from engine import fast as engine_fast
 from engine.plug import Risk
 from engine.study import PartError
+from kit import limits as limits_mod
 from kit import model as model_mod
 from kit.chats import PERSON, Chats
 from kit.db import Db
@@ -48,11 +57,16 @@ EFFORT = model_mod.EFFORT_REPLY
 TIMEOUT = 30       # seconds for each network step
 MAX_TOKENS = 1500  # reasoning included; a cut off answer is a named failure
 TEAM = "team"      # a turn a team member wrote: the store's side, not the agent's
+LIMIT_KEY = "reflection:fast"  # the writer's calls in kit/limits.py, counted like one customer's
 
 TOPICS = "the price, the size or delivery"
 NEVER_ABOUT = ("a number of any kind, in digits or in words; an amount, a money sign or a currency; a "
                "discount or anything free; a promise (a refund, an exchange, a guarantee, when something "
-               "will arrive); a date, a day or a time.")
+               "will arrive) or what a topic is or includes; store policy (returns, stock, cancelling); a way "
+               "to pay (a deposit, a transfer, a card, an installment); anyone's personal data (a name, a "
+               "password, an id, an account); a date, a day or a time.")
+# The plug's high list words a note may use to name a topic; every other word on it stays a never word.
+TOPIC_WORDS = frozenset({"price", "cost", "total", "delivery", "shipping", "fee", "charge", "size"})
 _NEVER_WORDS = {
     "number": (
         "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven",
@@ -60,9 +74,21 @@ _NEVER_WORDS = {
         "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred", "thousand", "million",
         "billion", "half", "quarter", "dozen", "double", "twice", "triple", "percent",
         "wa7ed", "etnen", "itnen", "talata", "tlata", "khamsa", "sitta", "tamanya",
-        "ashara", "meya", "alf", "nos",
+        "ashara", "ashra", "meya", "alf", "nos", "arbaa", "setta", "sabaa", "tesaa",
+        # Franco teens, tens and hundreds (one with a digit in it, like arba3tashar, is a digit already)
+        "hedashar", "hdashar", "hidashar", "etnashar", "itnashar", "tnashar", "talatashar", "tlatashar",
+        "talattashar", "arbatashar", "arbaatashar", "khamastashar", "khamstashar", "setashar", "sitashar",
+        "settashar", "sabatashar", "sabaatashar", "tamantashar", "tamanttashar", "tesatashar", "tesaatashar",
+        "tisatashar", "eshrin", "eshreen", "ishrin", "ishreen", "talatin", "talateen", "tlatin", "tlateen",
+        "arbein", "arbeen", "arbiin", "khamsin", "khamseen", "sittin", "setin", "setteen", "sitteen",
+        "sabein", "sabeen", "tamanin", "tamaneen", "tesein", "tesseen", "tesin", "tiseen", "meyten",
+        "miten", "mitein", "meteen", "toltomeya", "tultumeya", "khomsomeya", "sottomeya", "tomnomeya",
+        "alfen", "alfein", "alfeen", "alaf", "alaaf", "malyoon", "milyon",
         "واحد", "اتنين", "اثنين", "تلات", "ثلاث", "اربع", "خمس", "سته", "ستين", "سبع", "تمان", "ثمان", "تسع",
-        "عشر", "ميه", "ميت", "مائه", "الف", "مليون", "نص", "ربع", "ضعف", "مرتين"),
+        "عشر", "ميه", "ميت", "مائه", "الف", "مليون", "نص", "ربع", "ضعف", "مرتين",
+        # Arabic teens a shorter word above does not hold (خمستاشر holds خمس, عشرين holds عشر)
+        "حداشر", "احداشر", "اتناشر", "اطناشر", "تلتاشر", "تلاتاشر", "ستاشر", "سطاشر", "تمنتاشر", "تلتميه",
+        "ميتين", "الفين"),
     "amount": (
         "egp", "le", "pound", "dollar", "usd", "euro", "riyal", "dirham", "sar", "aed", "kwd", "qar",
         "geneh", "gneh", "guineh", "جنيه", "ج.م", "دولار", "ريال", "درهم"),
@@ -80,6 +106,16 @@ _NEVER_WORDS = {
         "minute", "hour", "day", "week", "month", "year", "bokra", "bukra", "naharda", "enaharda",
         "بكره", "النهارده", "انهارده", "الليله", "خلال", "ميعاد", "موعد", "تاريخ", "يوم", "ايام", "اسبوع",
         "ساعه", "شهر"),
+    "payment": (
+        "deposit", "transfer", "transferred", "transferring", "instapay", "wallet", "card", "upfront",
+        "up front", "installment", "instalment", "prepay", "prepaid", "in advance", "bank", "iban",
+        "vodafone cash", "عربون", "تحويل", "انستاباي", "قسط", "تقسيط"),
+    "personal_data": (
+        "password", "national id", "id number", "account", "passport", "otp", "cvv", "verification code",
+        "رقم قومي", "قومي", "باسورد", "كلمه السر"),
+    "policy": (
+        "negotiable", "negotiate", "negotiating", "negotiation", "include", "including", "inclusive",
+        "covered", "reserve"),
 }
 _NEVER_PATTERNS = (
     ("discount", r"\bon\s+sale\b"),
@@ -88,10 +124,29 @@ _NEVER_PATTERNS = (
     ("discount", r"\boff\s+the\s+(?:price|total|cost)\b"),
     ("promise", r"\bwill\s+(?:arrive|reach|come|get\s+there|be\s+delivered|ship)\b"),
     ("promise", r"\bdeliver(?:ed|s)?\s+(?:by|within|on|in|before)\b"),
+    # what a topic is: a note may say when to bring the price up, never what it is or holds
+    ("policy", r"\b(?:price|cost|total|delivery|shipping|fee|charge)s?\s+(?:is|are|was|were|will|includes?|"
+               r"included|including|covers?|covered|comes?|stays?|has|have|can|goes|gets)\b"),
 )
-NEVER = Risk(high_about=NEVER_ABOUT, low_about=PLUG.risk.low_about,
-             words=tuple((group, w) for group, words in _NEVER_WORDS.items() for w in words),
-             patterns=_NEVER_PATTERNS, tools=())
+
+
+def _never(plug_risk):
+    """NEVER from the plug's whole high list minus TOPIC_WORDS, after the groups above (so a word
+    on both keeps the name above), each word once."""
+    seen, words = set(), []
+    for group, w in [(g, w) for g, ws in _NEVER_WORDS.items() for w in ws] + list(plug_risk.words):
+        if w.casefold() in TOPIC_WORDS or w.casefold() in seen:
+            continue
+        seen.add(w.casefold())
+        words.append((group, w))
+    numbers = {p for _, p in engine_fast.NUMBERS}  # the engine checks these for every agent
+    patterns = _NEVER_PATTERNS + tuple((g, p) for g, p in plug_risk.patterns if p not in numbers)
+    tools = tuple(t for t in plug_risk.tools if t.casefold() not in TOPIC_WORDS)
+    return Risk(high_about=NEVER_ABOUT, low_about=plug_risk.low_about, words=tuple(words),
+                patterns=patterns, tools=tools)
+
+
+NEVER = _never(PLUG.risk)
 
 WRITE = (
     "You are Reflection, the part of an AI agent's system that looks back at its work. One of the "
@@ -176,13 +231,34 @@ def chat_turns(chats, chat_id):
     return out
 
 
-class FastNotes(engine_fast.FastNotes):
-    """The Sales agent's fast notes: a case is one chat, and the chat id names the customer."""
+class Metered:
+    """A writer whose every call is counted in kit/limits.py under LIMIT_KEY first. Over a limit
+    it raises PartError, so that ending gets no note (its row says why) and the sweep goes on."""
 
-    def __init__(self, db=None, chats=None, writer=None, keep_days=engine_fast.KEEP_DAYS):
+    def __init__(self, writer, limits):
+        self.writer, self.limits = writer, limits
+
+    def __call__(self, plug, view):
+        over = None
+        try:
+            self.limits.take(LIMIT_KEY)
+        except limits_mod.OverLimit as e:
+            over = e.which
+        if over is not None:
+            raise PartError(f"over the model call limit ({over})")
+        return self.writer(plug, view)
+
+
+class FastNotes(engine_fast.FastNotes):
+    """The Sales agent's fast notes: a case is one chat, and the chat id names the customer.
+    limits: the kit.limits.Limits every writer call is counted in (the running agent's own);
+    left out, one on the same database."""
+
+    def __init__(self, db=None, chats=None, writer=None, keep_days=engine_fast.KEEP_DAYS, limits=None):
         db = db if db is not None else Db()
         self.chats = chats if chats is not None else Chats(db)
-        super().__init__(db, PLUG, writer=Writer() if writer is None else writer,
+        self.limits = limits if limits is not None else limits_mod.Limits(db)
+        super().__init__(db, PLUG, writer=Metered(Writer() if writer is None else writer, self.limits),
                          reader=lambda chat_id: chat_turns(self.chats, chat_id), keep_days=keep_days,
                          never=NEVER)
 

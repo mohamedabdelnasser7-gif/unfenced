@@ -86,7 +86,9 @@ FIRST_LINE_DEADLINE = 5
 MAX_OPEN = 32
 MAX_QUEUE = 200
 REQUIRED_ENV = ("WHATSAPP_APP_SECRET", "WHATSAPP_VERIFY_TOKEN", "WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID",
-                "BASETEN_API_KEY", "OPERATOR_WHATSAPP")
+                "OPERATOR_WHATSAPP")
+# The model key is either one (kit/model.py keyed_legs): META_API_KEY alone runs every call.
+MODEL_KEYS = "META_API_KEY or BASETEN_API_KEY"
 # OPERATOR_WHATSAPP as WhatsApp gives a sender's number: country code and digits, no + and no
 # leading 0. In any other form team replies would read as customer messages (review t261028j finding 7).
 OPERATOR_NUMBER = re.compile(r"[1-9][0-9]{7,14}")
@@ -695,9 +697,12 @@ class App:
 
 
 def missing_env():
-    """Names in REQUIRED_ENV that are not set. The server does not start without them."""
+    """Names in REQUIRED_ENV that are not set, and MODEL_KEYS when neither model key is. The
+    server does not start without them."""
     from kit import env
-    return [n for n in REQUIRED_ENV if not env.get(n)]
+    from kit import model
+    missing = [n for n in REQUIRED_ENV if not env.get(n)]
+    return missing if model.has_key() else missing + [MODEL_KEYS]
 
 
 def wrong_env():
@@ -734,12 +739,13 @@ def main():
     # The Meta risk judge on Muse Spark Open. It fails closed: with no key, an error or an odd
     # answer it is unsure, and unsure counts as high, so the lesson waits for a person's yes.
     chats = Chats(db)
+    limits = Limits(db)
     try:  # fast reflection is never needed to answer: if it cannot start, the agent runs without it
-        fast = FastNotes(db, chats)
+        fast = FastNotes(db, chats, limits=limits)  # its writer calls count in the same limits
     except Exception:
         log.exception("fast reflection is off: its notes could not be set up")
         fast = None
-    app = App(chats, Model(), Lessons(db, judge=Judge()), Results(db), graph, limits=Limits(db), fast=fast)
+    app = App(chats, Model(), Lessons(db, judge=Judge()), Results(db), graph, limits=limits, fast=fast)
     handler = make_handler(env.get("WHATSAPP_APP_SECRET"), env.get("WHATSAPP_VERIFY_TOKEN"), app.accept, pnid)
     port = int(env.get("PORT", "8080"))
     server = ThreadingHTTPServer(("127.0.0.1", port), handler)

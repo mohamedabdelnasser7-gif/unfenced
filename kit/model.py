@@ -182,7 +182,7 @@ class Model:
             # Only the status. The body can echo the request (customer text) or more, so it is never read.
             failed = f"{name} answered {e.code} {_phrase(e.code)}"
             retry = e.code >= 500 or e.code in FALLBACK_CODES
-        except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException) as e:
+        except (OSError, http.client.HTTPException) as e:  # OSError: URLError, timeout, SSL, reset
             failed, retry = f"{name} call failed: {type(e).__name__}", True
         except ValueError as e:
             failed = f"{name} call failed: {type(e).__name__}"

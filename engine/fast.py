@@ -358,7 +358,7 @@ def guard(text, plug, theirs=(), never=None):
     The core marks and NUMBERS are checked either way."""
     if not isinstance(text, str) or not text.strip():
         return ["not one line of text"]
-    if "\n" in text or "\r" in text:
+    if len(text.splitlines()) > 1:  # every line break Python knows: \n, \r, U+2028, U+0085 and more
         return ["more than one line"]
     found = []
     if len(text.strip()) > NOTE_LEN:

@@ -78,21 +78,23 @@ class Refused(Exception):
     """The night cannot run as asked; the message names what is missing, never a value."""
 
 
-def needed_keys():
-    """The env names the night's parts need: BASETEN_API_KEY always (the fit check, the
-    adapter and the judge), META_API_KEY too when the study route is wonder, the default."""
+MODEL_KEYS = "META_API_KEY or BASETEN_API_KEY"
+
+
+def missing_keys():
+    """The env names the night still needs. The fit check, the adapter and the judge take either
+    model key (kit/model.py keyed_legs), so META_API_KEY alone runs them; the study route needs
+    its own key too, META_API_KEY on wonder, the default. MODEL_KEYS when neither model key is set."""
     try:
         route = parts.study_route()
     except model_mod.ModelError as e:
         raise Refused(str(e)) from None
-    names = [model_mod.OPEN.key_env]
-    if route.key_env not in names:
-        names.append(route.key_env)
-    return names
-
-
-def missing_keys():
-    return [n for n in needed_keys() if not env.get(n)]
+    missing = []
+    if route.key_env != model_mod.OPEN.key_env and not env.get(route.key_env):
+        missing.append(route.key_env)
+    if not model_mod.has_key() and not missing:  # META_API_KEY named above is either key already
+        missing.append(MODEL_KEYS)
+    return missing
 
 
 def default_days(plug):

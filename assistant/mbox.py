@@ -3,8 +3,13 @@ export (Inbox and Sent) in, a picture of the user out. Patterns only.
 
     python3 -I assistant/mbox.py --user ADDRESS --out PICTURE.json FILE.mbox [FILE.mbox ...]
 
-A message is the user's (Sent) when its From is the user's address or Gmail labelled it Sent; any
-other message is Inbox. Inbox and Sent may come as two files or one.
+A message is the user's (Sent) by is_sent: a message with Gmail labels (X-Gmail-Labels) is Sent
+only when they hold Sent and neither Inbox nor Spam, whatever its From says; with no labels, a
+message that was delivered to someone (Delivered-To or Received) is Inbox, and only then does a
+From of the user's address make it Sent. A forged From alone never makes an outside mail the
+user's. Any other message is Inbox. Inbox and Sent may come as two files or one. Messages are
+split only on an envelope line (From, a sender, then the mbox date), so a body line that starts
+with From is text.
 
 What the picture keeps, and nothing more:
   busy_hours     the hours the user is most active, from counts of messages per hour.
@@ -20,9 +25,11 @@ What the picture keeps, and nothing more:
 Other people's message text is never stored: Inbox subjects and bodies are read only to count, and
 quoted text inside the user's replies is cut before anything is kept.
 
-Safety: the file is untrusted. It is read as bytes, capped (MAX_BYTES a file, MAX_MESSAGES in all,
-MAX_BODY characters a message), only text/plain parts are decoded, attachments are skipped, and a
-message that cannot be parsed is counted as skipped. Nothing in it is run or followed.
+Safety: the file is untrusted. It is read as bytes, capped (MAX_BYTES for all the files together,
+MAX_MESSAGES in all, MAX_BODY characters a message), only text/plain parts are decoded, a part
+over MAX_PART raw characters is skipped before it is decoded, attachments are skipped, an odd
+charset or date is read as UTF-8 or no date, and a message that cannot be parsed is counted as
+skipped. Nothing in it is run or followed.
 """
 import argparse
 import collections
@@ -39,10 +46,18 @@ from pathlib import Path
 MAX_BYTES = 200 * 1024 * 1024
 MAX_MESSAGES = 20000
 MAX_BODY = 20000
+MAX_PART = 4 * MAX_BODY  # raw characters in one part; a longer part is skipped before decoding
+YEARS = (1970, 2100)     # a Date outside these years is no date
 MAX_PROMISES = 20
 MAX_FAST = 8
 FAST_MINUTES = 120
-SPLIT = re.compile(rb"(?:\A|\r?\n)From [^\r\n]*\r?\n")
+# The mbox envelope line: From, the sender, then the date as mbox writes it (asctime, with a zone
+# before the year in Gmail exports): "From a@b.test Thu Oct 30 10:00:00 2026" or
+# "From 123@xxx Wed Jan 05 15:23:00 +0000 2022".
+SPLIT = re.compile(rb"(?:\A|\r?\n)From [^ \t\r\n]+[ \t]+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[ \t]+"
+                   rb"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[ \t]+[0-9]{1,2}[ \t]+"
+                   rb"[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?[ \t]+(?:[+-][0-9]{4}[ \t]+|[A-Za-z]{2,5}[ \t]+)?"
+                   rb"[0-9]{4}[ \t]*\r?\n")
 QUOTE_START = re.compile(r"^(on .{3,200} wrote:|-{2,} ?original message ?-{2,}|from: .+)$", re.IGNORECASE)
 GREETINGS = ("hi", "hey", "hello", "dear", "good morning", "morning")
 PROMISE = re.compile(r"\b(i'll|i will|i can get|let me|i'm going to|will send|will get back|will reply|will share)\b",
@@ -70,9 +85,11 @@ def _addr(value):
 def _when(msg):
     try:
         d = email.utils.parsedate_to_datetime(str(msg.get("Date", "")))
-    except (TypeError, ValueError, IndexError):
+    except (TypeError, ValueError, IndexError, OverflowError):
         return None
-    return d if d is not None and d.tzinfo is not None else None
+    if d is None or d.tzinfo is None or not YEARS[0] <= d.year <= YEARS[1]:
+        return None  # a year far out would overflow when the time is moved to the user's zone
+    return d
 
 
 def _text(msg):
@@ -83,10 +100,13 @@ def _text(msg):
             continue
         if part.get_content_disposition() == "attachment":
             continue
+        payload = part.get_payload()
+        if isinstance(payload, str) and len(payload) > MAX_PART:
+            continue  # too long to decode: one base64 part could take a lot of memory
         raw = part.get_payload(decode=True) or b""
         try:
             out.append(raw.decode(part.get_content_charset() or "utf-8", errors="replace"))
-        except LookupError:  # a charset Python does not know: read it as UTF-8, never stop the file
+        except (LookupError, ValueError):  # a charset Python does not know or cannot use (idna): UTF-8
             out.append(raw.decode("utf-8", errors="replace"))
         if sum(map(len, out)) >= MAX_BODY:
             break
@@ -106,16 +126,27 @@ def own_text(body):
     return "\n".join(keep).strip()
 
 
+def is_sent(msg, user):
+    """Is the message the user's own (see the module lines)? user: the address, casefolded."""
+    labels = msg.get("X-Gmail-Labels")
+    if labels is not None:  # Gmail's own labels, and nothing else
+        got = {x.strip() for x in str(labels).casefold().split(",")}
+        return "sent" in got and not got & {"inbox", "spam"}
+    if msg.get("Delivered-To") is not None or msg.get("Received") is not None:
+        return False  # delivered to a mailbox: an inbound mail, whatever its From says
+    return _addr(msg.get("From")) == user
+
+
 def load(paths, user, *, max_bytes=MAX_BYTES, max_messages=MAX_MESSAGES):
-    """[(is_sent, msg)] from the files, and how many were skipped."""
+    """[(is_sent, msg)] from the files, and how many were skipped. max_bytes: all the files together."""
     user = (user or "").strip().casefold()
     if "@" not in user:
         raise Refused("the user's address is needed to tell Sent from Inbox")
+    paths = [Path(p) for p in paths]
+    if sum(p.stat().st_size for p in paths) > max_bytes:
+        raise Refused("the files are over the size cap")
     out, skipped = [], 0
     for p in paths:
-        p = Path(p)
-        if p.stat().st_size > max_bytes:
-            raise Refused(f"{p.name} is over the size cap")
         for raw in split_mbox(p.read_bytes()):
             if len(out) >= max_messages:
                 raise Refused("the export is over the message cap")
@@ -124,9 +155,7 @@ def load(paths, user, *, max_bytes=MAX_BYTES, max_messages=MAX_MESSAGES):
             except Exception:  # an untrusted file: any parse failure is one skipped message
                 skipped += 1
                 continue
-            labels = str(msg.get("X-Gmail-Labels", "")).casefold()
-            sent = _addr(msg.get("From")) == user or "sent" in [x.strip() for x in labels.split(",")]
-            out.append((sent, msg))
+            out.append((is_sent(msg, user), msg))
     return out, skipped
 
 

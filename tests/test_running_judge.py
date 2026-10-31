@@ -34,7 +34,8 @@ class Stop(Exception):
 
 def lessons_main_builds(test):
     """The Lessons main() hands the App, with every key set and no server, no database file."""
-    full = {**{n: "set" for n in wa.REQUIRED_ENV}, "OPERATOR_WHATSAPP": "201000000001"}
+    full = {**{n: "set" for n in wa.REQUIRED_ENV}, "OPERATOR_WHATSAPP": "201000000001",
+            "BASETEN_API_KEY": "fake-baseten-key-for-tests"}
     db = Db(":memory:")
     test.addCleanup(db.close)
     with mock.patch.dict(os.environ, full, clear=True), mock.patch("kit.env.load", return_value=[]), \

@@ -432,6 +432,21 @@ class EnvTest(unittest.TestCase):
             os.environ.pop("A_TEST_ONE", None)
             os.environ.pop("A_TEST_TWO", None)
 
+    def test_an_inline_comment_is_cut_from_an_unquoted_value_only(self):
+        """Review round 1 finding 9: KEY=abc # mine sent "abc # mine" as the key."""
+        lines = {"A_TEST_CUT": "fake-key-abc # mine", "A_TEST_TAB": "fake-key-abc\t#mine",
+                 "A_TEST_HASH": "fake#key", "A_TEST_QUOTED": '"fake # kept"', "A_TEST_SINGLE": "'fake # kept'",
+                 "A_TEST_ONLY": " # nothing set", "A_TEST_PLAIN": "fake-key-plain"}
+        want = {"A_TEST_CUT": "fake-key-abc", "A_TEST_TAB": "fake-key-abc", "A_TEST_HASH": "fake#key",
+                "A_TEST_QUOTED": "fake # kept", "A_TEST_SINGLE": "fake # kept", "A_TEST_ONLY": "",
+                "A_TEST_PLAIN": "fake-key-plain"}
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / ".env"
+            p.write_text("".join(f"{k}={v}\n" for k, v in lines.items()), encoding="utf-8")
+            with mock.patch.dict(os.environ, {}, clear=True):
+                env.load(p)
+                self.assertEqual({k: os.environ[k] for k in want}, want)
+
 
 if __name__ == "__main__":
     unittest.main()

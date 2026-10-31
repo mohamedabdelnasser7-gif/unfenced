@@ -814,7 +814,8 @@ class CrashedTurns(unittest.TestCase):
 
 
 class RequiredEnv(unittest.TestCase):
-    FULL = {**{n: "set" for n in wa.REQUIRED_ENV}, "OPERATOR_WHATSAPP": "201000000001"}
+    FULL = {**{n: "set" for n in wa.REQUIRED_ENV}, "OPERATOR_WHATSAPP": "201000000001",
+            "META_API_KEY": "fake-meta-key-for-tests"}
 
     def test_operator_number_is_required(self):
         self.assertIn("OPERATOR_WHATSAPP", wa.REQUIRED_ENV)
@@ -824,6 +825,50 @@ class RequiredEnv(unittest.TestCase):
                     {k: v for k, v in self.FULL.items() if k != "OPERATOR_WHATSAPP"}):
             with mock.patch.dict(os.environ, env, clear=True):
                 self.assertEqual(wa.missing_env(), ["OPERATOR_WHATSAPP"])
+
+    def test_one_model_key_of_either_kind_is_enough(self):
+        """Review round 1 finding 1, red team finding 5: one Meta key starts the webhook."""
+        self.assertNotIn("BASETEN_API_KEY", wa.REQUIRED_ENV)
+        base = {k: v for k, v in self.FULL.items() if k not in ("META_API_KEY", "BASETEN_API_KEY")}
+        for keys in ({"META_API_KEY": "fake-meta"}, {"BASETEN_API_KEY": "fake-baseten"},
+                     {"META_API_KEY": "fake-meta", "BASETEN_API_KEY": "fake-baseten"}):
+            with self.subTest(keys=sorted(keys)), mock.patch.dict(os.environ, {**base, **keys}, clear=True):
+                self.assertEqual(wa.missing_env(), [])
+        for keys in ({}, {"META_API_KEY": " ", "BASETEN_API_KEY": ""}):
+            with mock.patch.dict(os.environ, {**base, **keys}, clear=True):
+                self.assertEqual(wa.missing_env(), [wa.MODEL_KEYS])
+        with mock.patch.dict(os.environ, {k: v for k, v in base.items() if k != "WHATSAPP_TOKEN"}, clear=True):
+            self.assertEqual(wa.missing_env(), ["WHATSAPP_TOKEN", wa.MODEL_KEYS])
+
+    def start(self, env):
+        """main() with this env and no server or database file, up to building the App."""
+        db = Db(":memory:")
+        self.addCleanup(db.close)
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch("kit.env.load", return_value=[]), \
+                mock.patch("logging.basicConfig"), mock.patch("sales.loop.warn_size_prices"), \
+                mock.patch("kit.db.Db", return_value=db), mock.patch.object(wa, "ThreadingHTTPServer") as server, \
+                mock.patch.object(wa, "App", side_effect=StopIteration) as app:
+            with self.assertRaises(StopIteration):
+                wa.main()
+        server.assert_not_called()
+        return app.call_args
+
+    def test_the_server_starts_on_one_meta_key_and_the_fast_writer_shares_its_limits(self):
+        env = {k: v for k, v in self.FULL.items() if k != "BASETEN_API_KEY"}
+        self.assertIn("META_API_KEY", env)
+        call = self.start(env)
+        limits, fast = call.kwargs["limits"], call.kwargs["fast"]
+        self.assertIsInstance(limits, Limits)
+        self.assertIs(fast.limits, limits)
+
+    def test_the_server_does_not_start_with_no_model_key(self):
+        env = {k: v for k, v in self.FULL.items() if k not in ("META_API_KEY", "BASETEN_API_KEY")}
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch("kit.env.load", return_value=[]), \
+                mock.patch("logging.basicConfig"), mock.patch.object(wa, "ThreadingHTTPServer") as server:
+            with self.assertRaises(SystemExit) as cm:
+                wa.main()
+        self.assertEqual(str(cm.exception.code), "Missing in .env: " + wa.MODEL_KEYS)
+        server.assert_not_called()
 
     def test_server_does_not_start_without_it(self):
         env = {k: v for k, v in self.FULL.items() if k != "OPERATOR_WHATSAPP"}

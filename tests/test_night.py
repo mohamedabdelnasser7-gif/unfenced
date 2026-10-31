@@ -98,9 +98,19 @@ class Refuses(Setup):
             self.assertNotIn(value, err)
         return err
 
-    def test_no_baseten_key(self):
-        self.env(without=(BASETEN,))
-        self.assert_refused(BASETEN)
+    def test_one_meta_key_is_enough(self):
+        """Review round 1 finding 1: the fit check, the adapter and the judge run on Meta alone."""
+        for flag in ({}, {"META_STUDY_ROUTE": "open"}):
+            with self.subTest(flag=flag):
+                self.env(without=(BASETEN,), **flag)
+                self.assertEqual(night.missing_keys(), [])
+
+    def test_no_model_key_at_all_names_both(self):
+        self.env(without=(BASETEN, META), META_STUDY_ROUTE="open")
+        self.assertEqual(night.missing_keys(), [night.MODEL_KEYS])
+        self.assert_refused("META_API_KEY or BASETEN_API_KEY")
+        self.env(without=(BASETEN, META))
+        self.assertEqual(night.missing_keys(), [META])  # the wonder route's key is either key too
 
     def test_no_meta_key_on_the_wonder_route(self):
         for flag in ({}, {"META_STUDY_ROUTE": "wonder"}):

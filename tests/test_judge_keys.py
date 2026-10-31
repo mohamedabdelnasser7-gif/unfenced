@@ -10,6 +10,7 @@ import re
 import secrets
 import shutil
 import socket
+import ssl
 import subprocess
 import tempfile
 import unittest
@@ -202,6 +203,53 @@ class Fallback(unittest.TestCase):
             self.assertNotIn(self.m, text)
         self.assertIsNone(err.__cause__)
         self.assertTrue(err.__suppress_context__ or err.__context__ is None)
+
+    def test_ssl_and_other_os_errors_fall_back_and_leave_only_as_a_model_error(self):
+        """Review round 1 finding 7, red team finding 4: an SSL error or a plain OSError escaped
+        chat() raw, with no fallback. Now it falls back, and a second one is a ModelError."""
+        class CutRead(Resp):
+            def __init__(self, err):
+                super().__init__(b"")
+                self.err = err
+
+            def read(self):
+                raise self.err
+        for label, err in (("ssl", ssl.SSLError(1, "record layer failure " + self.b)),
+                           ("ssl eof", ssl.SSLEOFError(8, "EOF " + self.b)),
+                           ("os", OSError(9, "bad file descriptor " + self.b))):
+            for where in ("open", "read"):
+                with self.subTest(failure=label, where=where):
+                    t = Transport(baseten=[err], meta=[ok("from meta")])
+                    opener = t
+                    if where == "read":
+                        def opener(req, timeout, t=t, err=err):
+                            t.seen.append(req)
+                            return CutRead(err) if req.full_url == BASETEN_URL else Resp(ok("from meta"))
+                    with self.assertLogs("kit.model", level="ERROR") as logs:
+                        out = kit_model.Model(opener=opener).chat(HI)
+                    self.assertEqual(out["content"], "from meta")
+                    self.assertEqual(t.hosts(), [BASETEN_URL, META_URL])
+                    self.assertIn(f"Baseten call failed: {type(err).__name__}; this call goes to Meta",
+                                  "\n".join(logs.output))
+                    self.assertNotIn(self.b, "\n".join(logs.output))
+        t = Transport(baseten=[ssl.SSLEOFError(8, "EOF " + self.b)], meta=[OSError(9, "bad " + self.m)])
+        with self.assertRaises(kit_model.ModelError) as e, self.assertLogs("kit.model", level="ERROR"):
+            kit_model.Model(opener=t).chat(HI)
+        err = e.exception
+        self.assertEqual(str(err), "Baseten call failed: SSLEOFError; Meta call failed: OSError")
+        for text in (str(err), repr(err)):
+            self.assertNotIn(self.b, text)
+            self.assertNotIn(self.m, text)
+        self.assertIsNone(err.__cause__)
+        self.assertTrue(err.__suppress_context__ or err.__context__ is None)
+
+    def test_an_ssl_error_with_one_key_is_a_model_error_too(self):
+        env_with(self, META_API_KEY=self.m)
+        t = Transport(meta=[ssl.SSLError(1, "record layer failure " + self.m)])
+        with self.assertRaises(kit_model.ModelError) as e:
+            kit_model.Model(opener=t).chat(HI)
+        self.assertEqual(str(e.exception), "Meta call failed: SSLError")
+        self.assertEqual(t.hosts(), [META_URL])
 
     def test_the_fallback_never_follows_a_redirect(self):
         self.assertIs(kit_model.Model()._open, net.open_once)

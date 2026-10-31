@@ -354,7 +354,7 @@ class StoreTest(unittest.TestCase):
 
     def test_only_fields_in_the_data(self):
         for item in store.catalogue():
-            self.assertLessEqual(set(item), {"title", "type", "description", "variants"})
+            self.assertLessEqual(set(item), {"title", "type", "description", "image", "variants"})
             for v in item["variants"]:
                 self.assertLessEqual(set(v), {"tier", "size", "price", "sku", "stock"})
                 if "stock" in v:

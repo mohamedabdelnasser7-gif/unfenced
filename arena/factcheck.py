@@ -6,14 +6,17 @@ price     every amount in the reply (kit/send_check.py prices_in) is a price of 
           turn (a draft order's total). With no product named, any store price counts. A tier
           the reply names (Elite, Pro; else one the customer's line names) narrows the prices to
           that tier's, and in a clause that names one tier its amounts must be that tier's prices:
-          the Pro price given for an Elite boot is a wrong price.
+          the Pro price given for an Elite boot is a wrong price. An extra (store.extras: the name
+          printing) goes on any product, so its price counts whatever product the reply names, and
+          so do a price plus an extra, with or without one fee (2026-10-31).
 size      a size number after a size word (مقاس 43, size 43, EU 43) fits a size of a product
           the reply names, or of any product when it names none.
 stock     a reply that says a named product (and size, when it gives one) is available while
           the store has it out fails; so does one that says it is out while the store has it.
 delivery  an amount in a sentence about delivery is a delivery fee (the named governorate's
           zone fee when the reply names one); a count of days there sits inside the zones' days
-          (the named zone's when it names one).
+          (the named zone's when it names one). A count of days an exchange or return word governs
+          (exchange_days) is the exchange window, not a delivery time.
 order     a reply that says the order is placed or confirmed (claims_order below) passes only
           when a tool placed an order this turn (draft_order created): in a match the agent is
           the store, so its own claim is never a sale.
@@ -82,6 +85,13 @@ DELIVERY = re.compile(r"(?<!\w)(?:شحن|الشحن|توصيل|التوصيل|de
 DAYS = re.compile(r"(?<![\d.])(\d{1,2})\s*(?:(?:-|to|او|أو|ل|الى|إلى|و|or)\s*(\d{1,2})\s*)?"
                   r"(?:(?:working|business)\s+)?(?:days?|يوم|أيام|ايام|yom|youm|ayam)(?!\w)", re.IGNORECASE)
 TWO_DAYS = re.compile(r"(?<!\w)(?:يومين|yomein|youmein)(?!\w)", re.IGNORECASE)
+# an exchange, return or swap word: a count of days it governs is the exchange window, not a delivery time
+# ("ممكن تبدل المقاس خلال 14 يوم", Arena run 2026-10-31)
+EXCHANGE = re.compile(
+    r"(?<!\w)(?:(?:[وف]?(?:بال|لل|ال|ب|ل)?(?:تبديل|استبدال|ترجيع|استرجاع|مرتجع)"
+    r"|[وف]?(?:هت|ت|ي|ن|ا|أ)?(?:تبدل|ترجع)|[وف]?(?:هت|ت|ي|ن|ا|أ)(?:بدل|رجع))\w*"  # not a bare بدل (instead of)
+    r"|exchang\w*|returns?|returned|returning|swap\w*|refund\w*"
+    r"|t[ae]?ba?d[ae]?l\w*|ta?bdee?l\w*|[ei]?st[ae]?bdal\w*|t[ae]?r[gj](?:a|ee?|i)?3\w*)(?!\w)", re.IGNORECASE)
 SENTENCE = re.compile(r"[^.!?؟\n]+")
 # a clause for the tier rule: cut at an end mark, a new line, ؛ ; ، or a comma that is not inside
 # a number (16,500 stays whole); a decimal point does not end it
@@ -162,14 +172,19 @@ def check(reply, customer_text="", tool_results=(), orders=()):
     all_tiers = store.tiers()
     named = products_named(reply, items) or products_named(customer_text, items)
     said = tiers_named(reply, all_tiers) or tiers_named(customer_text, all_tiers)
-    pool = named or items
+    # an extra (the name printing) goes on any product, so a named boot never hides its price
+    extras = store.extras()
+    pool = (named + [e for e in extras if e not in named]) if named else items
     prices = {send_check.amount(v["price"]) for i in pool for v in _of_tiers(i.get("variants", []), said)
               if "price" in v}
+    extra_prices = {send_check.amount(v["price"]) for e in extras for v in e.get("variants", []) if "price" in v}
+    extra_prices.discard(None)
     from_tools = set()
     for name, res in tool_results:
         if name in tools.AMOUNT_TOOLS:
             from_tools |= send_check.amounts_in(res)
     allowed = set(prices) | fees | {p + f for p in prices for f in fees if p is not None and f is not None}
+    allowed |= _with_extras(prices, extra_prices, fees)
     allowed |= from_tools
     failed, wrong = [], set()
     for a in send_check.prices_in(reply, sizes, orders):
@@ -184,7 +199,8 @@ def check(reply, customer_text="", tool_results=(), orders=()):
         mine = products_named(clause, items) or pool
         ok = {send_check.amount(v["price"]) for i in mine for v in _of_tiers(i.get("variants", []), here)
               if "price" in v and v.get("tier")}
-        ok |= fees | {p + f for p in ok for f in fees if p is not None and f is not None} | from_tools
+        ok |= fees | {p + f for p in ok for f in fees if p is not None and f is not None} | from_tools \
+            | extra_prices | _with_extras(ok, extra_prices, fees)
         for a in send_check.prices_in(clause, sizes, orders):
             d = Decimal(str(a))
             if d not in wrong and d not in {Decimal(str(x)) for x in ok if x is not None}:
@@ -233,8 +249,9 @@ def check(reply, customer_text="", tool_results=(), orders=()):
             failed.append({"check": "delivery", "why": f"{a} is not the delivery fee for {zone or 'any zone'}"})
         low = min(z["days_min"] for z in mine)
         high = max(z["days_max"] for z in mine)
-        spans = [(int(m.group(1)), int(m.group(2) or m.group(1))) for m in DAYS.finditer(sentence)]
-        spans += [(2, 2)] * len(TWO_DAYS.findall(sentence))
+        spans = [(int(m.group(1)), int(m.group(2) or m.group(1))) for m in DAYS.finditer(sentence)
+                 if not exchange_days(sentence, m.start())]
+        spans += [(2, 2)] * sum(1 for m in TWO_DAYS.finditer(sentence) if not exchange_days(sentence, m.start()))
         for a, b in spans:
             if a < low or b > high:
                 failed.append({"check": "delivery", "why": f"{a} to {b} days is outside {low} to {high} days"
@@ -243,6 +260,33 @@ def check(reply, customer_text="", tool_results=(), orders=()):
     if claims_order(reply) and not placed(tool_results):
         failed.append({"check": "order", "why": "the reply says the order is placed, but no tool placed one"})
     return failed
+
+
+def _with_extras(prices, extra_prices, fees):
+    """A price with one extra on it, with or without one delivery fee: the Elite boot with its name
+    printing (16500 + 400), and that plus the fee."""
+    out = set()
+    for p in prices:
+        for e in extra_prices:
+            if p is None or p in extra_prices:
+                continue
+            out.add(p + e)
+            out |= {p + e + f for f in fees if f is not None}
+    return out
+
+
+def exchange_days(sentence, pos):
+    """True when the count of days at pos in sentence is an exchange or return window: the nearest
+    delivery or exchange word before it is an exchange word, or, with none before it, the nearest after
+    it is. "Delivery is 2 days and you can exchange within 14 days": 2 is delivery, 14 is not.
+    "ممكن تبدل خلال 14 يوم من التوصيل": 14 is not. "التوصيل خلال 14 يوم": 14 is delivery."""
+    words = [(m.start(), "exchange") for m in EXCHANGE.finditer(sentence)]
+    words += [(m.start(), "delivery") for m in DELIVERY.finditer(sentence)]
+    before = [w for w in words if w[0] < pos]
+    if before:
+        return max(before)[1] == "exchange"
+    after = [w for w in words if w[0] > pos]
+    return bool(after) and min(after)[1] == "exchange"
 
 
 def claims_order(reply):

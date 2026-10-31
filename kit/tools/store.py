@@ -8,6 +8,12 @@ its own lowercase name: a boot's variant has a tier ("Elite") and a size ("42").
 Stock goes out as a level, never a count (Mohamed's call, 28 Oct): "in stock",
 "few left" (under FEW_LEFT) or "out". A variant whose stock the store does not track
 (inventoryItem tracked false) has no stock field at all.
+
+Each product's image link goes out as "image" (2026-10-31): Shopify's featured media image
+url live; in the demo store a stand-in link on an .example host (demo_images in
+demo/catalogue.json, kept out of the seed mutation's variables), never a real brand's image.
+Only an https link with no space in it goes out. The send check lets a reply carry a link only
+when the store tool gave it in that chat (sales/loop.py store_links).
 """
 import html
 import json
@@ -31,7 +37,8 @@ NAME = "store"
 DEFINITION = {"type": "function", "function": {
     "name": NAME,
     "description": (
-        "Look up the store's products: names, prices, tiers, sizes and stock level (in stock, few left or out) when the store tracks it. "
+        "Look up the store's products: names, prices, tiers, sizes, stock level (in stock, few left or out) when the store tracks it, "
+        "and each product's image link when it has one. "
         "Search in English words "
         "like 'phantom' or 'name printing'. Leave query empty to get every product."),
     "parameters": {
@@ -108,9 +115,18 @@ def _clean(text):
     return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", text or "")).split())
 
 
+IMAGE_LINK = re.compile(r"https://[^\s<>\"']+")
+
+
+def _image(url):
+    """The image link when it is a plain https link with no space or quote in it, else None."""
+    return url if isinstance(url, str) and IMAGE_LINK.fullmatch(url) else None
+
+
 def _from_demo(path):
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     products = data.get("variables", data)
+    images = data.get("demo_images") if isinstance(data.get("demo_images"), dict) else {}
     items = []
     for key in sorted(products, key=lambda k: int(re.sub(r"\D", "", k) or 0)):
         p = products[key]
@@ -118,6 +134,7 @@ def _from_demo(path):
         _put(item, "title", p.get("title"))
         _put(item, "type", p.get("productType"))
         _put(item, "description", _clean(p.get("descriptionHtml")) or None)
+        _put(item, "image", _image(images.get(key)))
         variants = []
         for v in p.get("variants", []):
             var = {}
@@ -141,6 +158,7 @@ query Products($cursor: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       title productType description
+      featuredMedia { preview { image { url } } }
       variants(first: 50) {
         nodes { title price sku inventoryQuantity inventoryItem { tracked } selectedOptions { name value } }
       }
@@ -171,6 +189,8 @@ def _from_shopify():
             _put(item, "title", p.get("title"))
             _put(item, "type", p.get("productType"))
             _put(item, "description", p.get("description"))
+            preview = ((p.get("featuredMedia") or {}).get("preview") or {}).get("image") or {}
+            _put(item, "image", _image(preview.get("url")))
             variants = []
             for v in p["variants"]["nodes"]:
                 var = {}
@@ -222,6 +242,14 @@ def vocabulary():
 def size_strings():
     """Every size string in the catalogue ("43"), so the send check never reads a size as an amount."""
     return frozenset(v["size"] for item in catalogue() for v in item.get("variants", []) if v.get("size"))
+
+
+def extras():
+    """The products sold on top of any other product: every variant has neither a tier nor a size
+    (the name printing, one price whatever boot it goes on). The Arena fact check counts their
+    prices whatever product a reply names."""
+    return [i for i in catalogue() if i.get("variants")
+            and not any(v.get("tier") or v.get("size") for v in i["variants"])]
 
 
 def tiers():

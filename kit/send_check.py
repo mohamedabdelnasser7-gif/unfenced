@@ -28,6 +28,11 @@ Rules (from the store rules, the 27 Oct morning review and Mohamed's calls on 28
    currency word, after a price word or ب, or 100 or more after any cue word), or with k or
    ألف after the digits (1k EGP, 1.5 ألف), is refused, so the model writes it in digits.
 5. No exact stock count. The store tool gives a level (in stock, few left, out), never a number.
+6. Links (2026-10-31): a reply may carry a link only when it is, exactly, an image link the store
+   tool gave in this chat (links, from sales/loop.py store_links). Any other link is refused: a
+   scheme link (https://...), a www. link, or a bare domain with a path or a common ending
+   (shop.example/x, nike.com). An allowed link is read as no words and no numbers by the other rules,
+   so its Latin letters and digits never fail the script or amount rules.
 """
 import functools
 import math
@@ -308,6 +313,39 @@ STOCK_COUNT = re.compile(
       r"(?:فاضلين|فاضلة|فاضله|فاضل|باقيين|باقي|متبقيين|متبقي|في المخزن|في الستوك|متاحين|موجودين"
       r"|fadlin|fadleen|fadel|fadl|ba2yin|ba2y|mawgodin|mwgodin|fel stock)",
     re.IGNORECASE)
+
+URL_CHARS = r"[^\s<>\"'()\[\]{}]"
+LINK = re.compile(
+    rf"(?:https?://|www\.){URL_CHARS}+"
+    rf"|(?<![\w@.-])(?:[a-z0-9-]+\.)+[a-z]{{2,}}/{URL_CHARS}*"
+    r"|(?<![\w@.-])(?:[a-z0-9-]+\.)+(?:com|net|org|eg|io|co|me|ly|ai|app|shop|store|link|site|online|info|biz"
+    r"|xyz|gl|to|cc|tv|us|uk|page|dev|example|test)(?![\w-])", re.IGNORECASE)
+LINK_TAIL = ".,،;:!?؟"   # an end mark right after a link is not part of it
+
+
+def links_in(text):
+    """Every link in text as (start, end, link), the end marks after it left off."""
+    out = []
+    for m in LINK.finditer(text or ""):
+        link = m.group(0).rstrip(LINK_TAIL)
+        out.append((m.start(), m.start() + len(link), link))
+    return out
+
+
+def _links(reply, links):
+    """(the reply with each allowed link blanked, the links in it the store tool did not give).
+    The reply is read as written and with its invisible format characters taken out, so a zero
+    width space inside a link never hides it. (Not _plain: it turns _ into a space, and image
+    links carry _.)"""
+    allowed = {x for x in links or () if isinstance(x, str) and x}
+    seen = "".join(ch for ch in (reply or "") if unicodedata.category(ch) != "Cf")
+    wrong = [x for _, _, x in links_in(reply) + links_in(seen) if x not in allowed]
+    out = reply or ""
+    for start, end, link in reversed(links_in(out)):
+        if link in allowed:
+            out = out[:start] + " " + out[end:]
+    return out, list(dict.fromkeys(wrong))
+
 
 AMOUNT_KEYS = frozenset({"price", "fee", "total", "subtotal"})
 AMOUNT_TEXT = re.compile(r"\s*\d[\d,]*(?:\.\d+)?\s*")
@@ -716,7 +754,7 @@ def named_style(text):
     return problems
 
 
-def check(reply, customer_text="", amounts=(), vocabulary=frozenset(), sizes=(), orders=()):
+def check(reply, customer_text="", amounts=(), vocabulary=frozenset(), sizes=(), orders=(), links=()):
     """(passed, feedback) for one reply.
 
     amounts: every price and fee in the store and delivery data, plus amounts from this turn's store tools.
@@ -724,21 +762,26 @@ def check(reply, customer_text="", amounts=(), vocabulary=frozenset(), sizes=(),
     sizes: the catalogue's size strings, so a size is never read as an amount.
     orders: order names a draft_order or find_order result gave this turn (#1001), so the order
     the customer just placed or asked about is never read as an amount; any other #number still counts.
+    links: image links the store tool gave in this chat; any other link in the reply is refused.
     """
-    problems = named_problems(reply, customer_text, amounts, vocabulary, sizes, orders)
+    problems = named_problems(reply, customer_text, amounts, vocabulary, sizes, orders, links)
     if problems:
         return False, " ".join(dict.fromkeys(fb for _, fb in problems))
     return True, ""
 
 
-def named_problems(reply, customer_text="", amounts=(), vocabulary=frozenset(), sizes=(), orders=()):
+def named_problems(reply, customer_text="", amounts=(), vocabulary=frozenset(), sizes=(), orders=(), links=()):
     """Every rule the reply breaks, as (check name, feedback) pairs, in the order check() gives
-    them; [] when it passes. The names: empty, script, banned, dashes, emoji, markdown, sympathy,
+    them; [] when it passes. The names: empty, links, script, banned, dashes, emoji, markdown, sympathy,
     amounts, digits and stock. check() is this list joined, so the exam (reflection/exam.py) reads
     the same rules by name and never keeps a second copy of one."""
     if not (reply or "").strip():
         return [("empty", "The reply was empty. Write a reply to the customer.")]
     problems = []
+    reply, wrong_links = _links(reply, links)
+    if wrong_links:
+        problems.append(("links", "Share only a product's image link from the store tool in this chat, exactly as "
+                         "it gave it. No other links."))
     fb = _script_feedback(reply, customer_text, vocabulary)
     if fb:
         problems.append(("script", fb))

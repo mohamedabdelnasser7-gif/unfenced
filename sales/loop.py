@@ -325,7 +325,8 @@ def _answer(t, convo, msg, vocab, sizes, *, results, send):
                                    **({"order": made["order"]} if made else {})})
             return TurnResult(chat_id, outcome, ctx.sent[-1] if ctx.sent else None)
         passed, feedback = send_check.check(reply, t.customer_text, t.amounts, vocab, sizes,
-                                            orders=order_names(ctx.chats, chat_id))
+                                            orders=order_names(ctx.chats, chat_id),
+                                            links=store_links(ctx.chats, chat_id))
         if passed:
             send(msg.customer_id, reply)
             n = ctx.chats.add_step(chat_id, "assistant", content=reply)
@@ -481,6 +482,27 @@ def order_names(chats, chat_id):
         log.exception("could not read this turn's order names")
         return set()
     return names
+
+
+def store_links(chats, chat_id):
+    """The image links the store tool gave in this chat, any turn: the image of each item in a
+    store result that ran (ok true). The send check lets a reply carry only these links
+    (kit/send_check.py rule 6). Only a store result counts, never the customer's text or another
+    tool's. Never raises: on an error no link is given, so every link is refused."""
+    links = set()
+    try:
+        for s in chats.steps(chat_id):
+            if s["role"] != "tool" or s["name"] != store.NAME:
+                continue
+            out = json.loads(s["content"] or "null")
+            if not (isinstance(out, dict) and out.get("ok") is True and isinstance(out.get("items"), list)):
+                continue
+            links.update(i["image"] for i in out["items"]
+                         if isinstance(i, dict) and store._image(i.get("image")))
+    except Exception:
+        log.exception("could not read the store links in this chat")
+        return set()
+    return links
 
 
 def _placed(customer_text, made):

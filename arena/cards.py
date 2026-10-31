@@ -8,7 +8,9 @@ Winnable chats group by worry; unwinnable ones by worry too, in their own groups
 and "price, no budget" are two cards. Each card: the group's wants and buy triggers (the
 most common first, at most 3), its worry, patience (dodged answers taken before the chat
 ended: median and most), style, how many chats it stands for and their share of every
-tagged chat, its Arena weight and up to 4 cleaned example lines from its customers.
+tagged chat, its Arena weight and up to 4 cleaned example lines from its customers. When the
+items say whether each came from the pool of practice customers grown from real chats
+(arena/grow.py), the card also counts those ("grown").
 
 Style is counted in code from each customer's own messages; only numbers come out:
   length       the median words of a customer's text messages: short (up to 4), medium (5 to
@@ -140,7 +142,7 @@ def card(items, worry, why, rx=None):
     tags = [i["tags"] for i in items]
     patience = [t["patience"] for t in tags]
     styles = [i["style"] for i in items]
-    return {
+    out = {
         "worry": worry,
         "unwinnable": why is not None,
         "why_unwinnable": why,
@@ -158,6 +160,9 @@ def card(items, worry, why, rx=None):
         "lost": sum(i["label"] == "lost" for i in items),
         "examples": examples(items, rx),
     }
+    if any("grown" in i for i in items):
+        out["grown"] = sum(bool(i.get("grown")) for i in items)
+    return out
 
 
 def build(items, recipe):

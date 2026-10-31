@@ -1,4 +1,4 @@
-"""The Arena loop and its gate (new, 2026-10-30; DECISIONS items 4, 7, 14, 17, 18).
+"""The Arena loop and its gate (new, 2026-10-30; DECISIONS items 4, 7, 14, 17, 18, 30, 48, 51).
 
     python3 -I arena/run.py --cards DIR --matches N [--rounds 5] [--held-out persona-03,persona-07]
         [--trust FILE] [--customer-prompt FILE] [--cap 1000] [--state DIR] [--db PATH]
@@ -47,6 +47,14 @@ Every match is saved in arena-matches.jsonl with its verdict: the past wins the 
 reruns (arena/gate.py). Both files sit next to the agent's database (--db), with the stuck
 item, so the gate reads that agent's own wins and nothing else. --state names their folder
 only for a run with no database (its wins feed no gate); one of the two is needed.
+
+Both sides grow (items 30, 48, 51; arena/grow.py). When the owner's pool of practice customers
+holds cards grown from real chats, the Arena draws from the cards and the grown ones together,
+and a card that beat the agent in training is drawn more often (per loss, grow.LOST_WEIGHT), with
+the unwinnable share and the capped wants held. Each training match's result is counted in the
+pool, practice-<kind>.json in the owner's state folder: the Arena's folder, or the folder above
+it when the Arena's folder holds the agent's plug.json (grow.owner_of). Agents of one kind in one
+owner folder share the pool; a new one starts with zero lessons and faces the same customers.
 
 --quick is the short run for judges (docs/judges.md): one round of one training match and a gate
 of one match (QUICK_TRUST, in place of --trust), at most QUICK_CALLS model calls in this run on
@@ -270,9 +278,10 @@ def load_trust(path, agent=AGENT):
 class Arena:
     def __init__(self, cards, *, agent_model, customer_model, calls, trust=None, prompt=match_mod.GENERIC_PROMPT,
                  prompt_file=None, held_out=None, matches=10, rounds=DEFAULT_ROUNDS, fact_checks=None, seed=0,
-                 learn=None, between=None, lessons=None, state, reports=None, now=time.time):
+                 learn=None, between=None, lessons=None, state, reports=None, now=time.time, pool=None):
         """prompt_file: where the customer prompt was read from (None for the generic one), saved
-        with each match beside the prompt's fingerprint, so the eval gate can read it again."""
+        with each match beside the prompt's fingerprint, so the eval gate can read it again.
+        pool: the owner's practice pool (arena/grow.py), which counts each training match's result."""
         self.train, self.held = split(cards, held_out, seed=seed)
         self.gate_cards = [c for c in self.held if can_buy(c)]  # a card that will not buy is no test of the agent
         self.calls = calls
@@ -283,6 +292,7 @@ class Arena:
         self.prompt_sha = match_mod.prompt_sha(prompt)
         self.prompt_file = None if prompt_file is None else str(prompt_file)
         self.learn, self.between, self.lessons = learn, between, lessons
+        self.pool = pool
         self.halt, self.error = CAP, ""  # why the last match was dropped: the cap, or a model error
         self.state = Path(state)
         self.reports = Path(reports) if reports is not None else self.state
@@ -339,6 +349,8 @@ class Arena:
                 m, judged = out
                 one["training"]["played"] += 1
                 one["training"]["won"] += judged["won"]
+                if self.pool is not None:  # a practice customer that beats the agent comes back more often
+                    self.pool.record(card["id"], judged["won"])
                 if not judged["won"] and self.learn is not None:
                     one["training"]["cases"].append(self.learn(m, judged, m["id"]))
             for k in range(1, self.trust["matches"] + 1):
@@ -570,6 +582,10 @@ def text(rep):
         for lost in rp["lost"][:3]:
             lines.append(f"    lost chat {lost['chat']} ({lost['card']}): {lost['why']} (turn {lost['quote']['turn']}, "
                          f"{lost['quote']['who']}: \"{lost['quote']['text']}\")")
+    if rep.get("pool"):
+        p = rep["pool"]
+        lines.append(f"  practice customers grown from real chats: {p['grown_cards']} cards from {p['items']} chats"
+                     + (f", shared by {', '.join(p['siblings'])}" if p["siblings"] else ""))
     if rep.get("stuck"):
         lines.append(f"  stuck point for the Morning page: {rep['stuck']['file']}")
     if rep.get("item"):
@@ -641,6 +657,9 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
             raise Refused("the Arena's files would sit inside the repo, where real chat lines and the trust level"
                           " could be committed; keep --db or --state outside it or under data/ (DECISIONS item 17)")
         calls = Calls(state / CALLS_FILE, args.cap, limit=QUICK_CALLS if args.quick else None)
+        from arena import grow
+        practice = grow.for_state(state, AGENT)  # the owner's practice customers, of this agent's kind
+        cards = grow.deck(cards, practice)
         if args.db and not Path(args.db).is_file():
             raise Refused(f"no database at {args.db}")
         made = agent_model is None or customer_model is None  # a real run: the models are made here
@@ -685,7 +704,7 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
                       prompt_file=Path(args.customer_prompt).expanduser().resolve() if args.customer_prompt else None,
                       matches=args.matches, rounds=args.rounds,
                       fact_checks=None if args.fact_checks is None else args.fact_checks == "on", seed=args.seed,
-                      learn=learn, between=between, lessons=lessons, state=state)
+                      learn=learn, between=between, lessons=lessons, state=state, pool=practice)
         rep = arena.run()
         if planned is not None:
             rep["replay"] = (arena.replay(*planned) if rep["stopped"] == PASSED
@@ -693,6 +712,9 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
             rep["calls"]["used"] = calls.count
             if calls.problem:
                 rep["calls"]["problem"] = calls.problem
+        if practice.changed:
+            practice.save()
+        rep["pool"] = practice.summary()
     except (Refused, match_mod.PromptRefused, OSError, ValueError, RecursionError) as e:
         print(f"Not run: {e}", file=sys.stderr)
         return 2

@@ -52,6 +52,13 @@ as mode_card (None when the night wrote none), and the Morning page shows it for
 rename or drop. The Arena's calls count against its daily cap; a model that does not answer, or
 the cap, stops the step with no card and the report names why (mode_card_stopped).
 
+For the Sales agent, and any agent of its kind, the night then grows its practice customers
+(arena/grow.py, DECISIONS items 30, 32, 47, 48, 51): the window's new real chats, labelled from
+the chat itself, the lost and hard ones cleaned and tagged with the persona recipe (--recipe, a
+private file outside the repo), join the owner's pool, shared by that owner's agents of the same
+kind only, so tomorrow's Arena faces them. The tagger's calls count against the Arena's daily cap.
+The report names the counts as practice (practice.stopped says why, with no recipe given too).
+
 It refuses to start without the keys its parts need and names the missing variable. It
 never prints a key: a part that fails is named in the notes by its plain reason only.
 """
@@ -494,6 +501,8 @@ def main(argv=None, *, until=None):
     ap.add_argument("--json", action="store_true", help="print the report as JSON")
     ap.add_argument("--assistant-state", default=None,
                     help="the personal assistant's folder: moments, modes and past days (default: data/assistant)")
+    ap.add_argument("--recipe", default=None,
+                    help="the persona recipe, outside the repo: real chats become practice customers (arena/grow.py)")
     args = ap.parse_args(argv)
     env.load()
     try:
@@ -529,6 +538,11 @@ def main(argv=None, *, until=None):
         rep["mode_card"] = None if card is None else str(card)
         if stopped:
             rep["mode_card_stopped"] = stopped
+    # ---- practice customers from the window's real chats (arena/grow.py; DECISIONS items 30, 48, 51)
+    from arena import grow
+    if grow.kind_of(plug) == grow.DEFAULT_KIND:
+        rep["practice"] = grow.night(args.db, plug, args.recipe, rep["window"]["since"], rep["window"]["until"])
+    # ---- end of the practice step
     path = save(rep, args.db)
     if args.json:
         print(json.dumps(rep, ensure_ascii=False, indent=1))
@@ -536,6 +550,8 @@ def main(argv=None, *, until=None):
         print(text(rep, plug))
         if rep.get("mode_card"):
             print(f"  a new mode card waits on the Morning page: {rep['mode_card']}")
+        if rep.get("practice"):
+            print("  " + grow.line(rep["practice"]))
         print(f"  saved: {path}")
     return 0
 

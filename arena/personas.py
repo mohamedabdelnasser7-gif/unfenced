@@ -1,8 +1,8 @@
-"""Persona cards for the Arena from a store's old chats (new, 2026-10-30).
+"""Persona cards for the Arena from a store's old chats (new, 2026-10-30; DECISIONS items 30, 48, 51).
 
     python3 -I arena/personas.py --source EXPORT --out FOLDER [--limit N] [--cap N]
         --recipe FILE [--team NAME]... [--tz Africa/Cairo] [--quiet-hours 48] [--max-files N]
-        [--scripted] [--json]
+        [--state DIR] [--scripted] [--json]
 
 Run it by its path: under -I, "python3 -I -m arena.personas" cannot import the repo's packages.
 
@@ -28,6 +28,11 @@ It writes into FOLDER, which must be outside this repo and new, empty or an earl
 output: cards/persona-NN.json, replay.jsonl (every won and lost chat, cleaned, for the Arena
 replay) and summary.json (counts). Folders 0700, files 0600, no link followed. It prints
 counts only, never a message, a name, a phone or a path.
+
+--state names the owner's state folder (arena/grow.py): when its pool of practice customers grown
+from the Sales agent's real chats holds any, they join the tagged chats before step 5, so the
+cards stand for both and the caps hold over all of them. Each card then says how many of its
+chats came from the pool ("grown"), and arena/run.py adds no grown card again on top of them.
 
 --scripted: arena/scripted.py answers instead of the model; no call and no key. For tests and
 the demo cards in demo/personas.
@@ -344,9 +349,10 @@ def turns_of(chat, cleaner):
 
 
 def run(source, out, *, model=None, cap=tag_mod.MAX_CALLS, limit=None, recipe=None, team=(), tz=hist.TZ,
-        quiet_hours=label_mod.QUIET_HOURS, max_files=None):
+        quiet_hours=label_mod.QUIET_HOURS, max_files=None, grown=None):
     """One run: read, label, clean, tag, group and write. Returns the summary (counts only).
-    max_files: the file count cap of this build, 1 to MOST_FILES (None: reflection/history.py's)."""
+    max_files: the file count cap of this build, 1 to MOST_FILES (None: reflection/history.py's).
+    grown: the pool's items (arena/grow.py Pool.items), cleaned and tagged already; None for no pool."""
     if max_files is not None and (isinstance(max_files, bool) or not isinstance(max_files, int)
                                   or not 1 <= max_files <= MOST_FILES):
         raise hist.Refused(f"--max-files is 1 to {MOST_FILES}")
@@ -393,6 +399,10 @@ def run(source, out, *, model=None, cap=tag_mod.MAX_CALLS, limit=None, recipe=No
         item["entry"]["worry"] = tags["worry"]
         tagged.append({"label": item["label"], "tags": tags, "style": cards_mod.style_of(item["chat"]),
                        "turns": item["turns"]})
+    if grown is not None:  # each card then counts its chats from the pool (arena/cards.py card)
+        for item in tagged:
+            item["grown"] = False
+        tagged += [{**g, "grown": True} for g in grown]
     cards, info = cards_mod.build(tagged, recipe)
     summary = {
         "recipe": "example" if recipe.example else "own", "recipe_sha256": recipe.sha, "model": tagger.label,
@@ -409,6 +419,8 @@ def run(source, out, *, model=None, cap=tag_mod.MAX_CALLS, limit=None, recipe=No
         "cards": info,
         "replay_chats": len(replay),
     }
+    if grown is not None:
+        summary["grown"] = len(grown)
     write_out(out, cards, replay, summary)
     return summary
 
@@ -442,6 +454,8 @@ def text(s):
                      + (f' (cut from {w["share_real"]})' if w["share_used"] != w["share_real"] else '')
                      + ('; no card under no capped want to take the rest, so not held' if w.get("held") is False
                         else ''))
+    if "grown" in s:
+        lines.append(f'Grown from real chats: {s["grown"]} practice customers from the pool joined the cards')
     lines.append(f'Replay: {s["replay_chats"]} won and lost chats, cleaned')
     return "\n".join(lines)
 
@@ -461,6 +475,7 @@ def main(argv=None, *, model=None):
                     help="hours of quiet after the store's answer that make a chat lost (default 48)")
     ap.add_argument("--max-files", type=int, default=hist.MAX_FILES,
                     help=f"files read at most, for this build only (default {hist.MAX_FILES}, most {MOST_FILES})")
+    ap.add_argument("--state", default=None, help="the owner's state folder: its grown practice customers join")
     ap.add_argument("--scripted", action="store_true", help="the scripted model: no call, no key")
     ap.add_argument("--json", action="store_true", help="print the summary as JSON")
     args = ap.parse_args(argv)
@@ -481,6 +496,13 @@ def main(argv=None, *, model=None):
     try:
         check_out(args.out)
         recipe = recipe_mod.load(args.recipe)
+        grown = None
+        if args.state:
+            from arena import grow
+            try:
+                grown = grow.Pool(args.state, grow.DEFAULT_KIND).items or None  # an empty pool folds in nothing
+            except grow.Refused as e:
+                raise hist.Refused(str(e)) from None
         if args.scripted:
             model = ScriptedModel(recipe)
         elif model is None:
@@ -488,7 +510,7 @@ def main(argv=None, *, model=None):
             if not model_mod.has_key():
                 raise hist.Refused(model_mod.NO_KEY + " (or give --scripted)")
         summary = run(args.source, args.out, model=model, cap=args.cap, limit=args.limit, recipe=recipe,
-                      team=args.team, tz=args.tz, quiet_hours=args.quiet_hours, max_files=args.max_files)
+                      team=args.team, tz=args.tz, quiet_hours=args.quiet_hours, max_files=args.max_files, grown=grown)
     except hist.Refused as e:
         print(f"Refused, nothing written: {e}", file=sys.stderr)
         return 2

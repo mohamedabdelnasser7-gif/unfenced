@@ -6,6 +6,9 @@ and no change to the engine.
 
 Keys (unknown keys are refused, so a typo never passes quietly):
   agent    the agent's name: lowercase letters, digits and _.
+  kind     optional, the kind of agent, named as agent is (default: the agent's name). Agents of
+           one kind that one owner runs share the practice cases their real work grew
+           (arena/grow.py, DECISIONS item 51).
   about    optional, one plain line on what the agent does.
   case     one plain line: what one case is for this agent.
   fields   tags for the field the agent works in. Lessons carry them, so an agent can
@@ -61,8 +64,8 @@ from types import MappingProxyType
 FAST, SLOW = "fast", "slow"
 ALL = "all"  # the stage tag of a lesson that fits every stage
 NAME = re.compile(r"^[a-z][a-z0-9_]*$")
-KEYS = {"agent", "about", "case", "fields", "stages", "actions", "results", "causes", "source", "harm", "decides",
-        "risk", "trial", "slot", "exam"}
+KEYS = {"agent", "kind", "about", "case", "fields", "stages", "actions", "results", "causes", "source", "harm",
+        "decides", "risk", "trial", "slot", "exam"}
 REQUIRED = {"agent", "case", "actions", "results", "causes", "source", "harm", "decides", "risk", "trial", "slot"}
 LEVELS_WHY = "the owner sets both trial levels here, fast and careful, each {share, days}"
 WHY = {  # what a missing key is for, said in the refusal
@@ -154,6 +157,7 @@ class Plug:
     trial_holdback: float = HOLDBACK
     trial_worst_cost: float = WORST_COST
     exam: Exam | None = None  # the plug's exam (engine/exam.py); None when it has none
+    kind: str = ""  # the kind of agent; the agent's name when the plug names none
 
     def action(self, name):
         """The action's line; ValueError when this plug does not declare it."""
@@ -233,7 +237,8 @@ def from_dict(d, folder=None):
                 levels=MappingProxyType(levels), slot=_line(d["slot"], "slot"),
                 about=_line(d["about"], "about") if "about" in d else "",
                 trial_holdback=float(holdback), trial_worst_cost=float(worst),
-                exam=_exam(d["exam"], folder) if "exam" in d else None)
+                exam=_exam(d["exam"], folder) if "exam" in d else None,
+                kind=_name(d["kind"], "kind") if "kind" in d else agent)
 
 
 def _exam(e, folder):

@@ -147,6 +147,11 @@ class CurrencyFollowsTheScript(unittest.TestCase):
         self.assertFalse(passed)
         self.assertIn("EGP in English", fb)
 
+    def test_the_instructions_keep_the_price_line_and_say_egp_and_geneh(self):
+        self.assertIn('Say the price plainly, the number then جنيه, for example "16,500 جنيه".', loop.INSTRUCTIONS)
+        self.assertIn('In English write the currency as EGP, for example "16,500 EGP"; in Franco as geneh',
+                      loop.INSTRUCTIONS)
+
 
 class MaskedProductWords(unittest.TestCase):
     """Cleaned real cards can say "nike [name] boots". The store does not fail on it; a lone "[name]"

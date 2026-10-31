@@ -48,8 +48,8 @@ with the count waiting for a yes; no numbers row up top. No script: the tabs are
 every part opens with details and summary. Every time is Cairo time (Africa/Cairo).
 
 The cards. Every lesson that waits for a person's first yes is a card with Yes, No and Edit:
-high risk, a "replace it?" card, or a line close to a pulled one. At most CARDS (5) show on
-the page, across agents, ranked by what they could gain:
+high risk, a "replace it?" card, or a line close to a pulled one or to one that failed the eval
+gate. At most CARDS (5) show on the page, across agents, ranked by what they could gain:
     gain = the chance it is better x the gap between the two sides' good rates,
 each side's rate read as (1 + good) / (2 + cases), the study's even start. The chance and the
 case counts come from the study's card in the saved night reports. Ties go to the card with
@@ -1191,6 +1191,9 @@ def _status(les, item, k, report):
     close = report.get("close_to_pulled")
     if close:
         return "waits for a yes", f'It comes close to the pulled line "{close}".'
+    close = report.get("close_to_failed")  # DECISIONS item 50: close to a line the eval gate failed
+    if close:
+        return "waits for a yes", f'It comes close to the line "{close}", which failed the eval gate.'
     if report.get("held"):
         return "waits for a yes", "The night's trial places were taken, so it waits for a yes."
     if les["risk"] == risk_mod.HIGH:
@@ -2023,7 +2026,8 @@ def locks(agent):
         copy = "A lesson that copies words from the cases it came from always waits for your yes"
     return out + ["The auto pause: a trial whose lesson shows about twice the harm pauses itself and waits for you.",
                   f"{copy}, even with Accept high risk on.",
-                  "A line close to a pulled one, or one that goes against a live one, still waits for your yes."]
+                  "A line close to a pulled one or to one that failed the eval gate, or one that goes against a live one, "
+                  "still waits for your yes."]
 
 
 def _switches_html(a, token):

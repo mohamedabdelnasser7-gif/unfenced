@@ -100,7 +100,8 @@ def summary(plug, manifest, rep, plugs=()):
         item = {"lesson": card["change"], "pattern": cand.get("pattern"), "helps": cand.get("helps"),
                 "state": card["state"], "risk": card["risk"], "why": card["risk_why"],
                 "sure": card["sure"], "cases": card["cases"], "counted": counted, "from": card["from"],
-                "close_to_pulled": card["close_to_pulled"], "waits_for": card.get("waits_for"),
+                "close_to_pulled": card["close_to_pulled"], "close_to_failed": card.get("close_to_failed"),
+                "waits_for": card.get("waits_for"),
                 "replace": card.get("replace")}
         if risk.COPIED in (card["risk_why"] or ""):
             held.append(dict(item, held=HELD))
@@ -142,6 +143,8 @@ def text(s):
         held = "on trial" if f["state"] == "trying" else f'waits for a yes ({f["risk"]} risk: {f["why"]})'
         if f.get("close_to_pulled"):
             held = f'waits for a yes (close to the pulled line "{f["close_to_pulled"]}")'
+        elif f.get("close_to_failed"):  # DECISIONS item 50
+            held = f'waits for a yes (close to the line "{f["close_to_failed"]}", which failed the eval gate)'
         if f.get("waits_for"):
             held = "waits its turn behind lesson " + ", ".join(str(i) for i in f["waits_for"])
         if f.get("replace"):

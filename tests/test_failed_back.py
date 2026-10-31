@@ -5,7 +5,9 @@ try is a different line. The same line is never written again, a line close to i
 yes, and the failed lesson is never rewritten and never goes live on its own. Scripted parts and
 made-up garden beds only: no model, no network."""
 import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from engine import exam as engine_exam
 from engine import risk
@@ -13,8 +15,9 @@ from engine.lessons import TRYING, WAITING, Lessons
 from engine.log import Log
 from engine.study import FAILED_BEFORE, Study
 from kit.db import Db
-from reflection import night
+from reflection import morning, night
 from reflection import study as model_study
+from sim import run as sim_run
 from tests import plugs
 from tests import study_fakes as fk
 from tests.fake_model import FakeModel, clean_env, say
@@ -146,6 +149,24 @@ class NextNight(unittest.TestCase):
         self.assertIsNone(self.lessons.trial(card["lesson_id"]))
         self.assertEqual(night._state(card),
                          f'waits for a yes (close to the line "{fk.EARLY["lesson"]}", which failed the eval gate)')
+
+    def test_the_morning_page_names_the_failed_line_on_its_card(self):
+        rep = self.night(CLOSE)
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        until = int(rep["window"]["until"])
+        (Path(folder.name) / f"night-{self.plug.agent}-{until}.json").write_text(json.dumps(rep), encoding="utf-8")
+        page = morning.render(morning.Morning(self.db, [self.plug], reports=folder.name).view(fk.NOW + fk.DAY),
+                              token="t0ken")
+        why = f'It comes close to the line "{fk.EARLY["lesson"]}", which failed the eval gate.'
+        self.assertIn(morning.h(why), page)
+        self.assertNotIn(morning.h("It waits for a person's yes."), page)
+
+    def test_the_simulator_names_the_failed_line_too(self):
+        s = sim_run.summary(self.plug, {"read": 0, "seed": 0}, self.night(CLOSE), [self.plug])
+        self.assertEqual(s["found"][0]["close_to_failed"], fk.EARLY["lesson"])
+        self.assertIn(f'waits for a yes (close to the line "{fk.EARLY["lesson"]}", which failed the eval gate)',
+                      sim_run.text(s))
 
     def test_a_different_try_is_a_new_lesson_and_the_failed_one_is_never_rewritten(self):
         before = self.lessons.get(self.failed_id)

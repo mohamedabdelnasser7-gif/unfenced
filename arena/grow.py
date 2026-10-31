@@ -32,8 +32,9 @@ Each kept chat is cleaned (arena/clean.py: names, numbers and places out) before
 knows what the customers gave for their orders: every name and name to print in the night's
 draft_order calls is masked in any chat of the night, and in its own chat each word of it, the
 address and the chat's number too, so a name typed bare with no cue word still goes. A chat with
-no order keeps the words its cues showed as a name (arena/clean.py ChatCleaner.texts) and masks
-them in all its turns, with a name-shaped word beside any [name]. Its tags and
+no order keeps the words a cue named (arena/clean.py ChatCleaner.texts) and masks them in all
+its turns; a name-shaped word beside a [name] is masked in its own line only, never learned, so
+product words stay. Its tags and
 cleaned turns join the pool, and the pool's cards are rebuilt through the card code
 (arena/cards.py build), so the unwinnable share and the capped wants (item 33: name printing at
 most 25%) hold for the grown cards as for the first ones. A grown card's id names its group
@@ -44,7 +45,10 @@ training matches (arena/run.py) by the card's group (its worry and why it will n
 grown_id names grown cards), not by its id, and in training a card is drawn 1 + LOST_WEIGHT times
 as often per loss, at most MAX_COUNTED_LOSSES counted, so one card never crowds out the rest
 (decks). Grown cards train only and never take the gate; the gate's cards are
-split off the base cards first and the split is saved in the pool (arena/run.py fixed_split).
+split off the base cards first and the split is saved in the pool (arena/run.py fixed_split),
+with the base card ids that played a training match themselves (trained_ids), so a saved gate
+card trained in a --held-out run makes the next run draw the gate again. The pool file keeps each
+capped want's words, and the pattern is built again from them on load.
 The weights per loss, each side's share and the capped wants apply to the training draws after
 that split; the gate draws at the weights before any loss, with the capped wants held on its own
 draws. So on the training draws and on the gate draws each, printing stays at most 25% and the
@@ -222,6 +226,11 @@ class Pool:
         capped = [_capped_read(c) for c in capped] if isinstance(capped, list) else [None]
         self.capped = capped if all(c is not None for c in capped) else None
         self.split = data["split"] if _split_ok(data.get("split")) else None  # the gate's held ids (arena/run.py)
+        # base card ids that played a training match themselves (a group can train through another
+        # card): a saved gate holding one is drawn again (arena/run.py fixed_split)
+        ids = data.get("trained_ids")
+        self.trained_ids = set(ids) if isinstance(ids, list) and len(ids) <= MAX_SPLIT \
+            and all(isinstance(i, str) for i in ids) else set()
         self._keys = {i["read"] for i in self.items if "read" in i}
         self.changed = False
 
@@ -243,6 +252,9 @@ class Pool:
         row = self.played.setdefault(group(card), {"played": 0, "lost": 0})
         row["played"] += 1
         row["lost"] += 0 if won else 1
+        cid = card.get("id")
+        if isinstance(cid, str) and not cid.startswith("grown-") and len(self.trained_ids) < MAX_SPLIT:
+            self.trained_ids.add(cid)
         self.changed = True
 
     def progress(self, chat_id):
@@ -314,7 +326,8 @@ class Pool:
             os.chmod(self.path.parent, 0o700)  # an owner folder made earlier with a wider mode too
         _write(self.path, json.dumps({"kind": self.kind, "items": self.items, "read": self.read,
                                       "pending": self.pending, "floor": self.floor, "played": self.played,
-                                      "cards": self.cards, "capped": _capped_file(self.capped), "split": self.split},
+                                      "cards": self.cards, "capped": _capped_file(self.capped), "split": self.split,
+                                      "trained_ids": sorted(self.trained_ids)},
                                      ensure_ascii=False).encode("utf-8"))
         self.changed = False
 

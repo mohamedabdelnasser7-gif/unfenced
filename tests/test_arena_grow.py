@@ -332,7 +332,8 @@ class GateAndTraining(unittest.TestCase):
         # same worry training is no reason to drop it); a new draw and --held-out leave it out
         pool = grow.Pool(folder(self), "sales")
         held = [c["id"] for c in arena_with(self, self.base, pool).held]
-        pool.record(next(c for c in self.base if c["id"] == held[0]), True)  # its group trained
+        sibling = dict(next(c for c in self.base if c["id"] == held[0]), id="persona-99")
+        pool.record(sibling, True)  # its group trained through another card of its worry
         self.assertEqual([c["id"] for c in arena_with(self, self.base, pool).held], held)
         again = [c["id"] for c in arena_with(self, self.base, pool, seed=1).held]
         self.assertNotIn(held[0], again)
@@ -378,15 +379,37 @@ class SplitKept(unittest.TestCase):
         self.assertTrue(all(self.pool.trained(c) for c in cards))
         self.assertEqual(self.held(cards), sorted(c["id"] for c in held))
 
-    def test_one_held_out_run_leaves_the_saved_gate(self):
+    def test_one_held_out_run_leaves_the_saved_split_and_a_gate_card_it_trained_is_drawn_again(self):
+        # red team round 3: the saved gate never holds a card that played a training match itself
         first = self.held(self.base)
         self.assertEqual(first, ["persona-01", "persona-02"])
-        self.train_all(c for c in self.base if c["id"] not in first)
         saved = dict(self.pool.split)
-        train, _ = run.fixed_split(self.base, ["persona-01"], 0, self.pool)
-        self.train_all(train)  # persona-02 trains in this one run
+        train, _ = run.fixed_split(self.base, ["persona-03", "persona-04"], 0, self.pool)
+        self.train_all(train)  # persona-01 and persona-02 train in this one run
         self.assertEqual(self.pool.split, saved)
-        self.assertEqual(self.held(self.base), first)
+        self.assertTrue({"persona-01", "persona-02"} <= self.pool.trained_ids)
+        self.assertEqual(self.held(self.base), ["persona-03", "persona-04"])
+        self.assertEqual(self.pool.split["held"], ["persona-03", "persona-04"])
+        self.pool.changed = True
+        self.pool.save()
+        self.assertEqual(grow.Pool(self.pool.owner, "sales").trained_ids, self.pool.trained_ids)
+
+    def test_when_every_card_trained_itself_the_gate_tops_up_from_the_least_played(self):
+        first = self.held(self.base)
+        self.train_all(c for c in self.base if c["id"] not in first)
+        train, _ = run.fixed_split(self.base, ["persona-01"], 0, self.pool)
+        self.train_all(train)  # now only persona-01 has not trained itself
+        held = self.held(self.base)
+        self.assertEqual(len(held), len(first))
+        self.assertIn("persona-01", held)
+
+    def test_trained_ids_out_of_shape_are_dropped(self):
+        for bad in ("persona-01", [1], ["x"] * (grow.MAX_SPLIT + 1), {"persona-01": 1}):
+            self.pool.path.parent.mkdir(parents=True, exist_ok=True)
+            self.pool.path.write_text(json.dumps({"kind": "sales", "trained_ids": bad}), encoding="utf-8")
+            self.assertEqual(grow.Pool(self.pool.owner, "sales").trained_ids, set(), bad)
+        self.pool.record(dict(card(1, "size"), id="grown-size"), True)
+        self.assertEqual(self.pool.trained_ids, set())
 
     def test_a_rebuild_where_every_card_has_trained_still_draws_a_gate(self):
         self.train_all(self.base)

@@ -260,7 +260,8 @@ class Ideas(_Part):
 
 class Spotter(_Part):
     """spotter(plug, kinds, items): {item id: kind name or "none"}, in batches; an id left out,
-    or answered with anything but a declared kind or none, gets no kind (engine/handover.py)."""
+    or answered with anything but a declared kind or none, is left out of the answer. A case left
+    out gets no kind; a line left out holds the line for a yes (engine/handover.py, sort)."""
     on_study_route = True
 
     def __init__(self, model=None, timeout=TIMEOUT, batch=BATCH):

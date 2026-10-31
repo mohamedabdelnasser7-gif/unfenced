@@ -202,6 +202,40 @@ class AJokeIsHandedOver(Setup):
         self.assertEqual(card["state"], WAITING)
         self.assertIn("the hand over sort failed on a line (RuntimeError); it waits for a yes", rep["notes"])
 
+    def sorted_by_the_meta_spotter(self, answer):
+        """The jokes night with the real spotter part sorting each line on one scripted answer;
+        the case views still go to the test spotter."""
+        clean_env(self)
+        meta, cases = parts.Spotter(FakeModel(*[say(answer)] * 20)), Spotter()
+
+        def spotter(plug, kinds, items):
+            return (meta if any("lesson" in i for i in items) else cases)(plug, kinds, items)
+
+        return self.run_jokes(spotter=spotter)
+
+    def test_an_unusable_sort_answer_holds_the_line_for_a_yes(self):
+        held = "the hand over sort failed on a line (PartError: the spotter gave no usable answer for the line); " \
+               "it waits for a yes"
+        for answer in ("not json", json.dumps({}), json.dumps([]), json.dumps({"l2": "none"}),
+                       json.dumps({"l1": 7}), json.dumps({"l1": "made up"}), '```json\n{"l1": "playful"}\n``'):
+            with self.subTest(answer=answer):
+                self.setUp()
+                rep = self.sorted_by_the_meta_spotter(answer)
+                card, = rep["cards"]
+                self.assertEqual((card["change"], card["state"]), (JOKE["lesson"], WAITING))
+                self.assertIn(held, rep["notes"])
+                self.assertEqual(rep["candidates"][0]["lesson_id"], card["lesson_id"])
+
+    def test_only_an_answer_of_none_writes_the_line_and_a_kind_hands_it_over(self):
+        rep = self.sorted_by_the_meta_spotter(json.dumps({"l1": "none"}))
+        card, = rep["cards"]
+        self.assertEqual((card["change"], card["state"]), (JOKE["lesson"], TRYING))
+        self.assertFalse([n for n in rep["notes"] if "sort" in n])
+        self.setUp()
+        rep = self.sorted_by_the_meta_spotter(json.dumps({"l1": "playful"}))
+        self.assertEqual(rep["cards"], [])
+        self.assertEqual(rep["candidates"][0]["verdict"], HANDED)
+
     def test_a_line_that_is_none_of_the_kinds_is_written_as_usual(self):
         self.jokes()
         rep = self.study(proposer=fk.Proposer(fk.EARLY), tagger=fk.Tagger({fk.EARLY["pattern"]: "joked"}))

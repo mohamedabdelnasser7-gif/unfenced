@@ -31,8 +31,10 @@ Each night, with a spotter and a writer given (engine/study.py, Study(hand_over=
 The sort. Every line the study would write as a lesson (a pattern, an adapted lesson, an idea)
 is asked first (sort()): a line that is one of the plug's kinds is not written; it is handed
 over, never learned. So a kind the agent must never do itself (a plug may say so in the kind's
-line) can never come back as a lesson through the night. A failing sort holds the line for a
-person's yes instead (engine/study.py).
+line) can never come back as a lesson through the night. Only an answer of "none" lets the line
+be written as usual; a failing or unusable sort (no answer for the line, an answer that is not
+an object, a kind the plug does not declare) holds the line for a person's yes instead
+(engine/study.py).
 
 Nothing here asks for a yes, starts a trial or writes a lesson.
 """
@@ -94,17 +96,21 @@ class Track:
         return [{"kind": k, "to": to, "about": line} for k, (to, line) in self.kinds.items()]
 
     def sort(self, cand):
-        """(receiving agent, kind) when the line is one of the plug's kinds, else None. Raises
-        what the spotter raises; an answer that is not a declared kind is None."""
+        """(receiving agent, kind) when the line is one of the plug's kinds, None when the spotter
+        answers it "none". Raises what the spotter raises, and PartError on any other answer (not
+        an object, no answer for the line, or a kind the plug does not declare), so an unusable
+        sort holds the line for a yes and is never read as "not a kind"."""
         if not self.kinds:
             return None
         item = {"id": "l1", "lesson": cand["lesson"], "pattern": cand.get("pattern") or "",
                 "situation": cand.get("situation") or ""}
         got = self.spotter(self.plug, self._kinds(), [item])
         kind = got.get("l1") if isinstance(got, dict) else None
+        if kind == NONE:
+            return None
         if isinstance(kind, str) and kind in self.kinds:
             return self.kinds[kind][0], kind
-        return None
+        raise PartError("the spotter gave no usable answer for the line")
 
     def night(self, cases, texts, since, until, *, now, notes):
         """The night's handing over on the study's read cases: {kinds, notes}. kinds: one entry per

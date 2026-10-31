@@ -1,20 +1,34 @@
 """Review and red team gatefb round 1 fixes (2026-10-31). The add-on price rule reads only an extra
 its clause or sentence names, never one named elsewhere (review finding 2, F3, F12; red team item
 2); a clause that names the boot before the extra does not hold the extra's price (red team item
-1). Made-up replies against the demo store data; no model, no network."""
+1). A fast note's first word counts as a name only when the source wrote it with a capital outside
+its own sentence starts (review finding 5). Made-up text against the demo store data; no model,
+no network."""
 import copy
 import unittest
 from unittest import mock
 
 from arena import factcheck
+from engine import fast as engine_fast
 from kit.tools import store
+from reflection import PLUG as SALES
+from reflection import fast as sales_fast
 from tests.fake_model import clean_env
 
 AC = chr(0x60C)  # the Arabic comma
+ZW = chr(0x200B)  # a zero width space, a hidden character
 
 
 def checks(reply, customer=""):
     return [f["check"] for f in factcheck.check(reply, customer)]
+
+
+def note_guard(text, theirs=(), known=None):
+    return engine_fast.guard(text, SALES, list(theirs), never=sales_fast.NEVER,
+                             known=sales_fast.known() if known is None else known)
+
+
+NAMED = "names a word from the source's own words: "
 
 
 class AddOnBesideABoot(unittest.TestCase):
@@ -130,6 +144,41 @@ class TwoExtras(unittest.TestCase):
         for reply in ("Printing is 400 EGP extra, and we also sell spare laces.",
                       "Spare laces are 150 EGP extra. We also do printing."):
             self.assertEqual(checks(reply), [], reply)
+
+
+class FirstWordNames(unittest.TestCase):
+    """Review finding 5: a note's first word counts only when the source wrote it with a capital
+    outside its own sentence starts, so ordinary notes pass and names are still refused."""
+
+    def setUp(self):
+        clean_env(self)
+
+    def test_a_first_word_the_customer_typed_in_small_letters_passes(self):
+        customer = ("hi can you recommend a boot for me? please reply fast, i will think about it and look at "
+                    "the photos. talk to me in arabic please")
+        for text in ("Reply in short lines and ask the size early.", "Look at what they asked before the price.",
+                     "Think of the size before the price.", "Talk about comfort before the price.",
+                     "Please keep replies short and ask the size.", "Arabic replies work better; ask the size early."):
+            self.assertEqual(note_guard(text, [customer]), [], text)
+
+    def test_a_word_at_the_customers_own_sentence_or_line_start_does_not_count(self):
+        self.assertEqual(note_guard("Look at what they asked before the price.", ["hi. Look at the photos"]), [])
+        self.assertEqual(note_guard("Think of the size before the price.", ["hi\nThink about it"]), [])
+        self.assertEqual(note_guard("Recommend a tier, then mention delivery.", ["Recommend a boot"]), [])
+
+    def test_a_first_word_name_the_customer_wrote_is_still_refused(self):
+        for name in ("Ahmed", "Will", "Zeinab"):
+            text = f"{name} likes short replies; ask the size."
+            self.assertIn(NAMED + name.lower(), note_guard(text, [f"hi I am {name}, how much"]), text)
+            self.assertIn(NAMED + name.lower(), note_guard(f"Ask the size. {text}", [f"hi I am {name}"]), text)
+
+    def test_a_hidden_character_in_the_customers_name_does_not_hide_its_capital(self):
+        text = "Ahmed likes short replies; ask the size."
+        self.assertIn(NAMED + "ahmed", note_guard(text, ["hi I am Ah" + ZW + "med"]))  # read as nothing
+        self.assertIn(NAMED + "ahmed", note_guard(text, ["hi I am" + ZW + "Ahmed"]))  # read as a space
+
+    def test_a_name_past_the_first_word_still_counts_in_small_letters(self):
+        self.assertIn(NAMED + "ahmed", note_guard("Ask Ahmed for his size first.", ["ahmed here, which size?"]))
 
 
 if __name__ == "__main__":

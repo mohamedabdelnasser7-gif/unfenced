@@ -24,9 +24,12 @@ none of the risk check's core marks (a link, a phone number or a handle); no num
 a digit in any script, a numeral sign or a fraction (each reads as a digit in the risk check's
 normal form), a percent or a money sign (NUMBERS, for every agent); none of the never marks;
 no run of COPY_RUN words in a row copied from the source's own words, read in the same
-normal form; and no word written with a capital that the source's own words hold, a sentence's
-first word too unless it is one of OPENERS, so a name the source gave never reaches a note ("Ask
-Ahmed", red team round 2; "Ahmed wants", review round 3). The agent's own words pass that check:
+normal form; and no word written with a capital that the source's own words hold, so a name the
+source gave never reaches a note ("Ask Ahmed", red team round 2). A sentence's first word has a
+capital anyway: it is checked unless it is one of OPENERS ("Ahmed wants", review round 3), and
+only against the words the source wrote with a capital outside its own sentence starts, so "Think
+first" passes after "let me think" and "Ahmed wants" is refused after "I am Ahmed" (review
+gatefb round 1, finding 5). The agent's own words pass that check:
 the words its plug writes with a capital and the words the agent gives (known=: its catalogue,
 its places, its topic words), so a note may name a product or a place the source typed (review
 round 3). The never marks are what a note may never state, given by the agent as a Risk (words,
@@ -121,6 +124,8 @@ BEGIN SELECT RAISE(ABORT, 'a closed fast note stays closed'); END;
 """
 _WORDS = re.compile(r"\w+")
 _NAME_WORD = re.compile(r"[^\W\d_]+")  # a word of letters only
+# What a sentence starts after: its end marks and every line break Python knows (a note has none)
+_SENTENCE_ENDS = ".!?;:؟\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"
 # The words a note's sentence may open with although the source wrote them too: the verbs a note
 # leads with (the writer is told to write an aim from the agent's side) and the small words a
 # sentence starts with. A named list because no list of the writer's verbs exists in the data, and
@@ -408,7 +413,11 @@ def guard(text, plug, theirs=(), never=None, known=()):
     found += risk_mod.code_check(text, dataclasses.replace(marks, patterns=NUMBERS + tuple(marks.patterns)))
     if any(_runs(text) & _runs(t) for t in theirs if isinstance(t, str)):
         found.append(f"copies {COPY_RUN} or more words in a row from the source's own words")
-    names = (_capitalised(text) & _their_words(theirs)) - _own_words(plug, known)
+    # a word at a sentence start has a capital anyway, so it counts only when the source wrote it
+    # with a capital outside its own sentence starts (review gatefb round 1, finding 5)
+    later = _capitalised(text, starts=False)
+    names = ((later & _their_words(theirs)) | ((_capitalised(text) - later) & _their_capitals(theirs))) \
+        - _own_words(plug, known)
     if names:
         found.append("names a word from the source's own words: " + ", ".join(sorted(names)))
     return found
@@ -429,19 +438,29 @@ def _own_words(plug, known):
     return words
 
 
-def _capitalised(text, openers=OPENERS):
+def _capitalised(text, openers=OPENERS, starts=True, hidden=""):
     """The words of text written with a capital first letter, in the normal form, other than a
     sentence's first word that is on openers ("Ask Ahmed first" and "Ahmed wants" both give ahmed).
-    Hidden characters and marks are dropped and look alike letters read as Latin first, keeping
-    their case, so neither hides a capital."""
+    starts False: no sentence's first word at all. A sentence starts the text, a line and every
+    part after one of ".!?;:؟". Hidden characters (read as hidden) and marks are dropped and look
+    alike letters read as Latin first, keeping their case, so neither hides a capital."""
     plain = unicodedata.normalize("NFKD", (text or "").translate(risk_mod._LATIN))
-    plain = "".join(ch for ch in plain if unicodedata.category(ch) != "Cf" and ch not in risk_mod._BLANKS
-                    and not unicodedata.category(ch).startswith("M")).translate(risk_mod._LATIN)
-    def opener(m):  # a sentence's first word has a capital anyway: only an opener passes there
+    plain = "".join((hidden if unicodedata.category(ch) == "Cf" or ch in risk_mod._BLANKS else ch) for ch in plain
+                    if not unicodedata.category(ch).startswith("M")).translate(risk_mod._LATIN)
+    def skip(m):  # a sentence's first word has a capital anyway: only an opener passes there
         before = plain[:m.start()].rstrip(" \t\"'“”‘’(")
-        return (not before or before[-1] in ".!?;:؟") and risk_mod.normalize(m.group(0)) in openers
+        first = not before or before[-1] in _SENTENCE_ENDS
+        return first and (not starts or risk_mod.normalize(m.group(0)) in openers)
     return {risk_mod.normalize(m.group(0)) for m in _NAME_WORD.finditer(plain)
-            if len(m.group(0)) > 1 and m.group(0)[0].isupper() and not opener(m)}
+            if len(m.group(0)) > 1 and m.group(0)[0].isupper() and not skip(m)}
+
+
+def _their_capitals(theirs):
+    """The words the source's own turns write with a capital outside their sentence starts, in the
+    normal form, with a hidden character read both ways: "I am Ahmed" gives ahmed, "Recommend one"
+    and "hi. Look here" give nothing. A sentence's first word in a note counts only against these."""
+    return {w for t in theirs if isinstance(t, str) for hidden in ("", " ")
+            for w in _capitalised(t, starts=False, hidden=hidden)}
 
 
 def _their_words(theirs):

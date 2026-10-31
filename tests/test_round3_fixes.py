@@ -115,7 +115,9 @@ class NoteNames(unittest.TestCase):
         """The waterer plug's action "Water the bed." makes water the agent's own verb."""
         plug = plugs.load(plugs.WATERER, self)
         self.assertEqual(engine_fast.guard("Water this bed once.", plug, ["please water it"]), [])
-        self.assertTrue(engine_fast.guard("Mist this bed once.", plug, ["please mist it"]))
+        # a first word counts only when the source wrote it with a capital past its sentence start
+        # (review gatefb round 1, finding 5)
+        self.assertTrue(engine_fast.guard("Mist this bed once.", plug, ["please give it a Mist"]))
 
     def test_a_name_the_customer_gave_is_still_refused(self):
         for text in ("Ask Ahmed first about the size.", "Mr. Ahmed asked about the size; bring it up early."):

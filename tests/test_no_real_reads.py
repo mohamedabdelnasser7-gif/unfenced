@@ -43,6 +43,36 @@ class NoRealReads(unittest.TestCase):
         self.assertTrue(real_guard.under_real(REAL))
         self.assertTrue(real_guard.under_real(os.fsencode(REAL / "cards")))
 
+    def test_another_name_for_arena_real_is_refused_too(self):
+        """Review round 1, finding 3 (red team 3): the folder is matched by device and inode, not text."""
+        with tempfile.TemporaryDirectory() as d:
+            to_real, to_arena = Path(d) / "to-real", Path(d) / "to-arena"
+            to_real.symlink_to(REAL, target_is_directory=True)
+            to_arena.symlink_to(REAL.parent, target_is_directory=True)
+            names = [to_real / "replay.jsonl", to_arena / "real" / "cards", to_arena / "real",
+                     os.path.relpath(REAL / "replay.jsonl"), str(REAL).replace(os.sep + "real", os.sep + os.sep + "real"),
+                     "file:" + str(REAL / "replay.jsonl") + "?mode=ro", "file://" + str(REAL / "replay.jsonl"),
+                     "file:" + str(to_real / "x.db").replace(" ", "%20")]
+            swapped = Path(str(REAL).swapcase())
+            if swapped.exists():  # a case blind disk
+                names.append(swapped / "replay.jsonl")
+            firm = Path("/System/Volumes/Data" + str(REAL))
+            if firm.is_dir():
+                names.append(firm / "replay.jsonl")
+            for p in names:
+                with self.subTest(path=str(p)):
+                    self.assertTrue(real_guard.under_real(p))
+            for p in (to_arena / "realx", to_arena / "run.py", "file:" + str(run.DEMO_CARDS), "file::memory:"):
+                with self.subTest(path=str(p)):
+                    self.assertFalse(real_guard.under_real(p))
+            before = len(real_guard.refused)
+            with self.assertRaises(real_guard.RealRead):
+                open(to_real / "replay.jsonl", "rb")
+            with self.assertRaises(real_guard.RealRead):
+                sqlite3.connect(f"file:{to_real / 'x.db'}?mode=ro", uri=True)
+            self.assertEqual(len(real_guard.refused) - before, 2)
+            self.assertFalse((REAL / "x.db").exists())
+
     def test_a_run_with_no_cards_flag_loads_the_made_up_set(self):
         clean_env(self)
         seen = []

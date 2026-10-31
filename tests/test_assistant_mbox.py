@@ -201,6 +201,14 @@ class Untrusted(unittest.TestCase):
             self.assertEqual(pic["inbox"]["promised_to_user"], 1, head)
             self.assertNotIn("NAMED", json.dumps(pic), head)
 
+    def test_a_digest_is_someone_elses_words(self):
+        odd = "MIME-Version: 1.0\nContent-Type: multipart/mixed; boundary=\"B\"\n"
+        body = ("--B\nContent-Type: text/plain\n\nHi there.\n--B\nContent-Type: multipart/digest; boundary=\"D\"\n\n"
+                "--D\nContent-Type: text/plain\n\nDIGEST I will pay today.\n--D--\n--B--")
+        pic = read_text(mail(f"Nadia <{USER}>", "o@x.test", "s", body, WHEN, "d1@x.test", extra=odd))
+        self.assertNotIn("DIGEST", json.dumps(pic))
+        self.assertEqual(pic["promises"], [])
+
     def test_an_odd_charset_or_a_far_date_never_stops_the_read(self):
         text = (mail("o@x.test", USER, "s", "We will send it today.", WHEN, "c1@x.test",
                      extra='Content-Type: text/plain; charset="idna"\n')

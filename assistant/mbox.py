@@ -120,13 +120,14 @@ def _named(part):
 def _parts(msg):
     """The message's leaf parts in order, leaving out an attached message (message/rfc822 or any other
     message type), an attachment and a part with a file name, with every part under them: a mail
-    forwarded as an attachment is someone else's words (red team round 2, R2-2). No recursion, so a
+    forwarded as an attachment, or inside a digest, is someone else's words (red team rounds 2 and 3,
+    R2-2, R3-1). No recursion, so a
     deep nesting cannot overflow the stack."""
     stack = [msg]
     while stack:
         part = stack.pop()
-        if (part.get_content_maintype() == "message" or part.get_content_disposition() == "attachment"
-                or _named(part)):
+        if (part.get_content_maintype() == "message" or part.get_content_type() == "multipart/digest"
+                or part.get_content_disposition() == "attachment" or _named(part)):
             continue
         if part.is_multipart():
             stack.extend(reversed(part.get_payload()))

@@ -14,6 +14,14 @@ A booking is refused when it overlaps another meeting or breaks the user's rules
 (no_meetings_before, no_meetings_after, "HH:MM"). Every tool call the model makes is kept in
 calls, done or refused, so the Arena's checks read what the model tried, not only what passed.
 
+A prep note is the loop's own step for a meeting on the calendar (DECISIONS item 36, spec section 2
+job 2). prep_facts(meeting) gathers, in code, from the user's own mail on the desk up to now: who
+the people are to the user (how many messages with them, already written to or not), the last
+threads with them or on the meeting's topic, and the open promises (tasks tied to those threads).
+The loop gives those facts to the model with an intent, never fixed words (item 38), and prep()
+keeps the note it writes, at most PREP_WORDS words. A note has no address and no send path: it is
+for the user alone and never goes anywhere (send() only takes drafts).
+
 With an engine log (log, case), each action is saved with its result, the mode as its stage and
 a detail that never holds the text of anyone's email: item ids, buckets, word counts and the
 mode only.
@@ -28,6 +36,10 @@ ASSISTANT_NAMES = {"assistant", "model", "agent", ""}
 TIME = re.compile(r"^([01][0-9]|2[0-3]):([0-5][0-9])$")
 DATE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 WORD = re.compile(r"\w+", re.UNICODE)
+PREP_WORDS = 80        # the longest prep note kept
+PREP_THREADS = 3       # the last threads a prep note is given
+PREP_SAID = 25         # words of each thread's text it is given
+PLAIN_TITLE = {"meeting", "call", "sync", "chat", "with", "about", "quick", "catch"}
 
 
 class Refused(ValueError):
@@ -91,6 +103,7 @@ class Desk:
         self.lessons = set()
         self.calls, self.sorts, self.drafts, self.yeses = [], {}, {}, []
         self.sent, self.tasks, self.briefs, self.answers = [], [], [], []
+        self.preps = []
         self._next_draft = 1
         self.seq = 0  # orders yeses and sends, so a check can see a yes came first
 
@@ -184,6 +197,46 @@ class Desk:
         self.briefs.append({"text": text.strip(), "at": self.now, "mode": self.mode})
         self._act("brief", detail={"words": words(text)})
 
+    def prep_facts(self, meeting):
+        """What the user's own mail on the desk says about a meeting's people or topic, up to now."""
+        ev = self._event(meeting)
+        people = {a.casefold() for a in ev.get("with", []) if isinstance(a, str)}
+        src = self.items.get(ev.get("item")) if isinstance(ev.get("item"), str) else None
+        if src:
+            people.update(a.casefold() for a in [src.get("from"), *src.get("cc", [])] if isinstance(a, str))
+        people.discard(self.user)
+        topic = {w for w in WORD.findall(str(ev.get("title", "")).casefold()) if len(w) >= 4} - PLAIN_TITLE
+        now = minutes(self.now)
+        threads, count = [], {p: 0 for p in people}
+        for it in self.items.values():
+            if isinstance(it.get("at"), str) and TIME.match(it["at"]) and minutes(it["at"]) > now:
+                continue  # not arrived yet
+            addrs = {a.casefold() for a in [it.get("from"), it.get("to"), *it.get("cc", [])] if isinstance(a, str)}
+            for p in people & addrs:
+                count[p] += 1
+            if people & addrs or topic & set(WORD.findall(str(it.get("subject", "")).casefold())):
+                threads.append(it)
+        threads.sort(key=lambda it: minutes(it["at"]) if isinstance(it.get("at"), str) and TIME.match(it["at"]) else -1)
+        ids = {it["id"] for it in threads}
+        return {"meeting": {k: ev.get(k) for k in ("id", "title", "start", "end")},
+                "people": [{"who": p, "messages": count[p], "written_to_before": p in self.contacts}
+                           for p in sorted(people)],
+                "last_threads": [{"item": it["id"], "from": it.get("from"), "subject": it.get("subject"),
+                                  "at": it.get("at"), "said": " ".join(str(it.get("body", "")).split()[:PREP_SAID])}
+                                 for it in threads[-PREP_THREADS:]],
+                "open_promises": [{"text": t["text"], "due": t["due"]} for t in self.tasks if t.get("item") in ids]}
+
+    def prep(self, meeting, text):
+        """Keep the prep note the model wrote for a meeting. It has no address and is never sent."""
+        ev = self._event(meeting)
+        if not isinstance(text, str) or not text.strip():
+            raise Refused("a prep note has text")
+        if words(text) > PREP_WORDS:
+            raise Refused(f"a prep note is at most {PREP_WORDS} words")
+        self.preps.append({"meeting": ev["id"], "text": text.strip(), "at": self.now, "mode": self.mode})
+        self._act("prep", detail={"event": ev["id"], "words": words(text)})
+        return {"prep": len(self.preps), "meeting": ev["id"], "note": "for the user alone; it goes nowhere"}
+
     # the user's side
     def yes(self, draft_id, by):
         """The user's yes to a draft as it reads now. by names the user; never the assistant."""
@@ -246,11 +299,17 @@ class Desk:
             raise Refused(f"no item {item_id!r}")
         return self.items[item_id]
 
+    def _event(self, event_id):
+        ev = next((e for e in self.calendar if isinstance(event_id, str) and e.get("id") == event_id), None)
+        if ev is None:
+            raise Refused(f"no meeting {event_id!r} on the calendar")
+        return ev
+
     def _act(self, action, *, refused=False, detail=None):
         if self.log is None or action is None:
             return
         result = {"sort": "sorted", "draft": "drafted", "book": "booked", "task": "tasked", "brief": "briefed",
-                  "send": "sent"}[action]
+                  "prep": "prepped", "send": "sent"}[action]
         if refused:
             result = {"draft": "draft_refused", "book": "book_refused", "send": "send_refused"}.get(action)
         self.log.act(self.case, action, lessons=sorted(self.lessons), result=result, stage=stage_of(self.mode),

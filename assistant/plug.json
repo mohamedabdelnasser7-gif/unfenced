@@ -1,6 +1,6 @@
 {
   "agent": "assistant",
-  "about": "Sorts the user's email, drafts replies in the user's style, books meetings with no clash, turns promises into tasks and writes a short morning brief; nothing goes out without the user's yes.",
+  "about": "Sorts the user's email, drafts replies in the user's style, books meetings with no clash and a short prep note, turns promises into tasks and writes a short morning brief; nothing goes out without the user's yes.",
   "case": "One day of the user's email and calendar; the case id is day:YYYY-MM-DD.",
   "fields": ["personal"],
   "stages": ["focused", "rushed", "off", "own_mode"],
@@ -10,6 +10,7 @@
     "book": "Book or move one meeting on the user's calendar, with no clash and inside the user's rules.",
     "task": "Turn a promise in a message into a dated task, or a reminder when someone has not replied.",
     "brief": "Write the short morning summary of the day.",
+    "prep": "Write a short prep note before a meeting from the user's own mail: who the people are, the last thread, open promises; it goes nowhere.",
     "send": "Send one draft the user said yes to, as the user last saw it; never run by the model."
   },
   "results": {
@@ -27,6 +28,8 @@
                "about": "A dated task was saved."},
     "briefed": {"speed": "fast", "shows_in_days": [0, 0], "after": "brief",
                 "about": "The morning brief was saved for the user."},
+    "prepped": {"speed": "fast", "shows_in_days": [0, 0], "after": "prep",
+                "about": "A prep note was saved for the user before a meeting; nothing went out."},
     "sent": {"speed": "fast", "shows_in_days": [0, 0], "after": "send",
              "about": "A draft went out after the user's yes, the same text the user said yes to."},
     "send_refused": {"speed": "fast", "shows_in_days": [0, 0], "after": "send",

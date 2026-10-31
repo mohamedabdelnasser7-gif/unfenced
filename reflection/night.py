@@ -355,7 +355,7 @@ def text(rep, plug):
              "  parts: " + "; ".join(f"{k} {v}" for k, v in rep["parts"].items()),
              f'  read {rep["read"]["cases"]} cases: settled {d["good"] + d["bad"]} ({d["good"]} {good}, {d["bad"]} not, '
              f'{d["past_window"]} of them past their window), pending {rep["pending"]}, '
-             f'left out {rep["left_out"]["count"]} for a cause outside the agent']
+             f'left out {rep["left_out"]["count"]}, not counted' + _causes(rep["left_out"])]
     lines.extend(_trial_lines(rep["trials"]))
     if rep.get("exam"):
         e = rep["exam"]
@@ -518,6 +518,13 @@ def _n(x):
 
 def _day(t):
     return time.strftime("%Y-%m-%d", time.gmtime(t))
+
+
+def _causes(left):
+    """The plug's causes the left-out cases carry, by name with a count: the plug's words, not ours.
+    Not every cause is outside the agent (a plug may leave out a miss its user did not correct)."""
+    by = left.get("by_cause") or {}
+    return (" (" + ", ".join(f"{k} {v}" for k, v in sorted(by.items())) + ")") if by else ""
 
 
 def main(argv=None, *, until=None):

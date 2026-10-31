@@ -448,7 +448,7 @@ class TryAnIdeaOnTheServer(unittest.TestCase):
         self.assertEqual(self.post(fields), 303)
         les, = self.page.lessons["waterer"].mine()
         self.assertEqual((les["kind"], les["origin"], les["yes_by"], les["state"]),
-                         (IDEA, "person", "the owner", TRYING))
+                         (IDEA, "person", "the user", TRYING))
         self.assertEqual(self.post(dict(fields, stage="roots")), 303)
         self.assertEqual(self.post(dict(fields, token="wrong", line=SOIL["lesson"])), 403)
         self.assertEqual(len(self.page.lessons["waterer"].mine()), 1)

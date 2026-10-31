@@ -89,7 +89,7 @@ class Page(unittest.TestCase):
         self.assertEqual((mine["mode_card"]["fixed"], mine["mode_card"]["broken"]), (2, 0))
         page = mod.render(self.morning.view(NOW), token="t0ken")
         self.assertIn("A new mode?", page)
-        self.assertIn('action="/mode"', page)
+        self.assertIn('action="/mode"', page.split('<details class="overnight"', 1)[0])  # it needs a yes: never folded
         self.assertIn(f'name="card" value="{self.card.name}"', page)
         self.assertNotIn('action="/mode"', mod.render(self.morning.view(NOW), token=None))  # the static copy
 

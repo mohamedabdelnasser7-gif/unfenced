@@ -425,7 +425,7 @@ class Page(unittest.TestCase):
         les = self.lessons.get(self.lid)
         self.assertTrue(said.startswith(f"Lesson {self.lid} is on trial again until "), said)
         self.assertAlmostEqual(les["ends_at"], time.time() + 7 * DAY, delta=60)
-        self.assertEqual(self.trials.marks(self.lid, "longer")[0]["by"], "the owner")
+        self.assertEqual(self.trials.marks(self.lid, "longer")[0]["by"], "the user")
         with self.assertRaisesRegex(mod.Refused, "does not wait after an unclear trial"):
             mod.ACTIONS["/drop"](self.morning, {"lesson": [str(self.lid)]})
         self.assertEqual(self.morning.view()["unclear"], [])
@@ -438,9 +438,9 @@ class Page(unittest.TestCase):
         said = mod.ACTIONS["/drop"](self.morning, {"lesson": [str(self.lid)]})
         self.assertEqual(said, f"Lesson {self.lid} dropped. It is never given again.")
         les = self.lessons.get(self.lid)
-        self.assertEqual((les["state"], les["pulled_why"]), (PULLED, "unclear, dropped by the owner"))
+        self.assertEqual((les["state"], les["pulled_why"]), (PULLED, "unclear, dropped by the user"))
         [t] = self.agent(time.time())["trials"]
-        self.assertEqual((t["status"], t["why"]), ("unclear, then dropped", "unclear, dropped by the owner"))
+        self.assertEqual((t["status"], t["why"]), ("unclear, then dropped", "unclear, dropped by the user"))
         with self.assertRaisesRegex(mod.Refused, "does not wait after an unclear trial"):
             self.morning.drop(self.lid)
 
@@ -451,7 +451,7 @@ class Page(unittest.TestCase):
         self.assertEqual((self.lessons.get(new)["state"], said),
                          (TRYING, f"Lesson {on_trial} edited: the new line is lesson {new}. It is on trial."))
         item = next(i for i in self.agent(P_END + 120)["live"] if i["id"] == new)
-        self.assertIn("On trial as the owner's own line", item["why"])
+        self.assertIn("On trial as the user's own line", item["why"])
 
     def test_an_edited_line_waits_its_turn_behind_another_trial(self):
         kept = kept_lesson(self.lessons, "Water the grown beds deeply.", ["grown"], yes_by="mona", now=BASE)

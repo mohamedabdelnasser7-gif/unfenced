@@ -247,7 +247,7 @@ class Answers(Base):
         self.assertEqual(self.lessons.get(self.live)["state"], KEPT)
         self.morning.stop(self.live, "  It drowned the roots. ", now=NOW + 1)
         les = self.lessons.get(self.live)
-        self.assertEqual((les["state"], les["pulled_why"]), (PULLED, "stopped by the owner: It drowned the roots."))
+        self.assertEqual((les["state"], les["pulled_why"]), (PULLED, "stopped by the user: It drowned the roots."))
         card_ = self.high("Water bed 3 twice.")
         with self.assertRaisesRegex(mod.Refused, "not live"):
             self.morning.stop(card_, "No.", now=NOW + 1)
@@ -258,12 +258,12 @@ class Answers(Base):
         self.assertEqual(made.call_count, 1)  # what a person's line becomes is decided in one place
         new = max(les["id"] for les in self.lessons.mine())
         old, les = self.lessons.get(self.live), self.lessons.get(new)
-        self.assertEqual((old["state"], old["pulled_why"]), (PULLED, f"edited by the owner into lesson {new}"))
+        self.assertEqual((old["state"], old["pulled_why"]), (PULLED, f"edited by the user into lesson {new}"))
         self.assertEqual((les["state"], les["text"], les["stages"], les["yes_by"]),
-                         (TRYING, "Water the grown beds at dusk.", ["grown"], "the owner"))
+                         (TRYING, "Water the grown beds at dusk.", ["grown"], "the user"))
         self.assertEqual((les["origin"], said), ("person", f"Lesson {self.live} edited: the new line is lesson {new}. "
                                                            "It is on trial."))
-        self.assertEqual(les["source"], f'edited by the owner from lesson {self.live}: "Water the grown beds deeply."')
+        self.assertEqual(les["source"], f'edited by the user from lesson {self.live}: "Water the grown beds deeply."')
         items = {i["id"]: i for a in self.morning.view(NOW + 2)["agents"] for i in a["live"] + a["pulled"]}
         self.assertIn({"text": f"edited from lesson {self.live}", "to": self.live}, items[new]["links"])
         self.assertIn({"text": f"edited into lesson {new}", "to": new}, items[self.live]["links"])
@@ -301,13 +301,13 @@ class Answers(Base):
         yes, no = self.high("Water bed 3 twice."), self.high("Water bed 4 at noon.", ["grown"])
         self.morning.yes(yes, now=NOW + 1)
         les = self.lessons.get(yes)
-        self.assertEqual((les["state"], les["yes_by"]), (TRYING, "the owner"))
+        self.assertEqual((les["state"], les["yes_by"]), (TRYING, "the user"))
         with self.assertRaisesRegex(mod.Refused, "does not wait for a yes"):
             self.morning.yes(yes, now=NOW + 2)
         self.morning.no(no, "Too sure of a number.", now=NOW + 1)
         les = self.lessons.get(no)
         self.assertEqual((les["state"], les["pulled_why"], les["yes_at"]),
-                         (PULLED, "no from the owner: Too sure of a number.", None))
+                         (PULLED, "no from the user: Too sure of a number.", None))
         with self.assertRaisesRegex(mod.Refused, "does not wait for a yes"):
             self.morning.no(self.live, "", now=NOW + 1)
         self.assertEqual(self.lessons.get(self.live)["state"], KEPT)
@@ -339,7 +339,7 @@ class Answers(Base):
         self.morning.stop(two, "It was wrong.", now=NOW + 1)  # after the page was drawn
         said = self.morning.yes(new, shown=f"{one},{two}", now=NOW + 2)
         self.assertEqual(said, f"Lesson {new}: yes. It is on trial. Pulled: lesson {one}.")
-        self.assertEqual(self.lessons.get(two)["pulled_why"], "stopped by the owner: It was wrong.")
+        self.assertEqual(self.lessons.get(two)["pulled_why"], "stopped by the user: It was wrong.")
 
     def test_a_yes_on_a_card_that_names_other_lines_now_does_nothing(self):
         old = kept_lesson(self.lessons, "Water the seedlings slowly.", ["seedling"], yes_by="tester", now=NOW)
@@ -399,7 +399,7 @@ class Cards(Base):
         self.assertEqual(view["more"], 2)
         page = mod.render(view, token="t")
         self.assertEqual(page.count('action="/yes"'), 5)
-        self.assertIn("2 more wait for a yes", page)
+        self.assertNotIn("more wait", page)  # the two behind are never counted on the page (item 35)
         self.assertIn("the chance it is better is 99%", page)
 
     def test_five_cards_at_a_time_and_an_answered_card_makes_room(self):

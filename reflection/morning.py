@@ -43,9 +43,20 @@ with the day in Cairo time, the waiting stack (the first card open in light sage
 and No, the next ones under it as white passes that open), the first lesson on trial as a dark
 sage card, then Ideas, Facts and each agent's switches as white rows that open, and every
 agent's lessons below. The tabs (a bar on the bottom edge on a phone, one top island on a wide
-screen) are links to those parts, #today, #lessons, #ideas, #facts and #agents, the Lessons tab
-with the count waiting for a yes; no numbers row up top. No script: the tabs are anchors and
-every part opens with details and summary. Every time is Cairo time (Africa/Cairo).
+screen) are links to those parts, #today, #lessons, #ideas, #facts and #agents; no numbers row up
+top. No script: the tabs are anchors and every part opens with details and summary. Every time
+is Cairo time (Africa/Cairo).
+
+Light (DECISIONS item 35). The page is never a chore: what is open on it is only what needs the
+user (the cards that wait for a yes, the unclear cards, a new mode card, a paused trial with its
+Stop, the switches) and what the agents are trying now (the trial card, with its days left,
+which is the trial's own clock, not the user's). Nothing counts what is left to answer: no badge
+on the Lessons tab, no count beside "Waiting for your yes", no word of the cards behind the five
+on the page. The gate's fixed and broke counts stay (item 27): they are evidence, not chores.
+Everything that needs no answer (each agent's night notes, the Arena, the snapshot, every
+lesson, the trials, the pulled lessons and any report that could not be read) sits in one fold,
+"What happened overnight", closed until opened. A day with no answers changes nothing: a lesson
+with no yes stays off, and the page reads the same the next morning.
 
 The cards. Every lesson that waits for a person's first yes is a card with Yes, No and Edit:
 high risk, a "replace it?" card, or a line close to a pulled one or to one that failed the eval
@@ -80,7 +91,7 @@ buttons, each agent with a plug has a Try an idea form: one line and a stage.
 
 Answers. Yes: Lessons.approve, or Lessons.replace when the card names live lessons; the
 lesson goes on trial or waits its turn. The Yes form carries the lines the card named, and a
-card that names other lines by then is refused. No: pulled, its why "no from the owner". Stop on a
+card that names other lines by then is refused. No: pulled, its why "no from the user". Stop on a
 live lesson: pulled, with a one line why. Edit: a lesson is never rewritten, so Edit adds the
 new line and pulls the old one; the new line's source line names the old lesson, and the old
 one's why names the new lesson. What the new line becomes is decided in one place,
@@ -164,7 +175,7 @@ PORT_DEFAULT = "8082"
 DAY = 86400.0
 CAIRO = ZoneInfo("Africa/Cairo")  # every time on the page is Cairo time, never UTC
 CARDS = 5                       # cards on the page at a time, across agents; an answered card makes room
-BY = "the owner"                # who answers on this page
+BY = "the user"                 # who answers on this page (DECISIONS item 34)
 MAX_BODY = 16384                # bytes in one POST
 MAX_REPORT = 50 * 1024 * 1024   # bytes; a bigger saved report is skipped
 EDITED = "edited by "
@@ -215,9 +226,7 @@ code,.cases{font-family:var(--mono);font-size:13px;word-break:break-all}
 .col{display:flex;flex-direction:column;gap:40px;min-width:0}
 .sec-h{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 4px 16px}
 .sec-h h2{margin:0;font:500 20px/24px var(--font);letter-spacing:-.01em}
-.sec-h h2.hc{display:flex;align-items:center;gap:10px}
 .sec-h small{font:400 14px/20px var(--font);color:var(--ink-2);text-align:right}
-.hcount{min-width:28px;height:28px;padding:0 9px;border-radius:14px;display:inline-grid;place-items:center;background:var(--card);box-shadow:var(--shadow-soft);font:500 14px/1 var(--font);color:var(--ink)}
 .lab{display:flex;align-items:center;gap:8px;font:500 12px/16px var(--font);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
 .meta{font:400 14px/20px var(--font);color:var(--ink-2);margin-top:8px}
 .line{font-weight:500;color:var(--ink)}
@@ -358,6 +367,11 @@ transition:transform var(--t-press) var(--ease)}
 .wcard .lesson{font-size:24px;line-height:32px;margin-top:16px}
 .wcard .pair{margin-top:20px}
 .byagent{margin-top:56px}
+.overnight>summary{list-style:none;display:flex;align-items:center;gap:12px;margin:0 4px 16px;border-radius:var(--r-inner)}
+.overnight>summary::-webkit-details-marker{display:none}
+.overnight>summary h2{margin:0;font:500 20px/24px var(--font);letter-spacing:-.01em}
+.overnight>summary small{flex:1;font:400 14px/20px var(--font);color:var(--ink-2);text-align:right}
+.overnight[open]>summary .chev{transform:rotate(90deg)}
 .agent-sec{background:var(--card);border-radius:var(--r-card);box-shadow:var(--shadow-soft);padding:28px 32px 32px}
 .agent-sec+.agent-sec{margin-top:16px}
 .agent-sec>h2{display:flex;align-items:center;gap:12px;margin:0;font:500 20px/24px var(--font);letter-spacing:-.01em}
@@ -393,8 +407,6 @@ font:500 11px/14px var(--font);text-decoration:none;transition:color var(--t) va
 .tab:hover{color:var(--ink)}
 .tab:active{transform:scale(.96)}
 .tab .i{width:22px;height:22px}
-.bdg{position:absolute;top:3px;left:calc(50% + 4px);min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--volt);color:var(--ink);
-font:700 11px/18px var(--font);text-align:center;font-variant-numeric:tabular-nums;box-shadow:0 0 0 2px rgba(250,249,246,.9)}
 body:not(:has(:target)) .tab[href="#today"],body:has(#today:target) .tab[href="#today"],body:has(#lessons:target) .tab[href="#lessons"],
 body:has(#ideas:target) .tab[href="#ideas"],body:has(#facts:target) .tab[href="#facts"],body:has(#agents:target) .tab[href="#agents"],
 body:not(:has(:target)) .titem[href="#today"],body:has(#today:target) .titem[href="#today"],body:has(#lessons:target) .titem[href="#lessons"],
@@ -463,7 +475,6 @@ box-shadow:inset 0 1px 0 rgba(255,255,255,.9),inset 0 0 0 1px rgba(11,15,18,.05)
 transition:color var(--t) var(--ease),background var(--t) var(--ease),transform var(--t-press) var(--ease)}
 .titem:hover{color:var(--ink)}
 .titem:active{transform:scale(.97)}
-.titem .bdg{position:static;min-width:20px;height:20px;line-height:20px;border-radius:10px;box-shadow:none}
 .top{margin-top:40px}
 }
 @media (prefers-reduced-motion:reduce){
@@ -1469,15 +1480,15 @@ def _good_word(item):
 def render(view, *, token=None, flash=None):
     """The page, in the locked A3 look (_system/hackathon/design/morning/r1/opt-a3.html): the
     greeting, the waiting stack, the trial card, then Ideas, Facts and each agent's switches as rows
-    that open, and every agent's lessons below. The tabs are links to those parts, the Lessons tab
-    with the count waiting for a yes. token None: a static copy with no forms and no buttons."""
-    waiting = len(view["cards"]) + view["more"]
+    that open, and the fold "What happened overnight" below, closed. The tabs are links to those
+    parts, with no count on any of them (item 35). token None: a static copy with no forms and no
+    buttons."""
     where = "A static copy" if token is None else "On this computer only"
     out = ['<!doctype html><html lang="en"><head><meta charset="utf-8">',
            '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">',
            f'<title>Morning summary</title><style>{CSS}</style></head><body><div class="page">',
            f'<nav class="tisl sq" aria-label="Main"><div class="left"><span class="tlogo">{LOGO}</span>'
-           f'<span class="word">Ascent</span></div><div class="tnav">{_tabs("titem", waiting)}</div>'
+           f'<span class="word">Ascent</span></div><div class="tnav">{_tabs("titem")}</div>'
            f'<div class="right"><span class="tsample">{h(where)}</span></div></nav>',
            f'<header class="bar"><div class="brand"><span class="logo">{LOGO}</span><span class="word">Ascent</span>'
            f'<span class="where">Reflection, morning</span></div><span class="sample">{h(where)}</span></header>',
@@ -1488,53 +1499,65 @@ def render(view, *, token=None, flash=None):
     out.append("</div>")
     if flash:
         out.append(f'<p class="flash" role="status">{h(flash)}</p>')
-    for p in view["problems"]:
-        out.append(f'<p class="flash">{h(p)}</p>')
     out.append('</section><div class="grid"><div class="col">')
-    out.append(_waiting_html(view, token, waiting))
+    out.append(_waiting_html(view, token))
     if view["unclear"]:
         out.append('<section class="unclear" aria-labelledby="u-h"><div class="sec-h"><h2 id="u-h">Unclear: too few '
                    'results to tell</h2></div>' + "".join(_unclear_html(u, token) for u in view["unclear"]) + "</section>")
+    modes = [a for a in view["agents"] if a.get("mode_card") is not None]
+    if modes:  # a new mode needs the user's yes, so it is open on the page, never in the fold
+        out.append('<section class="modes" aria-labelledby="m-h"><div class="sec-h"><h2 id="m-h">A new mode?</h2></div>'
+                   + "".join(f'<article class="wcard sq" id="mode-{h(a["agent"])}">'
+                             + _mode_card_html(a["agent"], a["mode_card"], token if a["buttons"] else None)
+                             + "</article>" for a in modes) + "</section>")
     out.append('</div><aside class="col">')
-    out.append(_reflection_html(view))
+    out.append(_reflection_html(view, token))
     out.append('<div class="rows">')
     if view.get("ideas"):
         out.append(_ideas_html(view["ideas"], token))
     out.append(_facts_html(view, token))
     out.append(_agents_rows(view, token))
     out.append("</div></aside></div>")
-    out.append('<section class="byagent" aria-labelledby="b-h"><div class="sec-h"><h2 id="b-h">Every lesson, by agent'
-               '</h2></div>')
+    out.append(_overnight_html(view, token))
+    out.append("</div>")
+    out.append(f'<nav class="isl" aria-label="Main">{_tabs("tab")}</nav>')
+    out.append("</body></html>")
+    return "\n".join(out)
+
+
+def _overnight_html(view, token):
+    """The fold "What happened overnight", closed until opened: every part that needs no answer,
+    each agent's night notes, Arena, snapshot, lessons, trials and pulled lessons, and any saved
+    report that could not be read. Its buttons (Stop, Edit, Bring back, a lesson's own level) stay
+    inside for whoever wants them; nothing in it waits for the user (DECISIONS item 35)."""
+    out = ['<section class="byagent" aria-labelledby="b-h"><details class="overnight" id="overnight">'
+           f'<summary><h2 id="b-h">What happened overnight</h2><small>Nothing here waits for you</small>'
+           f'{_icon("chev", "i chev")}</summary>']
+    for p in view["problems"]:
+        out.append(f'<p class="flash">{h(p)}</p>')
     if not view["agents"]:
         out.append('<div class="calm sq"><p class="calm-h">No lessons yet.</p><p>Each agent shows here after its first '
                    'night.</p></div>')
     for a in view["agents"]:
         out.append(_agent_html(a, token))
-    out.append("</section></div>")
-    out.append(f'<nav class="isl" aria-label="Main">{_tabs("tab", waiting)}</nav>')
-    out.append("</body></html>")
+    out.append("</details></section>")
     return "\n".join(out)
 
 
-def _tabs(cls, waiting):
-    """The five tabs, each a link to its part of the page; Lessons carries the count waiting for a yes."""
-    out = []
-    for anchor, icon, name in TABS:
-        badge = (f'<span class="bdg" aria-hidden="true">{h(waiting)}</span><span class="vh">, {h(waiting)} waiting</span>'
-                 if anchor == "lessons" and waiting else "")
-        out.append(f'<a class="{cls}" href="#{anchor}">{_icon(icon)}{name}{badge}</a>')
-    return "".join(out)
+def _tabs(cls):
+    """The five tabs, each a link to its part of the page, with no count on any (item 35)."""
+    return "".join(f'<a class="{cls}" href="#{anchor}">{_icon(icon)}{name}</a>' for anchor, icon, name in TABS)
 
 
-def _waiting_html(view, token, waiting):
+def _waiting_html(view, token):
     """The waiting stack: the first card open, in light sage, with Yes and No; the next ones peek
-    under it as white passes, titles only, each opening to its own full card and buttons."""
-    count = (f'<span class="hcount num" aria-hidden="true">{h(waiting)}</span><span class="vh">, {h(waiting)} waiting'
-             '</span>' if waiting else "")
-    small = (f"Most to gain first, up to {CARDS} at a time" if view["more"] else "Most to gain first") if waiting else ""
-    out = ['<section class="lessons" id="lessons" aria-labelledby="w-h">',
-           f'<div class="sec-h"><h2 id="w-h" class="hc">Waiting for your yes{count}</h2><small>{h(small)}</small></div>']
+    under it as white passes, titles only, each opening to its own full card and buttons. No count
+    beside the heading and no word of the cards behind these (item 35): they show once a card is
+    answered, and one left unanswered simply stays off."""
     cards = view["cards"]
+    small = "Most to gain first" if cards else ""
+    out = ['<section class="lessons" id="lessons" aria-labelledby="w-h">',
+           f'<div class="sec-h"><h2 id="w-h">Waiting for your yes</h2><small>{h(small)}</small></div>']
     if not cards:
         out.append('<div class="calm sq"><p class="calm-h">Nothing waits for a yes.</p>'
                    '<p>A lesson that needs your yes shows here.</p></div>')
@@ -1547,8 +1570,6 @@ def _waiting_html(view, token, waiting):
                        f'{h(item["text"])}</span>{_icon("chev", "i chev")}</summary>'
                        f'<div class="peek-in">{_card_html(n + 1, item, token)}</div></details>')
         out.append("</div>")
-    if view["more"]:
-        out.append(f'<p class="meta more-wait">{h(view["more"])} more wait for a yes; they show once these are answered.</p>')
     out.append("</section>")
     return "\n".join(out)
 
@@ -1633,10 +1654,13 @@ def _stages(stages):
     return ("stage " if len(stages) == 1 else "stages ") + ", ".join(stages)
 
 
-def _reflection_html(view):
+def _reflection_html(view, token=None):
     """The trial card: the first lesson on trial, in dark sage, with the study's counts before it,
-    its days left and when it ends. The other lessons on trial follow as rows."""
+    its days left and when it ends. The other lessons on trial follow as rows, then each trial the
+    stop rule paused, with Stop: a pause waits for the user, so it is open here, never only in the
+    fold. A paused lesson with no answer stays paused, given in no new case."""
     now = view["at"]
+    paused = [(a, i) for a in view["agents"] for i in a["live"] if i["status"] == "paused"]
     trials = {t["id"]: t for a in view["agents"] for t in a["trials"]}
     running = sorted((i for a in view["agents"] for i in a["live"] if i["status"] == "on trial"),
                      key=lambda i: (i["ends_at"] or 0, i["id"]))
@@ -1659,6 +1683,16 @@ def _reflection_html(view):
                 out.append(_pill("flask", f'{i["agent"]}, also on trial', i["text"],
                                  f'{left} day{"s" if left != 1 else ""} left', body))
             out.append("</div>")
+    if paused:
+        out.append('<div class="rows also">')
+        for a, i in paused:
+            body = f'<p class="big" dir="auto">{h(i["text"])}</p><p class="meta">{h(i["why"])}</p>'
+            if i["id"] in trials:
+                body += f'<p class="meta"><a href="#t{h(i["id"])}">Its trial</a></p>'
+            if token is not None and a["buttons"]:
+                body += _form(token, "stop", i["id"], "Stop", field=("why", "", "Why, in one line", True))
+            out.append(_pill("flask", f'{i["agent"]}, paused', i["text"], "Paused", body, ident=f'p{i["id"]}'))
+        out.append("</div>")
     out.append("</section>")
     return "\n".join(out)
 
@@ -1850,9 +1884,6 @@ def _agent_html(a, token):
                 + "</li>" for x in stuck["lost"]) + "</ul>")
         if stuck.get("rounds"):
             out.append("<ul>" + "".join(f'<li class="meta">{h(x)}</li>' for x in stuck["rounds"]) + "</ul>")
-    mode = a.get("mode_card")
-    if mode is not None:
-        out.append(_mode_card_html(a["agent"], mode, token if buttons else None))
     snap = a["snapshot"]
     if snap is not None:
         back = f' To roll back to it: <code>{h(snap["command"])}</code>' if snap["command"] else ""
@@ -1879,7 +1910,9 @@ def _mode_card_html(agent, mode, token):
     words = ", ".join(f'"{w}"' for w in mode["words"])
     seen = (f' on {_n(mode["days"])} days' if mode["days"] is not None else "") + \
         (f', {_n(mode["moments"])} times' if mode["moments"] is not None else "")
-    out = ["<h3>A new mode?</h3>",
+    out = [f'<div class="pass-h"><div class="agent"><span class="av">{_agent_icon(agent)}</span><div><strong>{h(agent)}'
+           '</strong><small>A new mode, no answer changes nothing</small></div></div></div>',
+           f'<p class="lesson" dir="auto">{h(mode["name"])}</p>',
            f'<p class="meta" dir="auto">"{h(mode["name"])}": you said {h(words)}{h(seen)}, and it fit no mode.</p>']
     if mode["fixed"] is not None and mode["played"] is not None:
         out.append(f'<p class="meta">On {h(_n(mode["played"]))} of your past days the Arena played it fixed '
@@ -2146,7 +2179,7 @@ def _facts_html(view, token):
         body.append("</ul>")
     sub = facts[0]["fact"] if facts else ("No new fact cards now" if not view["kept_facts"]
                                           else f'{len(view["kept_facts"])} kept')
-    return _pill("facts", "Facts", sub, f"{len(facts)} new" if facts else "None new", "".join(body), ident="facts")
+    return _pill("facts", "Facts", sub, "New" if facts else "None new", "".join(body), ident="facts")  # no count (item 35)
 
 
 def _fact_html(f, token):

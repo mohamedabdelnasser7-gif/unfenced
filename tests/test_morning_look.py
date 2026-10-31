@@ -1,7 +1,8 @@
 """The morning page in the locked A3 look (_system/hackathon/design/morning/r1/opt-a3.html):
-the tabs are links to the page's own parts, the waiting count sits beside its heading with no
-numbers row, the open card holds the first waiting lesson's Yes and No, every time is Cairo
-time, and a study's counts are named from the pattern's own words, never "with it" (where
+the tabs are links to the page's own parts, with no count on the tabs or beside the waiting
+heading and no numbers row (DECISIONS item 35), what needs no answer sits in one closed fold, a
+day with no answers changes nothing, the open card holds the first waiting lesson's Yes and No,
+every time is Cairo time, and a study's counts are named from the pattern's own words, never "with it" (where
 "it" read as the lesson). No raw case id is on the page. Made-up plugs, in-memory database."""
 import re
 import unittest
@@ -34,13 +35,14 @@ class Tabs(tm.Base):
         self.assertNotIn("<script", page)
         self.assertNotIn("<link", page)
 
-    def test_the_lessons_tab_carries_the_count_waiting_for_a_yes(self):
+    def test_the_lessons_tab_carries_no_count(self):
         for n in (1, 2, 3):
             self.high(f"Water bed {n} twice.")
         page = body(self.page())
-        self.assertEqual(page.count('<span class="bdg" aria-hidden="true">3</span><span class="vh">, 3 waiting</span>'), 2)
+        self.assertEqual(page.count(f'href="#lessons">{mod._icon("list")}Lessons</a>'), 2)  # the island and the bar
+        self.assertNotIn('class="bdg"', page)
 
-    def test_nothing_waiting_shows_no_badge_and_a_calm_line(self):
+    def test_nothing_waiting_shows_a_calm_line(self):
         page = body(self.page())
         self.assertNotIn('class="bdg"', page)
         self.assertNotIn('class="hcount', page)
@@ -48,12 +50,12 @@ class Tabs(tm.Base):
 
 
 class Count(tm.Base):
-    def test_the_count_sits_beside_its_heading_and_there_is_no_numbers_row(self):
+    def test_the_heading_has_no_count_and_there_is_no_numbers_row(self):
         self.high("Water bed 1 twice.")
         self.high("Water bed 2 twice.")
         page = body(self.page())
-        self.assertIn('<h2 id="w-h" class="hc">Waiting for your yes<span class="hcount num" aria-hidden="true">2</span>'
-                      '<span class="vh">, 2 waiting</span></h2>', page)
+        self.assertIn('<h2 id="w-h">Waiting for your yes</h2>', page)
+        self.assertNotIn('class="hcount', page)
         self.assertNotIn('class="counts"', page)
         top = page.split('id="today"', 1)[1].split("</section>", 1)[0]
         top = re.sub(r'<p class="num">[^<]*Cairo</p>', "", top)
@@ -63,14 +65,87 @@ class Count(tm.Base):
         self.high("Water bed 1 twice.")
         self.assertRegex(body(self.page()), r"A yes means a <strong>careful trial</strong>: [^<]+ for \d+ days")
 
-    def test_the_count_takes_in_the_cards_past_the_five_shown(self):
+    def test_the_cards_past_the_five_shown_are_never_counted(self):
         for n in range(1, 8):
             self.high(f"Water bed {n} twice.")
         view = self.morning.view(NOW)
         self.assertEqual((len(view["cards"]), view["more"]), (5, 2))
         page = body(mod.render(view, token="t"))
-        self.assertIn('Waiting for your yes<span class="hcount num" aria-hidden="true">7</span>', page)
-        self.assertIn("2 more wait for a yes", page)
+        self.assertNotIn("more wait", page)
+        self.assertNotIn("at a time", page)
+        self.assertNotIn("7 waiting", page)
+
+
+def open_part(page):
+    """The page outside the fold "What happened overnight", as words, tags taken out."""
+    before, rest = page.split('<details class="overnight"', 1)
+    after = rest.split("</details></section>", 1)[1]
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", before + after))
+
+
+class Light(tm.Base):
+    """DECISIONS item 35: the page is light. No count of what is left to answer, nothing that needs
+    no answer outside the fold, and a day with no answers changes nothing."""
+
+    LEFT = re.compile(r"\b\d+\s+(?:more|waiting|left to|to go|remaining|unanswered|still wait)\b|\bmore wait\b|"
+                      r"\boverdue\b|\breminder\b|\bskipped\b|\byou missed\b", re.I)
+
+    def test_no_count_of_what_is_left_anywhere_on_the_page(self):
+        for n in range(1, 9):
+            self.high(f"Water bed {n} twice.")
+        page = body(self.page())
+        self.assertNotRegex(re.sub(r"<[^>]+>", " ", page), self.LEFT)
+        self.assertNotIn('class="bdg"', page)
+        self.assertNotIn('class="hcount', page)
+        self.assertNotIn('class="meta more-wait"', page)
+        self.assertNotRegex(open_part(page), r"\b8\b", "the eight waiting are never counted outside the fold")
+
+    def test_a_skipped_day_changes_nothing(self):
+        ids = [self.high(f"Water bed {n} twice.") for n in range(1, 7)]
+        self.report("waterer", NOW, notes=["One note from the night."])
+        before = {i: dict(self.lessons.get(i)) for i in ids}
+        first = self.morning.view(NOW)
+        later = self.morning.view(NOW + 3 * DAY)  # three mornings with no answer
+        self.assertEqual({i: dict(self.lessons.get(i)) for i in ids}, before)  # each one stays off, waiting
+        self.assertEqual([c["id"] for c in later["cards"]], [c["id"] for c in first["cards"]])
+        stack = [body(mod.render(v, token="t")).split('id="lessons"', 1)[1].split("</section>", 1)[0]
+                 for v in (first, later)]
+        self.assertEqual(stack[0], stack[1])  # the waiting stack reads the same, no age, no nag
+        self.assertNotRegex(re.sub(r"<[^>]+>", " ", body(mod.render(later, token="t"))), self.LEFT)
+
+    def test_what_needs_no_answer_sits_in_one_closed_fold(self):
+        self.high("Water bed 1 twice.")
+        self.report("waterer", NOW, notes=["One note from the night."])
+        (self.dir / "night-waterer-bad.json").write_text("{", encoding="utf-8")
+        page = body(self.page())
+        self.assertEqual(page.count('<details class="overnight" id="overnight">'), 1)  # no open attribute: closed
+        self.assertIn("What happened overnight", page)
+        fold = page.split('<details class="overnight"', 1)[1]
+        for part in ("One note from the night.", "The night's notes", "New in the last day", "Trials", "Pulled",
+                     "A saved night report could not be read"):
+            self.assertIn(part, fold, part)
+            self.assertNotIn(part, open_part(page), part)
+
+    def test_a_paused_trial_stays_open_with_its_stop(self):
+        lid = self.lessons.propose("Water the seedlings at dawn.", ["seedling"], sources=[], now=NOW - DAY)
+        with self.db.tx() as c:
+            c.execute("INSERT INTO trial_marks (agent, lesson_id, kind, value, detail, at) VALUES (?, ?, 'paused', 1, "
+                      "'{}', ?)", ("waterer", lid, NOW - 60))
+        page = body(self.page())
+        outside = page.split('<details class="overnight"', 1)[0]
+        self.assertIn(f'id="p{lid}"', outside)
+        self.assertIn("waterer, paused", outside)
+        self.assertIn(f'action="/stop"><input type="hidden" name="token" value="t0ken"><input type="hidden" '
+                      f'name="lesson" value="{lid}">', outside)
+
+    def test_the_page_says_user_never_owner_or_operator(self):
+        kept = tm.kept_lesson(self.lessons, "Water the grown beds deeply.", ["grown"], yes_by=mod.BY, now=NOW)
+        self.morning.stop(kept, "It drowned the roots.", now=NOW)
+        self.high("Water bed 1 twice.")
+        words = re.sub(r"<[^>]+>", " ", body(self.page())).lower()
+        self.assertIn("stopped by the user", words)
+        for bad in ("owner", "operator", "learning", "fast reflection"):
+            self.assertNotIn(bad, words, bad)
 
 
 class Stack(tm.Base):
@@ -142,7 +217,7 @@ class Sides(unittest.TestCase):
         self.assertEqual(mod.source_text(ADAPTED),
                          'adapted fully from fan cases: "Spun before noon" helps; there spun before noon: 5 of 9 ended '
                          'cooled; the other cases: 2 of 8; chance it is better 88%')
-        self.assertEqual(mod.source_text("edited by the owner from lesson 4"), "edited by the owner from lesson 4")
+        self.assertEqual(mod.source_text("edited by the user from lesson 4"), "edited by the user from lesson 4")
         self.assertEqual(mod.source_text(None), "")
 
 

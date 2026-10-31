@@ -56,8 +56,9 @@ a card whose group beat the agent is drawn more often (per loss, grow.LOST_WEIGH
 grow.MAX_COUNTED_LOSSES losses counted), and each side's
 share and the capped wants are held on the training draws; the gate draws at the weights before
 any loss, its capped wants held on its own. Each training match's result is counted in the pool,
-practice-<kind>.json in the owner's state folder (grow.owner_of). Agents of one kind under one
-owner share the pool; a new one starts with zero lessons and faces the same customers.
+practice-<kind>.json in the owner's state folder (grow.owner_of: the folder above the agent's
+when its owner.json names the owner the plug names, else the agent's own). Agents of one kind
+under one owner share the pool; a new one starts with zero lessons and faces the same customers.
 
 --quick is the short run for judges (docs/judges.md): one round of one training match and a gate
 of one match (QUICK_TRUST, in place of --trust), at most QUICK_CALLS model calls in this run on

@@ -29,8 +29,9 @@ output: cards/persona-NN.json, replay.jsonl (every won and lost chat, cleaned, f
 replay) and summary.json (counts). Folders 0700, files 0600, no link followed. It prints
 counts only, never a message, a name, a phone or a path.
 
---state names the owner's state folder (arena/grow.py): when its pool of practice customers grown
-from the Sales agent's real chats holds any, they join the tagged chats before step 5, so the
+--state names the Sales agent's state folder, as arena/run.py --state does: the pool read is its
+owner's (arena/grow.py for_state), the folder above it only when an owner.json there names the
+owner its plug names. When that pool of practice customers grown from the real chats holds any, they join the tagged chats before step 5, so the
 cards stand for both and the caps hold over all of them. Each card then says how many of its
 chats came from the pool ("grown"), and arena/run.py adds no grown card again on top of them.
 
@@ -475,7 +476,7 @@ def main(argv=None, *, model=None):
                     help="hours of quiet after the store's answer that make a chat lost (default 48)")
     ap.add_argument("--max-files", type=int, default=hist.MAX_FILES,
                     help=f"files read at most, for this build only (default {hist.MAX_FILES}, most {MOST_FILES})")
-    ap.add_argument("--state", default=None, help="the owner's state folder: its grown practice customers join")
+    ap.add_argument("--state", default=None, help="the agent's state folder, as arena/run.py takes it: its owner's grown practice customers join")
     ap.add_argument("--scripted", action="store_true", help="the scripted model: no call, no key")
     ap.add_argument("--json", action="store_true", help="print the summary as JSON")
     args = ap.parse_args(argv)
@@ -500,8 +501,8 @@ def main(argv=None, *, model=None):
         if args.state:
             from arena import grow
             try:
-                grown = grow.Pool(args.state, grow.DEFAULT_KIND).items or None  # an empty pool folds in nothing
-            except grow.Refused as e:
+                grown = grow.for_state(args.state).items or None  # an empty pool folds in nothing
+            except ValueError as e:  # grow.Refused, or a plug in the folder that does not load
                 raise hist.Refused(str(e)) from None
         if args.scripted:
             model = ScriptedModel(recipe)

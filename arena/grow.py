@@ -48,13 +48,19 @@ unwinnable share holds.
 
 Pools are per owner (item 51). The pool is practice-<kind>.json in the owner's state folder (in
 data/, which git ignores, or outside the repo). An agent's own folder is the folder of its
-database; when that folder holds the agent's plug (<folder>/plug.json), the owner's folder is the
-one above it, so several agents of one owner each keep their own database and Arena files and
-share one owner folder. A sibling is a plug of the same kind (engine/plug.py kind) in the same
-owner folder: siblings share the pool, so a new agent of a kind the owner already runs starts
-with zero lessons (item 20) and faces the practice customers its siblings' real work grew. A pool
-path outside the owner's folder is refused, a link included, so nothing crosses to another
-owner, even cleaned.
+database. Folders alone never say who the owner is: the owner's folder is the one above the
+agent's only when that folder holds owner.json naming an owner ({"owner": name}) and the agent's
+plug (<folder>/plug.json) names the same owner (engine/plug.py owner). Then several agents of one
+owner each keep their own database and Arena files and share one owner folder. With no marker,
+or a plug naming no owner or another, the agent's own folder is its owner's and its pool is its
+own (the night says "this agent only"), so two owners' agents laid side by side under one folder
+never share. A sibling is a plug of the same kind (engine/plug.py kind) naming the same owner in
+a folder under the owner's: siblings share the pool, so a new agent of a kind the owner already
+runs starts with zero lessons (item 20) and faces the practice customers its siblings' real work
+grew. A pool path outside the owner's folder is refused, a link included, so nothing crosses to
+another owner, even cleaned. A pool file naming another kind is refused, and so are values that
+are not exactly the shape this file writes; the pool is written under a fresh name and moved into
+place (arena/personas.py _write), never through a link, readable by its user only.
 
 The tagger's calls count against the Arena's daily cap in the agent's own folder (arena/run.py
 Calls), at most MAX_NEW chats a night. The step needs the persona recipe (arena/recipe.py,
@@ -85,8 +91,9 @@ MAX_PENDING = 2000  # chats read first the next night
 MAX_TRIES = 7       # nights a pending chat is read before it is let go
 MAX_PATTERN = 20_000
 DEFAULT_KIND = "sales"
-KIND = re.compile(r"[a-z][a-z0-9_]{0,40}")
+KIND = plug_mod.AGENT_NAME  # one rule for a plug's kind and the pool's: a kind the plug takes, the pool takes
 POOL_FILE = "practice-{kind}.json"
+OWNER_FILE = "owner.json"
 PERSON = "person"  # kit/chats.py PERSON: a team member's own reply
 
 
@@ -101,10 +108,35 @@ def kind_of(plug):
     return getattr(plug, "kind", "") or plug.agent
 
 
+def owner_name(folder):
+    """The owner folder holds owner.json ({"owner": a name}); the name, or None when it holds none,
+    a link, or a file that is not exactly that."""
+    path = Path(folder) / OWNER_FILE
+    if path.is_symlink() or not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    name = data.get("owner") if isinstance(data, dict) else None
+    return name if isinstance(name, str) and KIND.fullmatch(name) else None
+
+
+def _plug_at(folder):
+    path = Path(folder) / "plug.json"
+    try:
+        return plug_mod.load(path) if path.is_file() else None
+    except (OSError, ValueError):
+        return None
+
+
 def owner_of(folder):
-    """The owner's state folder for an agent's folder (see the module lines)."""
+    """The owner's state folder for an agent's folder (see the module lines): the folder above it
+    when that folder's owner.json names the owner the agent's plug names, else its own folder."""
     folder = Path(folder).expanduser().resolve()
-    return folder.parent if (folder / "plug.json").is_file() else folder
+    plug = _plug_at(folder)
+    marker = owner_name(folder.parent)
+    return folder.parent if plug is not None and marker is not None and plug.owner == marker else folder
 
 
 def kind_at(folder, default=DEFAULT_KIND):
@@ -114,14 +146,17 @@ def kind_at(folder, default=DEFAULT_KIND):
 
 
 def siblings(owner, kind):
-    """The agents of this kind with a plug in the owner's folder (<folder>/plug.json), sorted."""
+    """The agents of this kind that share the owner's folder, sorted: a plug in a folder under it
+    (<folder>/plug.json) naming the owner its owner.json names. None when it names no owner (an
+    agent's own folder)."""
+    owner = Path(owner).expanduser().resolve()
+    marker = owner_name(owner)
+    if marker is None:
+        return []
     out = []
-    for path in sorted(Path(owner).expanduser().resolve().glob("*/plug.json")):
-        try:
-            plug = plug_mod.load(path)
-        except (OSError, ValueError):
-            continue
-        if kind_of(plug) == kind:
+    for path in sorted(owner.glob("*/plug.json")):
+        plug = _plug_at(path.parent)
+        if plug is not None and plug.owner == marker and kind_of(plug) == kind:
             out.append(plug.agent)
     return out
 
@@ -156,6 +191,8 @@ class Pool:
         except (OSError, ValueError):
             data = {}
         data = data if isinstance(data, dict) else {}
+        if data.get("kind", kind) != kind:
+            raise Refused("the pool file is for another kind of agent")
         self.items = [i for i in (data.get("items") or []) if _item_ok(i)][-MAX_ITEMS:]
         read = data.get("read") if isinstance(data.get("read"), dict) else {}
         self.read = {k: [v[0], float(v[1])] for k, v in read.items()
@@ -169,7 +206,8 @@ class Pool:
                        and _count(v.get("played")) and _count(v.get("lost"))}
         self.cards = [c for c in (data.get("cards") or []) if _card_ok(c)]
         capped = data.get("capped")  # None until the pool is first built from a recipe
-        self.capped = [c for c in capped if _capped_ok(c)] if isinstance(capped, list) else None
+        # one entry out of shape and the example recipe's caps hold instead (item 33), never none
+        self.capped = list(capped) if isinstance(capped, list) and all(map(_capped_ok, capped)) else None
         self.split = data["split"] if _split_ok(data.get("split")) else None  # the gate's held ids (arena/run.py)
         self._keys = {i["read"] for i in self.items if "read" in i}
         self.changed = False
@@ -247,13 +285,14 @@ class Pool:
         self.changed = True
 
     def save(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_name(self.path.name + ".tmp")
-        tmp.write_text(json.dumps({"kind": self.kind, "items": self.items, "read": self.read, "pending": self.pending,
-                                   "floor": self.floor, "played": self.played,
-                                   "cards": self.cards, "capped": self.capped, "split": self.split}, ensure_ascii=False), encoding="utf-8")
-        os.chmod(tmp, 0o600)
-        tmp.replace(self.path)
+        """Written under a fresh name (0600, never through a link) and moved onto the pool file, the
+        way the persona build writes (arena/personas.py _write); a new owner folder is made 0700."""
+        from arena.personas import _write
+        os.makedirs(self.path.parent, mode=0o700, exist_ok=True)
+        _write(self.path, json.dumps({"kind": self.kind, "items": self.items, "read": self.read,
+                                      "pending": self.pending, "floor": self.floor, "played": self.played,
+                                      "cards": self.cards, "capped": self.capped, "split": self.split},
+                                     ensure_ascii=False).encode("utf-8"))
         self.changed = False
 
     def summary(self):
@@ -283,19 +322,42 @@ def _time(v):
 
 
 def _item_ok(i):
+    """{label, tags, style, turns} in the shapes arena/tag.py, cards.style_of and personas.turns_of
+    give, so the card code (arena/cards.py build) never meets a value it cannot read."""
     return (isinstance(i, dict) and i.get("label") in (label_mod.WON, label_mod.LOST)
-            and isinstance(i.get("tags"), dict) and isinstance(i.get("style"), dict) and isinstance(i.get("turns"), list))
+            and _tags_ok(i.get("tags")) and _style_ok(i.get("style")) and isinstance(i.get("turns"), list)
+            and all(isinstance(t, dict) and isinstance(t.get("from"), str)
+                    and isinstance(t.get("text", ""), str) for t in i["turns"]))
+
+
+def _tags_ok(t):
+    return (isinstance(t, dict) and all(isinstance(t.get(k), str) for k in ("worry", "want", "buy_trigger"))
+            and _count(t.get("patience")) and isinstance(t.get("no_budget"), bool))
+
+
+def _style_ok(s):
+    return (isinstance(s, dict) and isinstance(s.get("length"), str) and isinstance(s.get("opening"), str)
+            and _time(s.get("voice_notes")) and isinstance(s.get("language"), dict)
+            and all(_time(s["language"].get(k)) for k in cards_mod.LANGUAGES))
 
 
 def _card_ok(c):
     return (isinstance(c, dict) and isinstance(c.get("id"), str) and c["id"].startswith("grown-")
-            and isinstance(c.get("arena_weight"), (int, float)) and isinstance(c.get("want"), list))
+            and _time(c.get("arena_weight")) and c["arena_weight"] >= 0
+            and isinstance(c.get("chats"), int) and not isinstance(c["chats"], bool) and c["chats"] >= 1
+            and isinstance(c.get("want"), list) and all(isinstance(w, str) for w in c["want"]))
 
 
 def _capped_ok(c):
-    return (isinstance(c, dict) and isinstance(c.get("name"), str) and isinstance(c.get("pattern"), str)
+    if not (isinstance(c, dict) and isinstance(c.get("name"), str) and isinstance(c.get("pattern"), str)
             and len(c["pattern"]) <= MAX_PATTERN and isinstance(c.get("most"), (int, float))
-            and not isinstance(c["most"], bool) and 0 < c["most"] < 1)
+            and not isinstance(c["most"], bool) and 0 < c["most"] < 1):
+        return False
+    try:
+        re.compile(c["pattern"], re.IGNORECASE)
+    except (re.error, RecursionError, OverflowError):
+        return False
+    return True
 
 
 def _slug(text):
@@ -617,7 +679,12 @@ def night(db_path, plug, recipe_path, since, until):
     if rep.get("added"):
         pool.rebuild(recipe)
     if pool.changed:
-        pool.save()
+        try:
+            pool.save()
+        except OSError as e:  # the night's report is still saved; the counts above were not kept
+            rep["stopped"] = f"the pool was not saved ({type(e).__name__})"
+            rep.update(pool.summary())
+            return rep
     if calls.reached:
         rep["stopped"] = "the Arena's call cap"
     elif tagger.stopped:

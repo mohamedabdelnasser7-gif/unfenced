@@ -5,10 +5,14 @@ stages a plug declares, and refuses the rest, so a new agent needs a new plug fi
 and no change to the engine.
 
 Keys (unknown keys are refused, so a typo never passes quietly):
-  agent    the agent's name: lowercase letters, digits and _.
+  agent    the agent's name: lowercase letters, digits and _, starting with a letter, at most 41
+           characters (AGENT_NAME, the pool's kind in arena/grow.py takes the same).
   kind     optional, the kind of agent, named as agent is (default: the agent's name). Agents of
            one kind that one owner runs share the practice cases their real work grew
            (arena/grow.py, DECISIONS item 51).
+  owner    optional, the owner's name, named as agent is. The agent shares its owner's practice
+           cases only when the folder above its own holds owner.json naming the same owner
+           (arena/grow.py owner_of); with no owner, or another, its own folder is its owner's.
   about    optional, one plain line on what the agent does.
   case     one plain line: what one case is for this agent.
   fields   tags for the field the agent works in. Lessons carry them, so an agent can
@@ -64,7 +68,8 @@ from types import MappingProxyType
 FAST, SLOW = "fast", "slow"
 ALL = "all"  # the stage tag of a lesson that fits every stage
 NAME = re.compile(r"^[a-z][a-z0-9_]*$")
-KEYS = {"agent", "kind", "about", "case", "fields", "stages", "actions", "results", "causes", "source", "harm",
+AGENT_NAME = re.compile(r"[a-z][a-z0-9_]{0,40}")  # agent, kind and owner: a file name part in arena/grow.py
+KEYS = {"agent", "kind", "owner", "about", "case", "fields", "stages", "actions", "results", "causes", "source", "harm",
         "decides", "risk", "trial", "slot", "exam"}
 REQUIRED = {"agent", "case", "actions", "results", "causes", "source", "harm", "decides", "risk", "trial", "slot"}
 LEVELS_WHY = "the owner sets both trial levels here, fast and careful, each {share, days}"
@@ -158,6 +163,7 @@ class Plug:
     trial_worst_cost: float = WORST_COST
     exam: Exam | None = None  # the plug's exam (engine/exam.py); None when it has none
     kind: str = ""  # the kind of agent; the agent's name when the plug names none
+    owner: str = ""  # the owner's name (arena/grow.py owner_of); empty when the plug names none
 
     def action(self, name):
         """The action's line; ValueError when this plug does not declare it."""
@@ -209,7 +215,7 @@ def from_dict(d, folder=None):
         raise ValueError("a plug is one JSON object")
     _gone(d, "the plug")
     _keys(d, KEYS, REQUIRED, "the plug", WHY)
-    agent = _name(d["agent"], "agent")
+    agent = _name(d["agent"], "agent", AGENT_NAME)
     stages = tuple(_name(s, "stage") for s in _list(d.get("stages", []), "stages"))
     if ALL in stages:
         raise ValueError(f'"{ALL}" is kept for lessons that fit every stage')
@@ -238,7 +244,8 @@ def from_dict(d, folder=None):
                 about=_line(d["about"], "about") if "about" in d else "",
                 trial_holdback=float(holdback), trial_worst_cost=float(worst),
                 exam=_exam(d["exam"], folder) if "exam" in d else None,
-                kind=_name(d["kind"], "kind") if "kind" in d else agent)
+                kind=_name(d["kind"], "kind", AGENT_NAME) if "kind" in d else agent,
+                owner=_name(d["owner"], "owner", AGENT_NAME) if "owner" in d else "")
 
 
 def _exam(e, folder):
@@ -389,9 +396,10 @@ def _keys(d, allowed, required, where, why=None):
         raise ValueError(f"{where}: missing {missing[0]!r}" + (f": {what}" if what else ""))
 
 
-def _name(v, what):
-    if not isinstance(v, str) or not NAME.match(v):
-        raise ValueError(f"{what} {v!r}: lowercase letters, digits and _, starting with a letter")
+def _name(v, what, rx=NAME):
+    if not isinstance(v, str) or not rx.fullmatch(v):
+        raise ValueError(f"{what} {v!r}: lowercase letters, digits and _, starting with a letter"
+                         + (", at most 41 characters" if rx is AGENT_NAME else ""))
     return v
 
 

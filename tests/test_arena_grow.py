@@ -82,14 +82,21 @@ def recipe():
     return recipe_mod.load(recipe_mod.EXAMPLE)
 
 
-def write_plug(where, agent, kind=None):
+def write_plug(where, agent, kind=None, owner=None):
     d = json.loads(SALES_PLUG.read_text(encoding="utf-8"))
     d.pop("exam", None)
     d["agent"] = agent
     if kind:
         d["kind"] = kind
+    if owner:
+        d["owner"] = owner
     where.mkdir(parents=True, exist_ok=True)
     (where / "plug.json").write_text(json.dumps(d), encoding="utf-8")
+
+
+def write_owner(folder, name):
+    """The owner marker: folder is the owner's state folder of the plugs naming name."""
+    (folder / grow.OWNER_FILE).write_text(json.dumps({"owner": name}), encoding="utf-8")
 
 
 def grown_pool(test, owner, chats=ALL):
@@ -569,9 +576,10 @@ class NamesFromOrders(unittest.TestCase):
 class Siblings(unittest.TestCase):
     def setUp(self):
         self.owner = folder(self)
-        write_plug(self.owner / "store_a", "store_a", "sales")
-        write_plug(self.owner / "store_b", "store_b", "sales")
-        write_plug(self.owner / "other", "other_kind")
+        write_owner(self.owner, "acme")
+        write_plug(self.owner / "store_a", "store_a", "sales", owner="acme")
+        write_plug(self.owner / "store_b", "store_b", "sales", owner="acme")
+        write_plug(self.owner / "other", "other_kind", owner="acme")
 
     def test_plugs_of_one_kind_in_one_owner_folder_share_the_pool(self):
         a, b = grow.for_state(self.owner / "store_a"), grow.for_state(self.owner / "store_b")
@@ -627,8 +635,9 @@ class ZeroLessonsAtStart(unittest.TestCase):
     def setUp(self):
         clean_env(self)
         self.owner = folder(self)
-        write_plug(self.owner / "store_a", "store_a", "sales")
-        write_plug(self.owner / "store_b", "store_b", "sales")
+        write_owner(self.owner, "acme")
+        write_plug(self.owner / "store_a", "store_a", "sales", owner="acme")
+        write_plug(self.owner / "store_b", "store_b", "sales", owner="acme")
         grown_pool(self, self.owner)
         self.cards = self.owner / "cards"
         self.cards.mkdir()
@@ -716,6 +725,173 @@ class NightStep(unittest.TestCase):
         rep = self.run_main()
         self.assertTrue(rep["practice"]["stopped"].startswith("no recipe"))
         self.assertFalse((self.dir / "practice-sales.json").exists())
+
+    def test_a_failing_practice_step_still_saves_the_report(self):
+        with mock.patch.object(grow, "night", side_effect=RuntimeError("made-up")):
+            rep = self.run_main("--recipe", str(recipe_mod.EXAMPLE))
+        self.assertEqual(rep["practice"], {"kind": "sales", "stopped": "failed: RuntimeError"})
+        self.assertIn("snapshot", rep)
+
+    def test_a_pool_that_cannot_be_saved_is_named_and_the_report_saved(self):
+        with mock.patch.object(grow.Pool, "save", side_effect=PermissionError("made-up")):
+            rep = self.run_main("--recipe", str(recipe_mod.EXAMPLE))
+        self.assertEqual(rep["practice"]["stopped"], "the pool was not saved (PermissionError)")
+        self.assertEqual(rep["practice"]["added"], 2)
+        self.assertFalse((self.dir / "practice-sales.json").exists())
+
+
+class OwnerMarker(unittest.TestCase):
+    """Folders alone never make an owner (red team F3, review 6): owner.json above the agents'
+    folders names the owner, and each plug must name the same one."""
+
+    def setUp(self):
+        self.root = folder(self)
+
+    def test_two_owners_side_by_side_with_no_marker_never_share(self):
+        write_plug(self.root / "ownera_sales", "ownera_sales", "sales")
+        write_plug(self.root / "ownerb_sales", "ownerb_sales", "sales")
+        a, b = grow.for_state(self.root / "ownera_sales"), grow.for_state(self.root / "ownerb_sales")
+        self.assertEqual(a.path, self.root / "ownera_sales" / "practice-sales.json")
+        self.assertNotEqual(a.path, b.path)
+        self.assertEqual(grow.siblings(a.owner, "sales"), [])
+        grown_pool(self, a.owner)
+        self.assertEqual(grow.for_state(self.root / "ownerb_sales").items, [])
+        self.assertEqual(a.summary()["siblings"], [])
+
+    def test_a_plug_naming_no_owner_or_another_keeps_its_own_folder(self):
+        write_owner(self.root, "acme")
+        write_plug(self.root / "mine", "mine", "sales", owner="acme")
+        write_plug(self.root / "none", "none", "sales")
+        write_plug(self.root / "zed", "zed", "sales", owner="zed")
+        self.assertEqual(grow.owner_of(self.root / "mine"), self.root)
+        self.assertEqual(grow.owner_of(self.root / "none"), self.root / "none")
+        self.assertEqual(grow.owner_of(self.root / "zed"), self.root / "zed")
+        self.assertEqual(grow.siblings(self.root, "sales"), ["mine"])
+
+    def test_a_marker_that_is_a_link_or_not_exactly_a_name_names_no_owner(self):
+        write_plug(self.root / "mine", "mine", "sales", owner="acme")
+        other = folder(self)
+        write_owner(other, "acme")
+        os.symlink(other / grow.OWNER_FILE, self.root / grow.OWNER_FILE)
+        self.assertEqual(grow.owner_of(self.root / "mine"), self.root / "mine")
+        os.unlink(self.root / grow.OWNER_FILE)
+        for bad in ('{"owner": "Acme"}', '{"owner": ["acme"]}', '["acme"]', "not json"):
+            (self.root / grow.OWNER_FILE).write_text(bad, encoding="utf-8")
+            self.assertEqual(grow.owner_of(self.root / "mine"), self.root / "mine", bad)
+            self.assertEqual(grow.siblings(self.root, "sales"), [], bad)
+
+    def test_personas_state_reads_the_pool_the_arena_reads(self):
+        from arena import personas
+        write_owner(self.root, "acme")
+        write_plug(self.root / "store_a", "store_a", "sales", owner="acme")
+        grown_pool(self, self.root)
+        seen = {}
+
+        def fake_run(*a, grown=None, **k):
+            seen["grown"] = grown
+            return {}
+        with mock.patch.object(personas, "run", side_effect=fake_run), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            code = personas.main(["--source", str(folder(self)), "--out", str(folder(self) / "out"),
+                                  "--recipe", str(recipe_mod.EXAMPLE), "--state", str(self.root / "store_a"),
+                                  "--scripted", "--json"])
+        self.assertEqual(code, 0)
+        self.assertEqual(seen["grown"], grow.for_state(self.root / "store_a").items)
+        self.assertEqual(len(seen["grown"]), 2)
+
+    def test_the_plug_owner_key(self):
+        write_plug(self.root / "mine", "mine", "sales", owner="acme")
+        self.assertEqual(plug_mod.load(self.root / "mine" / "plug.json").owner, "acme")
+        self.assertEqual(plug_mod.load(SALES_PLUG).owner, "")
+
+
+class PoolFile(unittest.TestCase):
+    """The pool's file: written the safe way, its kind and values checked on load (F4, F6)."""
+
+    def setUp(self):
+        self.owner = folder(self)
+        self.pool, _, _ = grown_pool(self, self.owner)
+        self.data = json.loads(self.pool.path.read_text(encoding="utf-8"))
+
+    def reload(self, **changes):
+        self.pool.path.write_text(json.dumps({**self.data, **changes}), encoding="utf-8")
+        return grow.Pool(self.owner, "sales")
+
+    def test_save_writes_through_no_link_and_a_new_owner_folder_is_private(self):
+        outside = folder(self) / "outside.json"
+        outside.write_text("kept", encoding="utf-8")
+        os.symlink(outside, self.pool.path.with_name(self.pool.path.name + ".tmp"))
+        self.pool.save()
+        self.assertEqual(outside.read_text(encoding="utf-8"), "kept")
+        self.assertFalse(self.pool.path.is_symlink())
+        self.assertEqual(os.stat(self.pool.path).st_mode & 0o777, 0o600)
+        fresh = folder(self) / "new-owner"
+        pool = grow.Pool(fresh, "sales")
+        pool.changed = True
+        pool.save()
+        self.assertEqual(os.stat(fresh).st_mode & 0o777, 0o700)
+        self.assertEqual(os.stat(pool.path).st_mode & 0o777, 0o600)
+        self.assertEqual(sorted(p.name for p in fresh.iterdir()), ["practice-sales.json"])
+
+    def test_a_pool_file_of_another_kind_is_refused(self):
+        with self.assertRaises(grow.Refused):
+            self.reload(kind="marketing")
+
+    def test_a_bad_capped_pattern_gives_the_example_caps(self):
+        pool = self.reload(capped=[{"name": "printing", "pattern": "(", "most": 0.25},
+                                   {"name": "size", "pattern": "size", "most": 0.25}])
+        self.assertIsNone(pool.capped)  # the example recipe's caps (item 33) hold, not none
+        grow.decks([card(1, "size")], pool, set())
+        self.assertEqual(self.reload(capped=[{"name": "size", "pattern": "size", "most": 0.25}]).capped,
+                         [{"name": "size", "pattern": "size", "most": 0.25}])
+
+    def test_cards_with_values_the_deck_cannot_draw_are_dropped(self):
+        good = self.data["cards"][0]
+        bad = [{**good, "chats": 1e999}, {**good, "chats": 0}, {**good, "chats": True}, {**good, "chats": 1.5},
+               {**good, "arena_weight": float("inf")}, {**good, "arena_weight": float("nan")},
+               {**good, "arena_weight": -1}, {**good, "want": ["ok", 3]}]
+        for c in bad:
+            self.assertEqual(self.reload(cards=[c]).cards, [], c)
+        self.assertEqual(len(self.reload(cards=[good]).cards), 1)
+
+    def test_items_with_tags_or_style_out_of_shape_are_dropped(self):
+        item = self.data["items"][0]
+        bad = [{**item, "tags": {**item["tags"], "patience": "3"}},
+               {**item, "tags": {**item["tags"], "worry": None}},
+               {**item, "tags": {**item["tags"], "no_budget": 0}},
+               {**item, "style": {**item["style"], "language": {}}},
+               {**item, "style": {**item["style"], "voice_notes": float("nan")}},
+               {**item, "style": {**item["style"], "length": 3}},
+               {**item, "turns": [{"from": "customer", "text": 5}]},
+               {**item, "turns": ["text"]}]
+        for i in bad:
+            self.assertEqual(self.reload(items=[i]).items, [], i)
+        self.assertEqual(len(self.reload(items=[item]).items), 1)
+        with self.assertRaises(ValueError):
+            self.pool.add(bad[0], "c-x", 1, NOW)
+
+
+class KindRule(unittest.TestCase):
+    """One rule for a plug's kind and the pool's (F10)."""
+
+    def plug(self, **keys):
+        d = json.loads(SALES_PLUG.read_text(encoding="utf-8"))
+        d.pop("exam")
+        return plug_mod.from_dict({**d, **keys})
+
+    def test_a_kind_the_plug_takes_the_pool_takes(self):
+        self.assertIs(grow.KIND, plug_mod.AGENT_NAME)
+        longest = "k" * 41
+        self.assertEqual(self.plug(kind=longest).kind, longest)
+        grow.Pool(folder(self), longest)
+        for bad in ("k" * 42, "sales\n"):
+            with self.assertRaises(ValueError):
+                self.plug(kind=bad)
+            with self.assertRaises(grow.Refused):
+                grow.Pool(folder(self), bad)
+        for key in ("agent", "owner"):
+            with self.assertRaises(ValueError):
+                self.plug(**{key: "a" * 42})
 
 
 if __name__ == "__main__":

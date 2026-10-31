@@ -57,7 +57,8 @@ For the Sales agent, and any agent of its kind, the night then grows its practic
 the chat itself, the lost and hard ones cleaned and tagged with the persona recipe (--recipe, a
 private file outside the repo), join the owner's pool, shared by that owner's agents of the same
 kind only, so tomorrow's Arena faces them. The tagger's calls count against the Arena's daily cap.
-The report names the counts as practice (practice.stopped says why, with no recipe given too).
+The report names the counts as practice (practice.stopped says why, with no recipe given too, or
+the step's error by its type when it failed: the report is still saved).
 
 It refuses to start without the keys its parts need and names the missing variable. It
 never prints a key: a part that fails is named in the notes by its plain reason only.
@@ -541,7 +542,10 @@ def main(argv=None, *, until=None):
     # ---- practice customers from the window's real chats (arena/grow.py; DECISIONS items 30, 48, 51)
     from arena import grow
     if grow.kind_of(plug) == grow.DEFAULT_KIND:
-        rep["practice"] = grow.night(args.db, plug, args.recipe, rep["window"]["since"], rep["window"]["until"])
+        try:
+            rep["practice"] = grow.night(args.db, plug, args.recipe, rep["window"]["since"], rep["window"]["until"])
+        except Exception as e:  # the lessons went in already: the report and its rollback line are still saved
+            rep["practice"] = {"kind": grow.kind_of(plug), "stopped": f"failed: {type(e).__name__}"}
     # ---- end of the practice step
     path = save(rep, args.db)
     if args.json:

@@ -52,7 +52,12 @@ a lesson is sorted first, so a kind like a joke is handed over and never becomes
 note is saved where the receiving agent reads it (handover.received) and the report shows it as one
 quiet line; nothing waits for a yes.
 
-For the personal assistant, the night then takes the new mode step (assistant/newmode.py,
+For the personal assistant, the night first sends its Arena new practice days (DECISIONS items
+30, 32; assistant/arena.py take_finished): each day the user lived and finished that is worth
+practising (the user corrected something, or the code found a missed urgent item, a clash or
+another miss) is cleaned and joins the Arena's pool in the assistant's folder; easy days are
+skipped. The report counts them as practice_days.
+Then it takes the new mode step (assistant/newmode.py,
 DECISIONS item 36): the day's moments that fit no mode, kept in the assistant's folder
 (--assistant-state, data/assistant unless named, the Arena's folder), may become one mode card
 after the Arena plays the user's past days (the real days in that folder's pool) without and with
@@ -305,6 +310,12 @@ def assistant_state(value=None):
     return state
 
 
+def practice_days(state):
+    """The assistant's finished days worth practising, cleaned, join its Arena's pool; returns the counts."""
+    from assistant import arena as assistant_arena
+    return assistant_arena.take_finished(state)
+
+
 def new_mode(db_path, state):
     """The assistant's new mode step: at most one mode card next to the database, from the kept
     moments, tested in the Arena on the real days in the folder's pool. Returns (the card's path
@@ -552,6 +563,7 @@ def main(argv=None, *, until=None):
     if Path(args.db).resolve() != DEFAULT_PATH.resolve():
         rep["snapshot"]["db"] = args.db
     if state is not None:
+        rep["practice_days"] = practice_days(state)
         card, stopped = new_mode(args.db, state)
         rep["mode_card"] = None if card is None else str(card)
         if stopped:
@@ -569,6 +581,9 @@ def main(argv=None, *, until=None):
         print(json.dumps(rep, ensure_ascii=False, indent=1))
     else:
         print(text(rep, plug))
+        if rep.get("practice_days"):
+            p = rep["practice_days"]
+            print(f"  new practice days for the Arena: {p['added']} added, {p['easy']} easy days skipped")
         if rep.get("mode_card"):
             print(f"  a new mode card waits on the Morning page: {rep['mode_card']}")
         if rep.get("practice"):

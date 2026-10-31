@@ -14,9 +14,22 @@ With no file, or no level for this agent, the public placeholder asks every day 
 
 Both sides grow (items 30, 32). A day that beats the assistant comes back more often: the pool
 (assistant-days.json in the state folder) counts each seed's losses, and a lost seed is drawn
-LOST_WEIGHT times as often per loss. Real days join the pool through add_day (days the user
-lived, read back by Reflection with their answers), and a user picture (assistant/mbox.py) seeds
-the simulated days with the user's own hours and people.
+LOST_WEIGHT times as often per loss. Real days join the pool through add_day, and a user picture
+(assistant/mbox.py) seeds the simulated days with the user's own hours and people.
+
+The real days come in two steps. At the end of each day the user lived, keep_finished adds it to
+finished-days.jsonl in the state folder: the day shaped like a simulated one, with how many
+times the user corrected the assistant and which checks the code found failed. At night,
+Reflection (reflection/night.py) runs take_finished: a day worth practising (the user corrected
+something, or the code found a miss: an urgent item, a clash or any other check) is cleaned
+(clean_day) and joins the pool once; an easy day (won, nothing corrected) is skipped. The file is
+then removed, so the uncleaned days do not stay on disk after the night read them.
+
+clean_day uses the Arena's cleaner (arena/clean.py) on every text (subjects, bodies, titles, the
+user's own words): names, phones, numbers, emails, links and places out; dates in YYYY-MM-DD form
+are kept, so a promise still names its day. Every address becomes person<n>@practice.test, the
+same person the same address all day, and the user user@practice.test. The writing style is
+dropped. A planted instruction's mark is kept only when it still reads in its cleaned email.
 
 close_day writes a played day's results to the engine log, so the night study reads them: a
 failed urgent check is urgent_missed, a failed clash check is clash, and a won day with no
@@ -31,8 +44,10 @@ Model calls go through kit/model.py (Muse Spark Open) and count against the Aren
 cap, stops the gate; that day is dropped, never a loss.
 """
 import argparse
+import copy
 import json
 import random
+import re
 import sys
 from pathlib import Path
 
@@ -50,8 +65,12 @@ from kit.model import ModelError  # noqa: E402
 
 AGENT = "assistant"
 DAYS_FILE = "assistant-days.json"
+FINISHED_FILE = "finished-days.jsonl"
 LOST_WEIGHT = 3
 POOL_SIZE = 50
+PRACTICE_USER = "user@practice.test"
+TEXTS = ("subject", "body", "title", "text")
+ISO_DATE = re.compile(r"\b[0-9]{4}-[0-9]{2}-[0-9]{2}\b")
 
 
 def load_trust(path):
@@ -126,6 +145,111 @@ class Pool:
         tmp = self.path.with_name(self.path.name + ".tmp")
         tmp.write_text(json.dumps({"seeds": self.seeds, "real": self.real}, ensure_ascii=False), encoding="utf-8")
         tmp.replace(self.path)
+
+
+def keep_finished(state, day, desk, judged):
+    """A day the user lived, at its end, to finished-days.jsonl (see the module lines). Returns the row's
+    signals: how many corrections and which checks failed."""
+    row = {"day": day, "corrected": sum(a["kind"] == "corrected" for a in desk.answers),
+           "failed": sorted({f["check"] for f in judged["failed"]})}
+    path = Path(state) / FINISHED_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return {"corrected": row["corrected"], "failed": row["failed"]}
+
+
+def worth_practising(row):
+    """A finished day is worth practising when the user corrected something or the code found a miss."""
+    return bool(row.get("corrected")) or bool(row.get("failed"))
+
+
+def _clean_text(text, clean):
+    """One text through the Arena's cleaner, its YYYY-MM-DD dates kept as they are."""
+    if not isinstance(text, str):
+        return text
+    out, last = [], 0
+    for m in ISO_DATE.finditer(text):
+        out.append(clean(text[last:m.start()]) if m.start() > last else "")
+        out.append(m.group(0))
+        last = m.end()
+    out.append(clean(text[last:]) if last < len(text) or not out else "")
+    return "".join(out)
+
+
+def clean_day(day):
+    """A finished day, cleaned to join the pool (see the module lines). Raises ValueError when it is
+    not shaped like a simulated day."""
+    from arena.clean import clean
+    if not isinstance(day, dict) or not isinstance(day.get("events"), list) or not isinstance(day.get("hidden"), dict):
+        raise ValueError("a finished day has events and hidden answers, like a simulated one")
+    day = copy.deepcopy(day)
+    user = str(day.get("user") or "").strip().casefold()
+    names = {}
+
+    def addr(a):
+        if not isinstance(a, str):
+            return a
+        key = a.strip().casefold()
+        if key == user:
+            return PRACTICE_USER
+        return names.setdefault(key, f"person{len(names) + 1}@practice.test")
+
+    day["user"] = PRACTICE_USER
+    day["contacts"] = [addr(a) for a in day.get("contacts", [])]
+    for ev in day.get("calendar", []):
+        ev["with"] = [addr(a) for a in ev.get("with", [])]
+        ev["title"] = _clean_text(ev.get("title"), clean)
+    for e in day["events"]:
+        for k in ("from", "to"):
+            if k in e:
+                e[k] = addr(e[k])
+        if "cc" in e:
+            e["cc"] = [addr(a) for a in e["cc"]]
+        for k in TEXTS:
+            if k in e:
+                e[k] = _clean_text(e[k], clean)
+        trap = (e.get("hidden") or {}).get("trap")
+        if trap:
+            mark = _clean_text(str(trap.get("marker", "")), clean).strip()
+            keep = mark and "[" not in mark and mark.casefold() in str(e.get("body", "")).casefold()
+            e["hidden"]["trap"] = {"marker": mark} if keep else None
+    day.pop("seed", None)
+    day.pop("style", None)
+    day["id"] = f"real-{day.get('date')}"
+    return day
+
+
+def take_finished(state):
+    """The night step: each finished day worth practising, cleaned, joins the pool once; easy days are
+    skipped; the file is removed after. Returns the counts."""
+    path = Path(state) / FINISHED_FILE
+    rep = {"added": 0, "easy": 0, "already": 0, "unreadable": 0}
+    if not path.is_file():
+        return rep
+    pool = Pool(state)
+    have = {d.get("id") for d in pool.real}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(line)
+            if not isinstance(row, dict):
+                raise ValueError("not a row")
+            if not worth_practising(row):
+                rep["easy"] += 1
+                continue
+            day = clean_day(row.get("day"))
+        except (ValueError, TypeError, KeyError, AttributeError):
+            rep["unreadable"] += 1
+            continue
+        if day["id"] in have:
+            rep["already"] += 1
+            continue
+        pool.add_day(day)
+        have.add(day["id"])
+        rep["added"] += 1
+    pool.save()
+    path.unlink()
+    return rep
 
 
 def gate(trust, *, model, pool, seeds, rng, picture=None, play=play_day, lessons=None):

@@ -77,6 +77,12 @@ a lesson card through the agent's own lessons and risk check.
    line already among the agent's lessons, or close to a pulled one, is treated as in 5. The
    counts never speak for an idea: its card says it has no past cases and is a try
    (idea_card), and only its trial decides.
+8. Hand over. With a hand over track given (engine/handover.py) and a plug that names
+   hands_over, the night's lost cases are also read for patterns that are another agent's
+   matter: at most one short note a night per receiving agent, only from a kind seen in at
+   least MIN_SOURCES sources. Every line the study would write as a lesson (in 5, 6 and 7) is
+   sorted first: a line that is one of the plug's kinds is handed over and never written; a
+   sort that fails holds the line for a yes.
 
 run() returns the night's report as plain data: what was read and counted, each candidate
 with its numbers, the cards written, what came from other agents, the two switches as they
@@ -109,6 +115,7 @@ PAST = "none in its window"
 LESSON, KNOWN, FEW_CASES, FEW_SOURCES, NO_GAP = (
     "lesson", "already a lesson", "too few cases", "too few sources", "gap not clear")
 PULLED_BEFORE = "pulled before"
+HANDED = "handed over"  # a candidate that is another agent's matter (see 8)
 FAILED_BEFORE = "failed the eval gate before"
 FAILED_GIVEN = 10  # failed lines the proposer and the idea part are given a night, the newest
 FAILS_GIVEN = 3   # failed checks given with each failed line
@@ -126,6 +133,15 @@ IDEAS = 3         # ideas the idea part may write a night. Not a cap on trials (
                   # runs on a stage at a time, so more would only queue on the stages, ahead of
                   # later lessons that have cases, and lengthen the morning page.
 NO_CASES = "no past cases: this is a try"  # how sure an idea's card is today
+
+
+class HandedOver(ValueError):
+    """A line the study would write is one of the plug's hands_over kinds (see 8): handed over to
+    that agent, never written as a lesson here."""
+
+    def __init__(self, to, kind):
+        super().__init__(f"handed over to {to} ({kind}), not a lesson")
+        self.to, self.kind = to, kind
 
 
 class PartError(Exception):
@@ -185,7 +201,7 @@ class Study:
 
     def __init__(self, db, plug, *, proposer, tagger, fit=None, adapter=None, others=(), lessons=None,
                  judge=risk_mod.no_judge, limit=LIMIT, sample=SAMPLE, seed=0, clash=None, ideas=None,
-                 idea_limit=IDEAS):
+                 idea_limit=IDEAS, hand_over=None):
         self.db = db
         self.plug = plug
         self.log = Log(db, plug)
@@ -195,6 +211,7 @@ class Study:
         self.proposer, self.tagger, self.fit, self.adapter = proposer, tagger, fit, adapter
         self.clash = clash
         self.ideas, self.idea_limit = ideas, int(idea_limit)
+        self.hand_over = hand_over  # engine/handover.py Track, or None for no hand over track (see 8)
         self.others = tuple(others)
         self.limit, self.sample, self.seed = int(limit), int(sample), seed
         self._failed_lines, self._given, self._given_ids = set(), [], set()  # this night's failed lines (see 5)
@@ -238,13 +255,19 @@ class Study:
                       f'{self.plug.decides.good}, without it {g0} of {n0}; {rec["with"]["sources"]} and '
                       f'{rec["without"]["sources"]} sources; chance it is better {round(rec["chance"] * 100)}%; '
                       f'cases with it: {_shown(with_)}')
-            card = self._write(cand, source, [c.text for c in _unique(sample + with_)], rec, None, rep,
-                               close=_close(cand["lesson"], pulled, self._failed_lines))
+            try:
+                card = self._write(cand, source, [c.text for c in _unique(sample + with_)], rec, None, rep,
+                                   close=_close(cand["lesson"], pulled, self._failed_lines))
+            except HandedOver as e:  # another agent's matter (see 8): never a lesson here
+                rec["verdict"], rec["handed_to"] = HANDED, {"agent": e.to, "kind": e.kind}
+                continue
             rec["lesson_id"] = card["lesson_id"]
             known[_norm(cand["lesson"])] = KNOWN
         rep["candidates"] = found["candidates"]
         self._across(since, until, known, pulled, rep)
         self._ideas(cases, known, pulled, texts, rep, since, until)
+        rep["hand_over"] = (None if self.hand_over is None else
+                             self.hand_over.night(cases, texts, since, until, now=at, notes=rep["notes"]))
         rep["switches"] = self.lessons.switches.reading(at)
         return rep
 
@@ -429,8 +452,9 @@ class Study:
         asking "replace it?". kind: IDEA for one with no past cases behind it; its card carries
         idea_card. A lesson its exam held (Lessons(exam=...)) waits for a yes, its card's "exam"
         naming the first fail ("" when it passed or took no exam). Returns the card."""
+        held = self._sort(cand, rep)  # raises HandedOver for another agent's matter (see 8)
         against = self._against(cand, rep)
-        trial = close is None and against is None
+        trial = close is None and against is None and not held
         failed_close = close is not None and close in self._failed_lines
         if close is not None:  # the yes asker sees which pulled or failed line it comes close to
             what = "a line that failed the eval gate" if failed_close else "a pulled line"
@@ -467,6 +491,20 @@ class Study:
                 "exam": exam_mod.held_line(self.lessons.exam_of(lid))}  # "" when it passed or took none
         rep["cards"].append(card)
         return card
+
+    def _sort(self, cand, rep):
+        """Raise HandedOver when the line is one of the plug's hands_over kinds (see 8). True when
+        the sort failed, so the line waits for a yes; False when it is this agent's own."""
+        if self.hand_over is None or not self.plug.hands_over:
+            return False
+        try:
+            got = self.hand_over.sort(cand)
+        except Exception as e:  # a failing sort holds the line for a yes
+            rep["notes"].append(f"the hand over sort failed on a line ({_failed(e)}); it waits for a yes")
+            return True
+        if got is not None:
+            raise HandedOver(*got)
+        return False
 
     def _against(self, cand, rep):
         """The first live lesson on the candidate's stages that the clash check says it goes

@@ -57,6 +57,11 @@ Keys (unknown keys are refused, so a typo never passes quietly):
            have, as a share of cases that could lose the good result (0.02 is about 2 in
            100); 0 to 1, default 0.02. A person can move it for one lesson.
   slot     the line the lessons sit under in the agent's prompt.
+  hands_over  optional, {agent: {about, kinds}}: the kinds of pattern in this agent's lost
+           cases that are a matter for another agent, not for this one's lessons, and which
+           agent each goes to (engine/handover.py). agent: the receiving agent's name, never
+           this agent. about, optional: one plain line on what that agent can act on. kinds:
+           {name: one plain line}, at least one; a kind name goes to one agent only.
 """
 import json
 import math
@@ -70,7 +75,7 @@ ALL = "all"  # the stage tag of a lesson that fits every stage
 NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 AGENT_NAME = re.compile(r"[a-z][a-z0-9_]{0,40}")  # agent, kind and owner: a file name part in arena/grow.py
 KEYS = {"agent", "kind", "owner", "about", "case", "fields", "stages", "actions", "results", "causes", "source", "harm",
-        "decides", "risk", "trial", "slot", "exam"}
+        "decides", "risk", "trial", "slot", "exam", "hands_over"}
 REQUIRED = {"agent", "case", "actions", "results", "causes", "source", "harm", "decides", "risk", "trial", "slot"}
 LEVELS_WHY = "the owner sets both trial levels here, fast and careful, each {share, days}"
 WHY = {  # what a missing key is for, said in the refusal
@@ -144,6 +149,15 @@ class Exam:
 
 
 @dataclass(frozen=True)
+class HandOver:
+    """One receiving agent of a plug's hands_over: its name, what it can act on, and the kinds
+    of pattern that go to it ({name: one plain line})."""
+    agent: str
+    about: str
+    kinds: dict
+
+
+@dataclass(frozen=True)
 class Plug:
     agent: str
     case: str
@@ -164,6 +178,7 @@ class Plug:
     exam: Exam | None = None  # the plug's exam (engine/exam.py); None when it has none
     kind: str = ""  # the kind of agent; the agent's name when the plug names none
     owner: str = ""  # the owner's name (arena/grow.py owner_of); empty when the plug names none
+    hands_over: tuple = ()  # HandOver, one per receiving agent (engine/handover.py); () for none
 
     def action(self, name):
         """The action's line; ValueError when this plug does not declare it."""
@@ -245,7 +260,27 @@ def from_dict(d, folder=None):
                 trial_holdback=float(holdback), trial_worst_cost=float(worst),
                 exam=_exam(d["exam"], folder) if "exam" in d else None,
                 kind=_name(d["kind"], "kind", AGENT_NAME) if "kind" in d else agent,
-                owner=_name(d["owner"], "owner", AGENT_NAME) if "owner" in d else "")
+                owner=_name(d["owner"], "owner", AGENT_NAME) if "owner" in d else "",
+                hands_over=_hands_over(d["hands_over"], agent) if "hands_over" in d else ())
+
+
+def _hands_over(v, agent):
+    """The optional hands_over key: {receiving agent: {about, kinds: {name: line}}}."""
+    out, seen = [], set()
+    for name, h in _dict(v, "hands_over", empty=False).items():
+        to = _name(name, "hands_over agent")
+        if to == agent:
+            raise ValueError("hands_over: an agent hands over to another agent, never to itself")
+        where = f"hands_over {to!r}"
+        h = _dict(h, where, empty=False)
+        _keys(h, {"about", "kinds"}, {"kinds"}, where)
+        kinds = _named_lines(h["kinds"], f"{where} kinds", empty=False)
+        twice = sorted(seen & set(kinds))
+        if twice:
+            raise ValueError(f"{where}: the kind {twice[0]!r} goes to one agent only")
+        seen |= set(kinds)
+        out.append(HandOver(to, _line(h["about"], f"{where} about") if "about" in h else "", MappingProxyType(kinds)))
+    return tuple(out)
 
 
 def _exam(e, folder):

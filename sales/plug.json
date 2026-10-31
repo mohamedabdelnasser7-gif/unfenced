@@ -110,6 +110,16 @@
   },
   "trial": {"fast": {"share": 0.5, "days": 7}, "careful": {"share": 0.2, "days": 14}},
   "slot": "Lessons from past chats:",
+  "hands_over": {
+    "marketing": {
+      "about": "How people see the store and what it sells, before and outside any one chat.",
+      "kinds": {
+        "worth": "People hear the price and do not see why it is worth it: they ask why it costs that much, compare it, or go quiet after it.",
+        "unknown": "People do not know the store offers something it does: they ask whether it exists, or never hear of a product or service that would fit them.",
+        "playful": "A joke, a tease or a playful moment from the customer. The Sales agent never jokes, so the moment is for marketing to use, never a sales lesson."
+      }
+    }
+  },
   "exam": {
     "situations": "exam/situations.json",
     "checks": ["script", "banned_words", "style", "amounts", "stock_count", "echo", "bot_line", "handoff", "order",

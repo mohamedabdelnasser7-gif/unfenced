@@ -43,6 +43,15 @@ rollback) with the pulled lesson it was brought back from. The report lists fast
 notes on the night's cases (engine/fast.py, fast_notes), each by the case id the night read it
 under; a note is never a lesson, so a lesson from that case still goes the night's way.
 
+The night also hands over (engine/handover.py, DECISIONS items 6, 12 and 19): for a plug that
+names hands_over (the Sales agent's names the Marketing agent), the night's lost and quiet cases
+are read for the kinds of pattern that are the receiving agent's matter, and at most one short
+note a night goes to it, only from a kind seen in at least 3 sources. The spotter and the note
+writer are on the study route; the writer never sees a case. Every line the night would write as
+a lesson is sorted first, so a kind like a joke is handed over and never becomes a lesson. The
+note is saved where the receiving agent reads it (handover.received) and the report shows it as one
+quiet line; nothing waits for a yes.
+
 For the personal assistant, the night then takes the new mode step (assistant/newmode.py,
 DECISIONS item 36): the day's moments that fit no mode, kept in the assistant's folder
 (--assistant-state, data/assistant unless named, the Arena's folder), may become one mode card
@@ -71,6 +80,7 @@ from pathlib import Path
 
 from engine import exam as engine_exam
 from engine import plug as plug_mod
+from engine import handover
 from engine.fast import FastNotes
 from engine.lessons import TRYING
 from engine.lessons import Lessons as EngineLessons
@@ -183,13 +193,15 @@ def other_plugs(plug, root=ROOT):
 
 
 def night(db, plug, *, days=None, until=None, others=None, judge=None, proposer=None, tagger=None, fit=None,
-          adapter=None, ideas=None, exam=None):
+          adapter=None, ideas=None, exam=None, spotter=None, note_writer=None):
     """Run one night study over [until - days, until). Parts left out are the Meta ones, except
     the idea part: main() gives the Meta one; left out here, the night asks for no ideas, so a
     night run with scripted parts never reaches a model for ideas. exam: makes the gate before a
     trial from the night's lessons, exam(lessons) -> callable(text, stages) -> engine.exam.Result;
     main() gives the Sales agent's when its plug has an exam; left out, no exam runs, so a night
-    with scripted parts never reaches a model for it either.
+    with scripted parts never reaches a model for it either. spotter and note_writer: the hand
+    over track's parts (engine/handover.py); main() gives the Meta ones; left out, nothing is
+    handed over and no line is sorted.
     The trial check runs first, at until. Returns the study's report, with the runner's own
     window line, the links and the trial check ("trials") added."""
     days = default_days(plug) if days is None else float(days)
@@ -210,9 +222,12 @@ def night(db, plug, *, days=None, until=None, others=None, judge=None, proposer=
     if exam is not None:
         counted = lessons.examiner = Counted(exam(lessons))
     checked = Trials(db, plug, lessons=lessons).check(until)
+    others = other_plugs(plug) if others is None else others
+    hand = (handover.Track(db, plug, spotter=spotter, writer=note_writer, others=others)
+            if spotter is not None and note_writer is not None and plug.hands_over else None)
     study = LinkedStudy(db, plug, proposer=proposer or parts.Proposer(), tagger=tagger or parts.Tagger(),
                         fit=fit or parts.FitCheck(), adapter=adapter or parts.Adapter(),
-                        others=other_plugs(plug) if others is None else others, lessons=lessons, ideas=ideas)
+                        others=others, lessons=lessons, ideas=ideas, hand_over=hand)
     rep = study.run(since, until, now=until)
     rep["days"] = days
     rep["parts"]["judge"] = _judge_label(judge)
@@ -366,6 +381,7 @@ def text(rep, plug):
     lines.append("  agents read: " + ", ".join(lk["agents_read"]) + "; not read: " +
                  (", ".join(lk["agents_not_read"]) or "none"))
     lines.extend(_fast_lines(rep.get("fast_notes") or []))
+    lines.extend("  " + handover.line(n) for n in (rep.get("hand_over") or {}).get("notes", []))
     lines.append("  " + switches_line(rep["switches"]))
     lines.extend(_snapshot_lines(rep["snapshot"]))
     if rep["notes"]:
@@ -525,7 +541,8 @@ def main(argv=None, *, until=None):
         return 2
     db = Db(args.db)
     try:
-        rep = night(db, plug, days=args.days, until=until, ideas=parts.Ideas(), exam=sales_exam(plug, args.db))
+        rep = night(db, plug, days=args.days, until=until, ideas=parts.Ideas(), exam=sales_exam(plug, args.db),
+                    spotter=parts.Spotter(), note_writer=parts.NoteWriter())
     except Refused as e:
         print(f"Not run: {e}.", file=sys.stderr)
         return 2

@@ -12,6 +12,9 @@ Ctrl+C stops it.
 For every agent in the database, read from the lessons, trials and trial marks tables:
 1. The night's notes, from the newest saved night report of that agent, and the latest
    snapshot of its lessons with the command that rolls back to it (reflection/snapshots.py).
+   A note the night handed over to another agent (engine/handover.py) is one quiet line under
+   them: where it went and what it says, no case id, no count and no button; it asks nothing
+   (DECISIONS items 19 and 35).
    When the Arena got stuck (arena/run.py), the newest stuck item saved next to the database
    (arena-<agent>-<run>.json): its line and the held-out matches it lost, each quoting a turn.
    For the personal assistant, the open new mode card the night wrote next to the database
@@ -1143,7 +1146,14 @@ class _Ctx:
             notes = rep.get("notes") if isinstance(rep.get("notes"), list) else []
             self.newest[agent] = {"file": name, "until": _until(rep),
                                   "notes": [str(n) for n in notes if isinstance(n, (str, int, float))],
-                                  "switches": _dict(rep.get("switches")) or None}
+                                  "switches": _dict(rep.get("switches")) or None,
+                                  "handed": _handed(rep)}
+
+
+def _handed(rep):
+    """The notes a night report handed over to other agents, each {to, text}; the page shows no more."""
+    return [{"to": n["to"], "text": n["text"]} for n in _dicts(_dict(rep.get("hand_over")).get("notes"))
+            if isinstance(n.get("to"), str) and isinstance(n.get("text"), str)]
 
 
 def _held(les, k):
@@ -1872,6 +1882,8 @@ def _agent_html(a, token):
             out.append(f'<p class="meta">Switches that night: {h(line)}.</p>')
         out.append("<ul>" + "".join(f'<li class="meta" dir="auto">{h(n)}</li>' for n in night["notes"]) + "</ul>"
                    if night["notes"] else '<p class="meta">No notes.</p>')
+        out.extend(f'<p class="meta handed" dir="auto">Note to {h(n["to"])}: {h(n["text"])}</p>'
+                   for n in night.get("handed") or [])
     stuck = a.get("arena")
     if stuck is not None:
         out.append("<h3>The Arena</h3>")

@@ -18,9 +18,10 @@ from unittest import mock
 
 from engine import handover
 from engine import plug as plug_mod
+from engine.fast import guard
 from engine.lessons import TRYING, WAITING, Lessons
 from engine.log import Log
-from engine.study import HANDED, MIN_SOURCES, Study
+from engine.study import HANDED, MIN_SOURCES, TAGGED, Study
 from kit import model as kit_model
 from kit.db import Db
 from reflection import PLUG as SALES
@@ -146,6 +147,46 @@ class TheFloor(Setup):
         self.assertEqual(len(self.writer.calls), 1)
 
 
+    def test_a_tie_goes_to_the_kind_the_plug_names_first(self):
+        self.assertEqual(list(HANDS[TO]["kinds"]), ["heat", "playful"])
+        lost(self.log, 3, "playful", "play")
+        lost(self.log, 3, "heat", "hot")
+        note, = self.study()["hand_over"]["notes"]
+        self.assertEqual((note["kind"], note["sources"], note["cases"]), ("heat", 3, 3))
+
+    def test_a_left_out_case_counts_only_when_its_result_was_not_good(self):
+        lost(self.log, 2, "playful", "play")
+        fk.case(self.log, "frosted", "water", "soaked", "wilted", stage="seedling", cause="frost", moment="playful",
+                note="frost round")
+        fk.case(self.log, "grown", "water", "soaked", "grew", stage="seedling", cause="frost", moment="playful",
+                note="grown round")
+        rep = self.study()
+        note, = rep["hand_over"]["notes"]
+        self.assertEqual(sorted(note["case_ids"]), ["frosted", "play0", "play1"])
+        self.assertEqual(sorted(c["case"] for c in rep["left_out"]["cases"]), ["frosted", "grown"])
+
+    def test_the_spotter_reads_blind_views_only(self):
+        lost(self.log, 3, "playful", "play")
+        self.study()
+        views = self.spotter.calls[0]["items"]
+        self.assertEqual(len(views), 3)
+        for v in views:
+            self.assertEqual(set(v), {"id", "steps"})  # no deciding result and no good flag
+            self.assertRegex(v["id"], r"^k[0-9]+$")
+            self.assertEqual([s.get("result") for s in v["steps"]], ["soaked"])  # no slow result
+
+    def test_over_tagged_lost_cases_the_spotter_reads_a_seeded_sample(self):
+        self.assertEqual(TAGGED, 200)
+        lost(self.log, TAGGED + 5, "playful", "play")
+        note, = self.study()["hand_over"]["notes"]
+        first = {v["id"] for v in self.spotter.calls[0]["items"]}
+        self.assertEqual((len(first), note["cases"], note["sources"]), (TAGGED, TAGGED, TAGGED))
+        self.setUp()
+        lost(self.log, TAGGED + 5, "playful", "play")
+        self.study()
+        self.assertEqual({v["id"] for v in self.spotter.calls[0]["items"]}, first)
+
+
 class OneSourceManyCases(Setup):
     data = plugs.changed(GARDEN, source={"about": "The gardener who asked for the round.", "known_by": "row"})
 
@@ -156,6 +197,16 @@ class OneSourceManyCases(Setup):
         self.assertEqual((playful["cases"], playful["sources"]), (6, 1))
         self.assertEqual(rep["hand_over"]["notes"], [])
 
+    def test_on_equal_sources_the_kind_with_more_cases_wins(self):
+        for n, who in enumerate(("gardener1", "gardener2", "gardener3", "gardener3")):
+            lost(self.log, 1, "playful", f"play{n}_", source=who)
+        for n, who in enumerate(("gardener1", "gardener2", "gardener3")):
+            lost(self.log, 1, "heat", f"hot{n}_", source=who)
+        rep = self.study()
+        kinds = {k["kind"]: (k["sources"], k["cases"], k["verdict"]) for k in rep["hand_over"]["kinds"]}
+        self.assertEqual(kinds, {"heat": (3, 3, handover.BEATEN), "playful": (3, 4, handover.NOTE)})
+        note, = rep["hand_over"]["notes"]
+        self.assertEqual(note["kind"], "playful")
 
 class AJokeIsHandedOver(Setup):
     def jokes(self):
@@ -263,6 +314,13 @@ class NoWordsCopied(Setup):
 
     def test_a_number_is_refused(self):
         self.assertIn("number: /[0-9]/", self.refused("Three beds, 3 times, joked with the hose."))
+
+    def test_the_plug_high_risk_list_does_not_hold_the_note(self):
+        line = "Playful talk of poison near the sprayer comes up at the beds; a light post could carry that mood."
+        self.assertTrue(guard(line, self.plug))  # the plug's own high risk list would refuse it
+        lost(self.log, 3, "playful", "play")
+        note, = self.study(writer=Writer(line))["hand_over"]["notes"]
+        self.assertEqual(note["text"], line)
 
     def test_the_writer_never_sees_a_case(self):
         lost(self.log, 3, "playful", "play", note=WORDS)
@@ -461,6 +519,17 @@ class TheMetaParts(unittest.TestCase):
         system, data = fake.calls[0]["messages"]
         self.assertIn("playful", system["content"])
         self.assertEqual(json.loads(data["content"]), {"items": items})
+
+    def test_the_spotter_asks_in_batches_past_twenty_items(self):
+        self.assertEqual(parts.BATCH, 20)
+        items = [{"id": f"k{n}", "steps": []} for n in range(1, 26)]
+        fake = FakeModel(say(json.dumps({i["id"]: "playful" for i in items[:20]})),
+                         say(json.dumps({"k21": "none", "k22": "playful", "k1": "none"})))
+        got = parts.Spotter(fake)(self.plug, self.kinds, items)
+        self.assertEqual([len(json.loads(c["messages"][1]["content"])["items"]) for c in fake.calls], [20, 5])
+        want = {f"k{n}": "playful" for n in range(1, 21)}
+        want.update(k21="none", k22="playful")  # k1 in the second answer is not in that batch: not read
+        self.assertEqual(got, want)
 
     def test_the_writer_reads_strictly_and_sees_no_case(self):
         found = {"kind": "playful", "about": "A playful moment.", "cases": 3, "sources": 3}

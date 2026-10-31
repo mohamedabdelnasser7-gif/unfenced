@@ -37,3 +37,11 @@ A finished day the user lived is cleaned before it can join the assistant's Aren
 
 Next: the same allow-list rule as the practice customers, before the live day runner is wired.
 
+## The Arena's own copy (arena/run.py, engine/rounds.py)
+The Arena practises on a copy of the database and hands only gate-passed lessons to the live one. Left after review:
+- Nothing stops two Arena runs on the same database at once; the second deletes the first run's copy, and both can hand the same lesson live.
+- The old copy is removed before the new one is built, so if the live file cannot be read, the remembered failed lessons are lost.
+- Any database error on hand over is reported as "live busy".
+- A very narrow race, between the copy's file check and its reopen by name, could let a planted link redirect the carry of failed lessons.
+
+Next: a lock held for the whole run, the new copy built under a temporary name and then moved into place, and the carry written through the checked file.

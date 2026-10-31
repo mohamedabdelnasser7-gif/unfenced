@@ -49,7 +49,10 @@ class NoRealReads(unittest.TestCase):
             to_real, to_arena = Path(d) / "to-real", Path(d) / "to-arena"
             to_real.symlink_to(REAL, target_is_directory=True)
             to_arena.symlink_to(REAL.parent, target_is_directory=True)
+            to_cards = Path(d) / "to-cards"
+            to_cards.symlink_to(REAL / "cards", target_is_directory=True)
             names = [to_real / "replay.jsonl", to_arena / "real" / "cards", to_arena / "real",
+                     str(to_cards) + "/../replay.jsonl",  # review round 2, finding 3
                      os.path.relpath(REAL / "replay.jsonl"), str(REAL).replace(os.sep + "real", os.sep + os.sep + "real"),
                      "file:" + str(REAL / "replay.jsonl") + "?mode=ro", "file://" + str(REAL / "replay.jsonl"),
                      "file:" + str(to_real / "x.db").replace(" ", "%20")]

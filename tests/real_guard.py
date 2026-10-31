@@ -60,8 +60,10 @@ def under_real(path):
     p = _plain(p)
     if not p or p == ":memory:":
         return False
+    rp = os.path.normcase(os.path.realpath(p))  # a link into arena/real plus ".." lands here
     p = os.path.normcase(os.path.abspath(p))
-    if p == REAL or p.startswith(REAL + os.sep):
+    reals = {REAL, os.path.normcase(os.path.realpath(REAL))}
+    if any(q == r or q.startswith(r + os.sep) for q in (p, rp) for r in reals):
         return True
     real = _id(REAL)
     if real is None:

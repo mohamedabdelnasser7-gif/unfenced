@@ -200,8 +200,10 @@ class WhichChats(unittest.TestCase):
         self.assertEqual(len(self.model.calls), 2)  # nothing skipped ever reached the tagger
 
     def test_a_chat_is_read_once_and_a_chat_still_open_waits(self):
-        self.assertTrue(all(self.pool.has(c) for c in ("c-lost", "c-hard", "c-easy", "c-noprice")))
-        self.assertFalse(self.pool.has("c-open"))
+        self.assertEqual({c: self.pool.progress(c)[0] for c in ("c-lost", "c-hard", "c-easy", "c-noprice")},
+                         {"c-lost": 2, "c-hard": 11, "c-easy": 4, "c-noprice": 2})
+        self.assertIsNone(self.pool.progress("c-open"))
+        self.assertEqual(self.pool.pending, {"c-open": 1})  # still open: read first the next night
         db = Db(":memory:")
         self.addCleanup(db.close)
         write_chats(db, ALL)
@@ -215,6 +217,120 @@ class WhichChats(unittest.TestCase):
         chat = hist.Chat(source=hist.WHATSAPP, key="x", place=0, messages=[])
         self.assertFalse(grow.hard(chat, {"person": False, "check_failed": False}))
         self.assertTrue(grow.hard(chat, {"person": False, "check_failed": True}))
+
+
+def add_steps(db, cid, steps):
+    """More steps on a chat already written: (role, text, hours before NOW, step name)."""
+    with db.tx() as c:
+        n0 = c.execute("SELECT COALESCE(MAX(n), 0) FROM steps WHERE chat_id = ?", (cid,)).fetchone()[0]
+        for k, (role, text, h, name) in enumerate(steps, 1):
+            c.execute("INSERT INTO steps (chat_id, n, role, content, name, at) VALUES (?, ?, ?, ?, ?, ?)",
+                      (cid, n0 + k, role, text, name, NOW - h * H))
+        c.execute("UPDATE chats SET updated_at = ? WHERE id = ?", (NOW - steps[-1][2] * H, cid))
+
+
+class Reading(unittest.TestCase):
+    """Progress per chat by the last step read; only settled talks marked; leftovers first."""
+
+    def setUp(self):
+        self.db = Db(":memory:")
+        self.addCleanup(self.db.close)
+        self.pool = grow.Pool(folder(self), "sales")
+        self.model = ScriptedModel(recipe())
+
+    def night(self, until, most=grow.MAX_NEW, model=None):
+        return grow.grow(self.db, self.pool, since=until - 48 * H, until=until, most=most,
+                         tagger=Tagger(model=model or self.model, cap=50, recipe=recipe()))
+
+    def test_a_repeat_customer_later_talk_is_read(self):
+        write_chats(self.db, [EASY])
+        self.assertEqual(self.night(NOW)["easy wins, skipped"], 1)
+        add_steps(self.db, "c-easy", [("user", "عندكم شنطة رياضة؟", -20 * 24, None),
+                                      ("assistant", "ايوه ب 900 جنيه", -20 * 24 - 0.1, None)])
+        got = self.night(NOW + 23 * 24 * H)
+        self.assertEqual((got.get("added"), got.get("lost")), (1, 1), got)
+        self.assertEqual([t["text"] for t in self.pool.items[0]["turns"]], ["عندكم شنطة رياضة؟", "ايوه ب 900 جنيه"])
+        self.assertEqual(self.pool.items[0]["read"], "c-easy:6")
+
+    def test_a_talk_waiting_for_a_person_is_read_once_it_settles(self):
+        write_chats(self.db, [("c-wait", [("user", "بكام الجزمة السودا؟", 5, None), ("assistant", "ب 1450 جنيه", 4.9, None),
+                                          ("user", "ممكن تخفيض؟", 4.8, None)])])
+        got = self.night(NOW)
+        self.assertEqual(got["unclear, skipped"], 1)
+        self.assertIsNone(self.pool.progress("c-wait"))
+        self.assertIn("c-wait", self.pool.pending)
+        add_steps(self.db, "c-wait", [("assistant", "اخر سعر 1400 جنيه", -10, "person"), ("user", "تمام اكدلي", -10.1, None),
+                                      ("assistant", "تم تسجيل الطلب", -10.2, "person")])
+        got = self.night(NOW + 24 * H)
+        self.assertEqual((got.get("added"), got.get("hard")), (1, 1), got)
+        self.assertEqual(self.pool.pending, {})
+
+    def test_another_unclear_talk_is_left_unmarked_and_not_pending(self):
+        write_chats(self.db, [("c-cancel", [("user", "بكام؟", 70, None), ("assistant", "ب 1450 جنيه", 69.9, None),
+                                            ("user", "تمام اكدلي", 69.8, None), ("user", "لا الغي معلش", 69.7, None),
+                                            ("assistant", "تمام", 69.6, None)])])
+        got = self.night(NOW)
+        self.assertEqual(got["unclear, skipped"], 1)
+        self.assertIsNone(self.pool.progress("c-cancel"))
+        self.assertEqual(self.pool.pending, {})
+
+    def test_leftovers_are_read_first_the_next_night_whatever_the_window(self):
+        write_chats(self.db, [(f"l{i}", [("user", "بكام الجزمة؟", 80 - i * 0.01, None),
+                                         ("assistant", "ب 1450 جنيه", 79.9 - i * 0.01, None)]) for i in range(5)])
+        got = self.night(NOW, most=3)
+        self.assertEqual((got["added"], got["left for a later night"]), (3, 2))
+        self.assertEqual(self.pool.pending, {"l3": 0, "l4": 0})
+        got = self.night(NOW + 30 * 24 * H, most=3)  # the window is long past them
+        self.assertEqual(got.get("added"), 2, got)
+        self.assertEqual(self.pool.pending, {})
+        self.assertEqual(sorted(i["read"] for i in self.pool.items), [f"l{i}:2" for i in range(5)])
+
+    def test_no_talk_joins_twice(self):
+        write_chats(self.db, [LOST])
+        self.night(NOW)
+        item = dict(self.pool.items[0])
+        item.pop("read")
+        self.pool.add(item, "c-lost", 2, NOW)
+        self.assertEqual(len(self.pool.items), 1)
+        self.pool.read.clear()  # even when the progress is gone
+        self.assertEqual(self.night(NOW).get("added", 0), 1)
+        self.assertEqual(len(self.pool.items), 1)
+
+    def test_a_tagger_that_never_answers_lets_the_chat_go_after_max_tries(self):
+        write_chats(self.db, [LOST])
+        bad = mock.Mock(chat=mock.Mock(side_effect=ValueError("down")), label="x")
+        for k in range(grow.MAX_TRIES):
+            got = self.night(NOW + k * H, model=bad)
+            self.assertEqual(got.get("not tagged"), 1)
+        self.assertEqual(self.pool.pending, {})
+        self.assertEqual(self.pool.progress("c-lost")[0], 2)
+
+    def test_history_and_branch_chats_are_never_read(self):
+        write_chats(self.db, [LOST])
+        write_chats(self.db, [("c-history", LOST[1])], channel="history:whatsapp")
+        write_chats(self.db, [("c-branch", LOST[1])], parent="c-lost")
+        self.pool.pending = {"c-history": 0, "c-branch": 0}
+        got = self.night(NOW)
+        self.assertEqual((got["read"], got["added"]), (1, 1), got)
+        self.assertEqual(set(self.pool.read), {"c-lost"})
+
+    def test_a_dropped_progress_never_reads_a_chat_from_its_first_step(self):
+        write_chats(self.db, [(f"l{i}", [("user", "بكام الجزمة؟", 80 - i, None),
+                                         ("assistant", "ب 1450 جنيه", 79.9 - i, None)]) for i in range(3)])
+        with mock.patch.object(grow, "MAX_READ", 2):
+            self.assertEqual(self.night(NOW)["added"], 3)
+            self.assertEqual(sorted(self.pool.read), ["l1", "l2"])
+            self.assertEqual(self.pool.floor, NOW - 79.9 * H)
+            got = self.night(NOW)
+        self.assertEqual((got.get("added", 0), got["already read"]), (0, 3))
+        self.assertEqual(len(self.pool.items), 3)
+
+    def test_progress_survives_a_save(self):
+        write_chats(self.db, [LOST, OPEN])
+        self.night(NOW)
+        self.pool.save()
+        again = grow.Pool(self.pool.owner, "sales")
+        self.assertEqual((again.read, again.pending, again.floor), (self.pool.read, self.pool.pending, None))
 
 
 class CleaningApplied(unittest.TestCase):
@@ -296,7 +412,7 @@ class NamesFromOrders(unittest.TestCase):
         write_chats(db, [("c-order", self.steps("تمام", "اوك", {"name": "نورهان الشربيني", "phone": "0100 111 2233",
                                                                 "governorate": "Cairo", "address": "شارع واحد اتنين"}))],
                     customer="201009998877")
-        (_, chat, _), = grow.real_chats(db, SINCE - 96 * H, NOW)
+        (_, chat, _, _), = grow.real_chats(db, SINCE - 96 * H, NOW)
         self.assertEqual(chat.phone, "201009998877")
         self.assertEqual(chat.names, {"نورهان الشربيني"})
         self.assertEqual(chat.typed_phones, {"201009998877", "201001112233"})

@@ -8,11 +8,22 @@ sends the Arena new practice cases beside its lessons (item 47):
   hard     won, but only after at least HARD_TURNS customer messages, a person stepping in or a
            failed send check: kept.
   easy     any other win: skipped, there is nothing in it to practise.
-  unclear  skipped, never guessed (arena/label.py). A chat still open is not marked as read, so a
-           later night labels it again once it has settled.
-The chats read are the ones with a message since the night's window opened, looking back
-label.QUIET_HOURS more, so a chat that went quiet just before the window still counts. A chat
-the pool has read is never read twice.
+  unclear  skipped, never guessed (arena/label.py).
+A customer keeps one chat per channel for good (kit/chats.py), so the pool keeps each chat's
+progress by the last step it read, not by the chat: a later talk in the same chat is read from
+the step after it. Only a settled talk moves the progress on: won, lost, or quiet with no price
+given. Any other unclear talk (still open, a last message not answered yet, a voice note, a won
+sign then a cancel) is left unmarked and read again, with whatever came after it, once the chat
+has a new message. A talk still waiting (open, not answered, a voice note) and a settled one left
+over (MAX_NEW, the tagger's cap, the Arena's call cap, a tagger answer that did not fit) are kept
+as pending in the pool and read first the next night, whatever its window, up to MAX_TRIES
+nights each and MAX_PENDING in all. The other chats read are the ones with a message since the
+night's window opened, looking back label.QUIET_HOURS more, so a chat that went quiet just
+before the window still counts. Imported history chats (channel history:...) and branches of a
+chat (parent_id) are never read. A talk joins the pool once: the item keeps the chat and the
+step it ended on, and the same talk is never added twice. When the progress list passes
+MAX_READ chats the oldest are dropped and the pool keeps the time of the newest one dropped, so a
+chat it no longer lists is read only after that time, never from its first step again.
 
 Each kept chat is cleaned (arena/clean.py: names, numbers and places out) before the tagger
 (arena/tag.py) sees it and before anything is written; no second scan (item 40). The cleaner
@@ -45,6 +56,7 @@ private): with none it reads no chat and says so.
 """
 import dataclasses
 import json
+import math
 import os
 import re
 from collections import Counter
@@ -61,7 +73,9 @@ LOST_WEIGHT = 3
 HARD_TURNS = 6
 MAX_NEW = 50
 MAX_ITEMS = 500
-MAX_SEEN = 5000
+MAX_READ = 20_000   # chats whose progress the pool keeps
+MAX_PENDING = 2000  # chats read first the next night
+MAX_TRIES = 7       # nights a pending chat is read before it is let go
 MAX_PATTERN = 20_000
 DEFAULT_KIND = "sales"
 KIND = re.compile(r"[a-z][a-z0-9_]{0,40}")
@@ -136,13 +150,18 @@ class Pool:
             data = {}
         data = data if isinstance(data, dict) else {}
         self.items = [i for i in (data.get("items") or []) if _item_ok(i)][-MAX_ITEMS:]
-        self.seen = [str(s) for s in (data.get("seen") or []) if isinstance(s, str)][-MAX_SEEN:]
+        read = data.get("read") if isinstance(data.get("read"), dict) else {}
+        self.read = {k: [v[0], float(v[1])] for k, v in read.items()
+                     if isinstance(v, list) and len(v) == 2 and _count(v[0]) and _time(v[1])}
+        pending = data.get("pending") if isinstance(data.get("pending"), dict) else {}
+        self.pending = {k: v for k, v in pending.items() if _count(v)}
+        self.floor = float(data["floor"]) if _time(data.get("floor")) else None
         self.played = {str(k): v for k, v in (data.get("played") or {}).items()
                        if isinstance(v, dict) and _count(v.get("played")) and _count(v.get("lost"))}
         self.cards = [c for c in (data.get("cards") or []) if _card_ok(c)]
         capped = data.get("capped")  # None until the pool is first built from a recipe
         self.capped = [c for c in capped if _capped_ok(c)] if isinstance(capped, list) else None
-        self._seen = set(self.seen)
+        self._keys = {i["read"] for i in self.items if "read" in i}
         self.changed = False
 
     def weight(self, card_id):
@@ -154,21 +173,52 @@ class Pool:
         row["lost"] += 0 if won else 1
         self.changed = True
 
-    def has(self, chat_id):
-        return str(chat_id) in self._seen
+    def progress(self, chat_id):
+        """(the last step read, its time) for a chat, or None when the pool lists no step of it."""
+        got = self.read.get(str(chat_id))
+        return None if got is None else tuple(got)
 
-    def mark(self, chat_id):
-        if not self.has(chat_id):
-            self.seen.append(str(chat_id))
-            self._seen.add(str(chat_id))
+    def mark(self, chat_id, step, at):
+        """A settled talk: the chat is read up to step (at its time), and is no longer pending."""
+        self.read.pop(str(chat_id), None)  # moved to the end: the newest read stays longest
+        self.read[str(chat_id)] = [int(step), float(at)]
+        self.pending.pop(str(chat_id), None)
+        if len(self.read) > MAX_READ:
+            dropped = list(self.read)[:len(self.read) - MAX_READ]
+            self.floor = max([self.floor or 0.0] + [self.read[k][1] for k in dropped])
+            for k in dropped:
+                del self.read[k]
+        self.changed = True
+
+    def pend(self, chat_id, tried=True):
+        """Read it first the next night. tried: this night read it and could not settle or add it,
+        which counts towards MAX_TRIES; a talk only left over by a cap does not count."""
+        k = str(chat_id)
+        tries = self.pending.pop(k, 0) + bool(tried)
+        if tries >= MAX_TRIES:
+            self.changed = True
+            return False
+        self.pending[k] = tries
+        while len(self.pending) > MAX_PENDING:
+            del self.pending[next(iter(self.pending))]
+        self.changed = True
+        return True
+
+    def unpend(self, chat_id):
+        if self.pending.pop(str(chat_id), None) is not None:
             self.changed = True
 
-    def add(self, item, chat_id):
-        """A cleaned, tagged real chat joins the pool ({label, tags, style, turns}, as arena/cards.py takes)."""
+    def add(self, item, chat_id, step, at):
+        """A cleaned, tagged real talk joins the pool ({label, tags, style, turns}, as arena/cards.py
+        takes), once: the same chat up to the same step never joins twice. True when it joined."""
         if not _item_ok(item):
             raise ValueError("a practice item has a label, tags, a style and turns")
-        self.items = (self.items + [item])[-MAX_ITEMS:]
-        self.mark(chat_id)
+        key = f"{chat_id}:{int(step)}"
+        if key not in self._keys:
+            self.items = (self.items + [{**item, "read": key}])[-MAX_ITEMS:]
+            self._keys = {i["read"] for i in self.items if "read" in i} | {key}
+        self.mark(chat_id, step, at)
+        return True
 
     def rebuild(self, recipe):
         """The pool's cards from its items, through the card code; ids name each card's group."""
@@ -181,10 +231,10 @@ class Pool:
         self.changed = True
 
     def save(self):
-        self.seen = self.seen[-MAX_SEEN:]
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_name(self.path.name + ".tmp")
-        tmp.write_text(json.dumps({"kind": self.kind, "items": self.items, "seen": self.seen, "played": self.played,
+        tmp.write_text(json.dumps({"kind": self.kind, "items": self.items, "read": self.read, "pending": self.pending,
+                                   "floor": self.floor, "played": self.played,
                                    "cards": self.cards, "capped": self.capped}, ensure_ascii=False), encoding="utf-8")
         os.chmod(tmp, 0o600)
         tmp.replace(self.path)
@@ -197,6 +247,10 @@ class Pool:
 
 def _count(v):
     return isinstance(v, int) and not isinstance(v, bool) and v >= 0
+
+
+def _time(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
 
 def _item_ok(i):
@@ -274,10 +328,16 @@ def deck(base, pool):
 
 # ---- the night: real chats into practice customers
 
-def real_chats(db, since, until):
-    """[(chat id, reflection/history.py Chat, hard signs)] for the agent's chats with a message in
-    [since, until): customer steps as the customer's, the agent's and a person's replies as the
-    store's; tool calls and events left out, a failed send check and a person's reply counted.
+LIVE = "parent_id IS NULL AND channel NOT LIKE 'history:%'"  # no branch, no imported history chat
+
+
+def real_chats(db, since, until, pool=None):
+    """[(chat id, reflection/history.py Chat, hard signs, (last step, its time))] for the pool's
+    pending chats first, then the agent's other chats with a message in [since, until): the steps
+    after the last one the pool read (pool.progress), before until; customer steps as the
+    customer's, the agent's and a person's replies as the store's; tool calls and events left
+    out, a failed send check and a person's reply counted. The last step is None when no new step
+    came.
     What the customer gave for an order (the name, the name to print, the address and the phone in
     each draft_order call) and the chat's own number go on the Chat (names, address, phone,
     typed_phones), so the cleaner masks them wherever they are typed, with or without a cue."""
@@ -285,22 +345,34 @@ def real_chats(db, since, until):
         tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         if not {"chats", "steps"} <= tables:
             return []
-        ids = [(r[0], r[1]) for r in c.execute(
-            "SELECT id, customer_id FROM chats WHERE parent_id IS NULL AND updated_at >= ? AND updated_at < ? "
-            "ORDER BY created_at", (since, until))]
+        ids = {}
+        for chat_id in list(pool.pending) if pool is not None else []:
+            row = c.execute(f"SELECT id, customer_id FROM chats WHERE id = ? AND {LIVE}", (chat_id,)).fetchone()
+            if row is not None:
+                ids[row[0]] = row[1]
+        for row in c.execute(f"SELECT id, customer_id FROM chats WHERE {LIVE} AND updated_at >= ? AND updated_at < ? "
+                             "ORDER BY created_at", (since, until)):
+            ids.setdefault(row[0], row[1])
         out = []
-        for chat_id, customer in ids:
-            rows = c.execute("SELECT role, content, tool_calls, name, media, at FROM steps WHERE chat_id = ? "
+        for chat_id, customer in ids.items():
+            got = pool.progress(chat_id) if pool is not None else None
+            after = got[0] if got is not None else 0
+            floor = pool.floor if got is None and pool is not None and pool.floor is not None else float("-inf")
+            rows = c.execute("SELECT n, role, content, tool_calls, name, media, at FROM steps WHERE chat_id = ? "
                              "AND at < ? ORDER BY n", (chat_id, until)).fetchall()
-            msgs, signs = [], {"person": False, "check_failed": False}
+            msgs, signs, last = [], {"person": False, "check_failed": False}, None
             typed = {"names": set(), "phones": set(), "addresses": set()}
-            for role, content, tool_calls, name, media, at in rows:
+            for n, role, content, tool_calls, name, media, at in rows:
+                if role == "assistant":
+                    _typed(tool_calls, typed)  # from every talk of the chat: a name given once is masked in all
+                if n <= after or float(at) <= floor:
+                    continue
+                last = (n, float(at))
                 if role == "event":
                     signs["check_failed"] |= '"check_failed"' in (content or "")
                 elif role == "user":
                     msgs.append(hist.Message(at=float(at), team=False, text=content or "", media=_media(media)))
                 elif role == "assistant":
-                    _typed(tool_calls, typed)
                     if (content or "").strip():
                         signs["person"] |= name == PERSON
                         msgs.append(hist.Message(at=float(at), team=True, text=content))
@@ -308,7 +380,7 @@ def real_chats(db, since, until):
             chat = hist.Chat(source=hist.WHATSAPP, key=chat_id, place=0, messages=msgs, phone=phone,
                              names=typed["names"], typed_phones=(typed["phones"] | {phone}) - {""})
             chat.addresses = typed["addresses"]
-            out.append((chat_id, chat, signs))
+            out.append((chat_id, chat, signs, last))
     return out
 
 
@@ -380,38 +452,50 @@ def hard(chat, signs):
             or bool(signs.get("check_failed")))
 
 
+SETTLED = frozenset({label_mod.NO_PRICE})  # unclear but over: quiet with no price given
+WAITING = frozenset({label_mod.OPEN, label_mod.UNANSWERED, label_mod.VOICE})  # unclear for now, settles soon
+
+
 def grow(db, pool, *, since, until, tagger, calls=None, most=MAX_NEW, quiet_hours=label_mod.QUIET_HOURS):
     """The night's new practice items from the real chats into the pool. Returns counts only."""
     from arena.personas import turns_of  # the persona build's own turns, cleaned the same way
     n = Counter()
-    chats = real_chats(db, since - quiet_hours * 3600, until)
-    cleaner = Cleaner({name for _, chat, _ in chats for name in chat.names})  # every name of the night
-    for chat_id, chat, signs in chats:
-        if pool.has(chat_id):
+    chats = real_chats(db, since - quiet_hours * 3600, until, pool)
+    cleaner = Cleaner({name for _, chat, _, _ in chats for name in chat.names})  # every name of the night
+    for chat_id, chat, signs, last in chats:
+        if last is None:  # no step since the last one read
             n["already read"] += 1
+            pool.unpend(chat_id)
             continue
         n["read"] += 1
         lab, why = label_mod.label(chat, until, quiet_hours)
         if lab == label_mod.UNCLEAR:
             n["unclear, skipped"] += 1
-            if why != label_mod.OPEN:  # still open: a later night reads it again
-                pool.mark(chat_id)
+            if why in SETTLED:
+                pool.mark(chat_id, *last)
+            elif why in WAITING:
+                pool.pend(chat_id)
+            else:  # left unmarked: read again with what comes after it once the chat has a new message
+                pool.unpend(chat_id)
             continue
         if lab == label_mod.WON and not hard(chat, signs):
             n["easy wins, skipped"] += 1
-            pool.mark(chat_id)
+            pool.mark(chat_id, *last)
             continue
         if n["added"] >= most or not tagger.can_ask() or (calls is not None and calls.reached):
             n["left for a later night"] += 1
+            pool.pend(chat_id, tried=False)
             continue
         chat_cleaner = _Typed(cleaner.chat(chat.names), getattr(chat, "addresses", ()))
         turns = turns_of(chat, chat_cleaner)
         tags = tagger(turns, lab, cleaner=chat_cleaner)
         if tags is None:
             n["not tagged"] += 1
+            if not pool.pend(chat_id):  # tried MAX_TRIES nights: let it go
+                pool.mark(chat_id, *last)
             continue
         pool.add({"label": lab, "why": why, "hard": lab == label_mod.WON, "tags": tags,
-                  "style": cards_mod.style_of(chat), "turns": turns}, chat_id)
+                  "style": cards_mod.style_of(chat), "turns": turns}, chat_id, *last)
         n["added"] += 1
         n["lost" if lab == label_mod.LOST else "hard"] += 1
     return dict(n)

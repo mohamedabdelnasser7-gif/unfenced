@@ -5,6 +5,9 @@
    relay_failed and the customer hears TEAM_WILL_REPLY once.
 2. Pick the lessons that fit (at most 8) and call the model with the instructions,
    the lessons and only this stage's tools. Tools and stage are sent fresh every step.
+   When the customer's last chat ended without an order, fast reflection's note for this
+   chat (reflection/fast.py) goes last in the prompt, read once a turn before the first
+   model call; it is not a lesson and its id never joins the lesson ids a row keeps.
 3. At most MAX_TOOL_STEPS tool steps, then the model must answer in words. At most
    MAX_CALLS_PER_STEP tool calls run in one step; the voice note is heard once per turn. A
    handoff call after one that ended the turn in the same step is not run.
@@ -115,6 +118,7 @@ class _Turn:
     lessons: object = None
     amounts: set = field(default_factory=set)
     tool_steps: int = 0
+    note: str = ""  # fast reflection's note for this chat, under its heading; "" when none
 
     @property
     def lesson_ids(self):
@@ -123,13 +127,28 @@ class _Turn:
         return self.ctx.lesson_ids
 
 
-def system_prompt(stage, picked):
-    """The instructions, the stage note, then the lessons in the slot the engine writes from the plug."""
+def system_prompt(stage, picked, note=""):
+    """The instructions, the stage note, the lessons in the slot the engine writes from the plug,
+    then fast reflection's note for this chat when it has one."""
     parts = [INSTRUCTIONS, stages.note(stage)]
     lessons = slot(PLUG, picked)
     if lessons:
         parts.append(lessons)
+    if note:
+        parts.append(note)
     return {"role": "system", "content": "\n\n".join(parts)}
+
+
+def fast_note(fast, chat_id):
+    """Fast reflection's note for this chat's prompt, or "". Never raises: a note that cannot be
+    read is left out and the turn goes on."""
+    if fast is None:
+        return ""
+    try:
+        return fast.for_prompt(chat_id) or ""
+    except Exception:
+        log.exception("could not read the fast note; the turn goes on without it")
+        return ""
 
 
 def user_message(msg, stage):
@@ -168,11 +187,12 @@ def warn_size_prices():
     return found
 
 
-def turn(msg, *, chats, model, lessons, results, send, limits=None, over=None):
+def turn(msg, *, chats, model, lessons, results, send, limits=None, over=None, fast=None):
     """Handle one customer message. send(to, text) sends on the customer's channel.
 
     limits: a kit.limits.Limits; every model call in the turn is counted against it.
     over: the limit the webhook already found reached; the turn then makes no model call.
+    fast: fast reflection's notes (reflection.fast.FastNotes); left out, no note is read.
     """
     chat_id = chats.open(msg.channel, msg.customer_id)
     stage = stages.get(chats.stage(chat_id))
@@ -228,6 +248,7 @@ def turn(msg, *, chats, model, lessons, results, send, limits=None, over=None):
         return TurnResult(chat_id, "replied", fixed[-1][1])
 
     convo = history + [user_message(msg, stage)]
+    t.note = fast_note(fast, chat_id)  # read just before the first model call, once a turn
     try:
         return _answer(t, convo, msg, vocab, sizes, results=results, send=send)
     except limits_mod.OverLimit as e:
@@ -533,7 +554,7 @@ def _draft(t, convo):
         last = step == MAX_TOOL_STEPS
         picked = _lessons(t)
         defs = [] if last else tools.definitions(ctx.stage)
-        out = ctx.model.chat([system_prompt(ctx.stage, picked)] + convo, tools=defs or None)
+        out = ctx.model.chat([system_prompt(ctx.stage, picked, t.note)] + convo, tools=defs or None)
         calls = out.get("tool_calls") or []
         calls = [c for c in calls if isinstance(c, dict)] if isinstance(calls, list) else []
         if not calls or last:

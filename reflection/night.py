@@ -32,7 +32,9 @@ The report's links tie each new lesson back to where it came from: every case th
 pattern (all of them, where the lesson's source line names the first 20), or the other
 agent's kept lesson it was adapted from, and which agents the night read and which it did not.
 They also name each lesson of the report a person brought back (on the morning page or in a
-rollback) with the pulled lesson it was brought back from.
+rollback) with the pulled lesson it was brought back from. The report lists fast reflection's
+notes on the night's cases (engine/fast.py, fast_notes), each by the case id the night read it
+under; a note is never a lesson, so a lesson from that case still goes the night's way.
 
 It refuses to start without the keys its parts need and names the missing variable. It
 never prints a key: a part that fails is named in the notes by its plain reason only.
@@ -45,6 +47,7 @@ from pathlib import Path
 
 from engine import exam as engine_exam
 from engine import plug as plug_mod
+from engine.fast import FastNotes
 from engine.lessons import TRYING
 from engine.lessons import Lessons as EngineLessons
 from engine.study import SHOWN, Study
@@ -190,6 +193,9 @@ def night(db, plug, *, days=None, until=None, others=None, judge=None, proposer=
     rep["trials"] = checked
     rep["links"] = links(rep, study.others, lessons)
     rep["snapshot"] = snapshots.after_night(db, plug.agent, until)
+    # Fast reflection's notes on the night's cases, by the same case id (engine/fast.py): none is a
+    # lesson, and a lesson from these cases still goes the night's own way.
+    rep["fast_notes"] = FastNotes(db, plug).linked(study.log.window(since, until), now=until)
     rep["exam"] = None if counted is None else {"runs": counted.runs, "calls": counted.calls, "held": counted.held}
     if counted is not None and counted.skipped:
         rep["exam"]["skipped"] = {why: len(ids) for why, ids in sorted(counted.skipped.items())}
@@ -298,6 +304,7 @@ def text(rep, plug):
                  for b in lk["brought_back"])
     lines.append("  agents read: " + ", ".join(lk["agents_read"]) + "; not read: " +
                  (", ".join(lk["agents_not_read"]) or "none"))
+    lines.extend(_fast_lines(rep.get("fast_notes") or []))
     lines.append("  " + switches_line(rep["switches"]))
     lines.extend(_snapshot_lines(rep["snapshot"]))
     if rep["notes"]:
@@ -315,6 +322,18 @@ def _trial_lines(checked):
         lines.append(f'  ping: lesson {p["lesson_id"]}, case {p["case"]}, row {p["row"]}: {p["result"]}')
     if checked["started"]:
         lines.append("  started from their turn: lesson " + ", ".join(str(i) for i in checked["started"]))
+    return lines
+
+
+def _fast_lines(notes):
+    """Fast reflection's notes on the night's cases, each by its case id; nothing when none."""
+    if not notes:
+        return []
+    lines = [f"  fast notes on the night's cases {len(notes)} (none is a lesson; the case id links each "
+             "to the cases read above)"]
+    for n in notes:
+        said = f'"{n["text"]}"' if n["text"] is not None else f'no note ({n["why"]})'
+        lines.append(f'    - case {n["case"]}: {said}, {n["state"]}')
     return lines
 
 

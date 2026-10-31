@@ -40,6 +40,9 @@ It listens on 127.0.0.1:PORT (default 8080). Meta must reach it through a public
   team member whose reply crashed gets one line, as it may or may not have gone out.
 - The lessons get the Meta risk judge (reflection/judge.py), not the engine's stub. It fails
   closed: with no key, an error or an odd answer the lesson counts as high and waits for a yes.
+- Fast reflection (reflection/fast.py): a second thread sweeps every FAST_EVERY seconds for chats
+  that ended without an order and writes each one note for that customer's next chat only; the
+  turn reads it into the prompt. A sweep that fails is logged and the next one tries again.
 
 Graph API version: GRAPH_API_VERSION, default v26.0, the latest in Meta's changelog
 (https://developers.facebook.com/docs/graph-api/changelog, checked 28 Oct 2026; v26.0
@@ -93,6 +96,7 @@ MAX_ERROR_BODY = 64 * 1024
 # Meta's error code for a free-form message sent more than 24 hours after the customer's
 # last message (Re-engagement message): only a template can go then.
 WINDOW_CLOSED = 131047
+FAST_EVERY = 30  # seconds between fast reflection sweeps, so a note is written within seconds of a chat ending
 
 # Team replies
 HAND_BACK = frozenset({"رجّع", "رجع", "rag3", "back"})
@@ -478,9 +482,11 @@ class App:
     member's reply to a note, and a failed status of such a reply, before any turn.
     """
 
-    def __init__(self, chats, model, lessons, results, graph, limits=None, maxsize=MAX_QUEUE, operator=None):
+    def __init__(self, chats, model, lessons, results, graph, limits=None, maxsize=MAX_QUEUE, operator=None,
+                 fast=None):
         self.chats, self.model, self.lessons, self.results, self.graph = chats, model, lessons, results, graph
         self.limits = limits
+        self.fast = fast  # fast reflection's notes (reflection.fast.FastNotes), or None for none
         self.q = queue.Queue(maxsize=maxsize)
         if operator is None:
             from kit import env
@@ -531,7 +537,23 @@ class App:
         else:
             msg = to_message(inc, self.graph)
         return loop.turn(msg, chats=self.chats, model=self.model, lessons=self.lessons,
-                         results=self.results, send=self.graph.send, limits=self.limits, over=over)
+                         results=self.results, send=self.graph.send, limits=self.limits, over=over, fast=self.fast)
+
+    def sweep_fast(self, stop=None, every=FAST_EVERY):
+        """Fast reflection's sweep every `every` seconds until stop (a threading.Event) is set."""
+        stop = stop if stop is not None else threading.Event()
+        while not stop.wait(every):
+            self.sweep_once()
+
+    def sweep_once(self):
+        """One fast reflection sweep. Returns what it wrote; never raises."""
+        if self.fast is None:
+            return []
+        try:
+            return self.fast.sweep()
+        except Exception:
+            log.exception("the fast reflection sweep failed")
+            return []
 
     def team_chat(self, inc):
         """The chat a team member is answering, or None when this is not a team reply.
@@ -691,6 +713,7 @@ def main():
     from kit.db import Db
     from kit.limits import Limits
     from kit.model import Model
+    from reflection.fast import FastNotes
     from reflection.judge import Judge
     from reflection.lessons import Lessons
     from reflection.results import Results
@@ -710,7 +733,13 @@ def main():
     graph = Graph(env.get("WHATSAPP_TOKEN"), pnid, env.get("GRAPH_API_VERSION", GRAPH_VERSION_DEFAULT))
     # The Meta risk judge on Muse Spark Open. It fails closed: with no key, an error or an odd
     # answer it is unsure, and unsure counts as high, so the lesson waits for a person's yes.
-    app = App(Chats(db), Model(), Lessons(db, judge=Judge()), Results(db), graph, limits=Limits(db))
+    chats = Chats(db)
+    try:  # fast reflection is never needed to answer: if it cannot start, the agent runs without it
+        fast = FastNotes(db, chats)
+    except Exception:
+        log.exception("fast reflection is off: its notes could not be set up")
+        fast = None
+    app = App(chats, Model(), Lessons(db, judge=Judge()), Results(db), graph, limits=Limits(db), fast=fast)
     handler = make_handler(env.get("WHATSAPP_APP_SECRET"), env.get("WHATSAPP_VERIFY_TOKEN"), app.accept, pnid)
     port = int(env.get("PORT", "8080"))
     server = ThreadingHTTPServer(("127.0.0.1", port), handler)
@@ -718,6 +747,7 @@ def main():
     if requeued:
         log.info("re-queued %d messages saved before the last stop", requeued)
     threading.Thread(target=app.work, daemon=True).start()
+    threading.Thread(target=app.sweep_fast, daemon=True).start()
     log.info("listening on 127.0.0.1:%d", port)
     try:
         server.serve_forever()

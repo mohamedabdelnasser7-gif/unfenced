@@ -168,7 +168,7 @@ class Engine(unittest.TestCase):
             with self.subTest(what):
                 self.assertTrue(engine_fast.guard(text, plug, theirs), text)
         self.assertEqual(engine_fast.guard(NOTE, plug, theirs), [])
-        self.assertEqual(engine_fast.guard("Spray the beds less.", plug, theirs), [])  # two words in a row pass
+        self.assertEqual(engine_fast.guard("Water less and spray the beds.", plug, theirs), [])  # two words in a row pass
 
     def test_never_marks_given_by_the_agent_replace_its_high_list_but_never_numbers_or_core_marks(self):
         plug = plugs.load(plugs.WATERER, self)

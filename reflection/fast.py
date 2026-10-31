@@ -35,6 +35,8 @@ data (a name, a password, a national id, an account), or a date, a day or a time
 more than one line and three or more words in a row copied from the customer. Ordinals (first,
 then, last) and "once" are not numbers here: the order of questions is what most notes are about.
 Only the fast note guard changed: the lessons' risk check still reads the plug's whole high list.
+The engine's name check lets known() through: the topic words, the catalogue's words and the
+delivery places, so a note may name the Vapor or Cairo the customer typed, never their name.
 
 Every writer call is a model call, so it is counted in kit/limits.py under LIMIT_KEY, like a
 customer. A sweep stops once the writer is over a limit (FastNotes.sweep), so the endings left
@@ -50,6 +52,7 @@ from kit import limits as limits_mod
 from kit import model as model_mod
 from kit.chats import PERSON, Chats
 from kit.db import Db
+from kit.tools import store
 from reflection import PLUG
 from reflection.study import describe, read_json
 
@@ -98,7 +101,7 @@ _NEVER_WORDS = {
         "geneh", "gneh", "guineh", "جنيه", "ج.م", "دولار", "ريال", "درهم"),
     "discount": (
         "discount", "coupon", "promo", "voucher", "free", "freebie", "rebate", "cashback", "markdown",
-        "bargain", "cheaper", "money off", "complimentary", "gift", "on us", "on the house", "khasm",
+        "bargain", "cheaper", "money off", "complimentary", "gift", "on the house", "khasm",
         "خصم", "تخفيض", "ببلاش", "مجان", "كوبون", "اوفر"),
     "promise": (
         "promise", "guarantee", "warranty", "refund", "money back", "exchange", "replacement", "assure",
@@ -122,8 +125,12 @@ _NEVER_WORDS = {
         "رقم قومي", "قومي", "باسورد", "كلمه السر"),
     "policy": (
         "negotiable", "negotiate", "negotiating", "negotiation", "include", "including", "inclusive",
-        "covered", "cover", "reserve", "final"),
+        "covered", "cover", "reserve"),
 }
+# Never words read as whole words only, with no ending: the risk check's word endings would read
+# "on us" in "focus on using" and "final" in "finally" (review round 3). Kept here, on the note
+# guard's side, so the lesson risk check (engine/risk.py) reads its words as before.
+_WHOLE_WORDS = {"discount": ("on us",), "policy": ("final", "finals")}
 # a word that opens a new clause, so a verb after it is not the topic's own
 _NOT_A_CLAUSE = (r"(?!(?:once|when|whenever|if|after|before|until|unless|then|as|so|and|but|or|because|while"
                  r"|they|you|we|he|she|it|i)\b)")
@@ -155,21 +162,34 @@ _NEVER_PATTERNS = (
 
 def _never(plug_risk):
     """NEVER from the plug's whole high list minus TOPIC_WORDS, after the groups above (so a word
-    on both keeps the name above), each word once."""
-    seen, words = set(), []
+    on both keeps the name above), each word once; a _WHOLE_WORDS word as a whole word pattern."""
+    whole = tuple((g, w) for g, ws in _WHOLE_WORDS.items() for w in ws)
+    seen, words = {w for _, w in whole}, []
     for group, w in [(g, w) for g, ws in _NEVER_WORDS.items() for w in ws] + list(plug_risk.words):
         if w.casefold() in TOPIC_WORDS or w.casefold() in seen:
             continue
         seen.add(w.casefold())
         words.append((group, w))
     numbers = {p for _, p in engine_fast.NUMBERS}  # the engine checks these for every agent
-    patterns = _NEVER_PATTERNS + tuple((g, p) for g, p in plug_risk.patterns if p not in numbers)
+    patterns = (_NEVER_PATTERNS + tuple((g, r"(?<![a-z0-9_])" + r"\s+".join(w.split()) + r"(?![a-z0-9_])")
+                                        for g, w in whole)
+                + tuple((g, p) for g, p in plug_risk.patterns if p not in numbers))
     tools = tuple(t for t in plug_risk.tools if t.casefold() not in TOPIC_WORDS)
     return Risk(high_about=NEVER_ABOUT, low_about=plug_risk.low_about, words=tuple(words),
                 patterns=patterns, tools=tools)
 
 
 NEVER = _never(PLUG.risk)
+
+
+def known():
+    """The Sales agent's own words a note may name although the customer typed them (the engine's
+    name check, review round 3): the topic words, the catalogue's product, tier and size words
+    (Nike, Vapor, Elite, Pro) and the delivery places (Cairo). Read from the store each time, so a
+    product added later counts; the store's own cache keeps it cheap."""
+    places = {w for zone in store.delivery().get("zones", []) if isinstance(zone, dict)
+              for w in str(zone.get("area", "")).split()}
+    return frozenset(TOPIC_WORDS) | store.vocabulary() | places
 
 WRITE = (
     "You are Reflection, the part of an AI agent's system that looks back at its work. One of the "
@@ -283,7 +303,7 @@ class FastNotes(engine_fast.FastNotes):
         self.limits = limits if limits is not None else limits_mod.Limits(db)
         super().__init__(db, PLUG, writer=Metered(Writer() if writer is None else writer, self.limits),
                          reader=lambda chat_id: chat_turns(self.chats, chat_id), keep_days=keep_days,
-                         never=NEVER)
+                         never=NEVER, known=known)
 
     def for_prompt(self, chat_id, now=None):
         """This chat's note under HEADING, for the end of its prompt; "" when it has none."""

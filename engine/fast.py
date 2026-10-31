@@ -24,11 +24,14 @@ none of the risk check's core marks (a link, a phone number or a handle); no num
 a digit in any script, a numeral sign or a fraction (each reads as a digit in the risk check's
 normal form), a percent or a money sign (NUMBERS, for every agent); none of the never marks;
 no run of COPY_RUN words in a row copied from the source's own words, read in the same
-normal form; and no word written with a capital (past a sentence's first word) that the source's
-own words hold, so a name the source gave never reaches a note ("Ask Ahmed", red team round 2).
-The never marks are what a note may never state, given by the agent as a Risk (words, patterns
-and tools; never=). With none given they are the plug's whole high risk list,
-the strict default. An agent gives its own when its high list also holds words a note needs
+normal form; and no word written with a capital that the source's own words hold, a sentence's
+first word too unless it is one of OPENERS, so a name the source gave never reaches a note ("Ask
+Ahmed", red team round 2; "Ahmed wants", review round 3). The agent's own words pass that check:
+the words its plug writes with a capital and the words the agent gives (known=: its catalogue,
+its places, its topic words), so a note may name a product or a place the source typed (review
+round 3). The never marks are what a note may never state, given by the agent as a Risk (words,
+patterns and tools; never=). With none given they are the plug's whole high risk list, the
+strict default. An agent gives its own when its high list also holds words a note needs
 to name a topic: a note may say what to talk about, never state a figure, a cut, a promise or
 a date. A note that fails is not saved as a note: its row keeps only why, so the same ending is
 not tried again. The judge is not asked: a note never becomes a lesson and reaches one source's
@@ -118,24 +121,47 @@ BEGIN SELECT RAISE(ABORT, 'a closed fast note stays closed'); END;
 """
 _WORDS = re.compile(r"\w+")
 _NAME_WORD = re.compile(r"[^\W\d_]+")  # a word of letters only
+# The words a note's sentence may open with although the source wrote them too: the verbs a note
+# leads with (the writer is told to write an aim from the agent's side) and the small words a
+# sentence starts with. A named list because no list of the writer's verbs exists in the data, and
+# a first word has a capital anyway, so without it every note that opens like the source's own
+# words would be refused. Nothing here is a name. The agent's own verbs pass through _own_words (a plug
+# action written "Water the bed." gives water); any other first word is checked like the rest.
+OPENERS = frozenset((
+    "ask", "bring", "try", "offer", "lead", "start", "open", "mention", "wait", "keep", "let", "give",
+    "answer", "check", "show", "explain", "focus", "follow", "confirm", "say", "tell", "use", "suggest",
+    "raise", "hold", "skip", "avoid", "stay", "share", "send", "respond", "greet", "thank", "point", "help",
+    "get", "make", "put", "find", "see", "go", "move", "close", "end", "slow", "repeat", "remind", "clear",
+    "describe", "compare", "list", "note", "match", "finish", "set", "take", "leave", "stop", "be", "do",
+    "don", "dont", "never", "always", "the", "a", "an", "this", "that", "these", "those", "if", "when",
+    "once", "before", "after", "next", "then", "first", "instead", "only", "as", "since", "because", "so",
+    "here", "they", "he", "she", "it", "you", "we", "their", "his", "her", "its", "your", "our", "no",
+    "not", "for", "on", "in", "at", "with", "by", "from", "to", "of", "while", "until", "unless", "also",
+    "again", "both", "each", "every", "most", "some", "any", "more", "less", "other", "what", "why",
+    "how", "which", "who", "where", "there"))
 
 
 class FastNotes:
     """One agent's fast notes. writer(plug, view): the note as text, or None when nothing is worth
     trying; it may raise (a PartError's words are kept, any other error by its type only).
     reader(case id): the case's turns, a list of {"from", "text"} or {"from", "tools"}; optional.
-    never: the marks a note may never carry, a plug.Risk; the plug's high risk list when left out."""
+    never: the marks a note may never carry, a plug.Risk; the plug's high risk list when left out.
+    known(): the agent's own words a note may name although the source wrote them (its catalogue,
+    its places), read at each check; optional. When it fails, no words pass (the stricter way)."""
 
-    def __init__(self, db, plug, *, writer=None, reader=None, keep_days=KEEP_DAYS, never=None):
+    def __init__(self, db, plug, *, writer=None, reader=None, keep_days=KEEP_DAYS, never=None, known=None):
         if not keep_days > 0:
             raise ValueError("keep_days is more than 0")
         if never is not None and not isinstance(never, Risk):
             raise ValueError("never is a plug Risk")
+        if known is not None and not callable(known):
+            raise ValueError("known gives the agent's own words")
         self.db = db
         self.plug = plug
         self.log = Log(db, plug)
         self.writer, self.reader = writer, reader
         self.never = never
+        self.known = known
         self.keep_days = float(keep_days)
         self.db.script(SCHEMA)
 
@@ -232,10 +258,20 @@ class FastNotes:
         if not isinstance(raw, str):
             return None, "the writer gave no text"
         text = raw.strip()
-        found = guard(text, self.plug, theirs, never=self.never)
+        found = guard(text, self.plug, theirs, never=self.never, known=self._known())
         if found:
             return None, "stopped: " + "; ".join(found)
         return text, None
+
+    def _known(self):
+        """The agent's own words from known(), as texts; () with none or when it fails."""
+        if self.known is None:
+            return ()
+        try:
+            got = self.known()
+        except Exception:  # a catalogue that cannot answer lets no word through, never more
+            return ()
+        return tuple(w for w in got if isinstance(w, str)) if isinstance(got, (set, frozenset, list, tuple)) else ()
 
     def _save(self, case_id, source, ended_at, text, why, now):
         with self.db.tx() as c:
@@ -356,10 +392,11 @@ class FastNotes:
         return now >= last + longest(self.plug) * DAY
 
 
-def guard(text, plug, theirs=(), never=None):
+def guard(text, plug, theirs=(), never=None, known=()):
     """Why a note may not be given, as plain lines; [] when it may. theirs: the source's own words.
     never: the marks a note may never carry (a plug.Risk); the plug's high risk list when None.
-    The core marks and NUMBERS are checked either way."""
+    The core marks and NUMBERS are checked either way. known: the agent's own words (texts) a note
+    may name although the source wrote them; the words the plug writes with a capital pass too."""
     if not isinstance(text, str) or not text.strip():
         return ["not one line of text"]
     if len(text.splitlines()) > 1:  # every line break Python knows: \n, \r, U+2028, U+0085 and more
@@ -371,24 +408,40 @@ def guard(text, plug, theirs=(), never=None):
     found += risk_mod.code_check(text, dataclasses.replace(marks, patterns=NUMBERS + tuple(marks.patterns)))
     if any(_runs(text) & _runs(t) for t in theirs if isinstance(t, str)):
         found.append(f"copies {COPY_RUN} or more words in a row from the source's own words")
-    names = _capitalised(text) & _their_words(theirs)
+    names = (_capitalised(text) & _their_words(theirs)) - _own_words(plug, known)
     if names:
         found.append("names a word from the source's own words: " + ", ".join(sorted(names)))
     return found
 
 
-def _capitalised(text):
-    """The words of text written with a capital first letter, other than a sentence's first word
-    ("Ask Ahmed first" gives ahmed), in the normal form. Hidden characters and marks are dropped and
-    look alike letters read as Latin first, keeping their case, so neither hides a capital."""
+def _own_words(plug, known):
+    """The agent's own words, in the normal form: every word of known, and every word the plug's
+    own texts write with a capital (a channel or a partner the plug names)."""
+    words = set()
+    for w in known:
+        if isinstance(w, str):
+            words.update(_WORDS.findall(risk_mod.normalize(w)))
+    texts = [plug.about, plug.case, plug.source.about, plug.harm.about, *plug.actions.values(),
+             *plug.causes.values(), *(r.about for r in plug.results.values())]
+    for t in texts:
+        if isinstance(t, str):
+            words |= _capitalised(t, openers=())
+    return words
+
+
+def _capitalised(text, openers=OPENERS):
+    """The words of text written with a capital first letter, in the normal form, other than a
+    sentence's first word that is on openers ("Ask Ahmed first" and "Ahmed wants" both give ahmed).
+    Hidden characters and marks are dropped and look alike letters read as Latin first, keeping
+    their case, so neither hides a capital."""
     plain = unicodedata.normalize("NFKD", (text or "").translate(risk_mod._LATIN))
     plain = "".join(ch for ch in plain if unicodedata.category(ch) != "Cf" and ch not in risk_mod._BLANKS
                     and not unicodedata.category(ch).startswith("M")).translate(risk_mod._LATIN)
-    def opens(m):  # a sentence's first word has a capital anyway
+    def opener(m):  # a sentence's first word has a capital anyway: only an opener passes there
         before = plain[:m.start()].rstrip(" \t\"'“”‘’(")
-        return not before or before[-1] in ".!?;:؟"
+        return (not before or before[-1] in ".!?;:؟") and risk_mod.normalize(m.group(0)) in openers
     return {risk_mod.normalize(m.group(0)) for m in _NAME_WORD.finditer(plain)
-            if len(m.group(0)) > 1 and m.group(0)[0].isupper() and not opens(m)}
+            if len(m.group(0)) > 1 and m.group(0)[0].isupper() and not opener(m)}
 
 
 def _their_words(theirs):

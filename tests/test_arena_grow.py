@@ -150,6 +150,42 @@ class WeightPerLoss(unittest.TestCase):
         self.assertFalse(pool.trained(card(3, "trust")))
 
 
+class LossesByGroup(unittest.TestCase):
+    """Losses are counted by the card's group (worry and why it will not buy), at most
+    MAX_COUNTED_LOSSES of them, so a renumbered card keeps its group's count and no card runs away."""
+
+    def setUp(self):
+        self.pool = grow.Pool(folder(self), "sales")
+
+    def test_a_renumbered_card_keeps_its_group_losses_and_a_new_card_under_an_old_id_does_not(self):
+        lose(self.pool, card(3, "price"), 2)
+        self.assertEqual(self.pool.weight(card(5, "price")), 1 + 2 * grow.LOST_WEIGHT)  # the next build calls it persona-05
+        self.assertEqual(self.pool.weight(card(3, "size")), 1)  # persona-03 is another group now
+        self.assertEqual(list(self.pool.played), ["base:price"])
+
+    def test_why_it_will_not_buy_and_grown_cards_are_groups_of_their_own(self):
+        nobudget = dict(card(8, "price"), unwinnable=True, why_unwinnable="no budget")
+        lose(self.pool, nobudget, 1)
+        self.assertEqual(self.pool.weight(card(2, "price")), 1)
+        self.assertEqual(grow.group(nobudget), "base:price:no-budget")
+        lose(self.pool, dict(card(1, "price"), id="grown-price"), 1)
+        self.assertEqual(self.pool.weight(card(2, "price")), 1)
+        self.assertEqual(self.pool.weight(dict(card(1, "price"), id="grown-price")), 1 + grow.LOST_WEIGHT)
+
+    def test_at_most_max_counted_losses_count(self):
+        self.assertEqual((grow.LOST_WEIGHT, grow.MAX_COUNTED_LOSSES), (3, 5))
+        c = card(1, "price")
+        lose(self.pool, c, grow.MAX_COUNTED_LOSSES + 95)
+        self.assertEqual(self.pool.played["base:price"]["lost"], 100)  # every loss is kept, only 5 count
+        self.assertEqual(self.pool.weight(c), 1 + grow.LOST_WEIGHT * grow.MAX_COUNTED_LOSSES)
+
+    def test_rows_saved_under_a_card_id_or_with_bad_counts_are_dropped(self):
+        self.pool.path.write_text(json.dumps({"kind": "sales", "played": {
+            "persona-01": {"played": 3, "lost": 3}, "base:price": {"played": 2, "lost": 1},
+            "base:size": {"played": True, "lost": 0}, "base:trust": {"played": 1, "lost": -1}}}), encoding="utf-8")
+        self.assertEqual(grow.Pool(self.pool.owner, "sales").played, {"base:price": {"played": 2, "lost": 1}})
+
+
 class CapsHeld(unittest.TestCase):
     def base(self):
         return [dict(card(1, "price", 0.2), want=["name printing on boots"]), card(2, "size", 0.4),

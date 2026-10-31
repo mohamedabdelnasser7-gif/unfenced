@@ -52,7 +52,8 @@ Both sides grow (items 30, 48, 51; arena/grow.py). The base cards are split firs
 ids are saved in the owner's pool of practice customers, so the gate keeps the same cards run
 after run while the pool grows; a card grown from real chats and a card that has trained are
 never held out. The cards grown from real chats then join the training cards only. In training
-a card that beat the agent is drawn more often (per loss, grow.LOST_WEIGHT), and each side's
+a card whose group beat the agent is drawn more often (per loss, grow.LOST_WEIGHT, at most
+grow.MAX_COUNTED_LOSSES losses counted), and each side's
 share and the capped wants are held on the training draws; the gate draws at the weights before
 any loss, its capped wants held on its own. Each training match's result is counted in the pool,
 practice-<kind>.json in the owner's state folder (grow.owner_of). Agents of one kind under one

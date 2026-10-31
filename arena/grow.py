@@ -35,9 +35,11 @@ cleaned turns join the pool, and the pool's cards are rebuilt through the card c
 most 25%) hold for the grown cards as for the first ones. A grown card's id names its group
 (grown-<worry>, grown-<worry>-no-budget), so it keeps its losses when the pool is rebuilt.
 
-A practice customer that beats the agent comes back more often: the pool counts each card's
-losses in training matches (arena/run.py), and in training a card is drawn 1 + LOST_WEIGHT times
-as often per loss (decks). Grown cards train only and never take the gate; the gate's cards are
+A practice customer that beats the agent comes back more often: the pool counts the losses in
+training matches (arena/run.py) by the card's group (its worry and why it will not buy, the way
+grown_id names grown cards), not by its id, and in training a card is drawn 1 + LOST_WEIGHT times
+as often per loss, at most MAX_COUNTED_LOSSES counted, so one card never crowds out the rest
+(decks). Grown cards train only and never take the gate; the gate's cards are
 split off the base cards first and the split is saved in the pool (arena/run.py fixed_split).
 The weights per loss, each side's share and the capped wants apply to the training draws after
 that split; the gate draws at the weights before any loss, with the capped wants held on its own
@@ -74,6 +76,7 @@ from arena import paths
 from arena.clean import Cleaner
 
 LOST_WEIGHT = 3
+MAX_COUNTED_LOSSES = 5  # losses counted per card group at most (root's pick, waiting for Mohamed's word)
 HARD_TURNS = 6
 MAX_NEW = 50
 MAX_ITEMS = 500
@@ -160,8 +163,10 @@ class Pool:
         pending = data.get("pending") if isinstance(data.get("pending"), dict) else {}
         self.pending = {k: v for k, v in pending.items() if _count(v)}
         self.floor = float(data["floor"]) if _time(data.get("floor")) else None
-        self.played = {str(k): v for k, v in (data.get("played") or {}).items()
-                       if isinstance(v, dict) and _count(v.get("played")) and _count(v.get("lost"))}
+        played = data.get("played") if isinstance(data.get("played"), dict) else {}
+        self.played = {k: {"played": v["played"], "lost": v["lost"]} for k, v in played.items()
+                       if isinstance(k, str) and GROUP.fullmatch(k) and isinstance(v, dict)
+                       and _count(v.get("played")) and _count(v.get("lost"))}
         self.cards = [c for c in (data.get("cards") or []) if _card_ok(c)]
         capped = data.get("capped")  # None until the pool is first built from a recipe
         self.capped = [c for c in capped if _capped_ok(c)] if isinstance(capped, list) else None
@@ -170,14 +175,16 @@ class Pool:
         self.changed = False
 
     def weight(self, card):
-        return 1 + LOST_WEIGHT * int(self.played.get(str(card["id"]), {}).get("lost", 0))
+        """1 + LOST_WEIGHT per loss of the card's group in training, at most MAX_COUNTED_LOSSES counted."""
+        return 1 + LOST_WEIGHT * min(int(self.played.get(group(card), {}).get("lost", 0)), MAX_COUNTED_LOSSES)
 
     def trained(self, card):
-        """True when the card has played a training match: it is never held out for the gate."""
-        return int(self.played.get(str(card["id"]), {}).get("played", 0)) > 0
+        """True when the card's group has played a training match: it is never held out for the gate."""
+        return int(self.played.get(group(card), {}).get("played", 0)) > 0
 
     def record(self, card, won):
-        row = self.played.setdefault(str(card["id"]), {"played": 0, "lost": 0})
+        """A training match's result, counted for the card's group (group)."""
+        row = self.played.setdefault(group(card), {"played": 0, "lost": 0})
         row["played"] += 1
         row["lost"] += 0 if won else 1
         self.changed = True
@@ -291,10 +298,25 @@ def _capped_ok(c):
             and not isinstance(c["most"], bool) and 0 < c["most"] < 1)
 
 
+def _slug(text):
+    return re.sub(r"[^a-z0-9]+", "-", str(text or "other").casefold()).strip("-") or "other"
+
+
 def grown_id(card):
     """grown-<worry>, with -no-budget for a card unwinnable for no budget: the same group, the same id."""
-    slug = re.sub(r"[^a-z0-9]+", "-", str(card.get("worry") or "other").casefold()).strip("-") or "other"
-    return f"grown-{slug}" + ("-no-budget" if card.get("why_unwinnable") == "no budget" else "")
+    return f"grown-{_slug(card.get('worry'))}" + ("-no-budget" if card.get("why_unwinnable") == "no budget" else "")
+
+
+GROUP = re.compile(r"(?:base|grown):[a-z0-9-]{1,80}(?::[a-z0-9-]{1,80})?")
+
+
+def group(card):
+    """The card's group, the key its training results are counted under: base or grown, its worry
+    and why it will not buy (base:price, grown:price:no-budget). A persona build numbers its cards
+    again each time, so a card id (persona-NN) can name another group tomorrow; the group stays."""
+    side = "grown" if str(card.get("id", "")).startswith("grown-") else "base"
+    why = card.get("why_unwinnable")
+    return f"{side}:{_slug(card.get('worry'))[:80]}" + (f":{_slug(why)[:80]}" if why else "")
 
 
 def for_state(state, default_kind=DEFAULT_KIND):
@@ -351,10 +373,27 @@ def decks(base, pool, held):
         c["arena_weight"] *= pool.weight(c)
     _shares(train, sides)
     cards_mod.cap_wants(train, caps)
+    _hold(train, caps)
     gate = [c for c in out if c["id"] in held and buys(c)]
     _shares(gate, {False: 1.0, True: 0.0})
     cards_mod.cap_wants(gate, caps)
+    _hold(gate, caps)
     return train, gate
+
+
+def _hold(cards, caps):
+    """cap_wants rounds each weight to 3 places, so the weights can add up to a little under 1 and
+    a capped want's share of the draws a little over its most (0.2503 for 0.25). This cuts that
+    want's cards by just enough, so its share of the draws is at most its most."""
+    for _, rx, most in caps.capped:
+        mine = [c for c in cards if any(rx.search(w) for w in c["want"])]
+        have = sum(c["arena_weight"] for c in mine)
+        rest = sum(c["arena_weight"] for c in cards) - have
+        if have <= 0 or rest <= 0 or have / (have + rest) <= most:
+            continue
+        cut = most * rest / (have * (1 - most))
+        for c in mine:
+            c["arena_weight"] = math.floor(c["arena_weight"] * cut * 1e6) / 1e6
 
 
 def _shares(cards, sides):

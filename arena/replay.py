@@ -15,7 +15,7 @@ worry, only a card that will not buy, or no customer words before the store's fi
 
 Cleaned real chat lines (names, numbers and addresses removed) may sit in the repo (DECISIONS
 item 23; only the original lines stay out): arena/real/replay.jsonl is the cleaned replay set.
-load() still refuses a file inside the repo, so a run names a copy outside it. The tests use the
+load() takes that file and refuses any other file inside the repo. The tests use the
 set built from the made-up chats (demo/make_arena_history.py) and never read arena/real/.
 """
 import json
@@ -24,6 +24,7 @@ from pathlib import Path
 from arena import label, paths
 
 ROOT = Path(__file__).resolve().parent.parent
+REAL_REPLAY = ROOT / "arena" / "real" / "replay.jsonl"  # the cleaned replay set, the one repo file load() takes
 MAX_REPLAYS = 10
 MAX_BYTES = 20_000_000
 NO_WORRY = "no worry tag"
@@ -36,11 +37,18 @@ class Refused(ValueError):
     pass
 
 
+def _is_real_replay(p):
+    try:
+        return p.is_file() and REAL_REPLAY.is_file() and p.samefile(REAL_REPLAY)
+    except OSError:
+        return False
+
+
 def load(path):
-    """The replay set's entries, in file order. Refuses a file inside the repo."""
+    """The replay set's entries, in file order. Refuses a file inside the repo other than REAL_REPLAY."""
     p = Path(path).expanduser().resolve()
-    if paths.inside_repo(p):
-        raise Refused("the replay set sits inside the repo; keep real chats outside it (DECISIONS item 17)")
+    if paths.inside_repo(p) and not _is_real_replay(p):
+        raise Refused("the replay set sits inside the repo; only the cleaned set, arena/real/replay.jsonl, is taken from it (DECISIONS items 17 and 23)")
     if not p.is_file():
         raise Refused("the replay set is not a regular file")
     if p.stat().st_size > MAX_BYTES:

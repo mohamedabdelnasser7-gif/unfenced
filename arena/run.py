@@ -43,8 +43,8 @@ to --replay-max real lost chats, each from the customer's real opening against t
 with the chat's worry (arena/replay.py), scored with the same fact checks and verdict and counted
 against the same cap. A lost replay becomes a case too. Cleaned real chat lines (names, numbers
 and addresses removed) may sit in the repo (DECISIONS item 23): arena/real/replay.jsonl is the
-cleaned replay set, beside the cleaned real cards. arena/replay.py load() still refuses a file
-inside the repo, so a run names a copy outside it.
+cleaned replay set, beside the cleaned real cards. arena/replay.py load() takes that file and
+refuses any other file inside the repo.
 
 --cards defaults to the cleaned real cards (DEFAULT_CARDS, arena/real/cards; DECISIONS items 23
 and 40). The made-up set is DEMO_CARDS (demo/personas/cards); the tests use it and never read

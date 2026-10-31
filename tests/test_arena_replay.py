@@ -222,6 +222,12 @@ class Cli(unittest.TestCase):
         saved = (self.dir / run.MATCHES_FILE).read_text(encoding="utf-8")
         self.assertNotIn('"replay"', saved)
 
+    def test_the_cleaned_set_is_the_one_repo_file_taken(self):
+        self.assertEqual(replay.REAL_REPLAY, ROOT / "arena" / "real" / "replay.jsonl")
+        self.assertTrue(replay._is_real_replay(replay.REAL_REPLAY.resolve()))  # a stat, never a read
+        self.assertFalse(replay._is_real_replay((ROOT / "demo" / "crowd.jsonl").resolve()))
+        self.assertFalse(replay._is_real_replay((ROOT / "arena" / "real" / "summary.json").resolve()))
+
     def test_refuses_a_replay_set_in_the_repo_before_any_call(self):
         for given in (ROOT / "demo" / "crowd.jsonl", Path(str(ROOT / "demo" / "crowd.jsonl").swapcase())):
             code, _, err = self.main("--replay", str(given))

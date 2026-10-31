@@ -2,7 +2,7 @@
 
     python3 -I arena/run.py --cards DIR --matches N [--rounds 5] [--held-out persona-03,persona-07]
         [--trust FILE] [--customer-prompt FILE] [--cap 1000] [--state DIR] [--db PATH]
-        [--replay FILE [--replay-max 10]] [--fact-checks on|off] [--seed 0] [--json]
+        [--replay FILE [--replay-max 10]] [--fact-checks on|off] [--seed 0] [--json] [--quick]
 
 Each round: N training matches, each card drawn by its arena_weight from the cards the agent may
 train on, then the gate: the agent's trust level of matches (its "matches") drawn the same way
@@ -41,6 +41,12 @@ Every match is saved in arena-matches.jsonl with its verdict: the past wins the 
 reruns (arena/gate.py). Both files sit next to the agent's database (--db), with the stuck
 item, so the gate reads that agent's own wins and nothing else. --state names their folder
 only for a run with no database (its wins feed no gate); one of the two is needed.
+
+--quick is the short run for judges (docs/judges.md): one round of one training match and a gate
+of one match (QUICK_TRUST, in place of --trust), at most QUICK_CALLS model calls in this run on
+top of the day's cap, its files under data/arena-quick unless --db or --state names a place.
+With no model key in env or .env (META_API_KEY or BASETEN_API_KEY), the run prints one line
+pointing to the recorded replay (recorded/play.py) and exits 2 before reading anything else.
 """
 import argparse
 import datetime
@@ -70,6 +76,11 @@ HELD_OUT_SHARE = 0.3
 PUBLIC_TRUST = {"matches": 10, "wins": 10, "zero_failed_checks": True}
 TZ = "Africa/Cairo"
 PASSED, CAP, STUCK, ROUNDS, MODEL_ERROR = "passed", "cap", "stuck", "rounds", "model_error"
+# --quick, the short run for judges (docs/judges.md): one round of one training match and a gate of
+# one match, at most QUICK_CALLS model calls in the run, its files under the ignored data/ folder.
+QUICK_TRUST = {"matches": 1, "wins": 1, "zero_failed_checks": True}
+QUICK_CALLS = 40
+QUICK_STATE = ROOT / "data" / "arena-quick"
 
 
 class Refused(ValueError):
@@ -93,10 +104,12 @@ class Calls:
     a file. count is the day's count when last read; taken, the calls this object took. problem: why
 the count file could not be read, when it could not; then every take() is refused as at the cap."""
 
-    def __init__(self, path, cap=DEFAULT_CAP, day=None):
+    def __init__(self, path, cap=DEFAULT_CAP, day=None, limit=None):
+        """limit: at most this many calls by this object (the quick run), on top of the day's cap."""
         self.path, self.cap = Path(path), int(cap)
         if self.cap < 1:
             raise Refused("--cap must be at least 1")
+        self.limit = None if limit is None else int(limit)
         self.fixed_day = day
         self.day = day or today()
         self.lock = self.path.with_suffix(".lock")
@@ -132,6 +145,9 @@ the count file could not be read, when it could not; then every take() is refuse
         fd = os.open(self.lock, os.O_RDWR | os.O_CREAT, 0o600)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX)
+            if self.limit is not None and self.taken >= self.limit:
+                self.reached = True
+                raise CapReached(f"the run's limit of {self.limit} model calls is reached")
             self.day = self.fixed_day or today()  # read at each call, so a run across Cairo midnight moves on with the file
             self.count = self._read()
             if self.problem:
@@ -359,6 +375,8 @@ class Arena:
                "rounds": rounds, "calls": {"day": self.calls.day, "used": self.calls.count, "cap": self.calls.cap}}
         if self.calls.problem:
             rep["calls"]["problem"] = self.calls.problem
+        if self.calls.limit is not None:
+            rep["calls"]["run_limit"], rep["calls"]["run_used"] = self.calls.limit, self.calls.taken
         if stopped == MODEL_ERROR:
             rep["error"] = self.error
         if stopped == STUCK:
@@ -479,6 +497,8 @@ def text(rep):
         lines.append(f"  stopped by a model error: {rep['error']}; that match was dropped, not counted as lost")
     c = rep["calls"]
     lines.append(f"  model calls on {c['day']}: {c['used']} of {c['cap']}")
+    if c.get("run_limit") is not None:
+        lines.append(f"  quick run: {c['run_used']} of at most {c['run_limit']} model calls in this run")
     if c.get("problem"):
         lines.append(f"  {c['problem']}; it counts as the cap reached until it is fixed or removed")
     rp = rep.get("replay")
@@ -514,14 +534,26 @@ def main(argv=None, *, agent_model=None, customer_model=None):
     ap.add_argument("--fact-checks", choices=("on", "off"), default=None)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--quick", action="store_true", help="a short run for judges: one training match, a gate of one"
+                    f" match, at most {QUICK_CALLS} model calls")
     args = ap.parse_args(argv)
+    if args.quick:
+        args.matches, args.rounds = 1, 1
+        if not (args.db or args.state):
+            args.state = str(QUICK_STATE)
+    if agent_model is None or customer_model is None:
+        from kit import env, model as model_mod
+        env.load()
+        if not model_mod.has_key():
+            print(model_mod.NO_KEY_LINE, file=sys.stderr)
+            return 2
     db = None
     try:
         cards = load_cards(args.cards)
         if args.replay_max < 1:
             raise Refused("--replay-max must be at least 1")
         planned = replay_mod.plan(replay_mod.load(args.replay), cards, args.replay_max) if args.replay else None
-        trust = load_trust(args.trust)
+        trust = dict(QUICK_TRUST) if args.quick else load_trust(args.trust)
         prompt = match_mod.load_prompt(args.customer_prompt)
         if args.db and args.state:
             raise Refused("--state is for a run with no database; with --db the Arena keeps its files next to it")
@@ -531,10 +563,8 @@ def main(argv=None, *, agent_model=None, customer_model=None):
         if paths.inside_repo(state) and not paths.within(state, paths.DATA):
             raise Refused("the Arena's files would sit inside the repo, where real chat lines and the trust level"
                           " could be committed; keep --db or --state outside it or under data/ (DECISIONS item 17)")
-        calls = Calls(state / CALLS_FILE, args.cap)
+        calls = Calls(state / CALLS_FILE, args.cap, limit=QUICK_CALLS if args.quick else None)
         if agent_model is None or customer_model is None:
-            from kit import env, model as model_mod
-            env.load()
             agent_model = agent_model or model_mod.Model()
             customer_model = customer_model or model_mod.Model()
         learn, lessons = None, None

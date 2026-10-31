@@ -1,0 +1,580 @@
+{
+ "format": 1,
+ "kind": "arena",
+ "scripted": true,
+ "label": "SCRIPTED: made by recorded/record.py --scripted with scripted stand-in models. No model was called; this shows the shape of a run, not what Muse Spark says.",
+ "recorded_at": "2026-10-31T03:57:57.450+00:00",
+ "command": "python3 -I recorded/record.py --scripted",
+ "models": [
+  {
+   "role": "agent",
+   "route": "scripted",
+   "model": "scripted-seller"
+  },
+  {
+   "role": "customer",
+   "route": "scripted",
+   "model": "scripted-buyer"
+  }
+ ],
+ "report": {
+  "agent": "sales",
+  "run": "20261031T035757",
+  "stopped": "passed",
+  "trust": {
+   "matches": 1,
+   "wins": 1,
+   "zero_failed_checks": true
+  },
+  "fact_checks": true,
+  "training_cards": [
+   "persona-03",
+   "persona-04",
+   "persona-05",
+   "persona-06",
+   "persona-07",
+   "persona-08"
+  ],
+  "held_out_cards": [
+   "persona-01",
+   "persona-02"
+  ],
+  "rounds": [
+   {
+    "round": 1,
+    "training": {
+     "played": 1,
+     "won": 1,
+     "cases": []
+    },
+    "gate": {
+     "played": 1,
+     "won": 1,
+     "lost": []
+    }
+   }
+  ],
+  "calls": {
+   "day": "2026-10-31",
+   "used": 18,
+   "cap": 1000,
+   "run_limit": 40,
+   "run_used": 18
+  }
+ },
+ "matches": [
+  {
+   "card": "persona-07",
+   "worry": "just browsing",
+   "unwinnable": true,
+   "seed": "20261031T035757-r1-t01",
+   "opening": "availability",
+   "turns": [
+    {
+     "n": 1,
+     "customer": "How much are the Football Boots, Black?",
+     "replies": [
+      "The Football Boots, Black are 1450 EGP."
+     ],
+     "outcome": "replied",
+     "tools": [],
+     "failed": [],
+     "order": false
+    },
+    {
+     "n": 2,
+     "customer": "ok I'll take it. Demo Buyer, 12 Tahrir St, Dokki, Giza",
+     "replies": [
+      "Your order: Football Boots, Black size 43 x1, total 1510 EGP with delivery. Confirm?"
+     ],
+     "outcome": "replied",
+     "tools": [
+      "switch_stage",
+      "draft_order"
+     ],
+     "failed": [],
+     "order": false
+    },
+    {
+     "n": 3,
+     "customer": "yes",
+     "replies": [
+      "Thanks, order #1001 is placed."
+     ],
+     "outcome": "replied",
+     "tools": [
+      "draft_order"
+     ],
+     "failed": [],
+     "order": true
+    }
+   ],
+   "ended": "order",
+   "order": true,
+   "id": "20261031T035757-r1-t01",
+   "won": true,
+   "why": "order placed on the customer's yes",
+   "quote": {
+    "turn": 3,
+    "who": "customer",
+    "text": "yes"
+   },
+   "persona": {
+    "id": "persona-07",
+    "worry": "just browsing",
+    "unwinnable": true,
+    "why_unwinnable": "just browsing",
+    "want": [
+     "a football kit",
+     "something from the shop",
+     "football boots"
+    ],
+    "buy_trigger": [
+     "nothing yet, only looking"
+    ],
+    "patience": {
+     "median": 0,
+     "most": 0
+    },
+    "style": {
+     "length": {
+      "short": 0.33,
+      "medium": 0.67,
+      "long": 0.0
+     },
+     "language": {
+      "arabic": 0.67,
+      "franco": 0.0,
+      "english": 0.33
+     },
+     "voice_notes": 0.0,
+     "opening": {
+      "voice note": 0.0,
+      "photo or link": 0.0,
+      "price": 0.33,
+      "size": 0.0,
+      "availability": 0.33,
+      "greeting": 0.33,
+      "other": 0.0
+     }
+    },
+    "chats": 3,
+    "won": 0,
+    "lost": 3,
+    "examples": [
+     "تمام شكرا، أنا بس بتفرج دلوقتي",
+     "Hi! just looking at the new collection",
+     "حلو، بس بسأل بس دلوقتي"
+    ],
+    "share": 0.107,
+    "arena_weight": 0.107
+   },
+   "prompt_sha": "1f6fbfdf61bb29cc68aee491678737ccbcb814078aad40e7d0a520ab617ca7fb",
+   "prompt_file": null
+  },
+  {
+   "card": "persona-01",
+   "worry": "size",
+   "unwinnable": false,
+   "seed": "20261031T035757-r1-g01",
+   "opening": "size",
+   "turns": [
+    {
+     "n": 1,
+     "customer": "How much are the Football Boots, Black?",
+     "replies": [
+      "The Football Boots, Black are 1450 EGP."
+     ],
+     "outcome": "replied",
+     "tools": [],
+     "failed": [],
+     "order": false
+    },
+    {
+     "n": 2,
+     "customer": "ok I'll take it. Demo Buyer, 12 Tahrir St, Dokki, Giza",
+     "replies": [
+      "Your order: Football Boots, Black size 43 x1, total 1510 EGP with delivery. Confirm?"
+     ],
+     "outcome": "replied",
+     "tools": [
+      "switch_stage",
+      "draft_order"
+     ],
+     "failed": [],
+     "order": false
+    },
+    {
+     "n": 3,
+     "customer": "yes",
+     "replies": [
+      "Thanks, order #1001 is placed."
+     ],
+     "outcome": "replied",
+     "tools": [
+      "draft_order"
+     ],
+     "failed": [],
+     "order": true
+    }
+   ],
+   "ended": "order",
+   "order": true,
+   "id": "20261031T035757-r1-g01",
+   "won": true,
+   "why": "order placed on the customer's yes",
+   "quote": {
+    "turn": 3,
+    "who": "customer",
+    "text": "yes"
+   },
+   "persona": {
+    "id": "persona-01",
+    "worry": "size",
+    "unwinnable": false,
+    "why_unwinnable": null,
+    "want": [
+     "football boots"
+    ],
+    "buy_trigger": [
+     "a clear size answer"
+    ],
+    "patience": {
+     "median": 0.0,
+     "most": 0
+    },
+    "style": {
+     "length": {
+      "short": 0.17,
+      "medium": 0.83,
+      "long": 0.0
+     },
+     "language": {
+      "arabic": 0.67,
+      "franco": 0.17,
+      "english": 0.17
+     },
+     "voice_notes": 0.06,
+     "opening": {
+      "voice note": 0.0,
+      "photo or link": 0.0,
+      "price": 0.0,
+      "size": 0.83,
+      "availability": 0.17,
+      "greeting": 0.0,
+      "other": 0.0
+     }
+    },
+    "chats": 6,
+    "won": 4,
+    "lost": 2,
+    "examples": [
+     "مقاس 43 متاح؟",
+     "Hi, are these boots true to size?",
+     "عايز الجزمة دي مقاس 41",
+     "عايز الجزمة الكحلي مقاس 44"
+    ],
+    "share": 0.214,
+    "arena_weight": 0.214
+   },
+   "prompt_sha": "1f6fbfdf61bb29cc68aee491678737ccbcb814078aad40e7d0a520ab617ca7fb",
+   "prompt_file": null
+  }
+ ],
+ "trace": [
+  {
+   "n": 1,
+   "role": "customer",
+   "effort": "low",
+   "started": "2026-10-31T03:57:57.429+00:00",
+   "route": "scripted",
+   "model": "scripted-buyer",
+   "ended": "2026-10-31T03:57:57.429+00:00",
+   "output": {
+    "role": "assistant",
+    "content": "How much are the Football Boots, Black?"
+   }
+  },
+  {
+   "n": 2,
+   "role": "agent",
+   "effort": "medium",
+   "started": "2026-10-31T03:57:57.430+00:00",
+   "route": "scripted",
+   "model": "scripted-seller",
+   "ended": "2026-10-31T03:57:57.430+00:00",
+   "output": {
+    "role": "assistant",
+    "content": "The Football Boots, Black are 1450 EGP."
+   }
+  },
+  {
+   "n": 3,
+   "role": "customer",
+   "effort": "low",
+   "started": "2026-10-31T03:57:57.435+00:00",
+   "route": "scripted",
+   "model": "scripted-buyer",
+   "ended": "2026-10-31T03:57:57.435+00:00",
+   "output": {
+    "role": "assistant",
+    "content": "ok I'll take it. Demo Buyer, 12 Tahrir St, Dokki, Giza"
+   }
+  },
+  {
+   "n": 4,
+   "role": "agent",
+   "effort": "medium",
+   "started": "2026-10-31T03:57:57.436+00:00",
+   "route": "scripted",
+   "model": "scripted-seller",
+   "ended": "2026-10-31T03:57:57.436+00:00",
+   "output": {
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_2",
+      "type": "function",
+      "function": {
+       "name": "switch_stage",
+       "arguments": "{\"to\": \"ordering\"}"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "n": 5,
+   "role": "agent",
+   "effort": "medium",
+   "started": "2026-10-31T03:57:57.436+00:00",
+   "route": "scripted",
+   "model": "scripted-seller",
+   "ended": "2026-10-31T03:57:57.436+00:00",
+   "output": {
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_3",
+      "type": "function",
+      "function": {
+       "name": "draft_order",
+       "arguments": "{\"items\": [{\"product\": \"Beyond the Limits Football Boots, Black\", \"size\": \"43\", \"quantity\": 1}], \"name\": \"Demo Buyer\", \"governorate\": \"Giza\", \"address\": \"12 Tahrir St, Dokki\"}"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "n": 6,
+   "role": "agent",
+   "effort": "medium",
+   "started": "2026-10-31T03:57:57.437+00:00",
+   "route": "scripted",
+   "model": "scripted-seller",
+   "ended": "2026-10-31T03:57:57.437+00:00",
+   "output": {
+    "role": "assistant",
+    "content": "Your order: Football Boots, Black size 43 x1, total 1510 EGP with delivery. Confirm?"
+   }
+  },
+  {
+   "n": 7,
+   "role": "customer",
+   "effort": "low",
+   "started": "2026-10-31T03:57:57.439+00:00",
+   "route": "scripted",
+   "model": "scripted-buyer",
+   "ended": "2026-10-31T03:57:57.439+00:00",
+   "output": {
+    "role": "assistant",
+    "content": "yes"
+   }
+  },
+  {
+   "n": 8,
+   "role": "agent",
+   "effort": "medium",
+   "started": "2026-10-31T03:57:57.439+00:00",
+   "route": "scripted",
+   "model": "scripted-seller",
+   "ended": "2026-10-31T03:57:57.439+00:00",
+   "output": {
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_5",
+      "type": "function",
+      "function": {
+       "name": "draft_order",
+       "arguments": "{\"items\": [{\"product\": \"Beyond the Limits Football Boots, Black\", \"size\": \"43\", \"quantity\": 1}], \"name\": \"Demo Buyer\", \"governorate\": \"Giza\", \"address\": \"12 Tahrir St, Dokki\", \"confirm\": \"SSZBB\"}"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "n": 9,
+   "role": "agent",
+   "effort": "medium",
+   "started": "2026-10-31T03:57:57.441+00:00",
+   "route": "scripted",
+   "model": "scripted-seller",
+   "ended": "2026-10-31T03:57:57.441+00:00",
+   "output": {
+    "role": "assistant",
+    "content": "Thanks, order #1001 is placed."
+   }
+  },
+  {
+   "n": 10,
+   "role": "customer",
+   "effort": "low",
+   "started": "2026-10-31T03:57:57.443+00:00",
+   "route": "scripted",
+   "model": "scripted-buyer",
+   "ended": "2026-10-31T03:57:57.443+00:00",
+   "output": {
+    "role": "assistant",
+    "content": "How much are the Football Boots, Black?"
+   }
+  },
+  {
+   "n": 11,
+   "role": "agent",
+   "effort": "medium",
+   "started": "2026-10-31T03:57:57.443+00:00",
+   "route": "scripted",
+   "model": "scripted-seller",
+   "ended": "2026-10-31T03:57:57.443+00:00",
+   "output": {
+    "role": "assistant",
+    "content": "The Football Boots, Black are 1450 EGP."
+   }
+  },
+  {
+   "n": 12,
+   "role": "customer",
+   "effort": "low",
+   "started": "2026-10-31T03:57:57.445+00:00",
+   "route": "scripted",
+   "model": "scripted-buyer",
+   "ended": "2026-10-31T03:57:57.445+00:00",
+   "output": {
+    "role": "assistant",
+    "content": "ok I'll take it. Demo Buyer, 12 Tahrir St, Dokki, Giza"
+   }
+  },
+  {
+   "n": 13,
+   "role": "agent",
+   "effort": "medium",
+   "started": "2026-10-31T03:57:57.445+00:00",
+   "route": "scripted",
+   "model": "scripted-seller",
+   "ended": "2026-10-31T03:57:57.445+00:00",
+   "output": {
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_8",
+      "type": "function",
+      "function": {
+       "name": "switch_stage",
+       "arguments": "{\"to\": \"ordering\"}"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "n": 14,
+   "role": "agent",
+   "effort": "medium",
+   "started": "2026-10-31T03:57:57.446+00:00",
+   "route": "scripted",
+   "model": "scripted-seller",
+   "ended": "2026-10-31T03:57:57.446+00:00",
+   "output": {
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_9",
+      "type": "function",
+      "function": {
+       "name": "draft_order",
+       "arguments": "{\"items\": [{\"product\": \"Beyond the Limits Football Boots, Black\", \"size\": \"43\", \"quantity\": 1}], \"name\": \"Demo Buyer\", \"governorate\": \"Giza\", \"address\": \"12 Tahrir St, Dokki\"}"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "n": 15,
+   "role": "agent",
+   "effort": "medium",
+   "started": "2026-10-31T03:57:57.446+00:00",
+   "route": "scripted",
+   "model": "scripted-seller",
+   "ended": "2026-10-31T03:57:57.446+00:00",
+   "output": {
+    "role": "assistant",
+    "content": "Your order: Football Boots, Black size 43 x1, total 1510 EGP with delivery. Confirm?"
+   }
+  },
+  {
+   "n": 16,
+   "role": "customer",
+   "effort": "low",
+   "started": "2026-10-31T03:57:57.448+00:00",
+   "route": "scripted",
+   "model": "scripted-buyer",
+   "ended": "2026-10-31T03:57:57.448+00:00",
+   "output": {
+    "role": "assistant",
+    "content": "yes"
+   }
+  },
+  {
+   "n": 17,
+   "role": "agent",
+   "effort": "medium",
+   "started": "2026-10-31T03:57:57.448+00:00",
+   "route": "scripted",
+   "model": "scripted-seller",
+   "ended": "2026-10-31T03:57:57.448+00:00",
+   "output": {
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_11",
+      "type": "function",
+      "function": {
+       "name": "draft_order",
+       "arguments": "{\"items\": [{\"product\": \"Beyond the Limits Football Boots, Black\", \"size\": \"43\", \"quantity\": 1}], \"name\": \"Demo Buyer\", \"governorate\": \"Giza\", \"address\": \"12 Tahrir St, Dokki\", \"confirm\": \"JMWGJ\"}"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "n": 18,
+   "role": "agent",
+   "effort": "medium",
+   "started": "2026-10-31T03:57:57.449+00:00",
+   "route": "scripted",
+   "model": "scripted-seller",
+   "ended": "2026-10-31T03:57:57.449+00:00",
+   "output": {
+    "role": "assistant",
+    "content": "Thanks, order #1001 is placed."
+   }
+  }
+ ]
+}

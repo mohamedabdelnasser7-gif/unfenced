@@ -470,12 +470,12 @@ class TeamAndRecipe(Base):
                          ["demo/personas/recipe.example.json"])
 
     def test_no_key_is_refused_before_anything_is_read(self):
-        env = {k: v for k, v in os.environ.items() if k != "BASETEN_API_KEY"}
+        env = {k: v for k, v in os.environ.items() if k not in ("BASETEN_API_KEY", "META_API_KEY")}
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(pp.env, "load", return_value=[]), \
                 mock.patch.object(pp, "read_source") as read:
             code, _, err = self.main(scripted=False)
         self.assertEqual(code, 2)
-        self.assertIn("BASETEN_API_KEY is not set", err)
+        self.assertIn("no model key is set (META_API_KEY or BASETEN_API_KEY) (or give --scripted)", err)
         read.assert_not_called()
         self.assertFalse(self.out.exists())
 

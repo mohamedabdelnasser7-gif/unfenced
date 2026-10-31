@@ -1,0 +1,182 @@
+{
+ "format": 1,
+ "kind": "sales",
+ "scripted": true,
+ "label": "SCRIPTED: made by recorded/record.py --scripted with scripted stand-in models. No model was called; this shows the shape of a run, not what Muse Spark says.",
+ "recorded_at": "2026-10-31T03:57:57.455+00:00",
+ "command": "python3 -I recorded/record.py --scripted",
+ "models": [
+  {
+   "role": "agent",
+   "route": "scripted",
+   "model": "scripted-seller"
+  }
+ ],
+ "customer": "fixed lines, no model",
+ "chat": {
+  "card": "persona-01",
+  "worry": "size",
+  "unwinnable": false,
+  "seed": 0,
+  "opening": "size",
+  "turns": [
+   {
+    "n": 1,
+    "customer": "How much are the Football Boots, Black?",
+    "replies": [
+     "The Football Boots, Black are 1450 EGP."
+    ],
+    "outcome": "replied",
+    "tools": [],
+    "failed": [],
+    "order": false
+   },
+   {
+    "n": 2,
+    "customer": "ok I'll take it. Demo Buyer, 12 Tahrir St, Dokki, Giza",
+    "replies": [
+     "Your order: Football Boots, Black size 43 x1, total 1510 EGP with delivery. Confirm?"
+    ],
+    "outcome": "replied",
+    "tools": [
+     "switch_stage",
+     "draft_order"
+    ],
+    "failed": [],
+    "order": false
+   },
+   {
+    "n": 3,
+    "customer": "yes",
+    "replies": [
+     "Thanks, order #1001 is placed."
+    ],
+    "outcome": "replied",
+    "tools": [
+     "draft_order"
+    ],
+    "failed": [],
+    "order": true
+   }
+  ],
+  "ended": "order",
+  "order": true,
+  "won": true,
+  "why": "order placed on the customer's yes",
+  "quote": {
+   "turn": 3,
+   "who": "customer",
+   "text": "yes"
+  }
+ },
+ "trace": [
+  {
+   "n": 1,
+   "role": "agent",
+   "effort": "medium",
+   "started": "2026-10-31T03:57:57.451+00:00",
+   "route": "scripted",
+   "model": "scripted-seller",
+   "ended": "2026-10-31T03:57:57.451+00:00",
+   "output": {
+    "role": "assistant",
+    "content": "The Football Boots, Black are 1450 EGP."
+   }
+  },
+  {
+   "n": 2,
+   "role": "agent",
+   "effort": "medium",
+   "started": "2026-10-31T03:57:57.452+00:00",
+   "route": "scripted",
+   "model": "scripted-seller",
+   "ended": "2026-10-31T03:57:57.452+00:00",
+   "output": {
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_2",
+      "type": "function",
+      "function": {
+       "name": "switch_stage",
+       "arguments": "{\"to\": \"ordering\"}"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "n": 3,
+   "role": "agent",
+   "effort": "medium",
+   "started": "2026-10-31T03:57:57.452+00:00",
+   "route": "scripted",
+   "model": "scripted-seller",
+   "ended": "2026-10-31T03:57:57.452+00:00",
+   "output": {
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_3",
+      "type": "function",
+      "function": {
+       "name": "draft_order",
+       "arguments": "{\"items\": [{\"product\": \"Beyond the Limits Football Boots, Black\", \"size\": \"43\", \"quantity\": 1}], \"name\": \"Demo Buyer\", \"governorate\": \"Giza\", \"address\": \"12 Tahrir St, Dokki\"}"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "n": 4,
+   "role": "agent",
+   "effort": "medium",
+   "started": "2026-10-31T03:57:57.453+00:00",
+   "route": "scripted",
+   "model": "scripted-seller",
+   "ended": "2026-10-31T03:57:57.453+00:00",
+   "output": {
+    "role": "assistant",
+    "content": "Your order: Football Boots, Black size 43 x1, total 1510 EGP with delivery. Confirm?"
+   }
+  },
+  {
+   "n": 5,
+   "role": "agent",
+   "effort": "medium",
+   "started": "2026-10-31T03:57:57.454+00:00",
+   "route": "scripted",
+   "model": "scripted-seller",
+   "ended": "2026-10-31T03:57:57.454+00:00",
+   "output": {
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_5",
+      "type": "function",
+      "function": {
+       "name": "draft_order",
+       "arguments": "{\"items\": [{\"product\": \"Beyond the Limits Football Boots, Black\", \"size\": \"43\", \"quantity\": 1}], \"name\": \"Demo Buyer\", \"governorate\": \"Giza\", \"address\": \"12 Tahrir St, Dokki\", \"confirm\": \"LRCZM\"}"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "n": 6,
+   "role": "agent",
+   "effort": "medium",
+   "started": "2026-10-31T03:57:57.455+00:00",
+   "route": "scripted",
+   "model": "scripted-seller",
+   "ended": "2026-10-31T03:57:57.455+00:00",
+   "output": {
+    "role": "assistant",
+    "content": "Thanks, order #1001 is placed."
+   }
+  }
+ ]
+}

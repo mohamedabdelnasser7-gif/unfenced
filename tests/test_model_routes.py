@@ -129,10 +129,14 @@ class MissingKey(unittest.TestCase):
                 self.assertEqual(rec.seen, [])
 
     def test_a_missing_baseten_key_still_names_its_own_variable(self):
+        """With a Meta key the default call now goes to Muse Spark on the Meta API (DECISIONS item
+        33; tests/test_judge_keys.py). An empty key given in code still names Baseten's variable."""
         env_with(self, META_API_KEY=secrets.token_urlsafe(24))
+        rec = Recorder()
         with self.assertRaises(kit_model.ModelError) as e:
-            kit_model.Model(opener=Recorder()).chat(HI)
+            kit_model.Model(api_key="", opener=rec).chat(HI)
         self.assertEqual(str(e.exception), "BASETEN_API_KEY is not set")
+        self.assertEqual(rec.seen, [])
 
 
 class WonderBody(unittest.TestCase):

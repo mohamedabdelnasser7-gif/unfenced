@@ -50,7 +50,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if __name__ == "__main__" and str(ROOT) not in sys.path:  # run by its path under -I, as reflection/importer.py is
     sys.path.insert(0, str(ROOT))
 
-from kit import env  # noqa: E402
+from kit import env, model as model_mod  # noqa: E402
 from reflection import history as hist  # noqa: E402
 from reflection import importer as imp  # noqa: E402
 from arena import cards as cards_mod  # noqa: E402
@@ -485,8 +485,8 @@ def main(argv=None, *, model=None):
             model = ScriptedModel(recipe)
         elif model is None:
             env.load()
-            if not env.get("BASETEN_API_KEY"):
-                raise hist.Refused("BASETEN_API_KEY is not set (or give --scripted)")
+            if not model_mod.has_key():
+                raise hist.Refused(model_mod.NO_KEY + " (or give --scripted)")
         summary = run(args.source, args.out, model=model, cap=args.cap, limit=args.limit, recipe=recipe,
                       team=args.team, tz=args.tz, quiet_hours=args.quiet_hours, max_files=args.max_files)
     except hist.Refused as e:

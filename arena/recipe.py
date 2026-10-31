@@ -77,6 +77,7 @@ def _words(words):
 class Recipe:
     """A checked recipe: prompt (filled), worries (names in order), words ({name: pattern or
     None}), unwinnable (names), fallback, capped ((name, pattern, most) a capped want, in order),
+    capped_words ({name: its plain words}),
     sha (the file's first 12 hex of sha256), example (True when it is the example file)."""
 
     def __init__(self, data, sha="", example=False):
@@ -108,6 +109,8 @@ class Recipe:
         if fallback not in names:
             raise hist.Refused(bad + "fallback is one of the worry names")
         self.capped = _capped(data.get("capped_wants", []), bad)
+        # the plain words of each capped want: a grown pool keeps these and builds the pattern again
+        self.capped_words = {c["name"]: list(c["words"]) for c in data.get("capped_wants", [])}
         self.worries = tuple(names)
         self.words = words
         self.unwinnable = frozenset(unwinnable)

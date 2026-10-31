@@ -86,7 +86,7 @@ from arena import paths
 from arena.clean import Cleaner
 
 LOST_WEIGHT = 3
-MAX_COUNTED_LOSSES = 5  # losses counted per card group at most (root's pick, waiting for Mohamed's word)
+MAX_COUNTED_LOSSES = 5  # losses counted per card group at most (Mohamed 2026-10-31: the recommended 5)
 HARD_TURNS = 6
 MAX_NEW = 50
 MAX_ITEMS = 500
@@ -94,6 +94,7 @@ MAX_READ = 20_000   # chats whose progress the pool keeps
 MAX_PENDING = 2000  # chats read first the next night
 MAX_TRIES = 7       # nights a pending chat is read before it is let go
 MAX_PATTERN = 20_000  # a recipe's capped want of up to 200 words (arena/recipe.py) builds a long one
+MAX_UNBOUNDED = 3  # a stored pattern with more *, + or {n,} is refused: a*a*a*...b backtracks for ever
 MAX_NUMBER = 2 ** 53  # a number read from the pool file is at most this, so float() and math never overflow
 DEFAULT_KIND = "sales"
 KIND = plug_mod.AGENT_NAME  # one rule for a plug's kind and the pool's: a kind the plug takes, the pool takes
@@ -218,7 +219,8 @@ class Pool:
         self.cards = [c for c in (data.get("cards") or []) if _card_ok(c)]
         capped = data.get("capped")  # None until the pool is first built from a recipe
         # one entry out of shape and the example recipe's caps hold instead (item 33), never none
-        self.capped = list(capped) if isinstance(capped, list) and all(map(_capped_ok, capped)) else None
+        capped = [_capped_read(c) for c in capped] if isinstance(capped, list) else [None]
+        self.capped = capped if all(c is not None for c in capped) else None
         self.split = data["split"] if _split_ok(data.get("split")) else None  # the gate's held ids (arena/run.py)
         self._keys = {i["read"] for i in self.items if "read" in i}
         self.changed = False
@@ -297,7 +299,9 @@ class Pool:
         for c in built:
             c["id"] = grown_id(c)
         self.cards = built
-        self.capped = [{"name": name, "pattern": rx.pattern, "most": most}
+        words = getattr(recipe, "capped_words", {})  # the recipe's words: the file keeps these, not the pattern
+        self.capped = [{"name": name, "words": list(words[name]), "pattern": rx.pattern, "most": most}
+                       if name in words else {"name": name, "pattern": rx.pattern, "most": most}
                        for name, rx, most in getattr(recipe, "capped", ())]
         self.changed = True
 
@@ -310,7 +314,7 @@ class Pool:
             os.chmod(self.path.parent, 0o700)  # an owner folder made earlier with a wider mode too
         _write(self.path, json.dumps({"kind": self.kind, "items": self.items, "read": self.read,
                                       "pending": self.pending, "floor": self.floor, "played": self.played,
-                                      "cards": self.cards, "capped": self.capped, "split": self.split},
+                                      "cards": self.cards, "capped": _capped_file(self.capped), "split": self.split},
                                      ensure_ascii=False).encode("utf-8"))
         self.changed = False
 
@@ -368,10 +372,37 @@ def _card_ok(c):
             and isinstance(c.get("want"), list) and all(isinstance(w, str) for w in c["want"]))
 
 
+def _capped_read(c):
+    """One capped want from the pool file as {name, words, pattern, most}, or None when out of
+    shape. Its words are checked as a recipe's are and the pattern is built again from them
+    (arena/recipe.py _words), so no pattern is taken from the file. An older file holds only the
+    pattern: kept when _capped_ok passes it."""
+    if not isinstance(c, dict) or "words" not in c:
+        return {k: c[k] for k in ("name", "pattern", "most")} if _capped_ok(c) else None
+    from arena import recipe as recipe_mod
+    words, most = c.get("words"), c.get("most")
+    if not (isinstance(c.get("name"), str) and isinstance(most, (int, float)) and not isinstance(most, bool)
+            and 0 < most < 1 and isinstance(words, list) and 0 < len(words) <= recipe_mod.MAX_WORDS
+            and all(isinstance(w, str) and 0 < len(w) <= recipe_mod.MAX_WORD and w.isprintable() for w in words)):
+        return None
+    rx = recipe_mod._words(words)
+    return {"name": c["name"], "words": list(words), "pattern": rx.pattern, "most": most} if rx else None
+
+
+def _capped_file(capped):
+    """The capped wants as the pool file keeps them: the words when known, never both."""
+    if capped is None:
+        return None
+    return [{k: v for k, v in c.items() if k != "pattern"} if "words" in c else c for c in capped]
+
+
 def _capped_ok(c):
+    """An older pool file's capped want, {name, pattern, most}: no group repeated around a
+    quantifier and at most MAX_UNBOUNDED unbounded quantifiers, so matching a want never hangs."""
     if not (isinstance(c, dict) and isinstance(c.get("name"), str) and isinstance(c.get("pattern"), str)
             and len(c["pattern"]) <= MAX_PATTERN and isinstance(c.get("most"), (int, float))
-            and not isinstance(c["most"], bool) and 0 < c["most"] < 1) or _repeats_a_repeat(c["pattern"]):
+            and not isinstance(c["most"], bool) and 0 < c["most"] < 1) or _repeats_a_repeat(c["pattern"]) \
+            or _unbounded(c["pattern"]) > MAX_UNBOUNDED:
         return False
     try:
         re.compile(c["pattern"], re.IGNORECASE)
@@ -414,6 +445,31 @@ def _repeats_a_repeat(pattern):
         risky = closed
         i += 1
     return False
+
+
+OPEN_RANGE = re.compile(r"\{\d*,\}")  # {n,} and {,}: no top
+
+
+def _unbounded(pattern):
+    """How many *, + and {n,} the pattern holds outside a class and not escaped (a+? counts once)."""
+    count, i = 0, 0
+    while i < len(pattern):
+        ch = pattern[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == "[":  # a class, skipped to its closing ]
+            i += 1
+            i += pattern.startswith("^", i)
+            i += pattern.startswith("]", i)
+            while i < len(pattern) and pattern[i] != "]":
+                i += 2 if pattern[i] == "\\" else 1
+            i += 1
+            continue
+        if ch in "*+" or ch == "{" and OPEN_RANGE.match(pattern, i):
+            count += 1
+        i += 1
+    return count
 
 
 def _slug(text):

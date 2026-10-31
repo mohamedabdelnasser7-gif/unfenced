@@ -7,6 +7,7 @@ import io
 import json
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -1092,6 +1093,31 @@ class ValuesInRange(unittest.TestCase):
         for pat in kept:
             pool = self.reload(capped=[{"name": "printing", "pattern": pat, "most": 0.25}])
             self.assertEqual(pool.capped[0]["pattern"], pat)
+
+    def test_the_file_keeps_the_capped_words_and_the_pattern_is_built_again(self):
+        # review and red team round 3: no pattern is read from a pool the recipe built
+        name, _, most = recipe().capped[0]
+        self.assertEqual(self.data["capped"], [{"name": name, "words": recipe().capped_words[name], "most": most}])
+        self.assertEqual(grow.Pool(self.owner, "sales").capped[0]["pattern"], recipe().capped[0][1].pattern)
+        bomb = "a*" * 10 + "b"
+        pool = self.reload(capped=[{"name": "printing", "words": ["dtf"], "pattern": bomb, "most": 0.25}])
+        self.assertEqual(pool.capped[0]["pattern"], r"(?<!\w)(?:dtf)(?!\w)")
+        for words in ([], ["ok", 3], [""], ["x" * 61], ["a\nb"], ["ok"] * 201, "dtf"):
+            self.assertIsNone(self.reload(capped=[{"name": "printing", "words": words, "most": 0.25}]).capped, words)
+        pool.changed = True
+        pool.save()
+        self.assertNotIn("pattern", json.loads(pool.path.read_text(encoding="utf-8"))["capped"][0])
+
+    def test_a_pattern_with_more_than_three_open_quantifiers_gives_the_example_caps(self):
+        for pat in ("a*" * 14 + "b", ".*" * 14 + "x", "a*a*a*a*b", "a+b{2,}c*d{,}"):
+            pool = self.reload(capped=[{"name": "printing", "pattern": pat, "most": 0.25}])
+            self.assertIsNone(pool.capped, pat)
+            started = time.monotonic()
+            grow.decks([card(1, "size"), dict(card(2, "price"), id="grown-price", want=["a" * 28])], pool, set())
+            self.assertLess(time.monotonic() - started, 2)
+        for pat in ("a*a*a*b", r"\*\*\*\*a", "[*+]+x{2,5}"):
+            self.assertEqual(self.reload(capped=[{"name": "printing", "pattern": pat, "most": 0.25}]).capped[0]["pattern"],
+                             pat)
 
     def test_an_overflow_or_a_refusal_in_a_run_is_not_run_not_a_traceback(self):
         cards = folder(self) / "cards"

@@ -24,20 +24,22 @@ Reflection (reflection/night.py) runs take_finished: a day worth practising (the
 something, or the code found a miss: an urgent item, a clash or any other check) is cleaned
 (clean_day) and joins the pool once; an easy day (won, nothing corrected) is skipped. The file is
 then removed, so the uncleaned days do not stay on disk after the night read them; a file the
-night cannot read as a whole is moved aside instead, never read again. Both steps wait for the
-live day runner: nothing calls keep_finished yet, so the night finds no file and adds nothing.
+night cannot read as a whole is moved aside instead, never read again, and deleted after
+QUARANTINE_DAYS. Both steps wait for the live day runner: nothing calls keep_finished yet, so the
+night finds no file and adds nothing.
 
 clean_day rebuilds the day from an allow-list: only the keys a simulated day has, each of its
 type (times HH:MM, counts as numbers, yes or no as booleans); every other key is dropped, ids are
 kept only in the simulated shape (i01, e1) and dates only as real calendar dates. Every text kept
 (subjects, bodies, titles, the user's own words, calendar notes, a sender's display name, a
 snippet or preview, a promise's text) goes through the Arena's cleaner (arena/clean.py) with the
-day's own names (each address's local part and company, each display name, Latin or Arabic):
-names, phones, numbers, emails, links and places out, a signature after a sign off cut. A real
-calendar date with no other digit beside it is put back, so a promise still names its day. A
-meeting's location becomes [place]. Every address becomes person<n>@practice.test, the same
-person the same address all day, and the user user@practice.test. The writing style and seed are
-dropped. A planted instruction's mark is kept only when it still reads in its cleaned email.
+day's own names (each address's local part and company, the name words of each display name that
+reads as a person's, Latin or Arabic): names, phones, numbers, emails, links and places out, a
+short signature after a sign off cut (never a question or a planted instruction's mark). A real
+calendar date (years 2000 to 2100) with no other digit beside it is put back, so a promise still
+names its day. A meeting's location becomes [place]. Every address becomes person<n>@practice.test,
+the same person the same address all day, and the user user@practice.test. The writing style and
+seed are dropped. A planted instruction's mark is kept only when it still reads in its cleaned email.
 
 close_day writes a played day's results to the engine log, so the night study reads them: a
 failed urgent check is urgent_missed, a failed clash check is clash, and a won day with no
@@ -106,6 +108,11 @@ ROLE_WORDS = frozenset({"info", "sales", "support", "news", "newsletter", "norep
 MAIL_HOSTS = frozenset({"gmail", "googlemail", "yahoo", "outlook", "hotmail", "live", "icloud", "mail", "proton",
                         "protonmail", "aol", "msn", "yandex", "gmx", "zoho", "example", "test", "com", "net", "org"})
 MAX_LINE, MAX_LINES = 4_000_000, 400  # the longest finished-day line read, and the most lines a night reads
+FIRST_YEAR, LAST_YEAR = 2000, 2100  # a real calendar date's year: a digit run outside these is a number, not a date
+TAIL_LINES, TAIL_CHARS = 4, 200  # a signature after a sign off: at most this many lines and characters, no question
+QUESTION = re.compile(r"[?؟]")
+QUARANTINE_DAYS = 7  # a file moved aside is deleted after this many days
+QUARANTINE_NAME = re.compile(r"finished-days\.quarantine-([0-9]{8}-[0-9]{6})-[0-9a-f]{6}\.jsonl")
 DEFAULT_LIKES = {"rushed_words": 30, "focused_words": 120, "brief_words": 90}
 
 
@@ -239,14 +246,15 @@ def worth_practising(row):
 
 
 def real_date(text):
-    """The text when it is a real calendar date in YYYY-MM-DD form, else None."""
+    """The text when it is a real calendar date in YYYY-MM-DD form, a year from FIRST_YEAR to LAST_YEAR,
+    else None."""
     if not isinstance(text, str) or not DATE_SHAPE.fullmatch(text):
         return None
     try:
-        datetime.date.fromisoformat(text)
+        year = datetime.date.fromisoformat(text).year
     except ValueError:
         return None
-    return text
+    return text if FIRST_YEAR <= year <= LAST_YEAR else None
 
 
 def _after_names(text):
@@ -258,18 +266,33 @@ def _after_names(text):
     return FAMILY_AFTER.sub(lambda m: m.group(0) if is_stop(m.group(2)) else m.group(1) + "[name]", text)
 
 
-def _clean_text(text, clean):
-    """One text through the Arena's cleaner, whole, so its number cleaner sees every digit. Only a
-    real calendar date (YYYY-MM-DD) with no other digit within NEAR characters is put back, so a
-    promise still names its day; any other run of digits shaped like a date (0100-00-00,
-    1234-56-78) or a date beside more digits is cleaned like any number."""
+def _sign_off_cut(text, keep=()):
+    """The text with its signature cut: what follows the first sign off line that reads like one
+    (at most TAIL_LINES lines and TAIL_CHARS characters, no question mark, none of the words in keep)
+    becomes [name]. A sign off mid mail (Thanks! then the ask) cuts nothing."""
+    for cut in SIGN_OFF.finditer(text):
+        tail = text[cut.end():].strip()
+        if not tail:
+            return text
+        lines = [ln for ln in tail.splitlines() if ln.strip()]
+        if len(lines) > TAIL_LINES or len(tail) > TAIL_CHARS or QUESTION.search(tail) \
+                or any(k and k.casefold() in tail.casefold() for k in keep):
+            continue
+        return text[:cut.end()] + "\n[name]"
+    return text
+
+
+def _clean_text(text, clean, keep=()):
+    """One text through the Arena's cleaner, whole, so its number cleaner sees every digit. A
+    signature after a sign off is cut first (_sign_off_cut; keep names the words that must stay, a
+    planted instruction's mark). Only a real calendar date (YYYY-MM-DD, real_date) with no other
+    digit within NEAR characters is put back, so a promise still names its day; any other run of
+    digits shaped like a date (0100-00-00, 1234-56-78, 2735-04-18) or a date beside more digits is
+    cleaned like any number."""
     from arena.clean import normalize
     if not isinstance(text, str):
         return ""
-    text = normalize(text[:MAX_TEXT]).replace(KEEP, "")
-    cut = SIGN_OFF.search(text)
-    if cut and text[cut.end():].strip():
-        text = text[:cut.end()] + "\n[name]"
+    text = _sign_off_cut(normalize(text[:MAX_TEXT]).replace(KEEP, ""), keep)
     dates = [m for m in ISO_DATE.finditer(text) if real_date(m.group(0))]
     bare = list(text)
     for m in dates:
@@ -312,8 +335,9 @@ def _list(v, cap):
 
 def _names_of(day):
     """The names a day carries, for the cleaner: each address's local part as a name (karim.tawfik
-    as karim tawfik) with its company from the domain (not a mail service), and every display name
-    as typed, Latin or Arabic. The cleaner then masks each of their words wherever it stands."""
+    as karim tawfik) with its company from the domain (not a mail service), and the name words of
+    each display name that reads as a person's (_display_name), Latin or Arabic. The cleaner then
+    masks each of their words wherever it stands."""
     found, names = [], set()
 
     def walk_addr(a):
@@ -334,8 +358,10 @@ def _names_of(day):
             walk_addr(e.get(k))
         for a in _list(e.get("cc"), MAX_PEOPLE):
             walk_addr(a)
-        if isinstance(e.get("from_name"), str) and e["from_name"].strip():
-            names.add(e["from_name"].strip()[:MAX_NAME])
+        if isinstance(e.get("from_name"), str):
+            shown = _display_name(e["from_name"][:MAX_NAME], e.get("from"))
+            if shown:
+                names.add(shown)
     for a in found:
         local, _, host = a.strip()[:MAX_NAME].partition("@")
         words = [w for w in NAME_PART.findall(local) if w.casefold() not in ROLE_WORDS]
@@ -344,6 +370,24 @@ def _names_of(day):
         labels = [w for w in host.casefold().split(".")[:-1] if len(w) >= 3 and w not in MAIL_HOSTS]
         names.update(labels)
     return sorted(names)
+
+
+def _display_name(name, sender):
+    """The words of a sender's display name that look like a name, joined, or "" for none. A word
+    counts when the Arena's cleaner reads it as a name (a capitalised Latin word, latin_capital, or
+    an Arabic name word, also after ال) and is no stop word; the name counts only when it reads as a
+    person's: one word is a known first name (is_listed), or the sender's address holds one of its
+    words or starts with its initials (kt99 for Karim Tawfik). So Report Meeting Price masks nothing."""
+    from arena.clean import ARABIC, arabic_name_like, is_listed, is_stop, latin_capital, normalize
+    words = [w for w in NAME_PART.findall(normalize(name)) if not is_stop(w) and (
+        latin_capital(w) or arabic_name_like(w)
+        or (bool(ARABIC.search(w)) and w.startswith("ال") and arabic_name_like(w[2:])))]
+    local = sender.strip()[:MAX_NAME].partition("@")[0].casefold() if isinstance(sender, str) else ""
+    lead = re.match(r"[^\W\d_]*", local).group(0)
+    initials = "".join(w[0] for w in words).casefold()
+    tied = any(is_listed(w) for w in words) or any(len(w) >= 3 and w.casefold() in local for w in words) \
+        or (len(lead) >= 2 and initials.startswith(lead))
+    return " ".join(words) if words and tied else ""
 
 
 class _Ids:
@@ -442,9 +486,12 @@ def clean_day(day):
                     row[k] = addr(e[k])
             if "cc" in e:
                 row["cc"] = addrs(e["cc"])
+            trap = e["hidden"].get("trap") if isinstance(e.get("hidden"), dict) else None
+            mark = (trap.get("marker") if isinstance(trap, dict) and isinstance(trap.get("marker"), str) else "")
+            mark = mark[:MAX_NAME].strip() if len(mark[:MAX_NAME].strip()) >= 3 else ""
             for k in ("subject", "body", "from_name", "snippet", "preview"):
                 if isinstance(e.get(k), str):
-                    row[k] = text(e[k])
+                    row[k] = _clean_text(e[k], clean, keep=(mark,))
             for k in ("start", "end"):
                 if _time(e.get(k)):
                     row[k] = e[k]
@@ -514,67 +561,149 @@ def _lines(f, rep):
         yield raw
 
 
+def _same(path, fd):
+    """True when path still names the open file fd (no link, no other file put in its place)."""
+    try:
+        now = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    st = os.fstat(fd)
+    return (now.st_dev, now.st_ino) == (st.st_dev, st.st_ino)
+
+
+def _leftover(taken, rep):
+    """A taken file already there: moved aside when it is left by a night that was stopped (a
+    non-blocking lock on it succeeds, or it is no plain file); False when another night holds it now,
+    so this night leaves both files alone."""
+    try:
+        fd = os.open(taken, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return True
+    except OSError:  # a link: moved aside unread
+        _quarantine(taken)
+        rep["quarantined"] += 1
+        return True
+    try:
+        if stat.S_ISREG(os.fstat(fd).st_mode):
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                rep["busy"] += 1
+                return False
+            if not _same(taken, fd):
+                rep["busy"] += 1
+                return False
+        _quarantine(taken)
+        rep["quarantined"] += 1
+        return True
+    finally:
+        os.close(fd)
+
+
+def _clear_quarantine(state, rep):
+    """Deletes the files moved aside more than QUARANTINE_DAYS ago, by the time in their names."""
+    try:
+        names = os.listdir(state)
+    except FileNotFoundError:
+        return
+    cutoff = time.time() - QUARANTINE_DAYS * 86400
+    for name in names:
+        m = QUARANTINE_NAME.fullmatch(name)
+        if not m:
+            continue
+        try:
+            when = datetime.datetime.strptime(m.group(1), "%Y%m%d-%H%M%S").replace(tzinfo=datetime.timezone.utc)
+        except ValueError:
+            continue
+        if when.timestamp() < cutoff:
+            try:
+                os.unlink(os.path.join(state, name))
+                rep["cleared"] += 1
+            except FileNotFoundError:
+                pass
+
+
 def take_finished(state):
     """The night step: each finished day worth practising, cleaned, joins the pool once; easy days are
     skipped. Returns the counts. Until the live day runner calls keep_finished, the file is empty
     and this adds nothing.
 
-    The file is first renamed to finished-days.jsonl.taken, so a day kept while the night reads goes
-    to a new file for the next night; the night then holds the file's lock, so a row still being
-    written ends before it is read. Each line is read alone, at most MAX_LINE bytes and MAX_LINES
+    The night first takes the file's lock, so a row still being written ends before it is read, and
+    under the lock renames it to finished-days.jsonl.taken, so a day kept while the night reads goes
+    to a new file for the next night. Each line is read alone, at most MAX_LINE bytes and MAX_LINES
     lines: a line that fails for any reason (bad JSON, too deep, too long, not a day) is counted
     unreadable and the rest go on. The taken file is removed after the pool is saved. When the step
-    fails as a whole, the taken file is moved aside (_quarantine) and the error raised, so the night
-    goes on and the next night does not fail on the same file; a taken file left by a night that was
-    stopped is moved aside the same way."""
+    fails as a whole, the file is moved aside (_quarantine) and the error raised, so the night goes
+    on and the next night does not fail on the same file. A taken file already there is moved aside
+    only when it is no longer locked (left by a night that was stopped); while another night reads
+    it, this night counts busy and reads nothing. Files moved aside go after QUARANTINE_DAYS."""
     state = os.fspath(state)
     path, taken = os.path.join(state, FINISHED_FILE), os.path.join(state, FINISHED_FILE + ".taken")
-    rep = {"added": 0, "easy": 0, "already": 0, "unreadable": 0, "skipped": 0, "quarantined": 0}
-    if os.path.lexists(taken):
-        _quarantine(taken)
-        rep["quarantined"] += 1
-    try:
-        os.rename(path, taken)
-    except FileNotFoundError:
-        return rep
-    try:
-        fd = os.open(taken, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    rep = {"added": 0, "easy": 0, "already": 0, "unreadable": 0, "skipped": 0, "quarantined": 0, "busy": 0,
+           "cleared": 0}
+    _clear_quarantine(state, rep)
+    for _ in range(5):
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except FileNotFoundError:
+            if os.path.lexists(taken):
+                _leftover(taken, rep)
+            return rep
+        except OSError:  # a link in the file's place: moved aside unread
+            _quarantine(path)
+            rep["quarantined"] += 1
+            raise
+        try:
             if not stat.S_ISREG(os.fstat(fd).st_mode):
+                if _same(path, fd):
+                    _quarantine(path)
+                    rep["quarantined"] += 1
                 raise OSError("finished-days.jsonl is not a plain file")
-            pool = Pool(state)
-            have = {d.get("id") for d in pool.real}
-            with os.fdopen(os.dup(fd), "rb") as f:
-                for raw in _lines(f, rep):
-                    try:
-                        row = json.loads(raw.decode("utf-8"))
-                        if not isinstance(row, dict):
-                            raise ValueError("not a row")
-                        if not worth_practising(row):
-                            rep["easy"] += 1
-                            continue
-                        day = clean_day(row.get("day"))
-                    except Exception:  # any failure in one line (RecursionError, MemoryError, re.error too)
-                        rep["unreadable"] += 1
-                        continue
-                    if day["id"] in have:
-                        rep["already"] += 1
-                        continue
-                    pool.add_day(day)
-                    have.add(day["id"])
-                    rep["added"] += 1
-            pool.save()
-            os.unlink(taken)
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            if not _same(path, fd):
+                continue  # another night took the file while this waited for the lock
+            if not _leftover(taken, rep):
+                return rep
+            os.rename(path, taken)
+            try:
+                _read(fd, state, rep)
+                os.unlink(taken)
+            except BaseException:
+                try:
+                    _quarantine(taken)
+                except OSError:
+                    pass
+                raise
+            return rep
         finally:
             os.close(fd)
-    except BaseException:
-        try:
-            _quarantine(taken)
-        except OSError:
-            pass
-        raise
-    return rep
+    raise OSError("finished-days.jsonl kept changing while the night read it")
+
+
+def _read(fd, state, rep):
+    """The rows of the taken file, cleaned, into the pool, which is then saved."""
+    pool = Pool(state)
+    have = {d.get("id") for d in pool.real}
+    with os.fdopen(os.dup(fd), "rb") as f:
+        for raw in _lines(f, rep):
+            try:
+                row = json.loads(raw.decode("utf-8"))
+                if not isinstance(row, dict):
+                    raise ValueError("not a row")
+                if not worth_practising(row):
+                    rep["easy"] += 1
+                    continue
+                day = clean_day(row.get("day"))
+            except Exception:  # any failure in one line (RecursionError, MemoryError, re.error too)
+                rep["unreadable"] += 1
+                continue
+            if day["id"] in have:
+                rep["already"] += 1
+                continue
+            pool.add_day(day)
+            have.add(day["id"])
+            rep["added"] += 1
+    pool.save()
 
 
 def gate(trust, *, model, pool, seeds, rng, picture=None, play=play_day, lessons=None):

@@ -447,12 +447,12 @@ def _state(card):
     if card["state"] == "trying":
         return (f'on trial at the {card["level"]} level' if card.get("level") else "on trial") + (
             f", started under {accept}" if accept else "")
-    if card.get("exam"):
-        return f'waits for a yes: {card["exam"]}; a person\'s Yes on its card starts it anyway'
-    if card["close_to_pulled"]:
-        return f'waits for a yes (close to the pulled line "{card["close_to_pulled"]}")'
-    if card.get("close_to_failed"):  # DECISIONS item 50: close to a line the eval gate failed
-        return f'waits for a yes (close to the line "{card["close_to_failed"]}", which failed the eval gate)'
+    close = _close_words(card)
+    if card.get("exam"):  # the close words stay when the exam fails too (review gatefb round 2, finding 4)
+        return (f'waits for a yes: {card["exam"]}' + (f" ({close})" if close else "")
+                + "; a person's Yes on its card starts it anyway")
+    if close:
+        return f"waits for a yes ({close})"
     if card.get("replace"):
         r = card["replace"]
         return f'waits for a yes: replace lesson {r["lesson_id"]} "{r["line"]}"?'
@@ -461,6 +461,15 @@ def _state(card):
             f"; it waits under {accept} and starts with no yes only if the switch is still on at its turn, "
             "else it waits for a yes" if accept else "")
     return f'waits for a yes ({card["risk"]} risk: {card["risk_why"]})'
+
+
+def _close_words(card):
+    """The words naming the pulled or failed line a card's lesson comes close to; "" for none."""
+    if card.get("close_to_pulled"):
+        return f'close to the pulled line "{card["close_to_pulled"]}"'
+    if card.get("close_to_failed"):  # DECISIONS item 50: close to a line the eval gate failed
+        return f'close to the line "{card["close_to_failed"]}", which failed the eval gate'
+    return ""
 
 
 def _pct(x):

@@ -1183,22 +1183,29 @@ def _status(les, item, k, report):
         else:
             yes = f" It has {les['yes_by']}'s yes." if les["yes_by"] else ""
         return "waits its turn", f"One trial runs on a stage at a time; it waits behind {ahead}.{yes}"
-    if item.get("exam"):
-        return "waits for a yes", f"It {item['exam']}. Yes on this card starts it anyway."
+    close = _close_sentence(report)
+    if item.get("exam"):  # the close sentence stays when the exam fails too (review gatefb round 2, finding 4)
+        return "waits for a yes", (f"It {item['exam']}." + (f" {close}" if close else "")
+                                  + " Yes on this card starts it anyway.")
     if item["replaces"]:
         names = ", ".join(f'lesson {r["id"]}' for r in item["replaces"])
         return "waits for a yes", f'It goes against {names}; its card asks "replace it?".'
-    close = report.get("close_to_pulled")
     if close:
-        return "waits for a yes", f'It comes close to the pulled line "{close}".'
-    close = report.get("close_to_failed")  # DECISIONS item 50: close to a line the eval gate failed
-    if close:
-        return "waits for a yes", f'It comes close to the line "{close}", which failed the eval gate.'
+        return "waits for a yes", close
     if report.get("held"):
         return "waits for a yes", "The night's trial places were taken, so it waits for a yes."
     if les["risk"] == risk_mod.HIGH:
         return "waits for a yes", f"High risk: {plain_why(les['risk_why'])}."
     return "waits for a yes", "It waits for a person's yes."
+
+
+def _close_sentence(report):
+    """The sentence naming the pulled or failed line a card's lesson comes close to; "" for none."""
+    if report.get("close_to_pulled"):
+        return f'It comes close to the pulled line "{report["close_to_pulled"]}".'
+    if report.get("close_to_failed"):  # DECISIONS item 50: close to a line the eval gate failed
+        return f'It comes close to the line "{report["close_to_failed"]}", which failed the eval gate.'
+    return ""
 
 
 def _switches_line(sw):

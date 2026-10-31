@@ -5,17 +5,25 @@ only as the clause's subject (red team item A); an add-on word counts only befor
 the clause end (review finding 2, red team item B). Fast notes: a name the customer gave at a start
 counts (red team item C); ";" and ":" start no note sentence (review finding 3); a note is read with
 a hidden character both ways (red team item E); a place of one word passes only beside a delivery
-word (red team item D). Made-up text against the demo store data; no model, no network."""
+word (red team item D). Cards: a close sentence stays beside a failed exam (review finding 4). Made-up
+text against the demo store data and made-up garden beds; no model, no network."""
 import copy
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from arena import factcheck
 from engine import fast as engine_fast
+from engine.lessons import WAITING
 from kit.db import Db
 from kit.tools import store
 from reflection import PLUG as SALES
 from reflection import fast as sales_fast
+from reflection import morning, night
+from tests import study_fakes as fk
+from tests import test_failed_back as tfb
 from tests.fake_model import clean_env
 
 AC = chr(0x60C)  # the Arabic comma
@@ -287,6 +295,36 @@ class OneWordPlaces(unittest.TestCase):
         fast = engine_fast.FastNotes(db, SALES, writer=lambda plug, view: "Mention delivery to Zayed after the size.",
                                      never=sales_fast.NEVER, known=sales_fast.known)
         self.assertEqual(fast._write({}, ["I live in Zayed"]), ("Mention delivery to Zayed after the size.", None))
+
+
+class CloseLineWithAFailedExam(unittest.TestCase):
+    """Review finding 4: a line close to a failed or pulled line keeps that close sentence on its card
+    when its own exam fails too."""
+    setUp, study, night = tfb.NextNight.setUp, tfb.NextNight.study, tfb.NextNight.night
+
+    def test_the_night_line_and_the_morning_page_keep_the_close_sentence(self):
+        self.lessons.examiner = tfb.failing
+        rep = self.night(tfb.CLOSE)
+        card, = rep["cards"]
+        close = f'close to the line "{fk.EARLY["lesson"]}", which failed the eval gate'
+        self.assertEqual(night._state(card), f"waits for a yes: {card['exam']} ({close}); "
+                                             "a person's Yes on its card starts it anyway")
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        until = int(rep["window"]["until"])
+        (Path(folder.name) / f"night-{self.plug.agent}-{until}.json").write_text(json.dumps(rep), encoding="utf-8")
+        page = morning.render(morning.Morning(self.db, [self.plug], reports=folder.name).view(fk.NOW + fk.DAY),
+                              token="t0ken")
+        why = f"It {card['exam']}. It comes {close}. Yes on this card starts it anyway."
+        self.assertIn(morning.h(why), page)
+
+    def test_a_pulled_line_is_named_beside_a_failed_exam_too(self):
+        card = {"state": WAITING, "exam": "failed the exam: situation 2, check no_shade",
+                "close_to_pulled": "Visit the north beds first.", "close_to_failed": None}
+        self.assertEqual(night._state(card), 'waits for a yes: failed the exam: situation 2, check no_shade '
+                                             '(close to the pulled line "Visit the north beds first."); '
+                                             "a person's Yes on its card starts it anyway")
+        self.assertEqual(morning._close_sentence(card), 'It comes close to the pulled line "Visit the north beds first.".')
 
 
 if __name__ == "__main__":

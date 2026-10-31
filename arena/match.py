@@ -23,6 +23,12 @@ agent's turn ends model_error, or the customer's model raises kit/model.py Model
 match: it ends VOID with the error in "error", and the Arena drops it as it drops a match the
 call cap stops, so a model fault is never a loss, a case or a lesson held. What it returns is a
 plain dict (match_of); the score is arena/verdict.py and the fact checks arena/factcheck.py.
+
+Each turn record also says why the turn went as it did (2026-11-01; logging is off in a match, so
+this is the only trace): "checks", the send check feedback of each draft that failed it, and, when
+the chat went to a person, "handoff" with "by" (send_check, model, model_error or turn_failed) and
+the loop's own reason when it gave one (why_of). The failed drafts and the model's handoff words
+stay out.
 """
 import hashlib
 import json
@@ -216,6 +222,7 @@ def play(card, *, agent_model, customer_model, prompt=GENERIC_PROMPT, lessons=No
                 sent = []
                 chat_id = chats.open("whatsapp", CUSTOMER)
                 start = len(chats.steps(chat_id))
+                seen = _last_row(results, chat_id)
                 out = loop.turn(Message(channel="whatsapp", customer_id=CUSTOMER, text=line), chats=chats,
                                 model=agent_model, lessons=hand, results=results,
                                 send=lambda to, text: sent.append(text))
@@ -227,7 +234,8 @@ def play(card, *, agent_model, customer_model, prompt=GENERIC_PROMPT, lessons=No
                     for reply in sent:
                         failed += checker(reply, line, ran, orders)
                 turns.append({"n": n, "customer": line, "replies": sent, "outcome": out.outcome,
-                              "tools": [name for name, _ in ran], "failed": failed, "order": bool(made)})
+                              "tools": [name for name, _ in ran], "failed": failed, "order": bool(made),
+                              **why_of(results, chat_id, seen)})
                 if made:
                     order, ended = made, "order"
                     break
@@ -252,6 +260,27 @@ def play(card, *, agent_model, customer_model, prompt=GENERIC_PROMPT, lessons=No
     if error is not None:
         m["error"] = error
     return m
+
+
+def _last_row(results, chat_id):
+    """The id of the chat's newest result row, or 0."""
+    return max((r["id"] for r in results.for_chat(chat_id)), default=0)
+
+
+def why_of(results, chat_id, after):
+    """Why the turn went as it did, from the result rows it wrote (rows after id `after`):
+    "checks", the send check feedback of each reply that failed it (check_failed), and, when the
+    turn handed the chat on, "handoff" with who decided it ("by": send_check, model, model_error
+    or turn_failed) and the loop's own reason when it gave one. Code words and the check's
+    feedback only; the failed reply and the model's own handoff words are left out."""
+    rows = [r for r in results.for_chat(chat_id) if r["id"] > after]
+    out = {"checks": [r["detail"]["feedback"] for r in rows if r["outcome"] == "check_failed"
+                      and isinstance(r.get("detail"), dict) and isinstance(r["detail"].get("feedback"), str)]}
+    for r in rows:
+        if r["outcome"] in ("handed_off", "handoff_failed"):
+            d = r.get("detail") if isinstance(r.get("detail"), dict) else {}
+            out["handoff"] = {k: d[k] for k in ("by", "reason") if isinstance(d.get(k), str)}
+    return out
 
 
 def match_of(card, seed, turns, ended, order, opening):

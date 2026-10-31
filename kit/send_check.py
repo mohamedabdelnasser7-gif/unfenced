@@ -33,6 +33,11 @@ Rules (from the store rules, the 27 Oct morning review and Mohamed's calls on 28
    scheme link (https://...), a www. link, or a bare domain with a path or a common ending
    (shop.example/x, nike.com). An allowed link is read as no words and no numbers by the other rules,
    so its Latin letters and digits never fail the script or amount rules.
+7. Model numbers (2026-11-01): a number in a product title right after its title word ("Phantom 6",
+   "Vapor 17") is a model, not an amount or a stock count, so "Here is the Nike Phantom 6" passes
+   (names, the store's product titles). A price or currency after it still counts: "Vapor 17,500",
+   "Vapor 17 EGP" and "Vapor 17k" are amounts. Moved here from arena/factcheck.py, its one home now.
+   A title word with a digit ("F50") is not a Franco word, so an English reply may name it.
 """
 import functools
 import math
@@ -311,6 +316,36 @@ SHORT_AMOUNT = re.compile(
     rf"|(?<![\d.,]){NUMBER}\s*{THOUSANDS_WORDS}{NO_LETTER_AFTER}",
     re.IGNORECASE)
 
+# A model number ends where no digit, decimal or thousands group follows, and no currency or thousands
+# word: "Vapor 17 EGP" and "Vapor 17k" are amounts (red team round 2, R2-7)
+MODEL_NUMBER_END = rf"(?!\d|[.,]\d|\s*(?:{CURRENCY}|{THOUSANDS}){NO_LETTER_AFTER})"
+
+
+def model_numbers(titles):
+    """For each title number, the pattern of it with the title word it belongs to: "vapor 17", "f50"."""
+    out = []
+    for title in titles or ():
+        words = re.findall(r"[^\W_]+", (title if isinstance(title, str) else "").casefold())
+        for k, w in enumerate(words):
+            m = re.fullmatch(r"([a-z]*)(\d+)", w)
+            if not m:
+                continue
+            lead = m.group(1) or (words[k - 1] if k and re.fullmatch(r"[a-z]+", words[k - 1]) else "")
+            if lead:
+                out.append(r"(?<!\w)(" + re.escape(lead) + r")[\s-]*" + m.group(2) + MODEL_NUMBER_END)
+    return out
+
+
+def without_model_numbers(text, titles):
+    """text with each product's model number dropped where it follows its title word, so "is the
+    Vapor 17" holds no amount 17; the word stays, and so does a price after it ("Vapor 17,500",
+    "Vapor 17،500") or a currency or thousands word ("Vapor 17 EGP")."""
+    text = western_digits(text)
+    for pattern in model_numbers(titles):
+        text = re.sub(pattern, r"\1", text, flags=re.IGNORECASE)
+    return text
+
+
 # An exact stock count, in English, Arabic or Franco.
 STOCK_COUNT = re.compile(
     r"\d+\s+(?:(?:pairs?|pieces?|items?|units?|more)\s+)?(?:left|remaining|in\s+stock|available)" + NO_LETTER_AFTER
@@ -359,8 +394,8 @@ AMOUNT_KEYS = frozenset({"price", "fee", "total", "subtotal"})
 AMOUNT_TEXT = re.compile(r"\s*\d[\d,]*(?:\.\d+)?\s*")
 
 
-def detect_script(text):
-    """'arabic', 'franco', 'english', or None when there are no letters."""
+def detect_script(text, skip=frozenset()):
+    """'arabic', 'franco', 'english', or None when there are no letters. skip: words looks_franco passes over."""
     text = text or ""
     ar = len(ARABIC.findall(text))
     la = len(LATIN.findall(text))
@@ -368,18 +403,28 @@ def detect_script(text):
         return None
     if ar >= la:
         return "arabic"
-    return "franco" if looks_franco(text) else "english"
+    return "franco" if looks_franco(text, skip) else "english"
 
 
-def looks_franco(text):
-    words = [w for w in WORD.findall(text.lower()) if not ARABIC.search(w)]
+def looks_franco(text, skip=frozenset()):
+    """True when Latin text reads as Franco: a word with a Franco digit (3ayez) or two common Franco
+    words. skip: lowercase words passed over, the store's model words with a digit ("f50" from
+    "adidas F50"), so a product name never makes English read as Franco."""
+    words = [w for w in WORD.findall(text.lower()) if not ARABIC.search(w) and w not in skip]
     digit_words = [w for w in words if FRANCO_DIGIT_WORD.fullmatch(w) and not ORDINAL.match(w)]
     common = [w for w in words if w in FRANCO_WORDS]
     return len(digit_words) >= 1 or len(common) >= 2
 
 
-def _script_feedback(reply, customer_text, vocabulary):
-    want = detect_script(customer_text)
+def model_words(titles):
+    """The lowercase title words that hold a digit and a letter ("f50"), for looks_franco's skip."""
+    return frozenset(w for t in titles or () if isinstance(t, str) for w in WORD.findall(t.lower())
+                     if LATIN.search(w) and re.search(r"\d", w))
+
+
+def _script_feedback(reply, customer_text, vocabulary, names=()):
+    skip = model_words(names)
+    want = detect_script(customer_text, skip)
     if want is None:
         return None
     reply = HASH_NUMBER.sub(" ", reply)  # an order number is not a word: #D12 is not Franco
@@ -392,13 +437,22 @@ def _script_feedback(reply, customer_text, vocabulary):
             return "The customer wrote in Arabic letters. Reply in Egyptian Arabic, in Arabic letters."
     elif want == "franco":
         if ARABIC.search(reply):
-            return "The customer wrote in Franco. Reply in Franco, in Latin letters and numbers, no Arabic letters."
+            return ("The customer wrote in Franco. Reply in Franco, in Latin letters and numbers, no Arabic letters"
+                    + _arabic_found(reply) + " Write amounts as the number then geneh, for example 16,500 geneh.")
     elif want == "english":
         if ARABIC.search(reply):
-            return "The customer wrote in English. Reply in English."
-        if looks_franco(reply):
+            return ("The customer wrote in English. Reply in English, no Arabic letters" + _arabic_found(reply)
+                    + " Write amounts as the number then EGP, for example 16,500 EGP.")
+        if looks_franco(reply, skip):
             return "The customer wrote in English. Reply in plain English, not Franco."
     return None
+
+
+def _arabic_found(reply, most=3):
+    """ (this reply has: <the first Arabic words>). with the end mark, so the model sees what to change;
+    a currency word written in Arabic (جنيه) in an English reply is the usual one."""
+    words = list(dict.fromkeys(w for w in WORD.findall(reply) if ARABIC.search(w)))[:most]
+    return f" (this reply has: {', '.join(words)})." if words else "."
 
 
 def _plain(text):
@@ -635,7 +689,7 @@ def _mask_year(m):
     return m.group(0)[:m.start(g) - m.start()] + MASK + m.group(0)[m.end(g) - m.start():]
 
 
-def prices_in(reply, sizes=(), orders=()):
+def prices_in(reply, sizes=(), orders=(), names=()):
     """Every number in the reply that reads as an amount: ints, or Decimals for fractions.
 
     A number next to a currency word or sign always counts. A number after a price word, or
@@ -650,8 +704,10 @@ def prices_in(reply, sizes=(), orders=()):
     ("43") after a price word ("سعره 43") is still an amount.
     orders: order names a draft_order or find_order result gave this turn (#1001), read as
     order numbers wherever they stand whole.
+    names: the store's product titles; a title's model number after its title word ("Phantom 6")
+    is not read (without_model_numbers).
     """
-    text = LE_RANGE.sub(r"\1to", _plain(reply))
+    text = LE_RANGE.sub(r"\1to", without_model_numbers(_plain(reply), names))
     out = [_number(m.group(1) or m.group(2)) for m in PRICE.finditer(text)]
     masked = _mask(PRICE.sub(MONEY, text), sizes, orders)
     size_numbers = _size_numbers(sizes)
@@ -686,12 +742,13 @@ def size_number_amounts(amounts, sizes):
     return sorted({a for a in (amount(x) for x in amounts) if a is not None and a in numbers})
 
 
-def stock_counts(reply, sizes=(), orders=()):
+def stock_counts(reply, sizes=(), orders=(), names=()):
     """Exact stock counts stated in the reply ("3 left", "فاضل 2", "fadel 3").
 
-    A catalogue size number is a size, not a count ("43 available").
+    A catalogue size number is a size, not a count ("43 available"), and a model number after its
+    title word is a model ("Phantom 6 available in 42").
     """
-    masked = _mask(_plain(reply), sizes, orders)
+    masked = _mask(without_model_numbers(_plain(reply), names), sizes, orders)
     size_numbers = _size_numbers(sizes)
     return [m.group(0) for m in STOCK_COUNT.finditer(masked)
             if not all(len(n) <= 3 and int(n) in size_numbers for n in re.findall(r"\d+", m.group(0)))]
@@ -762,7 +819,7 @@ def named_style(text):
     return problems
 
 
-def check(reply, customer_text="", amounts=(), vocabulary=frozenset(), sizes=(), orders=(), links=()):
+def check(reply, customer_text="", amounts=(), vocabulary=frozenset(), sizes=(), orders=(), links=(), names=()):
     """(passed, feedback) for one reply.
 
     amounts: every price and fee in the store and delivery data, plus amounts from this turn's store tools.
@@ -771,14 +828,16 @@ def check(reply, customer_text="", amounts=(), vocabulary=frozenset(), sizes=(),
     orders: order names a draft_order or find_order result gave this turn (#1001), so the order
     the customer just placed or asked about is never read as an amount; any other #number still counts.
     links: image links the store tool gave in this chat; any other link in the reply is refused.
+    names: the store's product titles, so a model number ("Phantom 6") is never read as an amount.
     """
-    problems = named_problems(reply, customer_text, amounts, vocabulary, sizes, orders, links)
+    problems = named_problems(reply, customer_text, amounts, vocabulary, sizes, orders, links, names)
     if problems:
         return False, " ".join(dict.fromkeys(fb for _, fb in problems))
     return True, ""
 
 
-def named_problems(reply, customer_text="", amounts=(), vocabulary=frozenset(), sizes=(), orders=(), links=()):
+def named_problems(reply, customer_text="", amounts=(), vocabulary=frozenset(), sizes=(), orders=(), links=(),
+                   names=()):
     """Every rule the reply breaks, as (check name, feedback) pairs, in the order check() gives
     them; [] when it passes. The names: empty, links, script, banned, dashes, emoji, markdown, sympathy,
     amounts, digits and stock. check() is this list joined, so the exam (reflection/exam.py) reads
@@ -790,7 +849,7 @@ def named_problems(reply, customer_text="", amounts=(), vocabulary=frozenset(), 
     if wrong_links:
         problems.append(("links", "Share only a product's image link from the store tool in this chat, exactly as "
                          "it gave it. No other links."))
-    fb = _script_feedback(reply, customer_text, vocabulary)
+    fb = _script_feedback(reply, customer_text, vocabulary, names)
     if fb:
         problems.append(("script", fb))
     problems += named_style(reply)
@@ -800,7 +859,7 @@ def named_problems(reply, customer_text="", amounts=(), vocabulary=frozenset(), 
             problems.append(("sympathy", f'Remove the sympathy line ("{line}"). No sympathy lines; just answer.'))
             break
     allowed = {n for n in (amount(a) for a in amounts) if n is not None}
-    wrong = sorted({p for p in prices_in(reply, sizes, orders) if p not in allowed})
+    wrong = sorted({p for p in prices_in(reply, sizes, orders, names) if p not in allowed})
     if wrong:
         nums = ", ".join(s if len(s) <= MAX_INT_DIGITS else s[:MAX_INT_DIGITS] + "..." for s in map(str, wrong))
         problems.append(("amounts", f"These amounts are not in the store or delivery data: {nums}. "
@@ -808,8 +867,9 @@ def named_problems(reply, customer_text="", amounts=(), vocabulary=frozenset(), 
                          "If a number is not a price, say what it is: size 43, 2 days, order #1234, model 2026."))
     digits = _plain(reply)
     if SPELLED_AMOUNT.search(digits) or SHORT_AMOUNT.search(digits) or amount_in_words(digits):
-        problems.append(("digits", "Write every amount in digits, the number then جنيه, so it can be checked."))
-    if stock_counts(reply, sizes, orders):
+        problems.append(("digits", "Write every amount in digits, the number then the currency in the customer's "
+                         "script (جنيه in Arabic, EGP in English, geneh in Franco), so it can be checked."))
+    if stock_counts(reply, sizes, orders, names):
         problems.append(("stock", "Never give the exact stock count. If the store says few left, say only a few are "
                          "left; otherwise say it is in stock or out of stock."))
     return problems

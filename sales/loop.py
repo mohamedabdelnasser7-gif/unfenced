@@ -225,11 +225,12 @@ def turn(msg, *, chats, model, lessons, results, send, limits=None, over=None, f
     ctx = tools.Context(chat_id=chat_id, stage=stage, chats=chats, model=model, message=msg,
                         send=send, stages=stages.STAGES)
     t = _Turn(ctx=ctx, customer_text=customer_text, lessons=lessons)
-    vocab, sizes = frozenset(), frozenset()
+    vocab, sizes, names = frozenset(), frozenset(), frozenset()
     try:
         t.amounts = set(store.price_points())
         vocab = store.vocabulary()
         sizes = store.size_strings()
+        names = store.titles()
     except Exception:
         log.exception("store data unavailable; no price can pass the check this turn")
 
@@ -250,7 +251,7 @@ def turn(msg, *, chats, model, lessons, results, send, limits=None, over=None, f
     convo = history + [user_message(msg, stage)]
     t.note = fast_note(fast, chat_id)  # read just before the first model call, once a turn
     try:
-        return _answer(t, convo, msg, vocab, sizes, results=results, send=send)
+        return _answer(t, convo, msg, vocab, sizes, names, results=results, send=send)
     except limits_mod.OverLimit as e:
         return _limited(chat_id, ctx.stage, msg, t.customer_text, e.which, chats=chats, results=results, send=send,
                         limits=limits)
@@ -310,7 +311,7 @@ def _not_passed_on(chat_id, stage, msg, *, chats, results, send):
     return TurnResult(chat_id, "relay_failed", line if told else None)
 
 
-def _answer(t, convo, msg, vocab, sizes, *, results, send):
+def _answer(t, convo, msg, vocab, sizes, names=frozenset(), *, results, send):
     ctx = t.ctx
     chat_id = ctx.chat_id
     while True:
@@ -326,7 +327,7 @@ def _answer(t, convo, msg, vocab, sizes, *, results, send):
             return TurnResult(chat_id, outcome, ctx.sent[-1] if ctx.sent else None)
         passed, feedback = send_check.check(reply, t.customer_text, t.amounts, vocab, sizes,
                                             orders=order_names(ctx.chats, chat_id),
-                                            links=store_links(ctx.chats, chat_id))
+                                            links=store_links(ctx.chats, chat_id), names=names)
         if passed:
             send(msg.customer_id, reply)
             n = ctx.chats.add_step(chat_id, "assistant", content=reply)
@@ -357,7 +358,7 @@ def _hand_off(t, results, reason, detail):
     _save_sent(t, start)
     outcome = _handoff_outcome(ctx)
     results.record(ctx.chat_id, outcome, stage=stage.name, lessons=t.lesson_ids,
-                   detail={**detail, "ok": bool(out.get("ok"))})
+                   detail={**detail, "reason": reason, "ok": bool(out.get("ok"))})
     return TurnResult(ctx.chat_id, outcome, ctx.sent[-1] if ctx.sent else None)
 
 

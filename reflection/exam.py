@@ -177,7 +177,8 @@ def answer(s, lesson, *, model, kept=None):
                 "orders": orders, "order": loop.order_made(chats, chat_id),
                 "problems": dict(send_check.named_problems(reply, msg.text, amounts, store.vocabulary(),
                                                            store.size_strings(), orders=orders,
-                                                           links=loop.store_links(chats, chat_id)))}
+                                                           links=loop.store_links(chats, chat_id),
+                                                           names=store.titles()))}
     finally:
         db.close()
 

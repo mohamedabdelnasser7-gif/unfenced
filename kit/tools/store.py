@@ -239,6 +239,11 @@ def vocabulary():
     return frozenset(words)
 
 
+def titles():
+    """Every product title ("Nike Phantom 6"), so the send check reads a model number as a model."""
+    return frozenset(i["title"] for i in catalogue() if isinstance(i.get("title"), str))
+
+
 def size_strings():
     """Every size string in the catalogue ("43"), so the send check never reads a size as an amount."""
     return frozenset(v["size"] for item in catalogue() for v in item.get("variants", []) if v.get("size"))

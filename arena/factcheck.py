@@ -307,34 +307,18 @@ EXTRA_AMOUNT = re.compile(r"[^\S\n]*(?:(?:" + send_check.CURRENCY + r")" + send_
 
 
 def model_numbers(items):
-    """For each title number, the pattern of it with the title word it belongs to: "vapor 17", "f50"."""
-    out = []
-    for item in items:
-        words = re.findall(r"[^\W_]+", (item.get("title") or "").casefold())
-        for k, w in enumerate(words):
-            m = re.fullmatch(r"([a-z]*)(\d+)", w)
-            if not m:
-                continue
-            lead = m.group(1) or (words[k - 1] if k and re.fullmatch(r"[a-z]+", words[k - 1]) else "")
-            if lead:
-                out.append(r"(?<!\w)(" + re.escape(lead) + r")[\s-]*" + m.group(2) + MODEL_NUMBER_END)
-    return out
+    """For each title number, the pattern of it with the title word it belongs to: "vapor 17", "f50"
+    (kit/send_check.py model_numbers, from the items' titles)."""
+    return send_check.model_numbers(i.get("title") for i in items)
 
 
-# A model number ends where no digit, decimal or thousands group follows, and no currency or thousands
-# word: "Vapor 17 EGP" and "Vapor 17k" are amounts (red team round 2, R2-7)
-MODEL_NUMBER_END = (r"(?!\d|[.,]\d|\s*(?:" + send_check.CURRENCY + "|" + send_check.THOUSANDS + ")"
-                    + send_check.NO_LETTER_AFTER + ")")
+MODEL_NUMBER_END = send_check.MODEL_NUMBER_END
 
 
 def without_model_numbers(text, items):
     """text with each product's model number dropped where it follows its title word, so "is the
-    Vapor 17" holds no amount 17; the word stays, and so does a price after it ("Vapor 17,500",
-    "Vapor 17،500") or a currency or thousands word ("Vapor 17 EGP")."""
-    text = send_check.western_digits(text)
-    for pattern in model_numbers(items):
-        text = re.sub(pattern, r"\1", text, flags=re.IGNORECASE)
-    return text
+    Vapor 17" holds no amount 17 (kit/send_check.py without_model_numbers, from the items' titles)."""
+    return send_check.without_model_numbers(text, [i.get("title") for i in items])
 
 
 def _governorate_zone(text):

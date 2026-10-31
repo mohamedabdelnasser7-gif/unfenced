@@ -28,3 +28,12 @@ Lost real chats are cleaned before they become practice customers: a name a cust
 The pool file is written whole and checked on load, but two night runs at the same moment are not locked against each other.
 
 Next: mask any word the store's catalogue and common words do not explain, instead of growing name rules.
+
+## Names in the assistant's practice days (assistant/arena.py)
+A finished day the user lived is cleaned before it can join the assistant's Arena. Nothing feeds real days in yet: the live day runner is not built, so this step reads an empty file. Shapes it still misses or over-masks:
+- A name only the text carries, with no display name and not on the first name list, for example "lunch with Bahaa Shalaby".
+- A single long line right after a sign off is kept.
+- A display name made of ordinary capitalised words ("Report Meeting") masks those words for the whole day.
+
+Next: the same allow-list rule as the practice customers, before the live day runner is wired.
+

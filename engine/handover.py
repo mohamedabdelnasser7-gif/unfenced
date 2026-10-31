@@ -78,9 +78,11 @@ BEGIN SELECT RAISE(ABORT, 'a handed over note is never rewritten'); END;
 CREATE TRIGGER IF NOT EXISTS handed_over_one_note_a_window
 BEFORE INSERT ON handed_over
 WHEN EXISTS (SELECT 1 FROM handed_over WHERE from_agent = NEW.from_agent AND to_agent = NEW.to_agent
-             AND since < NEW.until AND until > NEW.since)
+             AND since < NEW.until - 3600 AND until > NEW.since + 3600)
 BEGIN SELECT RAISE(IGNORE); END;
 """
+# Windows that share an hour or less count as apart: a night that starts a few seconds earlier than the
+# one before still writes its note (the one-hour slack in the trigger above).
 
 
 class Track:

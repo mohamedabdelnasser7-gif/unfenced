@@ -379,16 +379,30 @@ class TheRow(Setup):
         self.assertEqual(sorted(later["case_ids"]), ["next0", "next1", "next2"])
         self.assertEqual(len(handover.received(self.db, TO)), 2)
 
+    def test_a_night_that_starts_a_few_seconds_early_still_writes_its_note(self):
+        lost(self.log, 3, "playful", "play")
+        first, = self.window(fk.SINCE, fk.UNTIL)
+        for n in range(3):
+            fk.case(self.log, f"next{n}", "water", "soaked", "wilted", at=fk.UNTIL + fk.DAY, stage="seedling",
+                    moment="playful", note=f"next round {n}")
+        later, = self.window(fk.UNTIL - 4, 2 * fk.UNTIL - fk.SINCE - 4)  # the clock ran 4 seconds early
+        self.assertFalse(later["again"])
+        self.assertNotEqual(later["id"], first["id"])
+        self.assertEqual(len(handover.received(self.db, TO)), 2)
+
     def test_the_table_itself_refuses_an_overlapping_window(self):
         handover.Track(self.db, self.plug, spotter=Spotter(), writer=Writer())
         sql = ("INSERT INTO handed_over (from_agent, to_agent, kind, text, cases, sources, since, until, written_at) "
                "VALUES (?, ?, 'playful', 'A line.', '[]', 3, ?, ?, 0)")
+        H = 3600.0
         with self.db.tx() as c:
-            self.assertEqual(c.execute(sql, ("waterer", TO, 0.0, 10.0)).rowcount, 1)
-            self.assertEqual(c.execute(sql, ("waterer", TO, 9.0, 19.0)).rowcount, 0)  # overlaps
-            self.assertEqual(c.execute(sql, ("waterer", "other", 9.0, 19.0)).rowcount, 1)  # another receiver
-            self.assertEqual(c.execute(sql, ("waterer", TO, 10.0, 20.0)).rowcount, 1)  # starts where it ends
-        self.assertEqual([(n["since"], n["until"]) for n in handover.received(self.db, TO)], [(0.0, 10.0), (10.0, 20.0)])
+            self.assertEqual(c.execute(sql, ("waterer", TO, 0.0, 10 * H)).rowcount, 1)
+            self.assertEqual(c.execute(sql, ("waterer", TO, 8 * H, 18 * H)).rowcount, 0)  # two hours shared
+            self.assertEqual(c.execute(sql, ("waterer", "other", 8 * H, 18 * H)).rowcount, 1)  # another receiver
+            self.assertEqual(c.execute(sql, ("fan", TO, 8 * H, 18 * H)).rowcount, 1)  # another sender
+            self.assertEqual(c.execute(sql, ("waterer", TO, 10 * H - 4, 20 * H)).rowcount, 1)  # 4 seconds shared
+        self.assertEqual([(n["since"], n["until"]) for n in handover.received(self.db, TO) if n["from"] == "waterer"],
+                         [(0.0, 10 * H), (10 * H - 4, 20 * H)])
 
     def test_a_failing_spotter_hands_nothing_over(self):
         lost(self.log, 3, "playful", "play")

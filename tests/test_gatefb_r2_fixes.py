@@ -16,12 +16,15 @@ from unittest import mock
 
 from arena import factcheck
 from engine import fast as engine_fast
-from engine.lessons import WAITING
+from engine import study as study_mod
+from engine.lessons import WAITING, Lessons
+from engine.study import Study
 from kit.db import Db
 from kit.tools import store
 from reflection import PLUG as SALES
 from reflection import fast as sales_fast
 from reflection import morning, night
+from tests import plugs
 from tests import study_fakes as fk
 from tests import test_failed_back as tfb
 from tests.fake_model import clean_env
@@ -325,6 +328,72 @@ class CloseLineWithAFailedExam(unittest.TestCase):
                                              '(close to the pulled line "Visit the north beds first."); '
                                              "a person's Yes on its card starts it anyway")
         self.assertEqual(morning._close_sentence(card), 'It comes close to the pulled line "Visit the north beds first.".')
+
+
+class CloseToAFailedLine(unittest.TestCase):
+    """Review round 2 test gaps: each part of the content rule for a line close to a failed one."""
+
+    def close(self, line, failed):
+        """(close with the failed line, close as a pulled line): the second is None when only the
+        content rule makes it close."""
+        pulled = [(study_mod._norm(failed), failed)]
+        return study_mod._close(line, pulled, {failed}), study_mod._close(line, pulled)
+
+    def test_a_line_whose_words_sit_inside_a_longer_failed_line_is_close(self):  # st7
+        failed = "Water the shady north beds early in the cool morning."
+        self.assertEqual(self.close("Water beds early.", failed), (failed, None))  # 3 of 7 content words
+
+    def test_the_share_of_content_words_is_at_least_near_failed(self):  # st11
+        self.assertEqual(study_mod.NEAR_FAILED, 0.6)
+        self.assertEqual(self.close("Water beds early at dusk.", fk.EARLY["lesson"]),
+                         (fk.EARLY["lesson"], None))  # 3 of 5 shared
+        self.assertEqual(self.close("Water beds early, then shade them in the evening.", fk.EARLY["lesson"]),
+                         (None, None))  # 3 of 6 shared
+
+    def test_signs_are_not_content_words(self):  # st13
+        self.assertEqual(study_mod._norm("Water beds early + \U0001F331 $"), "water beds early + \U0001F331 $")
+        self.assertEqual(self.close("Water beds early + \U0001F331 $", fk.EARLY["lesson"]), (fk.EARLY["lesson"], None))
+
+    def test_a_line_of_small_words_only_is_close_to_nothing(self):  # st17
+        self.assertEqual(study_mod._content(study_mod._norm("Do it first.")), set())
+        self.assertEqual(self.close("Do it first.", fk.EARLY["lesson"]), (None, None))
+
+
+class FailedLinesThroughTheNight(unittest.TestCase):
+    """Review round 2 test gaps: a person's held line queued with a yes is not given (st4); an idea
+    and an adapted lesson close to a failed line by content only wait naming it (st15, st16)."""
+    setUp, study, night = tfb.NextNight.setUp, tfb.NextNight.study, tfb.NextNight.night
+
+    def test_a_persons_held_line_with_a_yes_waiting_its_turn_is_not_given(self):  # st4
+        self.lessons.propose("Visit the north beds first.", ["all"], sources=[])  # takes the stage's trial
+        held = self.lessons.add("Water the shaded beds at noon.", ["all"], yes_by="Mona", exam=tfb.failing("", ()))
+        self.assertEqual(self.night()["failed_given"], [held, self.failed_id])
+        self.assertTrue(self.lessons.approve(held, "Mona"))
+        self.assertEqual(self.lessons.get(held)["state"], WAITING)
+        self.assertIsNone(self.lessons.trial(held)["started_at"])
+        self.assertEqual(self.night()["failed_given"], [self.failed_id])
+
+    def test_an_idea_close_to_a_failed_line_waits_naming_it(self):  # st15
+        idea = {"lesson": "Always water the beds early.", "situation": "Any bed on a warm day.", "stages": ["all"]}
+        rep = self.night(ideas=tfb.Recorder(idea))
+        rec, = rep["ideas"]
+        card, = [c for c in rep["cards"] if c["lesson_id"] == rec["lesson_id"]]
+        self.assertEqual((card["state"], card["close_to_failed"]), (WAITING, fk.EARLY["lesson"]))
+        self.assertIsNone(self.lessons.trial(card["lesson_id"]))
+
+    def test_an_adapted_lesson_close_to_a_failed_line_waits_naming_it(self):  # st16
+        fan = plugs.load(plugs.FAN, self)
+        mine = Lessons(self.db, fan, judge=tfb.always_low, exam=tfb.failing)
+        failed = "Turn the fan on early in the morning."
+        mine.propose(failed, ["all"], sources=[])
+        mine.examiner = None
+        line = "Always turn the fan on early."
+        rep = Study(self.db, fan, proposer=fk.Proposer(fk.EARLY), tagger=fk.Tagger(), lessons=mine,
+                    fit=fk.Fit({fk.EARLY["lesson"]: "partly"}), adapter=fk.Adapter({fk.EARLY["lesson"]: line}),
+                    others=[self.plug]).run(fk.SINCE, fk.UNTIL, now=fk.NOW + fk.DAY)
+        card, = [c for c in rep["cards"] if c["change"] == line]
+        self.assertEqual((card["state"], card["close_to_failed"]), (WAITING, failed))
+        self.assertIsNone(mine.trial(card["lesson_id"]))
 
 
 if __name__ == "__main__":

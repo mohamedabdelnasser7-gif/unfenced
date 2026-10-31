@@ -13,9 +13,17 @@ price     every amount in the reply (kit/send_check.py prices_in) is a price of 
           their Arabic and Franco spellings), or in a clause that names no product and no tier
           when the reply names the extra elsewhere (or, naming nothing, the customer's line does)
           and its sentence names no boot and no tier: "The Vapor 17 Elite is 400 EGP" fails,
-          "الطباعة 400 جنيه" passes (2026-10-31). An add-on word right beside the amount (more,
-          extra, plus, on top, زيادة) keeps the extra's price when its sentence names the extra
-          (else as above, the reply or the customer's line): "If you add printing to the Elite, it's 400 EGP more" passes (DECISIONS item 52). For
+          "الطباعة 400 جنيه" passes (2026-10-31). A clause that names a boot or a tier before the
+          extra, with no amount between, does not hold the extra's price: "The Vapor 17 Elite
+          with printing is 400 EGP"
+          fails, "Printing on the Vapor 17 Elite is 400 EGP" passes (red team gatefb round 1).
+          An add-on word right beside the amount (more, extra, plus, on top, زيادة; a whole word,
+          and not "more or less", "more than", "extra fast", "زيادة عن" and the like) keeps the
+          price of the extra its clause names, else of one its sentence names: "If you add
+          printing to the Elite, it's 400 EGP more" passes (DECISIONS item 52); "The Elite is 400
+          EGP more than the Pro, and printing is available too" and "The Vapor 17 Elite is 400 EGP
+          extra. We can also print your name." fail (review gatefb round 1). An extra named only
+          in another sentence, or only in the customer's line, never makes an add-on amount. For
           this rule a colon, a bracket and a spaced dash cut a clause too, and a
           clause that names no product and no tier takes those of the clauses before it in its
           sentence (red team round 2). A model number in a product's title (the 17 in Vapor 17,
@@ -120,10 +128,14 @@ ASIDE = re.compile(r"[()\[\]]|(?<=\s)[-\u2013\u2014](?=\s)")
 # item 52): "400 EGP more", "400 extra", "400 on top", "400 جنيه زيادة", "plus 400", "+ 400", "an extra
 # 400", "زيادة 400". Such an amount is said to go on top of something, so an extra's price there is the extra's.
 ADDON_WORDS = r"more|extra|on\s+top|زيادة|زياده"
+# Words after it that make it no add-on: "400 EGP more or less", "more than", "extra fast", "زيادة عن"
+# (red team gatefb round 1, item 2).
+NOT_ADDON_AFTER = (r"(?![^\S\n]+(?:or[^\S\n]+less|than|like|precisely|exactly|roughly|affordable|expensive|cheap"
+                   r"|fast|quickly)" + send_check.NO_LETTER_AFTER + r"|[^\S\n]*عن" + send_check.NO_LETTER_AFTER + ")")
 ADDON = re.compile(
     send_check.LETTER_BEFORE + r"(?:(?:plus|(?:an\s+)?extra|زيادة|زياده)[^\S\n]+|\+[^\S\n]*)(" + send_check.DIGITS + r")(?![\d.,]\d)"
     r"|(?<![\d.,])(" + send_check.DIGITS + r")[^\S\n]*(?:" + send_check.CURRENCY + r")?[^\S\n]*(?:" + ADDON_WORDS + ")"
-    + send_check.NO_LETTER_AFTER, re.IGNORECASE)
+    + send_check.NO_LETTER_AFTER + NOT_ADDON_AFTER, re.IGNORECASE)
 # Arabic and Franco spellings of an English word stem. Used only for a stem an extra's own title,
 # type or description carries (extra_words), so an extra with none of these stems gets none of them.
 STEM_FORMS = {
@@ -183,14 +195,27 @@ def extras_named(text, extras, items, kind=False):
     """The extras whose words (extra_words, in English or with their STEM_FORMS spellings) show in text:
     "printing", "your name", "two stickers", "الطباعة", "اسمك", "استيكرين". With kind, only the words
     of the extra's type ("Printing": "printing", "الطباعة", not "your name", which an order asks for)."""
-    out = []
-    for e in extras:
-        stems = sorted({_stem(w) for w in re.findall(r"[a-z]+", str(e.get("type") or "").casefold())
-                        if len(w) >= 3}) if kind else extra_words(e, items)
-        forms = [re.escape(s) + r"[a-z]*" for s in stems] + [STEM_FORMS[s] for s in stems if s in STEM_FORMS]
-        if forms and re.search(r"(?<!\w)(?:" + "|".join(forms) + r")(?!\w)", text or "", re.IGNORECASE):
-            out.append(e)
-    return out
+    return [e for e in extras if _extra_match(e, text, items, kind)]
+
+
+def _extra_match(e, text, items, kind=False):
+    """The first place text names the extra e (extras_named), or None."""
+    stems = sorted({_stem(w) for w in re.findall(r"[a-z]+", str(e.get("type") or "").casefold())
+                    if len(w) >= 3}) if kind else extra_words(e, items)
+    forms = [re.escape(s) + r"[a-z]*" for s in stems] + [STEM_FORMS[s] for s in stems if s in STEM_FORMS]
+    return re.search(r"(?<!\w)(?:" + "|".join(forms) + r")(?!\w)", text or "", re.IGNORECASE) if forms else None
+
+
+def _boot_first(clause, extras, items, all_tiers, sizes, orders):
+    """The clause names a boot or a tier before its first extra word, with no amount between: "The
+    Vapor 17 Elite with printing is 400 EGP" (red team gatefb round 1, item 1), not "The Vapor 17
+    Elite is 16,500 EGP and the name printing 400 EGP". False when it names no extra."""
+    at = [m.start() for m in (_extra_match(e, clause, items) for e in extras) if m]
+    if not at:
+        return False
+    head = clause[:min(at)]
+    return (bool(tiers_named(head, all_tiers) or _boots(products_named(head, items), extras))
+            and not send_check.prices_in(head, sizes, orders))
 
 
 def model_numbers(items):
@@ -317,13 +342,21 @@ def check(reply, customer_text="", tool_results=(), orders=()):
         backdrop = extras_named(customer_text, extras, items)
     for clause, boot, kinds, sentence_boot, sentence in _extra_clauses(text, items, extras, all_tiers):
         here = extras_named(clause, extras, items)
-        # an extra the sentence names (else the backdrop) keeps its price beside an add-on word:
-        # "If you add printing to the Elite, it's 400 EGP more" (DECISIONS item 52)
+        # the extra the clause names, else one its sentence names, keeps its price beside an add-on
+        # word: "If you add printing to the Elite, it's 400 EGP more" (DECISIONS item 52). An extra
+        # named only in another sentence, or only in the customer's line, never makes an add-on
+        # amount (review gatefb round 1, finding 2; red team gatefb round 1, item 2).
         on_top = _addon_amounts(clause) & _dec(send_check.amount(v["price"])
-                                               for e in (extras_named(sentence, extras, items) or backdrop)
+                                               for e in (here or extras_named(sentence, extras, items))
                                                for v in e.get("variants", []) if "price" in v)
         # the backdrop holds an extra's price only in a sentence that names no boot and no tier: "The
-        # Vapor 17 Elite, with printing, is 400 EGP" fails (red team round 2, R2-1)
+        # Vapor 17 Elite, with printing, is 400 EGP" fails (red team round 2, R2-1); a clause that
+        # names a boot or tier before the extra, with no amount between, holds it only beside an
+        # add-on word: "The Vapor 17
+        # Elite with printing is 400 EGP" fails, "Printing on the Vapor 17 Elite is 400 EGP" passes
+        # (red team gatefb round 1, item 1)
+        if _boot_first(clause, extras, items, all_tiers, sizes, orders):
+            here = []
         own = _dec(send_check.amount(v["price"]) for e in (here if sentence_boot else here or backdrop)
                    for v in e.get("variants", []) if "price" in v)
         amounts = [Decimal(str(a)) for a in send_check.prices_in(clause, sizes, orders)]

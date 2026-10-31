@@ -278,8 +278,9 @@ class Lessons:
         always waits for a person's yes, switch or not. sources: the texts of the cases it
         came from; a lesson that copies a run of words from one is high. It has no default, so a
         caller cannot skip the copy check by leaving it out; [] when none. trial False: it waits
-        for a yes whatever its risk (a line close to a pulled one, or one against a live one).
-        Returns its id."""
+        for a yes whatever its risk (a line close to a pulled or failed one, or one against a live
+        one); it still takes the exam when one would run for a trial, so its card shows a fail
+        (red team gatefb round 1, item 4). Returns its id."""
         return self._new(text, stages, source=source, sources=sources, trial=trial, kind=_kind(kind), now=now)
 
     def adapt(self, text, stages, *, source, sources, source_lesson_id=None, trial=True, now=None):
@@ -726,7 +727,7 @@ class Lessons:
         tags = self.plug.stage_tags(stages)
         level, why = risk_mod.classify(text, self.plug.risk, self.judge, sources=sources)
         now = _now(now)
-        wants = (self.examiner is not None or exam_given is not None) and trial and takes_exam(origin) and not skip_exam
+        wants = (self.examiner is not None or exam_given is not None) and takes_exam(origin) and not skip_exam
         exam = exam_given if exam_given is not None or not wants else self._exam(text, tags, level, why, yes_by, origin, now)
         with self.db.tx() as c:  # the switch is read in the same transaction the lesson is written in
             accept = None
@@ -751,9 +752,9 @@ class Lessons:
             return cur.lastrowid
 
     def _exam(self, text, tags, level, why, yes_by, origin, now):
-        """Run the exam on a new lesson that would start its trial now (see takes_exam): a person's
-        line when the rule says so, or the agent's lesson with no yes, low risk or high under Accept
-        high risk (read now, and again in _new's transaction). Outside the transaction: model calls
+        """Run the exam on a new lesson that would start its trial now, or would but for trial False
+        (see takes_exam): a person's line when the rule says so, or the agent's lesson with no yes,
+        low risk or high under Accept high risk (read now, and again in _new's transaction). Outside the transaction: model calls
         never hold the write lock. An examiner that raises fails the lesson. None when no exam ran."""
         if origin != PERSON:
             if yes_by is not None:

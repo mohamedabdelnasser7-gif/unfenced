@@ -234,7 +234,9 @@ def save(c, agent, lesson_id, result, now=None):
     c.execute("INSERT INTO lesson_exams (lesson_id, agent, passed, situation, check_name, why, calls, parts, at, "
               "fixed, broke, p_value, effect, fails) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
               (lesson_id, agent, int(result.passed), first.situation if first else None,
-               first.check if first else None, first.why if first else None, int(result.calls),
+               first.check if first else None,
+               None if first is None or first.why is None else _one_line(first.why),  # one line, capped (red team item 5)
+               int(result.calls),
                json.dumps(result.parts(), ensure_ascii=False), time.time() if now is None else now, *counts, fails))
 
 

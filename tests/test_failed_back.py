@@ -13,6 +13,7 @@ from engine import exam as engine_exam
 from engine import risk
 from engine.lessons import TRYING, WAITING, Lessons
 from engine.log import Log
+from engine import study as study_mod
 from engine.study import FAILED_BEFORE, Study
 from kit.db import Db
 from reflection import morning, night
@@ -75,6 +76,17 @@ class Saved(unittest.TestCase):
         good = les.propose(fk.MULCH["lesson"], ["seedling"], sources=[])
         self.assertIsNone(les.exam_of(good)["fails"])
         self.assertEqual(engine_exam.fails_of(les.exam_of(good)), [])
+
+    def test_each_kept_why_is_one_short_line(self):  # E8, red team item 5
+        why = "it watered\nthe shade " + "x" * 400
+        les = Lessons(self.db, self.plug, judge=always_low,
+                      exam=lambda t, s: Result(False, [Row(2, "shade_bed", "guard", False, "no_shade", why)], calls=1))
+        row = les.exam_of(les.propose(fk.EARLY["lesson"], ["all"], sources=[]))
+        kept, = json.loads(row["fails"])
+        for got in (kept["why"], row["why"]):
+            self.assertNotIn("\n", got)
+            self.assertLessEqual(len(got), 300)
+            self.assertTrue(got.startswith("it watered the shade x"))
 
     def test_at_most_max_fails_are_kept(self):
         many = [Row(n, f"s{n}", "guard", False, "no_shade", "why") for n in range(1, engine_exam.MAX_FAILS + 5)]
@@ -183,6 +195,90 @@ class NextNight(unittest.TestCase):
         self.assertNotIn("failed", self.proposer.calls[0])
         self.assertIn(fk.EARLY["lesson"], self.proposer.calls[0]["known"])
         self.assertEqual(rep["failed_given"], [])
+
+    def test_a_failed_line_pulled_with_no_trial_is_still_given(self):  # S1
+        self.assertTrue(self.lessons.pull(self.failed_id, "no use"))
+        rep = self.night()
+        self.assertEqual(rep["failed_given"], [self.failed_id])
+        self.assertEqual([f["lesson"] for f in self.proposer.calls[0]["failed"]], [fk.EARLY["lesson"]])
+
+    def test_a_failed_line_a_person_said_yes_to_and_then_pulled_is_not_given(self):  # finding 3
+        self.assertTrue(self.lessons.approve(self.failed_id, "Mona"))
+        self.assertTrue(self.lessons.pull(self.failed_id, "the trial lost", on_trial=True))
+        rep = self.night()
+        self.assertEqual(rep["failed_given"], [])
+        self.assertNotIn("failed", self.proposer.calls[0])
+
+    def test_a_failed_line_with_a_yes_waiting_its_turn_is_not_given(self):  # finding 3, a yes and no start
+        self.lessons.propose("Visit the north beds first.", ["all"], sources=[])  # takes the stage's trial
+        self.assertTrue(self.lessons.approve(self.failed_id, "Mona"))
+        self.assertEqual(self.lessons.get(self.failed_id)["state"], WAITING)
+        self.assertIsNone(self.lessons.trial(self.failed_id)["started_at"])
+        self.assertEqual(self.night()["failed_given"], [])
+        self.assertTrue(self.lessons.pull(self.failed_id, "no longer"))  # its queued trial row goes with it
+        self.assertEqual(self.night()["failed_given"], [])
+
+    def test_a_persons_line_its_exam_still_holds_is_given(self):
+        held = self.lessons.add("Water the shaded beds at noon.", ["all"], yes_by="Mona", exam=failing("", ()))
+        self.assertEqual(self.lessons.get(held)["state"], WAITING)
+        rep = self.night()
+        self.assertEqual(rep["failed_given"], [held, self.failed_id])
+
+    def test_a_waiting_lesson_that_passed_its_exam_is_not_given(self):  # S3
+        waits = self.lessons.propose("Visit the north beds first.", ["all"], sources=[], trial=False)
+        self.assertTrue(self.lessons.exam_of(waits)["passed"])
+        self.assertEqual(self.lessons.get(waits)["state"], WAITING)
+        rep = self.night()
+        self.assertEqual(rep["failed_given"], [self.failed_id])
+
+    def test_the_newest_failed_lines_first_and_at_most_failed_given(self):  # S10, S11
+        self.lessons.examiner = failing
+        names = ("north", "south", "east", "west", "rose", "herb", "corner", "fence", "pond", "path", "gate", "hill")
+        ids = [self.lessons.propose(f"Water the {n} bed at noon.", ["all"], sources=[]) for n in names]
+        rep = self.night()
+        want = list(reversed([self.failed_id] + ids))[:study_mod.FAILED_GIVEN]
+        self.assertEqual(study_mod.FAILED_GIVEN, 10)
+        self.assertEqual(rep["failed_given"], want)
+        self.assertEqual([f["lesson"] for f in self.proposer.calls[0]["failed"]],
+                         [self.lessons.get(i)["text"] for i in want])
+
+    def test_small_rewordings_of_a_failed_line_wait_for_a_yes(self):  # finding 4
+        failed = [(study_mod._norm(fk.EARLY["lesson"]), fk.EARLY["lesson"])]
+        for line in ("Water beds early.", "Always water the beds early.", "Water the beds early every day.",
+                     "Water the beds early, before the sun is up.",
+                     "Water the beds early in the morning, then check the shaded ones at noon."):  # one inside
+            with self.subTest(line=line):
+                self.assertEqual(study_mod._close(line, failed, {fk.EARLY["lesson"]}), fk.EARLY["lesson"])
+                self.assertIsNone(study_mod._close(line, failed))  # a pulled line keeps the old rule
+        for line in (NEW_TRY["lesson"], "Water the beds late in the evening."):
+            self.assertIsNone(study_mod._close(line, failed, {fk.EARLY["lesson"]}), line)
+
+    def test_a_rewording_through_the_night_waits_naming_the_failed_line(self):
+        rep = self.night(fk.candidate(fk.EARLY, lesson="Always water the beds early."))
+        card, = rep["cards"]
+        self.assertEqual((card["state"], card["close_to_failed"]), (WAITING, fk.EARLY["lesson"]))
+
+    def test_a_line_close_to_a_failed_one_still_takes_the_exam(self):  # red team item 4
+        self.lessons.examiner = failing
+        rep = self.night(CLOSE)
+        card, = rep["cards"]
+        self.assertEqual(card["close_to_failed"], fk.EARLY["lesson"])
+        self.assertFalse(self.lessons.exam_of(card["lesson_id"])["passed"])
+        self.assertEqual(card["exam"], "failed the exam: situation 2, check no_shade")
+
+    def test_the_first_fail_given_is_one_short_line(self):  # red team item 5
+        long_why = "was won, now lost: left\n(turn 3, agent: " + "A" * 2500 + ")"
+
+        def failing_long(text, tags):
+            return Result(False, [Row(2, "rerun-7", "arena", False, engine_exam.RERUN, long_why)], calls=1)
+
+        self.lessons.examiner = failing_long
+        self.lessons.propose("Water the beds at dusk.", ["all"], sources=[])
+        self.lessons.examiner = passing
+        self.night()
+        first = self.proposer.calls[0]["failed"][0]["first_fail"]
+        self.assertLessEqual(len(first), study_mod.FIRST_FAIL_MAX)
+        self.assertNotIn("\n", first)
 
     def test_with_no_failed_line_the_parts_are_called_as_before(self):
         db = Db(":memory:")

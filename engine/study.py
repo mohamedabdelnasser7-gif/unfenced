@@ -44,12 +44,15 @@ a lesson card through the agent's own lessons and risk check.
    never comes back on its own, whatever the switches say.
    The source line names the counts and the first cases with the pattern.
    A lesson that failed the eval gate is a mistake too (DECISIONS item 50). While it is not live
-   (it waits, or it was pulled after), its line counts like a pulled one: the same line is not
-   written again ("failed the eval gate before") and a line close to it waits for a yes, its card
-   naming the failed line. The proposer and the idea part are given this agent's failed lines,
-   the newest FAILED_GIVEN, each with what it broke (the first fail, the failed checks with why,
-   the cases it broke and the fixed and broken counts, from its exam row), so they write a
-   different try for that pattern. A new try is a new lesson; the failed one is never rewritten
+   (it waits, or it was pulled after) and never had a trial (no person's yes took it on), its line
+   counts like a pulled one: the same line is not written again ("failed the eval gate before")
+   and a line close to it waits for a yes, its card naming the failed line; close here also
+   means the two lines' content words are one inside the other or share NEAR_FAILED of them
+   (_close). Such a line still takes the exam, so its card shows a fail too. The proposer and
+   the idea part are given this agent's failed lines, the newest FAILED_GIVEN, each with what
+   it broke (the first fail as one line of at most FIRST_FAIL_MAX characters, the failed checks
+   with why, the cases it broke and the fixed and broken counts, from its exam row), so they
+   write a different try for that pattern. A new try is a new lesson; the failed one is never rewritten
    and still waits for a person's yes.
 6. Learn across agents. With a fit check and an adapter given, the study reads the other
    agents of the same database, in any field; the ones sharing a field come first, which
@@ -89,7 +92,7 @@ from collections import Counter
 
 from engine import exam as exam_mod
 from engine import risk as risk_mod
-from engine.lessons import DAY, IDEA, KEPT, MAX_LEN, PATTERN, PULLED, WAITING, Lessons, meet, whose
+from engine.lessons import DAY, IDEA, KEPT, MAX_LEN, PATTERN, PERSON, PULLED, WAITING, Lessons, meet, whose
 from engine.log import Log
 from engine.plug import SLOW
 
@@ -110,6 +113,14 @@ FAILED_BEFORE = "failed the eval gate before"
 FAILED_GIVEN = 10  # failed lines the proposer and the idea part are given a night, the newest
 FAILS_GIVEN = 3   # failed checks given with each failed line
 CLOSE = 0.85      # how close a line may come to a pulled one before it waits for a yes
+NEAR_FAILED = 0.6  # for a failed line, the share of content words two lines may share before it waits
+FIRST_FAIL_MAX = 300  # characters of a failed line's first fail given to the proposer and the idea part
+# Small words left out when two lines' content words are compared (a failed line, see 5)
+SMALL_WORDS = frozenset(
+    "a an the and or but nor of in on at to for from by with into onto over under up down out off about "
+    "is are was were be been being am do does did has have had it its this that these those them they "
+    "their there then than as so if when while before after until each every all any some very just also "
+    "always often ever too only first last more most less once again".split())
 IDEAS = 3         # ideas the idea part may write a night. Not a cap on trials (call 1A): every
                   # low risk lesson still starts. Ideas have no cases behind them and one trial
                   # runs on a stage at a time, so more would only queue on the stages, ahead of
@@ -228,7 +239,7 @@ class Study:
                       f'{rec["without"]["sources"]} sources; chance it is better {round(rec["chance"] * 100)}%; '
                       f'cases with it: {_shown(with_)}')
             card = self._write(cand, source, [c.text for c in _unique(sample + with_)], rec, None, rep,
-                               close=_close(cand["lesson"], pulled))
+                               close=_close(cand["lesson"], pulled, self._failed_lines))
             rec["lesson_id"] = card["lesson_id"]
             known[_norm(cand["lesson"])] = KNOWN
         rep["candidates"] = found["candidates"]
@@ -239,10 +250,13 @@ class Study:
 
     def _failed_tries(self, mine):
         """This agent's lessons that failed the eval gate and are not live (waiting, or pulled after),
-        newest first, each as the parts read it (see 5) with its lesson_id."""
+        newest first, each as the parts read it (see 5) with its lesson_id. A failed lesson that
+        ever had a trial (a person's yes started it or queued it) is not one: a person took it on,
+        so pulled after its trial it is a pulled line like any other (review gatefb round 1,
+        finding 3). Its first fail is one line of at most FIRST_FAIL_MAX characters."""
         out = []
         for les in reversed(mine):
-            if les["state"] not in (WAITING, PULLED):
+            if les["state"] not in (WAITING, PULLED) or self._tried(les):
                 continue
             row = self.lessons.exam_of(les["id"])
             if not row or row["passed"]:
@@ -250,6 +264,7 @@ class Study:
             first = exam_mod.held_line(row)
             if row.get("why"):
                 first = f'{first}: {row["why"]}'
+            first = " ".join(first.split())[:FIRST_FAIL_MAX]
             eff = exam_mod.effect_of(row)
             out.append({"lesson_id": les["id"], "lesson": les["text"], "first_fail": first,
                         "fails": [{"case": _case_name(f), "check": f.get("check") or "", "why": f.get("why") or ""}
@@ -257,6 +272,16 @@ class Study:
                         "broke_cases": exam_mod.broke_cases(row),
                         "fixed": None if eff is None else eff["fixed"], "broke": None if eff is None else eff["broke"]})
         return out
+
+    def _tried(self, les):
+        """The lesson ever had a trial: a trial row that started, or a person's yes that its exam
+        does not still hold (an agent's lesson with a yes; a person's own line with a trial row)."""
+        t = self.lessons.trial(les["id"])
+        if t is not None and t.get("started_at") is not None:
+            return True
+        if les.get("yes_at") is None:
+            return False
+        return les.get("origin") != PERSON or t is not None
 
     def _ideas(self, cases, known, pulled, texts, rep, since, until):
         """The night's ideas, lessons with no past cases behind them, written after the patterns
@@ -296,7 +321,8 @@ class Study:
                 rec["why"] = known[_norm(idea["lesson"])]
                 continue
             try:
-                card = self._write(idea, source, read, None, None, rep, close=_close(idea["lesson"], pulled), kind=IDEA)
+                card = self._write(idea, source, read, None, None, rep,
+                                   close=_close(idea["lesson"], pulled, self._failed_lines), kind=IDEA)
             except ValueError as e:  # refused by the lessons
                 rec["why"] = f"not written: {e}"
                 continue
@@ -547,7 +573,8 @@ class Study:
             return
         try:
             card = self._write(adapted, source(answer), sources, rec, dict(origin, fit=answer), rep,
-                               source_lesson_id=source_lesson_id, close=_close(adapted["lesson"], pulled))
+                               source_lesson_id=source_lesson_id, close=_close(adapted["lesson"], pulled,
+                                                                                    self._failed_lines))
         except ValueError as e:  # refused by the lessons (a kept lesson pulled meanwhile, a bad line)
             into["why"] = f"not written: {e}"
             return
@@ -754,9 +781,13 @@ def _pulled(lessons):
     return [(_norm(les["text"]), les["text"]) for les in lessons if les["state"] == PULLED]
 
 
-def _close(text, pulled):
+def _close(text, pulled, failed=()):
     """The pulled line this line comes close to, or None: the same words in any sequence (each
-    word as many times), or a small rewording (a ratio of CLOSE or more)."""
+    word as many times), or a small rewording (a ratio of CLOSE or more). A line in failed (one
+    that failed the eval gate, see 5) is also close when the two lines' content words (SMALL_WORDS
+    left out) are one inside the other, or share NEAR_FAILED of all their content words: "Water
+    beds early." and "Always water the beds early." come close to "Water the beds early in the
+    morning." (review gatefb round 1, finding 4)."""
     words = _norm(text)
     same = sorted(words.split())
     for p in pulled:
@@ -765,7 +796,20 @@ def _close(text, pulled):
     best = max(pulled, key=lambda p: difflib.SequenceMatcher(None, words, p[0]).ratio(), default=None)
     if best and difflib.SequenceMatcher(None, words, best[0]).ratio() >= CLOSE:
         return best[1]
+    mine = _content(words)
+    for p in pulled:
+        if p[1] not in failed:
+            continue
+        theirs = _content(p[0])
+        if mine and theirs and (mine <= theirs or theirs <= mine
+                                or len(mine & theirs) / len(mine | theirs) >= NEAR_FAILED):
+            return p[1]
     return None
+
+
+def _content(words):
+    """The content words of a line in _norm form: every word not in SMALL_WORDS."""
+    return {w for w in words.split() if w not in SMALL_WORDS and w[0].isalnum()}
 
 
 def _known(lessons, failed=()):

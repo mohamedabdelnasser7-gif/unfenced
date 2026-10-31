@@ -293,6 +293,17 @@ class GateAndTraining(unittest.TestCase):
         self.assertEqual(sorted(c["id"] for c in gate), ["persona-05", "persona-06"])
         self.assertLessEqual(share(gate, self.rx), 0.25)
 
+    def test_printing_stays_at_most_a_quarter_of_the_gate_when_rounding_would_push_it_over(self):
+        # cap_wants rounds each weight to 3 places: on these gate cards alone printing would draw
+        # 0.25025 of the gate; the gate's own hold (grow._hold) brings it back to 0.25 or under
+        weights = (0.919, 0.284, 0.111, 0.806)
+        base = [dict(card(i, "price", w), want=["name printing on boots"] if i == 1 else ["boots"])
+                for i, w in enumerate(weights, 1)]
+        gate = grow.decks(base, grow.Pool(folder(self), "sales"), {c["id"] for c in base})[1]
+        self.assertEqual(len(gate), 4)
+        self.assertLessEqual(share(gate, self.rx), 0.25)
+        self.assertGreater(share(gate, self.rx), 0.2499)
+
     def test_the_split_stays_the_same_when_other_cards_train(self):
         pool = grow.Pool(folder(self), "sales")
         first = sorted(c["id"] for c in arena_with(self, self.base, pool, seed=0).held)

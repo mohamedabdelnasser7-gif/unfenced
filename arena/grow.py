@@ -23,7 +23,9 @@ before the window still counts. Imported history chats (channel history:...) and
 chat (parent_id) are never read. A talk joins the pool once: the item keeps the chat and the
 step it ended on, and the same talk is never added twice. When the progress list passes
 MAX_READ chats the oldest are dropped and the pool keeps the time of the newest one dropped, so a
-chat it no longer lists is read only after that time, never from its first step again.
+chat it no longer lists is read only after that time, never from its first step again. A pool
+written before the progress list (df37745) lists the chats it read as seen; each is read only
+after the time that file was written.
 
 Each kept chat is cleaned (arena/clean.py: names, numbers and places out) before the tagger
 (arena/tag.py) sees it and before anything is written; no second scan (item 40). The cleaner
@@ -190,9 +192,9 @@ class Pool:
         if self.path == self.owner or not paths.within(self.path, self.owner):
             raise Refused("the pool sits outside the owner's state folder; pools never cross owners")
         try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
+            data, written = json.loads(self.path.read_text(encoding="utf-8")), self.path.stat().st_mtime
         except (OSError, ValueError):
-            data = {}
+            data, written = {}, None
         data = data if isinstance(data, dict) else {}
         if data.get("kind", kind) != kind:
             raise Refused("the pool file is for another kind of agent")
@@ -200,6 +202,12 @@ class Pool:
         read = data.get("read") if isinstance(data.get("read"), dict) else {}
         self.read = {k: [v[0], float(v[1])] for k, v in read.items()
                      if isinstance(v, list) and len(v) == 2 and _count(v[0]) and _time(v[1])}
+        # a pool from before the read list (df37745) names the chats it read in seen: each is read
+        # only after the time the file was written (step 0: its step is not known), never again whole
+        seen = data.get("seen") if isinstance(data.get("seen"), list) and _time(written) else []
+        seen = [s for s in dict.fromkeys(s for s in seen if isinstance(s, str)) if s not in self.read]
+        room = max(0, MAX_READ - len(self.read))
+        self.read = {**{s: [0, float(written)] for s in seen[len(seen) - room:]}, **self.read}
         pending = data.get("pending") if isinstance(data.get("pending"), dict) else {}
         self.pending = {k: v for k, v in pending.items() if _count(v)}
         self.floor = float(data["floor"]) if _time(data.get("floor")) else None
@@ -236,7 +244,8 @@ class Pool:
         self.changed = True
 
     def progress(self, chat_id):
-        """(the last step read, its time) for a chat, or None when the pool lists no step of it."""
+        """(the last step read, its time) for a chat, or None when the pool lists no step of it. Step 0:
+        a chat an old pool read (seen), read only after that time."""
         got = self.read.get(str(chat_id))
         return None if got is None else tuple(got)
 
@@ -294,9 +303,11 @@ class Pool:
 
     def save(self):
         """Written under a fresh name (0600, never through a link) and moved onto the pool file, the
-        way the persona build writes (arena/personas.py _write); a new owner folder is made 0700."""
+        way the persona build writes (arena/personas.py _write); the owner folder is made or set 0700."""
         from arena.personas import _write
         os.makedirs(self.path.parent, mode=0o700, exist_ok=True)
+        if not self.path.parent.is_symlink():
+            os.chmod(self.path.parent, 0o700)  # an owner folder made earlier with a wider mode too
         _write(self.path, json.dumps({"kind": self.kind, "items": self.items, "read": self.read,
                                       "pending": self.pending, "floor": self.floor, "played": self.played,
                                       "cards": self.cards, "capped": self.capped, "split": self.split},
@@ -546,6 +557,8 @@ def real_chats(db, since, until, pool=None):
             got = pool.progress(chat_id) if pool is not None else None
             after = got[0] if got is not None else 0
             floor = pool.floor if got is None and pool is not None and pool.floor is not None else float("-inf")
+            if got is not None and got[0] == 0:  # an old pool read it; its step is not known (Pool, seen)
+                floor = got[1]
             rows = c.execute("SELECT n, role, content, tool_calls, name, media, at FROM steps WHERE chat_id = ? "
                              "AND at < ? ORDER BY n", (chat_id, until)).fetchall()
             msgs, signs, last = [], {"person": False, "check_failed": False}, None

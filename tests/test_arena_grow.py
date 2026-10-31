@@ -1092,6 +1092,58 @@ class ValuesInRange(unittest.TestCase):
             self.assertIn("Not run: " + str(err), err_out.getvalue())
 
 
+class OldPoolsAndLimits(unittest.TestCase):
+    """Review round 2 of the feed (2026-10-31), item 3 and the gaps, and red team item 5: an old
+    pool's seen list, the owner folder's mode, MAX_PENDING and read rows out of shape."""
+
+    def setUp(self):
+        self.owner = folder(self)
+        self.path = self.owner / "practice-sales.json"
+
+    def write(self, data, at=None):
+        self.path.write_text(json.dumps({"kind": "sales", **data}), encoding="utf-8")
+        if at is not None:
+            os.utime(self.path, (at, at))
+        return grow.Pool(self.owner, "sales")
+
+    def test_a_chat_an_old_pool_saw_is_read_only_after_the_file_was_written(self):
+        db = Db(":memory:")
+        self.addCleanup(db.close)
+        later = ("c-later", [("user", "بكام الجزمة؟", 50, None), ("assistant", "1450 جنيه", 49.9, None),
+                             ("user", "طيب مقاس 44 متاح؟", 10, None)])
+        write_chats(db, [LOST, later, EASY])
+        pool = self.write({"items": [], "seen": ["c-lost", "c-later", 5, "c-lost"]}, at=NOW - 40 * H)
+        self.assertEqual(pool.read, {"c-lost": [0, NOW - 40 * H], "c-later": [0, NOW - 40 * H]})
+        read = grow.real_chats(db, SINCE - 96 * H, NOW, pool)
+        got = {cid: (len(chat.messages), last) for cid, chat, _, last in read}
+        self.assertEqual(got, {"c-lost": (0, None), "c-later": (1, (3, NOW - 10 * H)), "c-easy": (4, (4, NOW - 69.7 * H))})
+
+    def test_an_old_pool_seen_list_takes_only_the_room_the_read_list_leaves(self):
+        with mock.patch.object(grow, "MAX_READ", 3):
+            pool = self.write({"seen": ["a", "b", "c"], "read": {"x": [1, NOW], "y": [2, NOW]}}, at=NOW)
+        self.assertEqual(pool.read, {"c": [0, NOW], "x": [1, NOW], "y": [2, NOW]})
+
+    def test_an_owner_folder_made_earlier_with_a_wider_mode_is_set_private_on_save(self):
+        os.chmod(self.owner, 0o755)
+        pool = grow.Pool(self.owner, "sales")
+        pool.changed = True
+        pool.save()
+        self.assertEqual(os.stat(self.owner).st_mode & 0o777, 0o700)
+
+    def test_pending_keeps_at_most_max_pending_and_lets_the_oldest_go(self):
+        pool = grow.Pool(self.owner, "sales")
+        with mock.patch.object(grow, "MAX_PENDING", 3):
+            for n in range(1, 6):
+                pool.pend(f"c-{n}")
+        self.assertEqual(list(pool.pending), ["c-3", "c-4", "c-5"])
+
+    def test_read_rows_out_of_shape_are_dropped_on_load(self):
+        bad = {"short": [1], "long": [1, NOW, 3], "negative": [-1, NOW], "bool": [True, NOW], "half": [1.5, NOW],
+               "text time": [1, "x"], "nan": [1, float("nan")], "huge": [1, 10 ** 400], "object": {"a": 1, "b": 2}}
+        pool = self.write({"read": {**bad, "ok": [2, NOW]}})
+        self.assertEqual(pool.read, {"ok": [2, NOW]})
+
+
 class Guards(unittest.TestCase):
     """One test per behaviour the mutant sweep found unpinned (review 9)."""
 

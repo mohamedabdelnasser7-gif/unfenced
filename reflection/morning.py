@@ -14,6 +14,12 @@ For every agent in the database, read from the lessons, trials and trial marks t
    snapshot of its lessons with the command that rolls back to it (reflection/snapshots.py).
    When the Arena got stuck (arena/run.py), the newest stuck item saved next to the database
    (arena-<agent>-<run>.json): its line and the held-out matches it lost, each quoting a turn.
+   For the personal assistant, the open new mode card the night wrote next to the database
+   (assistant/newmode.py, mode-assistant-<run>.json): the mode's name, the user's words behind
+   it and the Arena's counts, with Yes, Rename and Drop. An answer goes through
+   newmode.answer_card to the assistant's folder (--assistant-state, data/assistant unless
+   named); the card is found by its file name among the open cards only, never by a path from
+   the form. A card with no answer changes nothing (DECISIONS item 35).
 2. New in the last day: each lesson added since a day ago, on trial, waiting for a yes or
    waiting its turn, with why.
 3. Live: the kept lessons and the lessons on trial, each with Stop and Edit.
@@ -524,10 +530,13 @@ class Morning:
     whose lessons the page may change. reports: the folder of the saved night reports. Each
     answer is one transaction: an answer that fails part way leaves nothing changed."""
 
-    def __init__(self, db, plugs, *, reports=None, by=BY, judge=risk_mod.no_judge, db_file=None, exams=None):
+    def __init__(self, db, plugs, *, reports=None, by=BY, judge=risk_mod.no_judge, db_file=None, exams=None,
+                 modes_state=None):
         """exams: {agent: examiner(text, stages) -> engine.exam.Result}, the exam a person's idea takes
-        (idea_exam); kept off the page's Lessons, so no exam ever runs inside an answer's transaction."""
+        (idea_exam); kept off the page's Lessons, so no exam ever runs inside an answer's transaction.
+        modes_state: the assistant's folder a mode card's answer goes to (assistant/newmode.py)."""
         self.db = db
+        self.modes_state = None if modes_state is None else Path(modes_state)
         self.exams = dict(exams or {})
         self.page = _OneTx(db)
         self.by = by
@@ -834,6 +843,25 @@ class Morning:
             return f"Kept: {card['fact']} It is saved with your name under Kept facts; no agent acts on it."
         return f"Dismissed: {card['fact']}"
 
+    def answer_mode(self, agent, card, choice, name="", now=None):
+        """The user's Yes, Rename or Drop on a new mode card. card: the card's file name as the page
+        drew it; it must name one of the open cards next to the database (newmode.open_cards), so a
+        path from the form never reaches a file."""
+        from assistant import newmode
+        self._plugged(agent)
+        if agent != newmode.AGENT or self.reports is None or self.modes_state is None:
+            raise Refused("No mode cards for that agent here, so nothing is changed.")
+        path = {p.name: p for p in newmode.open_cards(self.reports)}.get(card)
+        if path is None:
+            raise Refused("That mode card is not there now: it was answered already. Look at the page again.")
+        if choice not in newmode.CHOICES:
+            raise Refused("A mode card's answer is Yes, Rename or Drop.")
+        now_modes = newmode.answer_card(path, self.modes_state, choice, name=name if choice == "rename" else None,
+                                        by=self.by)
+        if choice == "drop":
+            return "Dropped. That mode is not proposed again."
+        return f'Added the mode "{now_modes["added"][-1]["name"]}" to the assistant\'s modes.'
+
     def _plugged(self, agent):
         lessons = self.lessons.get(agent) if isinstance(agent, str) else None
         if lessons is None:
@@ -900,16 +928,18 @@ class Morning:
             working = self._working(c)
         k = _Ctx(now, rows, trials, marks, clashes, self.read_reports(), backs=backs, exams=exams)
         arena, bad = self.read_arena()
-        k.problems = list(k.problems) + bad
+        modes, bad_modes = self.read_mode_cards()
+        k.problems = list(k.problems) + bad + bad_modes
         items = {les["id"]: self._item(les, k) for les in rows}
         for i in items.values():
             i["level"] = self._lesson_level(i, k)
         agents = []
-        for agent in sorted({les["agent"] for les in rows} | {m["agent"] for m in marks} | working | set(arena)):
+        for agent in sorted({les["agent"] for les in rows} | {m["agent"] for m in marks} | working | set(arena)
+                            | set(modes)):
             mine = [items[les["id"]] for les in rows if les["agent"] == agent]
             agents.append({
                 "agent": agent, "buttons": agent in self.lessons, "night": k.newest.get(agent),
-                "arena": arena.get(agent),
+                "arena": arena.get(agent), "mode_card": modes.get(agent),
                 "snapshot": self._snapshot(agent),
                 "new": [i for i in mine if i["added_at"] >= now - DAY],
                 "live": [i for i in mine if i["state"] in (KEPT, TRYING)],
@@ -1032,6 +1062,35 @@ class Morning:
             seen = out.get(item["agent"])
             if seen is None or (item["at"], path.name) > (seen["at"], seen["file"]):
                 out[item["agent"]] = {"file": path.name, "at": float(item["at"]), "line": item["line"], "lost": lost[:3]}
+        return out, problems
+
+    def read_mode_cards(self):
+        """The open new mode card of each agent saved next to the database (assistant/newmode.py
+        open_cards; the night writes at most one): ({agent: {file, name, words, moments, days,
+        fixed, broken, played}}, the names that could not be read)."""
+        out, problems = {}, []
+        if self.reports is None or not self.reports.is_dir():
+            return out, problems
+        from assistant import newmode
+        for path in newmode.open_cards(self.reports):
+            try:
+                if path.stat().st_size > MAX_REPORT:
+                    raise ValueError("too big")
+                card = json.loads(path.read_text(encoding="utf-8"))
+                arena = _dict(card.get("arena"))
+                if card.get("agent") != newmode.AGENT or path.name != f"mode-{card['agent']}-{card.get('run')}.json" or \
+                        not isinstance(card.get("name"), str) or not isinstance(card.get("at"), (int, float)):
+                    raise ValueError("not a mode card")
+            except (OSError, ValueError, UnicodeDecodeError):
+                problems.append(f"A saved mode card could not be read: {path.name}")
+                continue
+            words = [w for w in card.get("words") if isinstance(w, str)] if isinstance(card.get("words"), list) else []
+            seen = out.get(card["agent"])
+            if seen is None or (card["at"], path.name) > (seen["at"], seen["file"]):
+                out[card["agent"]] = {"file": path.name, "at": float(card["at"]), "name": card["name"], "words": words[:6],
+                                      "moments": _num(card.get("moments")), "days": _num(card.get("days")),
+                                      "fixed": _num(arena.get("fixed")), "broken": _num(arena.get("broken")),
+                                      "played": _num(arena.get("days"))}
         return out, problems
 
 
@@ -1776,6 +1835,9 @@ def _agent_html(a, token):
                 f'<li class="meta" dir="auto">Lost {h(x["card"])}: {h(x["why"])}'
                 + (f' (turn {h(x["turn"])}, {h(x["who"])}: "{h(x["text"])}")' if x["turn"] is not None else "")
                 + "</li>" for x in stuck["lost"]) + "</ul>")
+    mode = a.get("mode_card")
+    if mode is not None:
+        out.append(_mode_card_html(a["agent"], mode, token if buttons else None))
     snap = a["snapshot"]
     if snap is not None:
         back = f' To roll back to it: <code>{h(snap["command"])}</code>' if snap["command"] else ""
@@ -1793,6 +1855,27 @@ def _agent_html(a, token):
     title, items, anchor, empty = sections[3]
     out.append(_list_html(title, items, anchor, empty, buttons, token))
     out.append("</section>")
+    return "\n".join(out)
+
+
+def _mode_card_html(agent, mode, token):
+    """The open new mode card: the name, the user's words behind it, the Arena's counts, and Yes,
+    Rename and Drop when the page has buttons. No answer changes nothing."""
+    words = ", ".join(f'"{w}"' for w in mode["words"])
+    seen = (f' on {_n(mode["days"])} days' if mode["days"] is not None else "") + \
+        (f', {_n(mode["moments"])} times' if mode["moments"] is not None else "")
+    out = ["<h3>A new mode?</h3>",
+           f'<p class="meta" dir="auto">"{h(mode["name"])}": you said {h(words)}{h(seen)}, and it fit no mode.</p>']
+    if mode["fixed"] is not None and mode["played"] is not None:
+        out.append(f'<p class="meta">On {h(_n(mode["played"]))} of your past days the Arena played it fixed '
+                   f'{h(_n(mode["fixed"]))} and broke {h(_n(mode["broken"] or 0))}.</p>')
+    if token is not None:
+        card = ("card", mode["file"])
+        out.append(_agent_form(token, "mode", agent, "Yes", hidden=(card, ("choice", "yes")))
+                   + _agent_form(token, "mode", agent, "Rename", hidden=(card, ("choice", "rename")),
+                                 extra='<input type="text" name="name" value="" placeholder="Its name, a word or two" '
+                                       'maxlength="40" dir="auto" aria-label="Its name, a word or two" required>')
+                   + _agent_form(token, "mode", agent, "Drop", hidden=(card, ("choice", "drop")), quiet=True))
     return "\n".join(out)
 
 
@@ -2102,7 +2185,9 @@ ACTIONS = {"/stop": lambda m, f: m.stop(_field(f, "lesson"), _field(f, "why")),
                                                 _field(f, "days")),
            "/lesson_level": lambda m, f: m.lesson_level(_field(f, "lesson"), _field(f, "level")),
            "/keep_fact": lambda m, f: m.keep_fact(_field(f, "agent"), _field(f, "key"), _field(f, "shown")),
-           "/dismiss_fact": lambda m, f: m.dismiss_fact(_field(f, "agent"), _field(f, "key"), _field(f, "shown"))}
+           "/dismiss_fact": lambda m, f: m.dismiss_fact(_field(f, "agent"), _field(f, "key"), _field(f, "shown")),
+           "/mode": lambda m, f: m.answer_mode(_field(f, "agent"), _field(f, "card"), _field(f, "choice"),
+                                               _field(f, "name") if "name" in f else "")}
 
 
 def make_server(morning, *, port=int(PORT_DEFAULT), token=None):
@@ -2207,7 +2292,14 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="The morning page: what the engine learned, for every agent.")
     ap.add_argument("--db", default=str(DEFAULT_PATH), help="the agents' database (default: data/ascent.db)")
     ap.add_argument("--html", metavar="OUT", help="write the page once as a static file with no buttons, and serve nothing")
+    ap.add_argument("--assistant-state", default=None,
+                    help="the personal assistant's folder a mode card's answer goes to (default: data/assistant)")
     args = ap.parse_args(argv)
+    try:
+        modes_state = night_mod.assistant_state(args.assistant_state)
+    except night_mod.Refused as e:
+        print(f"Not run: {e}.", file=sys.stderr)
+        return 2
     if not Path(args.db).is_file():
         print(f"Not run: no database at {args.db}. The Sales agent makes it when it first runs.", file=sys.stderr)
         return 2
@@ -2218,7 +2310,8 @@ def main(argv=None):
             from reflection.lessons import Lessons as SalesLessons
             SalesLessons(db)
         other = Path(args.db).resolve() != DEFAULT_PATH.resolve()
-        morning = Morning(db, plugs, reports=Path(args.db).resolve().parent, db_file=args.db if other else None)
+        morning = Morning(db, plugs, reports=Path(args.db).resolve().parent, db_file=args.db if other else None,
+                          modes_state=modes_state)
         if args.html:
             print(f"written: {write_html(morning, args.html)}")
             return 0

@@ -36,6 +36,15 @@ rollback) with the pulled lesson it was brought back from. The report lists fast
 notes on the night's cases (engine/fast.py, fast_notes), each by the case id the night read it
 under; a note is never a lesson, so a lesson from that case still goes the night's way.
 
+For the personal assistant, the night then takes the new mode step (assistant/newmode.py,
+DECISIONS item 36): the day's moments that fit no mode, kept in the assistant's folder
+(--assistant-state, data/assistant unless named, the Arena's folder), may become one mode card
+after the Arena plays the user's past days (the real days in that folder's pool) without and with
+it. The card is a data file next to the database, mode-assistant-<time>.json; the report names it
+as mode_card (None when the night wrote none), and the Morning page shows it for the user's yes,
+rename or drop. The Arena's calls count against its daily cap; a model that does not answer, or
+the cap, stops the step with no card and the report names why (mode_card_stopped).
+
 It refuses to start without the keys its parts need and names the missing variable. It
 never prints a key: a part that fails is named in the notes by its plain reason only.
 """
@@ -251,6 +260,41 @@ def _judge_label(judge):
         return type(judge).__name__
 
 
+ASSISTANT = "assistant"  # the agent whose night takes the new mode step (assistant/newmode.py AGENT)
+
+
+def assistant_state(value=None):
+    """The assistant's folder, resolved: data/assistant unless named; refused inside the repo
+    outside data/, as the assistant's Arena refuses it (its moments are the user's own words)."""
+    from arena import paths
+    state = Path(value or paths.DATA / ASSISTANT).expanduser().resolve()
+    if paths.inside_repo(state) and not paths.within(state, paths.DATA):
+        raise Refused("the assistant's folder sits inside the repo outside data/")
+    return state
+
+
+def new_mode(db_path, state):
+    """The assistant's new mode step: at most one mode card next to the database, from the kept
+    moments, tested in the Arena on the real days in the folder's pool. Returns (the card's path
+    or None, why the step stopped or None)."""
+    from arena import run as arena_run
+    from assistant import arena as assistant_arena
+    from assistant import newmode
+    calls = arena_run.Calls(Path(state) / arena_run.CALLS_FILE, arena_run.DEFAULT_CAP)
+    made = []
+
+    def play(day, added):
+        if not made:  # the model only when a day is played
+            made.append(calls.model(model_mod.Model()))
+        return assistant_arena.play_day(day, model=made[0], added=added)[2]["won"]
+
+    try:
+        card = newmode.night(state, assistant_arena.Pool(state).real, play, reports=Path(db_path).resolve().parent)
+    except (model_mod.ModelError, arena_run.CapReached) as e:
+        return None, type(e).__name__
+    return card, None
+
+
 def save(rep, db_path):
     """The report as JSON next to the database. Returns the file's path."""
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(rep["window"]["until"]))
@@ -428,6 +472,8 @@ def main(argv=None, *, until=None):
     ap.add_argument("--days", type=float, default=None, help="the window in days (default: from the plug)")
     ap.add_argument("--db", default=str(DEFAULT_PATH), help="the agent's database (default: data/ascent.db)")
     ap.add_argument("--json", action="store_true", help="print the report as JSON")
+    ap.add_argument("--assistant-state", default=None,
+                    help="the personal assistant's folder: moments, modes and past days (default: data/assistant)")
     args = ap.parse_args(argv)
     env.load()
     try:
@@ -442,6 +488,11 @@ def main(argv=None, *, until=None):
         print(f"Not run: no database at {args.db}. The Sales agent makes it when it first runs.", file=sys.stderr)
         return 2
     plug = plug_mod.load(args.plug)
+    try:
+        state = assistant_state(args.assistant_state) if plug.agent == ASSISTANT else None
+    except Refused as e:
+        print(f"Not run: {e}.", file=sys.stderr)
+        return 2
     db = Db(args.db)
     try:
         rep = night(db, plug, days=args.days, until=until, ideas=parts.Ideas(), exam=sales_exam(plug, args.db))
@@ -453,11 +504,18 @@ def main(argv=None, *, until=None):
     rep["snapshot"]["plug"] = args.plug  # the rollback command names what this run was given
     if Path(args.db).resolve() != DEFAULT_PATH.resolve():
         rep["snapshot"]["db"] = args.db
+    if state is not None:
+        card, stopped = new_mode(args.db, state)
+        rep["mode_card"] = None if card is None else str(card)
+        if stopped:
+            rep["mode_card_stopped"] = stopped
     path = save(rep, args.db)
     if args.json:
         print(json.dumps(rep, ensure_ascii=False, indent=1))
     else:
         print(text(rep, plug))
+        if rep.get("mode_card"):
+            print(f"  a new mode card waits on the Morning page: {rep['mode_card']}")
         print(f"  saved: {path}")
     return 0
 

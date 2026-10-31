@@ -15,7 +15,10 @@ label.QUIET_HOURS more, so a chat that went quiet just before the window still c
 the pool has read is never read twice.
 
 Each kept chat is cleaned (arena/clean.py: names, numbers and places out) before the tagger
-(arena/tag.py) sees it and before anything is written; no second scan (item 40). Its tags and
+(arena/tag.py) sees it and before anything is written; no second scan (item 40). The cleaner
+knows what the customers gave for their orders: every name and name to print in the night's
+draft_order calls is masked in any chat of the night, and in its own chat each word of it, the
+address and the chat's number too, so a name typed bare with no cue word still goes. Its tags and
 cleaned turns join the pool, and the pool's cards are rebuilt through the card code
 (arena/cards.py build), so the unwinnable share and the capped wants (item 33: name printing at
 most 25%) hold for the grown cards as for the first ones. A grown card's id names its group
@@ -40,6 +43,7 @@ The tagger's calls count against the Arena's daily cap in the agent's own folder
 Calls), at most MAX_NEW chats a night. The step needs the persona recipe (arena/recipe.py,
 private): with none it reads no chat and says so.
 """
+import dataclasses
 import json
 import os
 import re
@@ -273,29 +277,91 @@ def deck(base, pool):
 def real_chats(db, since, until):
     """[(chat id, reflection/history.py Chat, hard signs)] for the agent's chats with a message in
     [since, until): customer steps as the customer's, the agent's and a person's replies as the
-    store's; tool calls and events left out, a failed send check and a person's reply counted."""
+    store's; tool calls and events left out, a failed send check and a person's reply counted.
+    What the customer gave for an order (the name, the name to print, the address and the phone in
+    each draft_order call) and the chat's own number go on the Chat (names, address, phone,
+    typed_phones), so the cleaner masks them wherever they are typed, with or without a cue."""
     with db.tx() as c:
         tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         if not {"chats", "steps"} <= tables:
             return []
-        ids = [r[0] for r in c.execute(
-            "SELECT id FROM chats WHERE parent_id IS NULL AND updated_at >= ? AND updated_at < ? ORDER BY created_at",
-            (since, until))]
+        ids = [(r[0], r[1]) for r in c.execute(
+            "SELECT id, customer_id FROM chats WHERE parent_id IS NULL AND updated_at >= ? AND updated_at < ? "
+            "ORDER BY created_at", (since, until))]
         out = []
-        for chat_id in ids:
+        for chat_id, customer in ids:
             rows = c.execute("SELECT role, content, tool_calls, name, media, at FROM steps WHERE chat_id = ? "
                              "AND at < ? ORDER BY n", (chat_id, until)).fetchall()
             msgs, signs = [], {"person": False, "check_failed": False}
+            typed = {"names": set(), "phones": set(), "addresses": set()}
             for role, content, tool_calls, name, media, at in rows:
                 if role == "event":
                     signs["check_failed"] |= '"check_failed"' in (content or "")
                 elif role == "user":
                     msgs.append(hist.Message(at=float(at), team=False, text=content or "", media=_media(media)))
-                elif role == "assistant" and (content or "").strip():
-                    signs["person"] |= name == PERSON
-                    msgs.append(hist.Message(at=float(at), team=True, text=content))
-            out.append((chat_id, hist.Chat(source=hist.WHATSAPP, key=chat_id, place=0, messages=msgs), signs))
+                elif role == "assistant":
+                    _typed(tool_calls, typed)
+                    if (content or "").strip():
+                        signs["person"] |= name == PERSON
+                        msgs.append(hist.Message(at=float(at), team=True, text=content))
+            phone = hist.phone_key(customer or "")
+            chat = hist.Chat(source=hist.WHATSAPP, key=chat_id, place=0, messages=msgs, phone=phone,
+                             names=typed["names"], typed_phones=(typed["phones"] | {phone}) - {""})
+            chat.addresses = typed["addresses"]
+            out.append((chat_id, chat, signs))
     return out
+
+
+TYPED_NAMES = ("name",)          # draft_order arguments that hold a person's name
+TYPED_PRINT = "print_name"       # on an item: the name to print, often the customer's or a friend's
+MAX_TYPED = 300                  # draft_order's longest text field (the address)
+
+
+def _typed(raw, typed):
+    """Adds what the customer gave in each draft_order call of one step (kit/tools/draft_order.py)
+    to typed: names (name, print_name), phones (phone) and addresses (address)."""
+    try:
+        calls = json.loads(raw) if raw else []
+    except ValueError:
+        return
+    for call in calls if isinstance(calls, list) else []:
+        fn = call.get("function") if isinstance(call, dict) else None
+        if not isinstance(fn, dict) or fn.get("name") != "draft_order":
+            continue
+        args = fn.get("arguments")
+        try:
+            args = json.loads(args) if isinstance(args, str) else args
+        except ValueError:
+            continue
+        if not isinstance(args, dict):
+            continue
+        names = [args.get(k) for k in TYPED_NAMES]
+        names += [i.get(TYPED_PRINT) for i in args.get("items") or [] if isinstance(i, dict)]
+        typed["names"] |= {n.strip() for n in names if isinstance(n, str) and 2 <= len(n.strip()) <= MAX_TYPED}
+        if isinstance(args.get("phone"), str):
+            typed["phones"] |= {hist.phone_key(args["phone"])} - {""}
+        if isinstance(args.get("address"), str) and 5 <= len(args["address"].strip()) <= MAX_TYPED:
+            typed["addresses"].add(args["address"].strip())
+
+
+class _Typed:
+    """One chat's cleaner (arena/clean.py ChatCleaner) with the addresses the customer gave for an
+    order taken out first, wherever they are typed, as [address]."""
+
+    def __init__(self, inner, addresses):
+        self.inner = inner
+        words = [a.split() for a in sorted(addresses, key=len, reverse=True)]
+        self.rx = re.compile("|".join(r"\s+".join(map(re.escape, w)) for w in words if w),
+                             re.IGNORECASE) if any(words) else None
+
+    def _out(self, text):
+        return self.rx.sub("[address]", text) if self.rx is not None and isinstance(text, str) else text
+
+    def __call__(self, text):
+        return self.inner(self._out(text))
+
+    def texts(self, messages):
+        return self.inner.texts([dataclasses.replace(m, text=self._out(m.text)) for m in messages])
 
 
 def _media(raw):
@@ -318,8 +384,9 @@ def grow(db, pool, *, since, until, tagger, calls=None, most=MAX_NEW, quiet_hour
     """The night's new practice items from the real chats into the pool. Returns counts only."""
     from arena.personas import turns_of  # the persona build's own turns, cleaned the same way
     n = Counter()
-    cleaner = Cleaner()
-    for chat_id, chat, signs in real_chats(db, since - quiet_hours * 3600, until):
+    chats = real_chats(db, since - quiet_hours * 3600, until)
+    cleaner = Cleaner({name for _, chat, _ in chats for name in chat.names})  # every name of the night
+    for chat_id, chat, signs in chats:
         if pool.has(chat_id):
             n["already read"] += 1
             continue
@@ -337,7 +404,7 @@ def grow(db, pool, *, since, until, tagger, calls=None, most=MAX_NEW, quiet_hour
         if n["added"] >= most or not tagger.can_ask() or (calls is not None and calls.reached):
             n["left for a later night"] += 1
             continue
-        chat_cleaner = cleaner.chat(chat.names)
+        chat_cleaner = _Typed(cleaner.chat(chat.names), getattr(chat, "addresses", ()))
         turns = turns_of(chat, chat_cleaner)
         tags = tagger(turns, lab, cleaner=chat_cleaner)
         if tags is None:

@@ -58,16 +58,24 @@ def folder(test):
     return Path(d.name).resolve()
 
 
-def write_chats(db, chats):
+def write_chats(db, chats, channel="whatsapp", customer="made-up", parent=None):
+    """Steps: (role, text, hours before NOW, step name) or with a fifth part, the step's tool calls."""
     Chats(db)
     with db.tx() as c:
         for cid, steps in chats:
-            times = [NOW - h * H for _, _, h, _ in steps]
-            c.execute("INSERT INTO chats (id, channel, customer_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-                      (cid, "whatsapp", "made-up", min(times), max(times)))
-            for n, (role, text, h, name) in enumerate(steps, 1):
-                c.execute("INSERT INTO steps (chat_id, n, role, content, name, at) VALUES (?, ?, ?, ?, ?, ?)",
-                          (cid, n, role, text, name, NOW - h * H))
+            times = [NOW - s[2] * H for s in steps]
+            c.execute("INSERT INTO chats (id, channel, customer_id, parent_id, created_at, updated_at) "
+                      "VALUES (?, ?, ?, ?, ?, ?)", (cid, channel, customer, parent, min(times), max(times)))
+            for n, (role, text, h, name, *calls) in enumerate(steps, 1):
+                c.execute("INSERT INTO steps (chat_id, n, role, content, name, tool_calls, at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                          (cid, n, role, text, name, json.dumps(calls[0], ensure_ascii=False) if calls else None,
+                           NOW - h * H))
+
+
+def order_call(**args):
+    """A made-up draft_order tool call, as kit/chats.py saves it on the agent's step."""
+    return [{"id": "call-1", "type": "function",
+             "function": {"name": "draft_order", "arguments": json.dumps(args, ensure_ascii=False)}}]
 
 
 def recipe():
@@ -220,6 +228,79 @@ class CleaningApplied(unittest.TestCase):
             self.assertNotIn(NAME, text)
         self.assertIn("[phone]", saved)
         self.assertIn("1450 جنيه", saved)  # prices stay: they are what the customers are about
+
+
+class NamesFromOrders(unittest.TestCase):
+    """What the customer gave for an order (draft_order's name, print name, address and phone) is
+    masked wherever it is typed: bare, with no cue word, in any case, in a later message too."""
+
+    def grow_one(self, steps, other=()):
+        owner = folder(self)
+        pool, counts, model = grown_pool(self, owner, chats=(("c-order", steps), *other))
+        self.assertGreaterEqual(counts.get("added", 0), 1, counts)
+        saved = (owner / "practice-sales.json").read_text(encoding="utf-8")
+        return saved, json.dumps(model.calls, ensure_ascii=False)
+
+    def steps(self, typed, later, args):
+        return [("user", "بكام الجزمة السودا مقاس 38؟", 70, None), ("assistant", "ب 1450 جنيه", 69.9, None),
+                ("user", typed, 69.8, None),
+                ("assistant", "", 69.7, None, order_call(items=[{"product": "boots", "size": "38"}], **args)),
+                ("assistant", "تمام، الطلب جاهز. اكدلي؟", 69.6, None),
+                ("user", "غالية شوية بصراحة", 69.5, None), ("assistant", "دي جودة عالية", 69.4, None),
+                ("user", "طب هفكر", 69.3, None), ("assistant", "براحتك", 69.2, None),
+                ("user", later, 69.1, None), ("assistant", "تحت امرك", 69.0, None),
+                ("user", "تمام اكدلي", 68.9, None), ("assistant", "تم تسجيل الطلب", 68.8, None)]
+
+    def test_a_full_name_typed_bare_with_no_cue(self):
+        saved, sent = self.grow_one(self.steps("تمام هاخدها، نورهان الشربيني", "اوك",
+                                               {"name": "نورهان الشربيني", "governorate": "Cairo", "address": "x x x x x"}))
+        for text in (saved, sent):
+            self.assertNotIn("نورهان", text)
+            self.assertNotIn("الشربيني", text)
+
+    def test_an_arabic_surname_alone_in_a_later_message(self):
+        saved, sent = self.grow_one(self.steps("تمام هاخدها", "الشربيني معاك تاني، الاوردر اتأخر",
+                                               {"name": "نورهان الشربيني", "governorate": "Cairo", "address": "x x x x x"}))
+        for text in (saved, sent):
+            self.assertNotIn("الشربيني", text)
+        self.assertIn("الاوردر اتأخر", saved)  # the rest of the line stays
+
+    def test_a_latin_lowercase_name(self):
+        saved, sent = self.grow_one(self.steps("ok take it, karim tawfik mansour", "mansour here again, any news?",
+                                               {"name": "Karim Tawfik Mansour", "governorate": "Cairo", "address": "x x x x x"}))
+        for text in (saved, sent):
+            for word in ("karim", "tawfik", "mansour"):
+                self.assertNotIn(word, text.casefold())
+
+    def test_a_name_from_one_chat_is_masked_in_another_chat_of_the_night(self):
+        other = ("c-other", [("user", "سلام، انا سلمى الشربيني اختها", 60, None), ("assistant", "ب 1450 جنيه", 59.9, None)])
+        saved, sent = self.grow_one(self.steps("تمام هاخدها", "اوك",
+                                               {"name": "سلمى الشربيني", "governorate": "Cairo", "address": "x x x x x"}),
+                                    other=(other,))
+        for text in (saved, sent):
+            self.assertNotIn("الشربيني", text)
+
+    def test_the_address_and_the_print_name_given_for_the_order(self):
+        args = {"items": [{"product": "printing", "print_name": "Zorvanello"}], "name": "x y",
+                "governorate": "Cairo", "address": "الياسمين الكوثر"}
+        steps = self.steps("واكتب عليها Zorvanello", "نفس المكان اللي فات: الياسمين الكوثر", {})
+        steps[3] = ("assistant", "", 69.7, None, order_call(**args))
+        saved, sent = self.grow_one(steps)
+        for text in (saved, sent):
+            self.assertNotIn("الياسمين", text)
+            self.assertNotIn("Zorvanello", text)
+
+    def test_the_chat_carries_the_number_and_what_was_typed(self):
+        db = Db(":memory:")
+        self.addCleanup(db.close)
+        write_chats(db, [("c-order", self.steps("تمام", "اوك", {"name": "نورهان الشربيني", "phone": "0100 111 2233",
+                                                                "governorate": "Cairo", "address": "شارع واحد اتنين"}))],
+                    customer="201009998877")
+        (_, chat, _), = grow.real_chats(db, SINCE - 96 * H, NOW)
+        self.assertEqual(chat.phone, "201009998877")
+        self.assertEqual(chat.names, {"نورهان الشربيني"})
+        self.assertEqual(chat.typed_phones, {"201009998877", "201001112233"})
+        self.assertEqual(chat.addresses, {"شارع واحد اتنين"})
 
 
 class Siblings(unittest.TestCase):

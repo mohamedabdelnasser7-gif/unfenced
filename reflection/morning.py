@@ -20,6 +20,8 @@ For every agent in the database, read from the lessons, trials and trial marks t
    newmode.answer_card to the assistant's folder (--assistant-state, data/assistant unless
    named); the card is found by its file name among the open cards only, never by a path from
    the form. A card with no answer changes nothing (DECISIONS item 35).
+   A run with Reflection between its rounds (arena/rounds.py) writes such an item too, stuck or
+   not: each round's gate wins and the lessons proposed, passed, refused and handed on after it.
 2. New in the last day: each lesson added since a day ago, on trial, waiting for a yes or
    waiting its turn, with why.
 3. Live: the kept lessons and the lessons on trial, each with Stop and Edit.
@@ -1036,8 +1038,8 @@ class Morning:
         return out, problems
 
     def read_arena(self):
-        """The newest Arena stuck item of each agent saved next to the database (arena/run.py
-        stuck_item): ({agent: {file, at, line, lost}}, the names that could not be read)."""
+        """The newest Arena item of each agent saved next to the database (arena/run.py stuck_item
+        or rounds_item): ({agent: {file, at, line, lost, rounds}}, the names that could not be read)."""
         out, problems = {}, []
         if self.reports is None or not self.reports.is_dir():
             return out, problems
@@ -1046,7 +1048,7 @@ class Morning:
                 if path.stat().st_size > MAX_REPORT:
                     raise ValueError("too big")
                 item = json.loads(path.read_text(encoding="utf-8"))
-                if not isinstance(item, dict) or item.get("kind") != "arena_stuck" or \
+                if not isinstance(item, dict) or item.get("kind") not in ("arena_stuck", "arena_rounds") or \
                         not isinstance(item.get("agent"), str) or not isinstance(item.get("line"), str) or \
                         not isinstance(item.get("at"), (int, float)) or path.name != f"arena-{item['agent']}-{item.get('run')}.json":
                     raise ValueError("not an Arena stuck item")
@@ -1061,7 +1063,8 @@ class Morning:
                              "who": str(q.get("who") or ""), "text": str(q.get("text") or "")})
             seen = out.get(item["agent"])
             if seen is None or (item["at"], path.name) > (seen["at"], seen["file"]):
-                out[item["agent"]] = {"file": path.name, "at": float(item["at"]), "line": item["line"], "lost": lost[:3]}
+                out[item["agent"]] = {"file": path.name, "at": float(item["at"]), "line": item["line"], "lost": lost[:3],
+                                      "rounds": _arena_rounds(item.get("reflection"))}
         return out, problems
 
     def read_mode_cards(self):
@@ -1835,6 +1838,8 @@ def _agent_html(a, token):
                 f'<li class="meta" dir="auto">Lost {h(x["card"])}: {h(x["why"])}'
                 + (f' (turn {h(x["turn"])}, {h(x["who"])}: "{h(x["text"])}")' if x["turn"] is not None else "")
                 + "</li>" for x in stuck["lost"]) + "</ul>")
+        if stuck.get("rounds"):
+            out.append("<ul>" + "".join(f'<li class="meta">{h(x)}</li>' for x in stuck["rounds"]) + "</ul>")
     mode = a.get("mode_card")
     if mode is not None:
         out.append(_mode_card_html(a["agent"], mode, token if buttons else None))
@@ -2415,6 +2420,31 @@ def _dicts(v):
 
 def _dict(v):
     return v if isinstance(v, dict) else {}
+
+
+def _arena_rounds(rows):
+    """An Arena item's rounds (arena/run.py reflection_rows), each as one plain line: its gate wins,
+    then the Reflection after it (lessons proposed, passed, refused, handed on), whole counts only."""
+    def n(v):
+        return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else 0
+    out = []
+    for r in _dicts(rows)[:20]:
+        text = f"Round {n(r.get('round'))}: gate {n(r.get('gate_won'))} of {n(r.get('gate_played'))} won"
+        got = r.get("reflection")
+        if isinstance(got, dict):
+            if n(got.get("cases")):
+                text += (f"; then Reflection on {n(got.get('cases'))} lost matches: lessons proposed "
+                         f"{n(got.get('proposed'))}, passed {n(got.get('passed'))}, refused {n(got.get('refused'))}, "
+                         f"handed to the next round {n(got.get('handed'))}")
+                if n(got.get("waits_for_yes")):
+                    text += f", waiting for a yes {n(got.get('waits_for_yes'))}"
+                text += f"; eval gate fixed {n(got.get('fixed'))}, broke {n(got.get('broke'))}"
+                if got.get("stopped") == "cap":
+                    text += "; stopped at the model call cap"
+            else:
+                text += "; no lost match to study"
+        out.append(text + ".")
+    return out
 
 
 def _until(rep):

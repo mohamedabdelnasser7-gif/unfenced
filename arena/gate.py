@@ -149,11 +149,15 @@ class Fresh:
     """The examiner with the Arena rerun after it, built fresh for each exam: every call reads the
     past wins and the call count again (gate()), so a page or a night that stays open reruns the
     wins saved after it opened and counts against the cap as it stands. With no past win yet the
-    examiner runs alone (nothing to rerun)."""
+    examiner runs alone (nothing to rerun). calls: a call count already open (the Arena's own,
+    between rounds, arena/rounds.py), so the rerun takes from the run's count; else a new count on
+    the file next to the database, read as it is at each exam."""
 
-    def __init__(self, examiner, kept, *, state, agent_model=None, customer_model=None, cap=run_mod.DEFAULT_CAP):
+    def __init__(self, examiner, kept, *, state, agent_model=None, customer_model=None, cap=run_mod.DEFAULT_CAP,
+                 calls=None):
         self.examiner, self.kept, self.state, self.cap = examiner, kept, state, cap
         self.agent_model, self.customer_model = agent_model, customer_model
+        self.calls = calls
 
     def gate(self):
         """A Gate on the past wins as they are now, or None when there is none."""
@@ -164,8 +168,9 @@ class Fresh:
             from kit import model as model_mod
             self.agent_model = self.agent_model or model_mod.Model()
             self.customer_model = self.customer_model or model_mod.Model()
+        calls = self.calls if self.calls is not None else run_mod.Calls(self.state / run_mod.CALLS_FILE, self.cap)
         return Gate(self.examiner, wins=wins, agent_model=self.agent_model, customer_model=self.customer_model,
-                    calls=run_mod.Calls(self.state / run_mod.CALLS_FILE, self.cap), kept=self.kept)
+                    calls=calls, kept=self.kept)
 
     def __call__(self, text, tags):
         g = self.gate()

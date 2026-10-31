@@ -24,7 +24,13 @@ The loop stops on a pass, at the model call cap, at a model that does not answer
 dropped as a capped one is, never counted as lost; the report names the error), or after
 NO_GAIN_ROUNDS rounds in a row with no more gate wins than the best round before; then the stuck point is written next to the database
 (or in --state) as arena-<agent>-<time>.json, an item for the Morning page. between(round), when
-given (a library hook, for the night study between rounds), runs before each round after the first.
+given, runs before each round after the first. With --db and more than one round the CLI fills it
+(arena/rounds.py, DECISIONS item 9a): the night study on the round's lost training matches, every
+new lesson through the eval gate, and only the lessons that pass and may go ahead with no further
+yes handed to the next round; its model calls take from the same cap, and a cap reached there stops
+the run. The report gives each round's lessons proposed, passed, refused and handed on beside its
+gate wins, and the same rows go to the Morning page in the run's item (arena_rounds, or the stuck
+item when it got stuck). With no --db there is no step between rounds.
 
 --replay names the persona build's replay.jsonl (outside the repo): once the gate passes, the
 Sales agent replays up to --replay-max real lost chats, each from the customer's real opening
@@ -170,6 +176,9 @@ the count file could not be read, when it could not; then every take() is refuse
             def chat(self, messages, tools=None, effort="medium", max_tokens=1500, whole=False):
                 calls.take()
                 return inner.chat(messages, tools=tools, effort=effort, max_tokens=max_tokens, whole=whole)
+
+            def __getattr__(self, name):  # the route and model id a part names in its label
+                return getattr(inner, name)
         return Counted()
 
 
@@ -313,8 +322,13 @@ class Arena:
         rounds, best, flat, stopped = [], None, 0, ROUNDS
         for r in range(1, self.rounds + 1):
             if r > 1 and self.between is not None:
-                self.between(r - 1)
-            one = {"round": r, "training": {"played": 0, "won": 0, "cases": []},
+                got = self.between(r - 1)
+                if isinstance(got, dict):  # arena/rounds.py: the night study and the gate on the round before
+                    rounds[-1]["reflection"] = got
+                if self.calls.reached:  # the cap came during the night study: stop here, nothing unchecked goes on
+                    self.halt = CAP
+                    return self._report(rounds, CAP)
+            one ={"round": r, "training": {"played": 0, "won": 0, "cases": []},
                    "gate": {"played": 0, "won": 0, "lost": []}}
             rounds.append(one)
             for k in range(1, self.matches + 1):
@@ -381,7 +395,34 @@ class Arena:
             rep["error"] = self.error
         if stopped == STUCK:
             rep["stuck"] = self.stuck_item(rounds)
+        elif any("reflection" in r for r in rounds):
+            rep["item"] = self.rounds_item(rounds, stopped)
         return rep
+
+    @staticmethod
+    def reflection_rows(rounds):
+        """Each round's gate wins and, after it, its Reflection counts (arena/rounds.py), for the
+        Morning page: [{round, gate_won, gate_played, reflection or None}]."""
+        out = []
+        for r in rounds:
+            got = r.get("reflection")
+            keep = None if got is None else {k: got.get(k) for k in (
+                "after_round", "cases", "proposed", "passed", "refused", "waits_for_yes", "handed", "fixed", "broke",
+                "calls", "stopped")}
+            out.append({"round": r["round"], "gate_won": r["gate"]["won"], "gate_played": r["gate"]["played"],
+                        "reflection": keep})
+        return out
+
+    def rounds_item(self, rounds, stopped):
+        """The run's rounds with their Reflection counts as a Morning page item, written next to
+        the database as the stuck item is (a run that got stuck writes that one, with the same rows)."""
+        last = rounds[-1]["gate"]
+        item = {"agent": AGENT, "kind": "arena_rounds", "at": self.now(), "run": self.run_id, "stopped": stopped,
+                "rounds": len(rounds), "gate_won": last["won"], "gate_played": last["played"],
+                "needs": self.trust["wins"], "lost": [], "reflection": self.reflection_rows(rounds),
+                "line": f"The Arena ran {len(rounds)} round{'' if len(rounds) == 1 else 's'} and stopped, {stopped}: "
+                        f"{last['won']} of {last['played']} held-out matches won in the last, {self.trust['wins']} needed."}
+        return self._write_item(item)
 
     def stuck_item(self, rounds):
         """The stuck point as a Morning page item, written next to the database."""
@@ -391,6 +432,11 @@ class Arena:
                 "needs": self.trust["wins"], "lost": last["lost"][:3],
                 "line": f"The Arena is stuck: {last['won']} of {last['played']} held-out matches won after "
                         f"{len(rounds)} rounds, {self.trust['wins']} needed, no gain in the last {NO_GAIN_ROUNDS}."}
+        if any("reflection" in r for r in rounds):
+            item["reflection"] = self.reflection_rows(rounds)
+        return self._write_item(item)
+
+    def _write_item(self, item):
         self.reports.mkdir(parents=True, exist_ok=True)
         path = self.reports / f"arena-{AGENT}-{self.run_id}.json"
         path.write_text(json.dumps(item, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -493,6 +539,17 @@ def text(rep):
         for lost in g["lost"][:3]:
             lines.append(f"    lost {lost['card']}: {lost['why']} (turn {lost['quote']['turn']}, "
                          f"{lost['quote']['who']}: \"{lost['quote']['text']}\")")
+        if r.get("reflection") is not None:
+            from arena import rounds as rounds_mod
+            got = r["reflection"]
+            lines.append("    Reflection " + rounds_mod.line(got))
+            for one in got.get("lessons") or []:
+                state = ("handed on" if one["handed"] else "passed, waits for a yes" if one["waits_for_yes"]
+                         else "passed, not handed" if one["passed"] else f"refused: {one['why'] or 'failed the gate'}")
+                counts = "" if not one.get("gate") else f" ({one['gate']['fixed']} fixed, {one['gate']['broke']} broke)"
+                lines.append(f"      lesson {one['lesson_id']} ({one['risk']} risk): {state}{counts}")
+            for note in (got.get("notes") or [])[:3]:
+                lines.append(f"      note: {note}")
     if rep.get("error"):
         lines.append(f"  stopped by a model error: {rep['error']}; that match was dropped, not counted as lost")
     c = rep["calls"]
@@ -515,10 +572,30 @@ def text(rep):
                          f"{lost['quote']['who']}: \"{lost['quote']['text']}\")")
     if rep.get("stuck"):
         lines.append(f"  stuck point for the Morning page: {rep['stuck']['file']}")
+    if rep.get("item"):
+        lines.append(f"  rounds for the Morning page: {rep['item']['file']}")
     return "\n".join(lines)
 
 
-def main(argv=None, *, agent_model=None, customer_model=None):
+def reflection_models():
+    """The night study's Meta models between rounds, as reflection/night.py has them: the proposer,
+    the tagger and the idea part on the study route, the fit check, the adapter and the risk judge on
+    Muse Spark Open, the exam on Muse Spark Open. Refused, naming the variable, when a key is missing."""
+    from kit import model as model_mod
+    from reflection import judge as judge_mod, night, study as parts
+    try:
+        missing = night.missing_keys()
+    except night.Refused as e:
+        raise Refused(f"the night study between rounds cannot run: {e}") from None
+    if missing:
+        raise Refused("the night study between rounds needs " + ", ".join(missing) + " in env or .env")
+    return {"study": model_mod.Model(timeout=parts.TIMEOUT, route=parts.study_route()),
+            "open": model_mod.Model(timeout=judge_mod.TIMEOUT), "exam": model_mod.Model()}
+
+
+def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
+    """reflection: for tests, the models of the step between rounds ({"study", "open", "exam"}) and
+    optionally "examiner" (arena/rounds.py Between); a real run makes them (reflection_models)."""
     ap = argparse.ArgumentParser(prog="arena/run.py", description="The Arena: persona matches and the gate.")
     ap.add_argument("--cards", default=str(DEFAULT_CARDS))
     ap.add_argument("--matches", type=int, default=10, help="training matches a round")
@@ -564,17 +641,27 @@ def main(argv=None, *, agent_model=None, customer_model=None):
             raise Refused("the Arena's files would sit inside the repo, where real chat lines and the trust level"
                           " could be committed; keep --db or --state outside it or under data/ (DECISIONS item 17)")
         calls = Calls(state / CALLS_FILE, args.cap, limit=QUICK_CALLS if args.quick else None)
-        if agent_model is None or customer_model is None:
+        if args.db and not Path(args.db).is_file():
+            raise Refused(f"no database at {args.db}")
+        made = agent_model is None or customer_model is None  # a real run: the models are made here
+        between_models = None
+        if args.db and args.rounds > 1:  # the night study and the gate between rounds (arena/rounds.py)
+            if reflection is not None:
+                between_models = dict(reflection)
+            elif made:
+                between_models = reflection_models()
+            else:
+                raise Refused("the step between rounds needs its models: give reflection with the agent's models")
+        if made:
             agent_model = agent_model or model_mod.Model()
             customer_model = customer_model or model_mod.Model()
-        learn, lessons = None, None
+        learn, lessons, between = None, None, None
         if args.db:
             from kit.db import Db
-            from arena import learn as learn_mod
+            from arena import learn as learn_mod, rounds as rounds_mod
+            from reflection import PLUG as SALES_PLUG
             from reflection.exam import _Lessons
             from reflection.lessons import Lessons as SalesLessons
-            if not Path(args.db).is_file():
-                raise Refused(f"no database at {args.db}")
             db = Db(args.db)
             mined = history_lessons(db)
             if mined:
@@ -584,13 +671,21 @@ def main(argv=None, *, agent_model=None, customer_model=None):
                               "its lessons in the Arena (DECISIONS item 20): start from a database with no lesson "
                               "mined from imported history")
             learn = lambda m, judged, mid: learn_mod.to_case(db, m, judged, mid)  # noqa: E731
-            lessons = _Lessons(SalesLessons(db), None)  # the agent's kept lessons, handed as the exam hands them
+            # the agent's kept lessons, handed as the exam hands them, then those passed between rounds
+            pool = rounds_mod.Pool(SalesLessons(db))
+            lessons = _Lessons(pool, None)
+            if between_models is not None:
+                examiner = between_models.pop("examiner", rounds_mod.real_examiner)
+                between = rounds_mod.Between(db, SALES_PLUG, calls=calls, state=state, pool=pool,
+                                             agent_model=agent_model, customer_model=customer_model,
+                                             models=between_models, examiner=examiner)
+                learn = between.learn
         arena = Arena(cards, agent_model=agent_model, customer_model=customer_model, calls=calls, trust=trust,
                       prompt=prompt, held_out=[x for x in args.held_out.split(",") if x.strip()],
                       prompt_file=Path(args.customer_prompt).expanduser().resolve() if args.customer_prompt else None,
                       matches=args.matches, rounds=args.rounds,
                       fact_checks=None if args.fact_checks is None else args.fact_checks == "on", seed=args.seed,
-                      learn=learn, lessons=lessons, state=state)
+                      learn=learn, between=between, lessons=lessons, state=state)
         rep = arena.run()
         if planned is not None:
             rep["replay"] = (arena.replay(*planned) if rep["stopped"] == PASSED

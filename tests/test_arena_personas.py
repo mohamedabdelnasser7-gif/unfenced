@@ -685,5 +685,36 @@ class MaxFiles(Base):
         self.assertFalse((self.base / "lib").exists())
 
 
+class GrownFold(Base):
+    """The pool's items folded into the build (--state, arena/grow.py): each card says how many of
+    its chats came from the pool, and an empty pool folds in nothing (review 9)."""
+
+    STYLE = {"length": "short", "language": {"arabic": 1.0, "franco": 0.0, "english": 0.0}, "voice_notes": 0.0,
+             "opening": "other"}
+
+    def items(self, worry, n):
+        return [{"label": "lost", "tags": {"want": "made-up want", "worry": worry, "buy_trigger": "made-up",
+                                           "patience": 2, "no_budget": False},
+                 "style": self.STYLE, "turns": [{"from": "customer", "text": "made-up line", "min": 0}]}
+                for _ in range(n)]
+
+    def test_pool_items_fold_in_and_every_card_says_how_many(self):
+        r = fake_recipe.load()
+        summary = pp.run(self.hist, self.out, model=ScriptedModel(r), recipe=r, grown=self.items(r.worries[0], 3))
+        cards = self.cards()
+        self.assertGreater(len(cards), 1)
+        self.assertTrue(all("grown" in c for c in cards), [c.get("grown") for c in cards])
+        self.assertEqual(sum(c["grown"] for c in cards), 3)
+        self.assertEqual(summary["grown"], 3)
+
+    def test_an_empty_pool_folds_in_nothing(self):
+        state = self.base / "state"
+        state.mkdir()
+        code, _, err = self.main("--state", str(state))
+        self.assertEqual(code, 0, err)
+        self.assertFalse(any("grown" in c for c in self.cards()))
+        self.assertNotIn("grown", self.summary())
+
+
 if __name__ == "__main__":
     unittest.main()

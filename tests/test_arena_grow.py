@@ -664,6 +664,16 @@ class ZeroLessonsAtStart(unittest.TestCase):
         self.assertTrue((self.owner / "store_b" / run.MATCHES_FILE).is_file())  # its own Arena files stay its own
         self.assertFalse((self.owner / run.MATCHES_FILE).exists())
 
+    def test_the_arena_saves_what_training_counted_and_the_gate_split(self):
+        db_path = self.owner / "store_b" / "ascent.db"
+        Db(str(db_path)).close()
+        with contextlib.redirect_stdout(io.StringIO()):
+            run.main(["--cards", str(self.cards), "--matches", "1", "--rounds", "1", "--db", str(db_path), "--json"],
+                     agent_model=Agent(), customer_model=Customer(buyers=("size", "price", "other")))
+        saved = json.loads((self.owner / "practice-sales.json").read_text(encoding="utf-8"))
+        self.assertTrue(saved["played"])
+        self.assertTrue(saved["split"]["held"])
+
 
 class FoldedCards(unittest.TestCase):
     def test_cards_built_with_the_pool_take_no_grown_card_again(self):
@@ -725,6 +735,18 @@ class NightStep(unittest.TestCase):
         rep = self.run_main()
         self.assertTrue(rep["practice"]["stopped"].startswith("no recipe"))
         self.assertFalse((self.dir / "practice-sales.json").exists())
+
+    def test_the_night_builds_the_grown_cards(self):
+        self.run_main("--recipe", str(recipe_mod.EXAMPLE))
+        cards = grow.Pool(self.dir, "sales").cards
+        self.assertTrue(cards)
+        self.assertTrue(all(c["id"].startswith("grown-") for c in cards))
+
+    def test_the_call_cap_stops_the_step_and_the_report_says_so(self):
+        with mock.patch.object(run, "DEFAULT_CAP", 1):
+            rep = self.run_main("--recipe", str(recipe_mod.EXAMPLE))
+        self.assertEqual(rep["practice"]["stopped"], "the Arena's call cap")
+        self.assertEqual(rep["practice"]["added"], 1)
 
     def test_a_failing_practice_step_still_saves_the_report(self):
         with mock.patch.object(grow, "night", side_effect=RuntimeError("made-up")):
@@ -869,6 +891,72 @@ class PoolFile(unittest.TestCase):
         self.assertEqual(len(self.reload(items=[item]).items), 1)
         with self.assertRaises(ValueError):
             self.pool.add(bad[0], "c-x", 1, NOW)
+
+
+class Guards(unittest.TestCase):
+    """One test per behaviour the mutant sweep found unpinned (review 9)."""
+
+    def setUp(self):
+        self.owner = folder(self)
+
+    def test_a_pool_file_that_is_a_link_inside_the_owner_folder_is_refused(self):
+        (self.owner / "other.json").write_text("{}", encoding="utf-8")
+        os.symlink(self.owner / "other.json", self.owner / "practice-sales.json")
+        with self.assertRaises(grow.Refused):
+            grow.Pool(self.owner, "sales")
+
+    def test_the_owner_folder_itself_is_never_the_pool_file(self):
+        with self.assertRaises(grow.Refused):
+            grow.Pool(self.owner, "sales", path=self.owner)
+
+    def test_a_link_put_at_the_pool_path_after_it_was_read_is_replaced_not_written_through(self):
+        pool = grow.Pool(self.owner, "sales")
+        outside = folder(self) / "outside.json"
+        outside.write_text("kept", encoding="utf-8")
+        os.symlink(outside, pool.path)
+        pool.changed = True
+        pool.save()
+        self.assertEqual(outside.read_text(encoding="utf-8"), "kept")
+        self.assertFalse(pool.path.is_symlink())
+
+    def test_no_chat_is_tagged_once_the_call_cap_is_reached(self):
+        db = Db(":memory:")
+        self.addCleanup(db.close)
+        write_chats(db, ALL)
+        pool, model = grow.Pool(self.owner, "sales"), ScriptedModel(recipe())
+        got = grow.grow(db, pool, since=SINCE, until=NOW, tagger=Tagger(model=model, cap=50, recipe=recipe()),
+                        calls=mock.Mock(reached=True))
+        self.assertEqual((got.get("added", 0), got["left for a later night"]), (0, 2))
+        self.assertEqual(pool.items, [])
+
+    def test_a_step_after_the_window_closed_is_not_read(self):
+        db = Db(":memory:")
+        self.addCleanup(db.close)
+        cid, steps = LOST
+        write_chats(db, [(cid, steps + [("user", "لسه متاحة؟", -5, None)])])
+        with db.tx() as c:  # a night run for a window that closed before the chat's newest step
+            c.execute("UPDATE chats SET updated_at = ? WHERE id = ?", (NOW - 79.9 * H, cid))
+        (_, chat, _, last), = grow.real_chats(db, SINCE - 96 * H, NOW)
+        self.assertEqual(last, (2, NOW - 79.9 * H))
+        self.assertEqual(len(chat.messages), 2)
+
+    def test_a_cap_whose_most_is_not_a_share_gives_the_example_caps(self):
+        pool, _, _ = grown_pool(self, self.owner)
+        data = json.loads(pool.path.read_text(encoding="utf-8"))
+        for most in (1.5, 1, 0, True, -0.2):
+            pool.path.write_text(json.dumps({**data, "capped": [{"name": "printing", "pattern": "x", "most": most}]}),
+                                 encoding="utf-8")
+            self.assertIsNone(grow.Pool(self.owner, "sales").capped, most)
+
+    def test_a_card_from_the_pool_file_that_is_not_grown_is_dropped(self):
+        pool, _, _ = grown_pool(self, self.owner)
+        data = json.loads(pool.path.read_text(encoding="utf-8"))
+        pool.path.write_text(json.dumps({**data, "cards": [{**data["cards"][0], "id": "persona-01"}]}), encoding="utf-8")
+        self.assertEqual(grow.Pool(self.owner, "sales").cards, [])
+
+    def test_a_no_budget_card_has_its_own_group_id(self):
+        self.assertEqual(grow.grown_id({"worry": "price", "why_unwinnable": "no budget"}), "grown-price-no-budget")
+        self.assertEqual(grow.grown_id({"worry": "price", "why_unwinnable": None}), "grown-price")
 
 
 class KindRule(unittest.TestCase):

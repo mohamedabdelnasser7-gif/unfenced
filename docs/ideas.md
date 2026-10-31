@@ -55,7 +55,7 @@ Deployment does the real work. Night reflection reads it and picks the cases wor
 
 Research backs the need for this. Mind the Sim2Real Gap in User Simulation for Agentic Tasks (arXiv 2603.11245) compared simulated users with real people and found the simulated ones too cooperative, so agents scored higher against them than against humans. Real data keeps the simulated side closer to real customers.
 
-For the personal assistant this is built: real days become new simulated days, and a day that beats it is drawn more often. For the Sales agent, the practice customers are built from cleaned real chats today. The nightly step that adds new real chats as practice customers, and brings back the ones that beat it more often, is planned.
+For the personal assistant this is built: real days become new simulated days, and a day that beats it is drawn more often. For the Sales agent this is built too: each night, lost real chats are cleaned and become new practice customers, and the ones that beat it come back more often.
 
 ## Agents learn from each other
 

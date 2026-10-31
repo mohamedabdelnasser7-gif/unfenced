@@ -45,10 +45,15 @@ cap, stops the gate; that day is dropped, never a loss.
 """
 import argparse
 import datetime
+import fcntl
 import json
+import os
 import random
 import re
+import secrets
+import stat
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -170,16 +175,54 @@ class Pool:
         tmp.replace(self.path)
 
 
+def _folder(path):
+    """The state folder, made 0700 like arena/personas._folder; a link or a file in its place is refused."""
+    path = os.fspath(path)
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    try:
+        os.mkdir(path, 0o700)
+    except FileExistsError:
+        pass
+    st = os.lstat(path)
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+        raise OSError("the state folder is a link or not a folder")
+    os.chmod(path, 0o700)
+
+
 def keep_finished(state, day, desk, judged):
     """A day the user lived, at its end, to finished-days.jsonl (see the module lines). Returns the row's
-    signals: how many corrections and which checks failed."""
+    signals: how many corrections and which checks failed. Nothing calls it yet: it waits for the live
+    day runner, which will call it as each real day ends.
+
+    The row is added the way arena/personas._write writes: never through a link (O_NOFOLLOW), only to
+    a plain file of its own, 0600, in a 0700 folder; O_APPEND under a lock, and when the night took
+    the file while this waited, the row goes to a new one, so no row is lost."""
     row = {"day": day, "corrected": sum(a["kind"] == "corrected" for a in desk.answers),
            "failed": sorted({f["check"] for f in judged["failed"]})}
-    path = Path(state) / FINISHED_FILE
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(row, ensure_ascii=False) + "\n")
-    return {"corrected": row["corrected"], "failed": row["failed"]}
+    data = (json.dumps(row, ensure_ascii=False) + "\n").encode("utf-8")
+    _folder(state)
+    path = os.path.join(os.fspath(state), FINISHED_FILE)
+    for _ in range(5):
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            st = os.fstat(fd)
+            try:
+                now = os.lstat(path)
+            except FileNotFoundError:
+                continue
+            if (now.st_dev, now.st_ino) != (st.st_dev, st.st_ino):
+                continue  # the night took the file while this waited for the lock
+            if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+                raise OSError("finished-days.jsonl is not a plain file of its own")
+            os.fchmod(fd, 0o600)
+            view = memoryview(data)
+            while view:
+                view = view[os.write(fd, view):]
+            return {"corrected": row["corrected"], "failed": row["failed"]}
+        finally:
+            os.close(fd)
+    raise OSError("finished-days.jsonl kept changing while the day was written")
 
 
 def worth_practising(row):

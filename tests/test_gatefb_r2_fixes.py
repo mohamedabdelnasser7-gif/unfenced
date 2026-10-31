@@ -113,6 +113,33 @@ class BootFirst(unittest.TestCase):
         self.assertEqual(checks("The Vapor 17 Elite with printing is 16,500 + 400 = 16,900 EGP."), [])
 
 
+class OwnPriceThenExtra(unittest.TestCase):
+    """Call 8: a boot clause that ends on the boot's own price may name the extra's price right after
+    the extra, past one joining word."""
+
+    def setUp(self):
+        clean_env(self)
+
+    def test_the_boots_price_then_the_extras_price_passes(self):
+        for reply in ("The Vapor 17 Elite is 16,500 EGP with printing 400 EGP.",
+                      "The Vapor 17 Elite is 16,500 EGP plus printing 400 EGP.",
+                      "Vapor 17 Elite 16,500 EGP with printing 400 EGP.",
+                      "الـ Vapor 17 Elite بـ 16,500 جنيه بالطباعة 400 جنيه"):
+            self.assertEqual(checks(reply), [], reply)
+
+    def test_anything_more_between_still_joins(self):
+        fee = next(str(int(float(z["fee"]))) for z in factcheck.store.delivery()["zones"] if "fee" in z)
+        for reply in ("The Vapor 17 Elite was 16,500 EGP and with printing is 400 EGP.",
+                      "The Vapor 17 Elite was 16,500 EGP and with printing 400 EGP.",
+                      f"The Vapor 17 Elite is {fee} EGP with printing 400 EGP.",
+                      "The Vapor 17 Elite is 16,500 EGP with printing is 400 EGP.",
+                      "The Vapor 17 Elite is 16,500 EGP with 60 EGP delivery with printing 400 EGP.",
+                      "The Vapor 17 Elite is 400 EGP with printing 400 EGP.",
+                      "The Vapor 17 Elite with printing 400 EGP.", "الـ Elite بالطباعة 400 جنيه",
+                      f"الـ Vapor 17 Elite بـ {fee} جنيه بالطباعة 400 جنيه"):
+            self.assertEqual(checks(reply), ["price"], reply)
+
+
 class ExtraFirst(unittest.TestCase):
     """Red team item A: an extra named first holds its price only as the clause's subject."""
 

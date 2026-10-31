@@ -16,7 +16,9 @@ price     every amount in the reply (kit/send_check.py prices_in) is a price of 
           "الطباعة 400 جنيه" passes (2026-10-31). A clause that names a boot or a tier and the
           extra holds the extra's price only beside a sum, or when the boot comes first with no
           joining word between ("For the Vapor 17 Elite the printing is 400 EGP" passes, "The
-          Vapor 17 Elite with printing is 400 EGP" fails), or when the extra comes first as the
+          Vapor 17 Elite with printing is 400 EGP" fails) or with the boot's own price before
+          the extra and the extra's amount right after it ("The Vapor 17 Elite is 16,500 EGP
+          with printing 400 EGP" passes), or when the extra comes first as the
           clause's subject ("Printing on the Vapor 17 Elite is 400 EGP" passes, "With printing the
           Vapor 17 Elite is 400 EGP" fails) (_extra_not_held; red team gatefb rounds 1 and 2,
           review gatefb round 2). An add-on word right beside the amount (more, extra, plus, on
@@ -265,6 +267,8 @@ def _extra_not_held(clause, extras, items, all_tiers, sizes, orders):
         mine = _dec(send_check.amount(v["price"]) for e in extras for v in e.get("variants", []) if "price" in v)
         if _dec(send_check.prices_in(gap, sizes, orders)) & mine:  # its price beside the boot, before the extra
             return True
+        if _own_price_then_extra(gap, clause[first.end():], items, extras, sizes, orders):
+            return False
         return bool(JOIN.search(gap) or word.startswith("ب")
                     or ((AND.search(gap) or first.group(0).startswith("و"))
                         and not send_check.prices_in(gap, sizes, orders)))
@@ -274,6 +278,30 @@ def _extra_not_held(clause, extras, items, all_tiers, sizes, orders):
     after = clause[first.end():]
     reach = after[:_boot_end(after, items, extras, all_tiers)]
     return not (TOWARD.search(reach) or send_check.prices_in(reach, sizes, orders))
+
+
+def _own_price_then_extra(gap, after, items, extras, sizes, orders):
+    """True when a boot price ends the gap or comes right before its first joining word, only
+    SUBJECT_LEAD words follow that word, and an amount follows the extra at once: "The Vapor 17 Elite
+    is 16,500 EGP with printing 400 EGP" and "الـ Vapor 17 Elite بـ 16,500 جنيه بالطباعة 400 جنيه" name
+    each its own price. "The Vapor 17 Elite was 16,500 EGP and with printing 400 EGP", "The Vapor 17
+    Elite is 16,500 EGP with printing is 400 EGP" and "The Vapor 17 Elite is 60 EGP with printing 400
+    EGP" (a fee) do not (gatefb round 2 fix, call 8)."""
+    join = JOIN.search(gap)
+    before, between = (gap, "") if join is None else (gap[:join.start()], gap[join.end():])
+    boots = _dec(send_check.amount(v["price"]) for i in items if i not in extras
+                 for v in i.get("variants", []) if "price" in v)
+    return bool(OWN_PRICE_END.search(before) and _dec(send_check.prices_in(before, sizes, orders)) & boots
+                and SUBJECT_LEAD.fullmatch(between.lstrip()) and EXTRA_AMOUNT.match(after))
+
+
+# A price that ends the text, its currency word after it or none ("16,500 EGP "), and an amount right at
+# the start of the text, its currency word before it or none (" 400 EGP"): the two sides of
+# _own_price_then_extra.
+OWN_PRICE_END = re.compile(r"\d(?:[^\S\n]*(?:" + send_check.CURRENCY + r")" + send_check.NO_LETTER_AFTER
+                           + r")?[^\S\n]*$", re.IGNORECASE)
+EXTRA_AMOUNT = re.compile(r"[^\S\n]*(?:(?:" + send_check.CURRENCY + r")" + send_check.NO_LETTER_AFTER
+                          + r"[^\S\n]*)?(?:" + send_check.DIGITS + r")", re.IGNORECASE)
 
 
 def model_numbers(items):

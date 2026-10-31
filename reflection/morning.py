@@ -288,7 +288,6 @@ font:400 15px/20px var(--font);color:var(--ink-2);transition:transform var(--t) 
 .peek.p3{z-index:2;width:calc(100% - 72px);margin-left:36px;opacity:.92}
 .peek.p4{z-index:1;width:calc(100% - 96px);margin-left:48px;opacity:.92}
 .peek[open]{opacity:1}
-.more-wait{margin:16px 4px 0}
 .more-l{margin-top:20px;border-top:1px solid var(--line);padding-top:4px}
 .more-l>summary{list-style:none;display:inline-flex;align-items:center;gap:6px;min-height:40px;cursor:pointer;font:500 14px/20px var(--font);color:var(--ink-2);
 transition:color var(--t) var(--ease)}
@@ -1786,7 +1785,7 @@ def _ideas_html(ideas, token):
         body.append('<p class="mh">Try an idea</p>')
         for a in ideas["agents"]:
             body.append(_try_html(token, a))
-    return _pill("bulb", "Ideas", sub, f"{len(open_)} open" if open_ else "None open", "".join(body), ident="ideas")
+    return _pill("bulb", "Ideas", sub, "Open" if open_ else "None open", "".join(body), ident="ideas")
 
 
 def _idea_html(item):

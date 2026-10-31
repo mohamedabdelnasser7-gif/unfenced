@@ -87,7 +87,7 @@ class Light(tm.Base):
     """DECISIONS item 35: the page is light. No count of what is left to answer, nothing that needs
     no answer outside the fold, and a day with no answers changes nothing."""
 
-    LEFT = re.compile(r"\b\d+\s+(?:more|waiting|left to|to go|remaining|unanswered|still wait)\b|\bmore wait\b|"
+    LEFT = re.compile(r"\b\d+\s+(?:more|open|waiting|left to|to go|remaining|unanswered|still wait)\b|\bmore wait\b|"
                       r"\boverdue\b|\breminder\b|\bskipped\b|\byou missed\b", re.I)
 
     def test_no_count_of_what_is_left_anywhere_on_the_page(self):
@@ -99,6 +99,17 @@ class Light(tm.Base):
         self.assertNotIn('class="hcount', page)
         self.assertNotIn('class="meta more-wait"', page)
         self.assertNotRegex(open_part(page), r"\b8\b", "the eight waiting are never counted outside the fold")
+
+    def test_the_ideas_row_carries_no_count(self):
+        view = self.morning.view(NOW)
+        card = {"idea": "Shade the north bed at noon.", "whose": "the user", "sure": "not yet",
+                "moves": {"result": "grew", "shows_in_days": [2, 5]}, "know_in_days": 9,
+                "must_not_worsen": {"results": [], "about": ""}, "level": {"name": "low", "share": 0.1, "days": 7}}
+        view["ideas"]["open"] = [{"id": f"l{n}", "agent": "waterer", "risk": "high", "why": "waits for a yes",
+                                    "idea": card} for n in range(8)]
+        page = body(mod.render(view, token="t"))
+        self.assertIn("Shade the north bed at noon.", page)
+        self.assertNotRegex(re.sub(r"<[^>]+>", " ", page), self.LEFT)
 
     def test_a_skipped_day_changes_nothing(self):
         ids = [self.high(f"Water bed {n} twice.") for n in range(1, 7)]

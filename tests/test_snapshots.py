@@ -35,7 +35,7 @@ T1 = 1_800_000_000.0           # the first night
 T2 = T1 + DAY                  # the next night
 T3 = T2 + 3600                 # the rollback
 N1, N2 = snap_mod.night_of(T1), snap_mod.night_of(T2)
-OWNER = "the owner"
+OWNER = "the user"
 
 
 def always_low(text, high_about, low_about):

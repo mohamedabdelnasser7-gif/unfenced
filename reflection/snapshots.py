@@ -72,7 +72,7 @@ from engine.lessons import KEPT, PULLED, TRYING, WAITING, back_copy, back_family
 from engine.lessons import Lessons as EngineLessons  # noqa: E402
 from kit.db import DEFAULT_PATH, Db  # noqa: E402
 
-BY = "the owner"   # who signs a rollback unless --by names someone
+BY = "the user"   # who signs a rollback unless --by names someone
 SHORT = 12         # hash characters shown
 WAITS_TURN, ON_TRIAL, PAUSED, ENDED, DECIDED = "waits its turn", "on trial", "paused", "ended", "decided"
 PULL, STAYS, CANNOT, LEFT = "pull", "stays", "cannot come back", "left waiting"

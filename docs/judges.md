@@ -1,5 +1,5 @@
 # For judges
-*Created: 2026-10-31. Last updated: 2026-10-31.*
+*Created: 2026-10-31. Last updated: 2026-11-01.*
 
 Every model this project calls is a Meta model: Muse Spark on the Meta Model API, or Muse Spark Open on Baseten. You do not need to connect any other account. The store name is made up; the products and prices are real; the practice customers are built from real chats with names, numbers and addresses removed.
 
@@ -31,7 +31,7 @@ Keys can also come from your shell environment; a value there wins over `.env`. 
 python3 -I arena/run.py --quick
 ```
 
-The Arena plays made-up customers against the Sales agent and then runs a small gate. The quick run is one round with one training match and a gate of one match, and it stops at 40 model calls at most. Its files go to `data/arena-quick`, which git ignores. It ends with a short report: what each match ended on, the gate result and the calls used. Exit code 0 means the gate passed, 1 means it did not, 2 means it did not run (the line above it says why).
+The Arena plays practice customers against the Sales agent and then runs a small gate. By default they are the cards built from cleaned real chats in `arena/real/cards` (names, numbers and addresses removed); `--cards demo/personas/cards` plays the made-up set instead. The quick run is one round with one training match and a gate of one match, and it stops at 40 model calls at most. Its files go to `data/arena-quick`, which git ignores. It ends with a short report: what each match ended on, the gate result and the calls used. Exit code 0 means the gate passed, 1 means it did not, 2 means it did not run (the line above it says why).
 
 The full run drops `--quick` and names a folder for its files with `--state` (options at the top of `arena/run.py`).
 
@@ -43,7 +43,7 @@ python3 -I recorded/play.py
 
 This prints a recorded Arena run and a recorded Sales chat from `recorded/arena-run.json` and `recorded/sales-chat.json`. It needs no key and opens no network connection. Each file carries its provenance: when it was recorded, the command that made it, and a trace with one entry per model call (who asked, the host, the model id, start and end times, and the answer).
 
-The recording shipped today was made with scripted stand-in models, and both the files and the replay say SCRIPTED at the top. It shows the shape of a run, not what Muse Spark says. A real recording comes from the same recorder with a key:
+The recording shipped today was made with scripted stand-in models on the made-up customers, and both the files and the replay say SCRIPTED at the top. It shows the shape of a run, not what Muse Spark says, and it is recorded again after the measured run on the cleaned real cards. A real recording comes from the same recorder with a key:
 
 ```
 python3 -I recorded/record.py

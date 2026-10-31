@@ -215,6 +215,34 @@ class Cli(unittest.TestCase):
         code, out, _ = self.main("--replay", str(self.out / "replay.jsonl"), "--replay-max", "1")
         self.assertIn("replay of real lost chats: 1 of 1 won, 0 cases to Reflection; skipped: its card will not buy 3", out)
 
+    def test_the_cleaned_set_is_taken_end_to_end_and_a_second_one_in_the_repo_is_not(self):
+        """Review round 1, finding 6: REAL_REPLAY pointed at a made-up file in the repo, through a link
+        outside it, so only the same file by device and inode is taken, never one by its name."""
+        from unittest import mock
+        crowd = ROOT / "demo" / "crowd.jsonl"
+        link = self.dir / "cleaned.jsonl"
+        link.symlink_to(crowd)
+        with mock.patch.object(replay, "REAL_REPLAY", link):
+            self.assertEqual(len(replay.load(crowd)), sum(1 for x in crowd.read_text(encoding="utf-8").splitlines()
+                                                           if x.strip()))
+            code, out, err = self.main("--replay", str(crowd), "--json")
+            self.assertNotIn("inside the repo", err)
+            self.assertEqual(code, 0, err)
+            self.assertIn("replay", json.loads(out))
+            with self.assertRaises(replay.Refused):
+                replay.load(ROOT / "demo" / "personas" / "summary.json")
+        with tempfile.TemporaryDirectory(dir=ROOT, prefix=".test-replay-") as d:
+            second = Path(d) / "replay.jsonl"  # the same name, in the repo, not the cleaned set
+            second.write_bytes((self.out / "replay.jsonl").read_bytes())
+            for patched in (None, link):
+                with self.subTest(real_replay=patched), \
+                        mock.patch.object(replay, "REAL_REPLAY", patched or replay.REAL_REPLAY):
+                    with self.assertRaises(replay.Refused):
+                        replay.load(second)
+                    code, _, err = self.main("--replay", str(second))
+                    self.assertEqual(code, 2)
+                    self.assertIn("inside the repo", err)
+
     def test_no_replay_before_the_gate_passes(self):
         code, out, _ = self.main("--replay", str(self.out / "replay.jsonl"), customer=Customer(buyers=()))
         self.assertEqual(code, 1)

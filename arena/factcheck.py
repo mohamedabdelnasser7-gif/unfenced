@@ -269,6 +269,8 @@ def _extra_not_held(clause, extras, items, all_tiers, sizes, orders):
             return True
         if _own_price_then_extra(gap, clause[first.end():], items, extras, sizes, orders):
             return False
+        if re.fullmatch(r"[a-z]+ed|(?:ال)?مطبوع\w*", word, re.IGNORECASE):  # a participle: the boot printed
+            return True
         return bool(JOIN.search(gap) or word.startswith("ب")
                     or ((AND.search(gap) or first.group(0).startswith("و"))
                         and not send_check.prices_in(gap, sizes, orders)))

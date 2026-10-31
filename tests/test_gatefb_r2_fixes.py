@@ -99,6 +99,11 @@ class BootFirst(unittest.TestCase):
                       "The Elite with printing is 400 EGP.", "Elite + printing = 400 EGP."):
             self.assertEqual(checks(reply), ["price"], reply)
 
+    def test_a_participle_after_the_boot_joins(self):  # review gatefb round 3, finding 1
+        for reply in ("The Vapor 17 Elite printed is 400 EGP.", "Your Vapor 17 Elite printed comes to 400 EGP.",
+                      "الـ Vapor 17 Elite مطبوع عليه اسمك بـ 400 جنيه", "الـ Vapor 17 Elite المطبوع بـ 400 جنيه"):
+            self.assertEqual(checks(reply), ["price"], reply)
+
     def test_the_extras_price_beside_the_boot_before_the_extra_is_refused(self):
         self.assertEqual(checks("The Vapor 17 Elite is 400 EGP more than the printing."), ["price"])
 

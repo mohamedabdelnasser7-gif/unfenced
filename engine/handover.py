@@ -25,10 +25,10 @@ Each night, with a spotter and a writer given (engine/study.py, Study(hand_over=
    free to name the topic. A writer that fails, gives nothing or is refused sends no note that
    night; the report says why. The counts and the case ids sit beside the line, added in code.
 5. Hand over. The note is saved as a row of the handed_over table, which the receiving agent
-   reads (received()), and named in the night's report. A row is never rewritten, and no two notes
-   from one agent to one receiving agent have windows that overlap: a rerun of the same night, a
-   second run a few minutes later (the runner sets until to the time it runs) or a night whose
-   window takes in part of an earlier note's window writes none (the table refuses it).
+   reads (received()), and named in the night's report. A row is never rewritten, and one agent
+   sends one receiving agent at most one note a night (night_of: the Cairo evening date the window
+   ends in, noon to noon; the table refuses a second). The night windows overlap, so a note whose
+   cases were all handed over on an earlier night is not sent again.
 
 The sort. Every line the study would write as a lesson (a pattern, an adapted lesson, an idea)
 is asked first (sort()): a line that is one of the plug's kinds is not written; it is handed
@@ -42,6 +42,8 @@ Nothing here asks for a yes, starts a trial or writes a lesson.
 """
 import json
 import random
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from engine.fast import guard
 from engine.log import case_key
@@ -69,20 +71,21 @@ CREATE TABLE IF NOT EXISTS handed_over (
   since REAL NOT NULL,
   until REAL NOT NULL,
   written_at REAL NOT NULL,
-  UNIQUE (from_agent, to_agent, until)
+  night TEXT NOT NULL,
+  UNIQUE (from_agent, to_agent, night)
 );
 CREATE INDEX IF NOT EXISTS handed_over_to ON handed_over (to_agent, id);
 CREATE TRIGGER IF NOT EXISTS handed_over_never_rewritten
 BEFORE UPDATE ON handed_over
 BEGIN SELECT RAISE(ABORT, 'a handed over note is never rewritten'); END;
-CREATE TRIGGER IF NOT EXISTS handed_over_one_note_a_window
-BEFORE INSERT ON handed_over
-WHEN EXISTS (SELECT 1 FROM handed_over WHERE from_agent = NEW.from_agent AND to_agent = NEW.to_agent
-             AND since < NEW.until - 3600 AND until > NEW.since + 3600)
-BEGIN SELECT RAISE(IGNORE); END;
 """
-# Windows that share an hour or less count as apart: a night that starts a few seconds earlier than the
-# one before still writes its note (the one-hour slack in the trigger above).
+CAIRO = ZoneInfo("Africa/Cairo")
+
+
+def night_of(until):
+    """The night a window ends in, as its Cairo evening date: a run from noon to the next noon is one night,
+    so a rerun, or a run seconds earlier than the night before, keeps one note a night."""
+    return datetime.fromtimestamp(float(until) - 12 * 3600, CAIRO).date().isoformat()
 
 
 class Track:
@@ -124,9 +127,9 @@ class Track:
     def night(self, cases, texts, since, until, *, now, notes):
         """The night's handing over on the study's read cases: {kinds, notes}. kinds: one entry per
         declared kind {to, kind, cases, sources, verdict, why}; notes: the notes handed over, each
-        {id, to, kind, text, cases, sources, case_ids, again}. again: a note whose window overlaps
-        this one was handed over before (a rerun, or a run soon after), so no new row; the note
-        shown is that earlier one."""
+        {id, to, kind, text, cases, sources, case_ids, again}. again: this night's note to that agent was
+        handed over before (a rerun), so no new row; the note shown is that earlier one. A note whose
+        cases were all handed over before is not sent again (the night windows overlap)."""
         out = {"kinds": [], "notes": []}
         if not self.kinds:
             return out
@@ -176,6 +179,15 @@ class Track:
         receiver = {"agent": h.agent, "about": (other.about if other is not None and other.about else h.about)}
         found = {"kind": entry["kind"], "about": self.kinds[entry["kind"]][1], "cases": entry["cases"],
                  "sources": entry["sources"]}
+        ids = [case_key(c.id) for c in got]
+        night = night_of(until)
+        with self.db.tx() as c:
+            earlier = c.execute("SELECT cases FROM handed_over WHERE from_agent = ? AND to_agent = ? AND night != ?",
+                                (self.plug.agent, h.agent, night)).fetchall()
+        sent = {i for r in earlier for i in json.loads(r["cases"])}
+        if sent.issuperset(ids):
+            entry["verdict"], entry["why"] = NOT_SENT, "these cases were handed over before"
+            return None
         try:
             text = self.writer(self.plug, dict(receiver), dict(found))
         except Exception as e:  # a failing writer sends no note
@@ -190,19 +202,17 @@ class Track:
             entry["verdict"], entry["why"] = NOT_SENT, "the note was refused: " + "; ".join(refused)
             return None
         text = text.strip()
-        ids = [case_key(c.id) for c in got]
         with self.db.tx() as c:
             cur = c.execute("INSERT OR IGNORE INTO handed_over (from_agent, to_agent, kind, text, cases, sources, "
-                            "since, until, written_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            "since, until, written_at, night) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                             (self.plug.agent, h.agent, entry["kind"], text, json.dumps(ids, ensure_ascii=False),
-                             entry["sources"], float(since), float(until), float(now)))
+                             entry["sources"], float(since), float(until), float(now), night))
             if cur.rowcount == 1:
                 row = {"id": cur.lastrowid, "kind": entry["kind"], "text": text, "cases": ids,
                        "sources": entry["sources"]}
             else:
-                row = _row(c.execute("SELECT * FROM handed_over WHERE from_agent = ? AND to_agent = ? AND since < ? "
-                                     "AND until > ? ORDER BY id DESC LIMIT 1",
-                                     (self.plug.agent, h.agent, float(until), float(since))).fetchone())
+                row = _row(c.execute("SELECT * FROM handed_over WHERE from_agent = ? AND to_agent = ? AND night = ?",
+                                     (self.plug.agent, h.agent, night)).fetchone())
         return {"id": row["id"], "to": h.agent, "kind": row["kind"], "text": row["text"], "cases": len(row["cases"]),
                 "sources": row["sources"], "case_ids": list(row["cases"]), "again": cur.rowcount != 1}
 

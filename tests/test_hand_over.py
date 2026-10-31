@@ -362,21 +362,18 @@ class TheRow(Setup):
         self.assertEqual((first["again"], again["again"], again["id"]), (False, True, first["id"]))
         self.assertEqual(len(handover.received(self.db, TO)), 1)
 
-    def test_an_overlapping_window_writes_none_and_the_next_window_writes_one(self):
+    def test_the_next_night_sends_no_note_on_the_same_cases_and_one_when_new_cases_come(self):
         lost(self.log, 3, "playful", "play")
         first, = self.window(fk.SINCE, fk.UNTIL)
-        half = fk.DAY / 2
-        again, = self.window(fk.SINCE + half, fk.UNTIL + half)  # starts half a day into the first window
-        self.assertEqual((again["again"], again["id"]), (True, first["id"]))
-        inside, = self.window(fk.SINCE + half, fk.UNTIL - fk.DAY)  # wholly inside the first window
-        self.assertEqual((inside["again"], inside["id"]), (True, first["id"]))
-        for n in range(3):  # the next window starts where the first one ends
+        rep = self.window(fk.SINCE + fk.DAY, fk.UNTIL + fk.DAY)  # the windows overlap, no new case
+        self.assertEqual(rep, [])
+        for n in range(3):
             fk.case(self.log, f"next{n}", "water", "soaked", "wilted", at=fk.UNTIL + fk.DAY, stage="seedling",
                     moment="playful", note=f"next round {n}")
         later, = self.window(fk.UNTIL, 2 * fk.UNTIL - fk.SINCE)
         self.assertFalse(later["again"])
         self.assertNotEqual(later["id"], first["id"])
-        self.assertEqual(sorted(later["case_ids"]), ["next0", "next1", "next2"])
+        self.assertTrue({"next0", "next1", "next2"} <= set(later["case_ids"]))
         self.assertEqual(len(handover.received(self.db, TO)), 2)
 
     def test_a_night_that_starts_a_few_seconds_early_still_writes_its_note(self):
@@ -390,19 +387,22 @@ class TheRow(Setup):
         self.assertNotEqual(later["id"], first["id"])
         self.assertEqual(len(handover.received(self.db, TO)), 2)
 
-    def test_the_table_itself_refuses_an_overlapping_window(self):
+    def test_a_night_runs_from_noon_to_noon_in_cairo(self):
+        noon = 1768989600.0  # 2026-01-21 12:00 in Cairo (UTC+2)
+        self.assertEqual(handover.night_of(noon + 60), "2026-01-21")
+        self.assertEqual(handover.night_of(noon + 15 * 3600), "2026-01-21")  # 03:00 the next morning
+        self.assertEqual(handover.night_of(noon - 60), "2026-01-20")
+
+    def test_the_table_itself_keeps_one_note_a_night(self):
         handover.Track(self.db, self.plug, spotter=Spotter(), writer=Writer())
-        sql = ("INSERT INTO handed_over (from_agent, to_agent, kind, text, cases, sources, since, until, written_at) "
-               "VALUES (?, ?, 'playful', 'A line.', '[]', 3, ?, ?, 0)")
-        H = 3600.0
+        sql = ("INSERT OR IGNORE INTO handed_over (from_agent, to_agent, kind, text, cases, sources, since, until, "
+               "written_at, night) VALUES (?, ?, 'playful', 'A line.', '[]', 3, 0, 1, 0, ?)")
         with self.db.tx() as c:
-            self.assertEqual(c.execute(sql, ("waterer", TO, 0.0, 10 * H)).rowcount, 1)
-            self.assertEqual(c.execute(sql, ("waterer", TO, 8 * H, 18 * H)).rowcount, 0)  # two hours shared
-            self.assertEqual(c.execute(sql, ("waterer", "other", 8 * H, 18 * H)).rowcount, 1)  # another receiver
-            self.assertEqual(c.execute(sql, ("fan", TO, 8 * H, 18 * H)).rowcount, 1)  # another sender
-            self.assertEqual(c.execute(sql, ("waterer", TO, 10 * H - 4, 20 * H)).rowcount, 1)  # 4 seconds shared
-        self.assertEqual([(n["since"], n["until"]) for n in handover.received(self.db, TO) if n["from"] == "waterer"],
-                         [(0.0, 10 * H), (10 * H - 4, 20 * H)])
+            self.assertEqual(c.execute(sql, ("waterer", TO, "2026-01-20")).rowcount, 1)
+            self.assertEqual(c.execute(sql, ("waterer", TO, "2026-01-20")).rowcount, 0)  # the same night
+            self.assertEqual(c.execute(sql, ("waterer", "other", "2026-01-20")).rowcount, 1)  # another receiver
+            self.assertEqual(c.execute(sql, ("fan", TO, "2026-01-20")).rowcount, 1)  # another sender
+            self.assertEqual(c.execute(sql, ("waterer", TO, "2026-01-21")).rowcount, 1)  # the next night
 
     def test_a_failing_spotter_hands_nothing_over(self):
         lost(self.log, 3, "playful", "play")

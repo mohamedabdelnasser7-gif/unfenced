@@ -48,9 +48,11 @@ it. One message goes through these steps, in this order:
     a ل joined to it behind a delivery verb (ابعتها لزوزو) or after deliver to, ship it to, send
     it to (lower case too, a colon or a new line between); every common first name in
     arena/words.py wherever it stands; then up to 2 name-like words after any [name]; then one
-    name-shaped word right before and right after each [name] (Tawfik [name], [name] الشربيني),
-    never a common word, an Arabic word starting with ا (اطبع) or a lower case Latin word in a
-    message with capitals; a name-shaped word at a message's start before معاك or here.
+    name-shaped word right before and right after each [name], over spaces, a comma, an emoji or
+    a new line (Tawfik [name], [name] الشربيني, [name]، اسكندر): never a common or product word
+    (jacket, black, فيبور), an order to the store (اطبع), a word with ال unless it ends in ي
+    (الجاكيت stays), or a lower case Latin word unless here comes next (karim tawfik here); a
+    name-shaped word at a message's start before معاك or here.
 Prices and sizes stay (السعر 850 جنيه, مقاس 43): they are what the personas are about.
 
 ChatCleaner.texts cleans a whole chat: after the store asks the name (اسمك ايه, ممكن الاسم,
@@ -59,9 +61,12 @@ is [name] (لحظة, then the name, are both [name]); a short store line with no
 a thumbs up, ok, an export's media or deleted message line) does not move on. After the store asks
 for the address, or after a customer message that cleaned to [address] or [place], every
 customer message up to the store's next one is [address]. When the store asks both at once,
-the first answer is [name] and the rest [address]. Every word a cue showed as a name in the chat
-(steps 7 and 9, the answer to the name question) joins the chat's names and the chat is cleaned
-again with them, so a surname typed bare in another turn, before or after, is masked too.
+the first answer is [name] and the rest [address]. Every word a cue named in the chat (my name
+is, I am, this is, يا, hi, a title, a relation word, the answer to the name question) joins the
+chat's names and the chat is cleaned once more with them, so that name typed bare in another
+turn, before or after, is masked too. A word masked only for standing after or beside a [name]
+is never learned: it may be a product word (الجاكيت, Mercurial), and learning it would mask it
+in every turn.
 """
 import json
 import re
@@ -692,15 +697,20 @@ SPEAKING = frozenset(fold(w) for w in ("معاك", "معاكي", "معاكم", "
 NOT_BESIDE = frozenset({"print", "write", "put", "add", "deliver", "ship", "gift", "named", "called", "saved",
                         "esm", "esmy", "esmi", "ismy", "ismi", "esmo", "esmaha", "besm", "besmy", "bism",
                         "recipient", "mostalem", "ya", *(g for g in GREETINGS if " " not in g),
-                        *map(fold, ("تاني", "ثاني", "تانيه", "برضو", "بردو", "خالص", "again", "tany", "tani"))})
+                        *map(fold, ("تاني", "ثاني", "تانيه", "برضو", "بردو", "خالص", "again", "tany", "tani")),
+                        *map(fold, ("اطبع", "اطبعلي", "اطبعي", "اطبعوا", "اكتب", "اكتبلي", "اكتبي", "اكتبوا", "حط",
+                                    "حطلي", "حطي"))})
+# the gap a word beside a [name] may cross: spaces, a comma, an emoji, one new line (كريم، اسكندر)
+_NEAR = "[ \t,،" + send_check.EMOJI.pattern[1:-1] + "]*"
+NEAR_GAP = re.compile(_NEAR + "(?:\n" + _NEAR + ")?")
 
 
 def name_shaped(word, lower=False):
     """A word that can be a name beside a [name] (a surname with no cue): no common word (a stop
-    word, a form of address, a title, a cue word), Latin letters only, 3 or more, capitalised or
-    in a message typed in lower case (lower), or Arabic of 3 letters or more not shaped like a verb
-    and not starting with ا (an order to the store: اطبع, اكتب; a name with ا is on the first name
-    list); a word with ال is never a verb (الشربيني)."""
+    or product word, a form of address, a title, a cue word, an order to the store: اطبع), Latin
+    letters only, 3 or more, capitalised or lower case when the caller allows it (lower), or Arabic
+    of 3 letters or more not shaped like a verb (اسكندر too); a word with ال is never a verb and is
+    a name only when it ends in ي (الشربيني, not الجاكيت or الاوردر)."""
     f = fold(word)
     if word.startswith("[") or not word.isalpha() or is_stop(word) or f in LATIN_FORMS or f in W.TITLES \
             or f.startswith("يا") and f[2:] in W.TITLES or f in W.DELIVERY_VERBS or f in W.RELATION \
@@ -708,17 +718,17 @@ def name_shaped(word, lower=False):
         return False
     if ARABIC.search(word):
         if f.startswith("ال"):
-            return len(f) >= 5
-        return len(f) >= 3 and not f.startswith("ا") and not verb_shaped(f)
+            return len(f) >= 5 and f.endswith("ي")
+        return len(f) >= 3 and not verb_shaped(f)
     return word.isascii() and len(word) >= 3 and (word[0].isupper() or lower)
 
 
-def _cue_names(text, learned=None, lower=None):
+def _cue_names(text, learned=None):
     """Step 9 after يا and hi: titles, weak and relation cues, a lone ل, listed first names,
     then up to 2 name-like words after any [name], then one name-shaped word right before and
     right after each [name] (Tawfik [name], [name] الشربيني), and a name-shaped word at the start
-    before معاك or here. learned: a set every word masked here joins. lower: the message as typed
-    had no capital letter (read off text when not given)."""
+    before معاك or here. learned: a set the words a cue named join (never a listed first name,
+    a chained word or a word beside a [name])."""
     toks = [(m.start(), m.end(), m.group(0)) for m in TOKEN.finditer(text)]
     if not toks:
         return text
@@ -730,13 +740,18 @@ def _cue_names(text, learned=None, lower=None):
     loose = [bool(re.fullmatch(r"[ \t]*[,،]?[ \t]+|\.[ \t]*", g)) for g in gaps]  # mr.zorvex too
     # after deliver to: a colon or a new line too (deliver to: zorvex, deliver to\nzorvex)
     deliv = [bool(re.fullmatch(r"[ \t]*[,،:：]?[ \t]*\n?[ \t]*|\.[ \t]*", g)) and g != "" for g in gaps]
-    mask, prefix = set(), {}
+    near = [bool(NEAR_GAP.fullmatch(g)) and g != "" for g in gaps]
+    mask, prefix, cued = set(), {}, set()
 
     def take(j, ok, gap=spaced):
         if j < n and gap[j] and not words[j].startswith("[") and ok(words[j]):
             mask.add(j)
             return True
         return False
+
+    def cue(j, ok, gap=spaced):  # a word a cue named: the chat learns it
+        if take(j, ok, gap):
+            cued.add(j)
 
     for i, w in enumerate(words):
         f = folded[i]
@@ -751,47 +766,53 @@ def _cue_names(text, learned=None, lower=None):
                     jm.group(2) in W.CUE or FRANCO_AR.fullmatch(jm.group(2)))):
             mask.add(i)
             prefix[i] = w[:len(jm.group(1))]
+            if jm.group(2) not in W.FIRST:
+                cued.add(i)
             continue
         if jm and jm.group(1) == "ل" and i and spaced[i] and folded[i - 1] in W.DELIVERY_VERBS \
                 and jm.group(2) not in W.NOT_WEAK and arabic_name_like(jm.group(2)):  # ابعتها لزوزو
             mask.add(i)
             prefix[i] = w[:1]
+            cued.add(i)
             continue
         if f in W.TITLES or f.startswith("يا") and f[2:] in W.TITLES:  # ياعم زوزو
-            take(i + 1, lambda x, t=w: _after_title(t, x), loose)
+            cue(i + 1, lambda x, t=w: _after_title(t, x), loose)
         elif f in W.WEAK:
-            take(i + 1, _weak_ok, loose)
+            cue(i + 1, _weak_ok, loose)
         elif f in W.RELATION:
-            take(i + 1, _relation_ok)
+            cue(i + 1, _relation_ok)
         elif f in W.DETACHED:  # ابعتها لـ زوزو
-            take(i + 1, lambda x: _weak_ok(x) or arabic_name_like(x) or latin_name_like(x))
+            cue(i + 1, lambda x: _weak_ok(x) or arabic_name_like(x) or latin_name_like(x))
         for pair in W.WEAK_PAIRS + W.RELATION_PAIRS + W.DELIVERY_PAIRS:
             k = len(pair)
             if k > 1 and tuple(folded[i:i + k]) == pair and all(spaced[i + 1:i + k]):
                 if pair in W.DELIVERY_PAIRS:
-                    take(i + k, _delivery_ok, deliv)
+                    cue(i + k, _delivery_ok, deliv)
                 else:
-                    take(i + k, _weak_ok if pair in W.WEAK_PAIRS else _relation_ok, loose)
+                    cue(i + k, _weak_ok if pair in W.WEAK_PAIRS else _relation_ok, loose)
     for i in range(n):  # the chain: up to 2 words after a [name], over spaces only
         if i in mask or words[i] == "[name]":
             for j in (i + 1, i + 2):
                 if not take(j, _chained):
                     break
-    # beside a [name]: one name-shaped word right before it and one right after it, over spaces
-    # only; a word taken here takes no other (a lower case Latin word only in a lower case message)
-    lower = not re.search(r"[A-Z]", text) if lower is None else lower
-    named =[i for i in range(n) if i in mask or words[i] == "[name]"]
+    # beside a [name]: one name-shaped word right before it and one right after it, over spaces,
+    # a comma, an emoji or a new line; a word taken here takes no other. A lower case Latin word
+    # only when here comes right after (karim tawfik here), read per word, not per message.
+    def here_after(j):
+        return j + 1 < n and folded[j + 1] == "here"
+
+    named = [i for i in range(n) if i in mask or words[i] == "[name]"]
     for i in named:
-        take(i + 1, lambda x: name_shaped(x, lower))
-        if i and spaced[i] and name_shaped(words[i - 1], lower):
+        take(i + 1, lambda x, j=i + 1: name_shaped(x, here_after(j)), near)
+        if i and near[i] and name_shaped(words[i - 1], here_after(i)):
             mask.add(i - 1)
         elif i > 1 and spaced[i] and spaced[i - 1] and folded[i - 1] in ("el", "al") \
-                and name_shaped(words[i - 2], lower):  # Nour el [name]
+                and name_shaped(words[i - 2], here_after(i)):  # Nour el [name]
             mask |= {i - 2, i - 1}
     if n > 1 and folded[1] in SPEAKING and spaced[1] and name_shaped(words[0], True):  # الشربيني معاك
         mask.add(0)
     if learned is not None:
-        learned.update(words[i] for i in mask)
+        learned.update(words[i][len(prefix.get(i, "")):] for i in cued)
     if not mask:
         return text
     out, last = [], 0
@@ -926,7 +947,6 @@ class ChatCleaner:
         if not isinstance(text, str) or not text:
             return ""
         text = normalize(text)
-        lower = not re.search(r"[A-Z]", text)  # typed in lower case: a lower case word can be a name
         if "@" in text:
             text = hist.EMAIL.sub("[email]", text)
             text = SPACED_EMAIL.sub("[email]", text)
@@ -963,7 +983,7 @@ class ChatCleaner:
             return "[address]"
         text = hist.YA.sub(lambda m: _ya(m, self.learned), text)
         text = LATIN_CALL.sub(lambda m: _latin_call(m, self.learned), text)
-        text = _cue_names(text, self.learned, lower)
+        text = _cue_names(text, self.learned)
         return RUN.sub(r"[\1]", text)
 
     MAX_ANSWER = 4  # words of an answer to the name question taken as the chat's name
@@ -971,22 +991,22 @@ class ChatCleaner:
     def texts(self, messages):
         """The cleaned text of each message of one chat ("" for none), with the chat-level rules
         in the module notes: the answer to the name question, and the address window. Every word a
-        cue showed as a name (after a name cue, يا, hi, a title, beside a [name], the answer to the
-        name question) joins the chat's names, and the chat is cleaned again with them, so a bare
-        surname is masked before and after the turn that showed it."""
+        cue named (after a name cue, يا, hi, a title, a relation word, the answer to the name
+        question) joins the chat's names, and the chat is cleaned once more with them, so that
+        name typed bare is masked before and after the turn that showed it. Words masked only
+        beside or after a [name] are not learned, and there is one more pass, never a second."""
         out = self._texts(messages)
-        for _ in range(2):
-            display = Display(self.names + sorted(self.learned))
-            if display.words == self.display.words and display.skel == self.display.skel:
-                break
+        display = Display(self.names + sorted(self.learned))
+        if display.words != self.display.words or display.skel != self.display.skel:
             self.display = display
             out = self._texts(messages)
         return out
 
     def _learn_answer(self, text):
         words = TOKEN.findall(normalize(text))
-        if len(words) <= self.MAX_ANSWER:
-            self.learned.update(w for w in words if name_shaped(w, True) or is_listed(w))
+        if len(words) <= self.MAX_ANSWER:  # an answer's surname with ال needs no ي: زورفانو السيد
+            self.learned.update(w for w in words if name_shaped(w, True) or is_listed(w)
+                                or _bare(w) and name_shaped(_bare(w), True))
 
     def _texts(self, messages):
         out, ask_name, window = [], False, False

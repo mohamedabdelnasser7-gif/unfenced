@@ -690,6 +690,21 @@ class NamesWithNoOrder(unittest.TestCase):
                 self.assertNotIn(w, sent)
         self.assertIn("اطبع", saved)  # the want stays: printing is capped by it
 
+    def test_product_words_beside_a_name_reach_the_pool_and_the_tagger(self):
+        # round 3 of the feed review: a word beside a name is never learned for the whole chat
+        steps = [("user", "تمام يا كريم؟ لا انا كريم الجاكيت الجلد ده بكام؟", 70, None),
+                 ("assistant", "الجاكيت الجلد ب 2400 جنيه، متاح كل المقاسات", 69.9, None),
+                 ("user", "الجاكيت الجلد ده اصلي؟ وفي اسود؟ Karim Nike Mercurial too?", 69.8, None),
+                 ("assistant", "ايوه الجاكيت اصلي وفي اسود", 69.7, None)]
+        counts, saved, sent = self.grown([("c-product", steps)])
+        self.assertEqual(counts.get("lost"), 1, counts)
+        for text in (saved, sent):
+            self.assertNotIn("كريم", text)
+            self.assertNotIn("Karim", text)
+            self.assertIn("الجاكيت الجلد ب 2400", text)
+            self.assertIn("ايوه الجاكيت اصلي", text)
+            self.assertIn("Nike Mercurial", text)
+
     def test_a_name_given_after_the_store_asks_then_the_surname_alone(self):
         steps = [("user", "بكام الجاكيت الاسود؟ بلاتيرو بيسأل", 80, None), ("assistant", "الجاكيت ب 950 جنيه. تحب تطلبه؟", 79.9, None),
                  ("user", "تمام", 79.8, None), ("assistant", "ممكن الاسم بالكامل؟", 79.7, None),

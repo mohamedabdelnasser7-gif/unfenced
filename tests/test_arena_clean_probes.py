@@ -652,9 +652,12 @@ class NamesBesideAndLearned(Check):
         got = self.chat([(False, "بلاتيرو بيسأل عن الجاكيت"), (True, "ب 950 جنيه"), (False, "اسمي زورفانو بلاتيرو")])
         self.assertEqual(got[0], "[name] بيسأل عن الجاكيت")
 
-    def test_a_surname_beside_a_name_is_masked_alone_later(self):
+    def test_a_word_beside_a_name_is_masked_there_and_never_learned(self):
+        # round 3: a beside word may be a product word, so it is masked in its own line only; a
+        # bare surname with no cue in another line is a known limit (DECISIONS 23 and 40)
         got = self.chat([(False, "بكام الجاكيت؟ نورهان بلاتيرو"), (True, "ب 950 جنيه"), (False, "هبعته بكرة، بلاتيرو")])
-        self.assertEqual(got[2], "هبعته بكرة، [name]")
+        self.assertEqual(got[0], "بكام الجاكيت؟ [name]")
+        self.assertEqual(got[2], "هبعته بكرة، بلاتيرو")
 
     def test_a_name_after_ya_or_hi_is_masked_alone_later(self):
         got = self.chat([(True, "اهلا يا زورفانو، تحت امرك"), (False, "زورفانو بيسأل، بكام؟")])
@@ -669,6 +672,118 @@ class NamesBesideAndLearned(Check):
         self.assertEqual(cl.Display(["Nourhan Sherbiny"]).hit("الشربيني"), "")
         self.assertEqual(cl.Display(["نورهان الشربيني"]).hit("Sherbiny"), "")
 
+
+
+class ProductWordsBesideNames(Check):
+    """Review and red team round 3 of the feed (2026-10-31): only a word a cue named is learned
+    for the rest of the chat, so product words beside a name stay in every turn and in the tag
+    fields; the beside rule crosses a comma, an emoji or a new line and takes Arabic surnames
+    starting with ا; a word with ال beside a name only when it ends in ي; a lower case Latin word
+    beside a name only before here. Every probe line of the round, both ways."""
+
+    def chat(self, rows, names=()):
+        return cl.Cleaner(names).chat(names).texts([msg(t, team) for team, t in rows])
+
+    def both_ways(self, rows, want):
+        got = self.chat([(team, text) for team, text in rows])
+        for (team, text), w, g in zip(rows, want, got):
+            with self.subTest(text=text):
+                self.assertEqual(g, w)
+
+    def test_review_lines_product_words_stay_in_every_turn(self):
+        self.both_ways([(False, "انا كريم الجاكيت ده بكام؟"), (True, "الجاكيت ب 950 جنيه"),
+                        (False, "الجاكيت متاح مقاس L؟"), (False, "is the jacket waterproof?")],
+                       ["انا [name] الجاكيت ده بكام؟", "الجاكيت ب 950 جنيه", "الجاكيت متاح مقاس L؟",
+                        "is the jacket waterproof?"])
+        self.both_ways([(False, "انا نورهان الجزمة السودا بكام"), (False, "نورهان السودا متاحة 38؟"),
+                        (True, "السودا متاحة 38 ب 1450")],
+                       ["انا [name] الجزمة السودا بكام", "[name] السودا متاحة 38؟", "السودا متاحة 38 ب 1450"])
+        self.both_ways([(False, "hi karim black boots size 43 how much"), (True, "black is 1450 EGP"),
+                        (False, "ok black or white which is better")],
+                       ["hi [name] black boots size 43 how much", "black is 1450 EGP",
+                        "ok black or white which is better"])
+        self.both_ways([(False, "Karim Nike Mercurial size 43 price?"), (True, "Nike Mercurial is 2400 EGP"),
+                        (False, "Is the Nike original?")],
+                       ["[name] Nike Mercurial size 43 price?", "Nike Mercurial is 2400 EGP", "Is the Nike original?"])
+        self.both_ways([(True, "Thanks Karim Elite is in stock"), (False, "Elite or Pro?")],
+                       ["Thanks [name] Elite is in stock", "Elite or Pro?"])
+        self.both_ways([(False, "خطيبتي نورهان عايزة الجزمة البيضا"), (True, "البيضا متاحة"),
+                        (False, "خطيبتي بتسأل على المقاس")],
+                       ["خطيبتي [name] عايزة الجزمة البيضا", "البيضا متاحة", "خطيبتي بتسأل على المقاس"])
+        self.both_ways([(False, "يا كريم الشنطة الكبيرة بكام"), (True, "الشنطة الكبيرة ب 600"),
+                        (False, "الشنطة لونها ايه")],
+                       ["يا [name] الشنطة الكبيرة بكام", "الشنطة الكبيرة ب 600", "الشنطة لونها ايه"])
+        self.both_ways([(False, "انا كريم الجاكيت الجلد الاسود"), (False, "الجاكيت الجلد متاح؟"), (True, "الجلد ب 2000")],
+                       ["انا [name] الجاكيت الجلد الاسود", "الجاكيت الجلد متاح؟", "الجلد ب 2000"])
+        self.both_ways([(True, "تحت امرك يا كريم"), (False, "كريم اوريجينال؟"), (False, "اوريجينال ولا هاي كوبي")],
+                       ["تحت امرك يا [name]", "[name] اوريجينال؟", "اوريجينال ولا هاي كوبي"])
+        self.both_ways([(False, "انا احمد فيبور 17 بكام"), (True, "فيبور 17 ب 3000"), (False, "vapor 17 elite?")],
+                       ["انا [name] فيبور 17 بكام", "فيبور 17 ب 3000", "vapor 17 elite?"])
+
+    def test_review_lines_order_prices_jersey_model_dress(self):
+        self.both_ways([(True, "تمام يا احمد الاوردر اتسجل وهيوصلك خلال 3 ايام"), (False, "الاوردر هيوصل امتى؟"),
+                        (False, "my order number?")],
+                       ["تمام يا [name] الاوردر اتسجل وهيوصلك خلال 3 ايام", "الاوردر هيوصل امتى؟", "my order number?"])
+        self.both_ways([(True, "اهلا يا محمد الاسعار في الصورة"), (False, "الاسعار دي نهائي؟")],
+                       ["اهلا يا [name] الاسعار في الصورة", "الاسعار دي نهائي؟"])
+        self.both_ways([(False, "hi ahmed jersey price"), (True, "jersey is 900 EGP")],
+                       ["hi [name] jersey price", "jersey is 900 EGP"])
+        self.both_ways([(True, "Hi Omar Predator is back in stock"), (False, "Predator size 44?")],
+                       ["Hi [name] Predator is back in stock", "Predator size 44?"])
+        self.both_ways([(False, "انا منى الفستان ده متاح؟"), (True, "الفستان متاح مقاس M")],
+                       ["انا منى الفستان ده متاح؟", "الفستان متاح مقاس M"])
+
+    def test_red_team_lines_surnames_beside_a_name(self):
+        cases = [([(False, "عايز الجزمة السودا، كريم اسكندر"), (True, "متاحة بـ 1450 جنيه")], ["اسكندر", "كريم"]),
+                 ([(False, "اسكندر محمد بيسأل عن المقاس"), (True, "المقاس متاح")], ["اسكندر", "محمد"]),
+                 ([(False, "كريم، الشربيني عايز الجزمة"), (True, "ب 1450")], ["الشربيني", "كريم"]),
+                 ([(False, "كريم" + chr(0x1F44B) + " الشربيني عايز الجزمة"), (True, "ب 1450")], ["الشربيني"]),
+                 ([(False, "كريم\nالشربيني عايز الجزمة"), (True, "ب 1450")], ["الشربيني"]),
+                 ([(False, "بكام الجزمة؟ نورهان الشربيني"), (True, "ب 1450")], ["الشربيني", "نورهان"]),
+                 ([(False, "Karim eskandar here, the Black boots price?"), (True, "sure, 1450")], ["eskandar"])]
+        for rows, needles in cases:
+            got = " ".join(self.chat(rows))
+            for w in needles:
+                with self.subTest(text=rows[0][1], word=w):
+                    self.assertNotIn(w, got)
+        self.assertIn("الجزمة السودا", self.chat(cases[0][0])[0])
+        self.assertIn("بيسأل عن المقاس", self.chat(cases[1][0])[0])
+
+    def test_the_beside_rule_word_by_word(self):
+        self.assertTrue(cl.name_shaped("الشربيني"))
+        self.assertTrue(cl.name_shaped("اسكندر"))
+        for w in ("الجاكيت", "الاوردر", "السودا", "اطبع", "فيبور", "اوريجينال", "خطيبتي", "Nike", "Elite", "jacket"):
+            with self.subTest(word=w):
+                self.assertFalse(cl.name_shaped(w))
+        self.assertFalse(cl.name_shaped("eskandar"))
+        self.assertTrue(cl.name_shaped("eskandar", True))
+
+    def test_only_cue_words_are_learned(self):
+        c = cl.Cleaner([]).chat([])
+        c.texts([msg("انا كريم الجاكيت ده بكام؟"), msg("Karim Nike Mercurial size 43 price?", True),
+                 msg("اسمي زورفانو بلاتيرو"), msg("I am Tamblino, the Elite please")])
+        self.assertNotIn("الجاكيت", c.learned)
+        self.assertNotIn("Nike", c.learned)
+        self.assertNotIn("Mercurial", c.learned)
+        self.assertNotIn("Elite", c.learned)
+        self.assertTrue({"زورفانو", "Tamblino"} <= c.learned, c.learned)
+
+    def test_the_chat_is_cleaned_once_more_never_twice(self):
+        c = cl.Cleaner([]).chat([])
+        calls = []
+        real = c._texts
+        c._texts = lambda m: calls.append(1) or real(m)
+        c.texts([msg("زورفانو بيسأل"), msg("اسمي زورفانو بلاتيرو"), msg("بلاتيرو تاني")])
+        self.assertEqual(len(calls), 2)
+
+    def test_tag_fields_keep_product_words(self):
+        from arena import tag as tag_mod
+        c = cl.Cleaner([]).chat([])
+        c.texts([msg("انا كريم الجاكيت الجلد الاسود"), msg("الجاكيت الجلد متاح؟"), msg("الجلد ب 2000", True),
+                 msg("Karim Nike Mercurial size 43 price?")])
+        self.assertEqual(tag_mod._field("الجاكيت الجلد الاسود", c), "الجاكيت الجلد الاسود")
+        self.assertEqual(tag_mod._field("Nike Mercurial size 43", c), "Nike Mercurial size 43")
+        self.assertEqual(tag_mod._field("a black jacket", c), "a black jacket")
 
 class Examples(unittest.TestCase):
     def test_lines_refused(self):

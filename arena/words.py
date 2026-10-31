@@ -84,6 +84,14 @@ STOP_AR = """
 الثلاثي هيستلم هتستلم هستلم استلم المستلم تحت امرك امرك وصل وصلت وصلني موجود موجوده متاح متاحه
 مفيش فيه فيها عليه عليها لينا ليكم ليه ليها طلب بعت دفع شاف كلم سال رد عمل جاب خد اخد راح جه كان
 مكتب مكتبي مكتبنا شغل شغلي بيت بيتي البيت محل المحل فرع اقرب ايميل ايميلي الايميل بوابه البواب
+حبيبي حبيبتي
+"""
+# Product words beside a name or after one are never a name (round 3 of the feed review, 2026-10-31):
+# what a customer asks for, its colour and its model stay readable in every turn.
+PRODUCT_AR = """
+جاكيت جاكت جواكت هودي جيرسي تيشرت قميص شورت بنطلون شراب شنطه كاب فستان جلد جلدي سودا سوده بيضا بيضه
+حمرا زرقا خضرا صفرا اصفر رصاصي ذهبي فضي برتقالي بنفسجي زيتي بمبي نبيتي موف فيبور ميركوريال بريداتور
+نايكي نايك اديداس بوما اوريجينال اورجينال اورجنال اوردر
 """
 
 STOP_LA = """
@@ -98,6 +106,11 @@ gay ray7 nazel barra gowa ha5od hatlob otlob akkedly eb3at gazma ma2as lon se3r 
 salam ahlan el7amdolelah full name what where when how who which why can could will should do does did
 have has had get got send sent call message msg dm thx
 work home house office email mail gmail inbox kindly check
+"""
+PRODUCT_LA = """
+jacket jackets hoodie jersey shirt tshirt shorts pants bag cap dress leather waterproof original
+black white red blue green grey gray navy beige brown pink yellow orange purple gold silver
+nike adidas puma mercurial predator vapor superfly phantom tiempo copa elite pro academy
 """
 
 TITLES_AR = """
@@ -123,6 +136,7 @@ WEAK_PAIRS = (("i", "am"), ("this", "is"), ("it's",), ("its",))
 RELATION_AR = """
 لابني لبنتي لماما لبابا لاخويا لاختي لجوزي لمراتي لصاحبي لصاحبتي لخالي لعمي لخالتي لعمتي لجدي لجدتي
 ابني بنتي اخويا اختي ماما بابا جوزي مراتي صاحبي صاحبتي خالي عمي خالتي عمتي
+خطيبتي خطيبي لخطيبتي لخطيبي
 """
 RELATION_PAIRS = tuple(("my", w) for w in ("son", "daughter", "brother", "sister", "wife", "husband", "friend",
                                           "mom", "mum", "dad", "mother", "father", "cousin"))
@@ -153,7 +167,7 @@ def _set(*texts):
 
 FIRST = _set(FIRST_NAMES_AR, FIRST_NAMES_LA)
 CUE = _set(CUE_NAMES_AR, CUE_NAMES_LA) - FIRST
-STOP = _set(STOP_AR, STOP_LA)
+STOP = _set(STOP_AR, STOP_LA, PRODUCT_AR, PRODUCT_LA)
 TITLES = _set(TITLES_AR, TITLES_LA)
 LATIN_ENGLISH_TITLES = _set(ENGLISH_TITLES)
 WEAK = _set(WEAK_AR, WEAK_LA)

@@ -20,7 +20,11 @@ the simulated days with the user's own hours and people.
 
 close_day writes a played day's results to the engine log, so the night study reads them: a
 failed urgent check is urgent_missed, a failed clash check is clash, and a won day with no
-correction from the user is day_clean.
+correction from the user is day_clean. Lessons come only from the user's corrections (item 36):
+the plug settles a day as bad only on corrected, so urgent_missed and clash stay Arena win checks,
+harm while a lesson is on trial, and signs that a day is worth practising. A lost day the user
+did not correct gets day_missed with the cause only_code, so the night study leaves it out of
+every count and a miss only the code found never becomes a lesson.
 
 Model calls go through kit/model.py (Muse Spark Open) and count against the Arena's daily cap
 (arena/run.py Calls, arena-calls.json in the state folder). A model that does not answer, or the
@@ -78,8 +82,12 @@ def close_day(log, case, desk, judged):
         name = {"urgent": "urgent_missed", "clash": "clash"}.get(f["check"])
         if name:
             rows.append(log.result(case, name, detail={"item": f.get("item"), "check": f["check"]}))
-    if judged["won"] and not any(a["kind"] == "corrected" for a in desk.answers):
+    corrected = any(a["kind"] == "corrected" for a in desk.answers)
+    if judged["won"] and not corrected:
         rows.append(log.result(case, "day_clean"))
+    elif not corrected:
+        found = sorted({f["check"] for f in judged["failed"]})
+        rows.append(log.result(case, "day_missed", cause="only_code", detail={"checks": found}))
     return rows
 
 

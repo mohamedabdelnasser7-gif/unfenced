@@ -44,12 +44,15 @@
     "clash": {"speed": "fast", "shows_in_days": [0, 1],
               "about": "Two meetings overlap on the calendar, or one breaks the user's rules."},
     "day_clean": {"speed": "fast", "shows_in_days": [0, 1],
-                  "about": "At the end of the day the code found no urgent item missed, no clash, nothing sent without a yes and every promise a task, and the user corrected nothing."}
+                  "about": "At the end of the day the code found no urgent item missed, no clash, nothing sent without a yes and every promise a task, and the user corrected nothing."},
+    "day_missed": {"speed": "fast", "shows_in_days": [0, 1],
+                   "about": "At the end of the day the code found a miss and the user corrected nothing."}
   },
   "causes": {
     "late_item": "The item arrived after the user's day ended.",
     "plan_changed": "The user changed the plan of the day after the assistant acted.",
-    "no_signal": "The day gave no sign of the mode the user was in."
+    "no_signal": "The day gave no sign of the mode the user was in.",
+    "only_code": "Only the code found a miss and the user corrected nothing; lessons come only from the user's corrections."
   },
   "source": {
     "about": "The day itself. One case is one day of the user's work, so the case id names it.",
@@ -60,7 +63,7 @@
     "about": "A missed urgent item, a clash and a correction count as harm.",
     "serious": ["urgent_missed"]
   },
-  "decides": {"good": "day_clean", "bad": ["urgent_missed", "clash", "corrected"]},
+  "decides": {"good": "day_clean", "bad": ["corrected"]},
   "risk": {
     "high": {
       "about": "High risk for the user: anything that goes out (a send, a forward, a reply to many), any promise or date, meetings moved or cancelled, money, and anyone's personal data.",

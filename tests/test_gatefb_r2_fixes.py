@@ -4,12 +4,16 @@ extra's price unless a joining word sits between them (review finding 5); an ext
 only as the clause's subject (red team item A); an add-on word counts only before an allowed word or
 the clause end (review finding 2, red team item B). Fast notes: a name the customer gave at a start
 counts (red team item C); ";" and ":" start no note sentence (review finding 3); a note is read with
-a hidden character both ways (red team item E). Made-up text against the demo store data; no model,
-no network."""
+a hidden character both ways (red team item E); a place of one word passes only beside a delivery
+word (red team item D). Made-up text against the demo store data; no model, no network."""
+import copy
 import unittest
+from unittest import mock
 
 from arena import factcheck
 from engine import fast as engine_fast
+from kit.db import Db
+from kit.tools import store
 from reflection import PLUG as SALES
 from reflection import fast as sales_fast
 from tests.fake_model import clean_env
@@ -225,6 +229,64 @@ class HiddenCharactersInANote(unittest.TestCase):
     def test_any_space_between_a_places_words_keeps_it_whole(self):  # mutant ef12
         text = "Ask if Sheikh" + chr(0x1680) + "Zayed is close."
         self.assertEqual(engine_fast.guard(text, SALES, ["I am in Sheikh Zayed"], known=("Sheikh Zayed",)), [])
+
+
+ZONES = {"zones": [{"area": "Zayed", "fee": "60"}, {"area": "Rehab", "fee": "60"},
+                   {"area": "Maadi" + AC + " Nasr City", "fee": "60"}, {"area": "Badr City AND Shorouk", "fee": "60"}]}
+
+
+class OneWordPlaces(unittest.TestCase):
+    """Red team item D: a delivery place of one word passes only in a note sentence that also writes a
+    delivery word, so a customer named like a one-word zone is still refused."""
+
+    def setUp(self):
+        clean_env(self)
+        patcher = mock.patch.object(store, "delivery", lambda *a, **k: copy.deepcopy(ZONES))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_one_word_place_as_a_name_is_refused(self):
+        for name, text in (("Zayed", "Ask Zayed about the size."), ("Rehab", "Ask what Rehab wants before the price."),
+                           ("Maadi", "Maadi wants the Elite; ask the size."),
+                           ("Zayed", "Ask Zayed the size. Mention delivery after.")):
+            self.assertIn(NAMED + name.lower(), note_guard(text, [f"hi I am {name}, how much"]), text)
+
+    def test_a_one_word_place_beside_a_delivery_word_passes(self):
+        for text in ("Mention delivery to Zayed after the size.", "Ask if Rehab is their delivery area.",
+                     "Confirm the zone is Maadi, then ask the size.", "Say shipping to Shorouk works; ask the size."):
+            self.assertEqual(note_guard(text, ["I live in Zayed or Rehab or Maadi or Shorouk"]), [], text)
+
+    def test_a_hidden_character_does_not_join_a_delivery_word_to_another_sentence(self):
+        self.assertIn(NAMED + "zayed", note_guard("Ask Zayed the size." + ZW + "Delivery after.", ["I am Zayed"]))
+
+    def test_an_arabic_comma_and_a_capital_and_cut_a_zone_into_places(self):  # mutants rf5, rf6
+        known = sales_fast.known()
+        for place in ("Nasr City", "Badr City"):
+            self.assertIn(place, known)
+        for place in ("Maadi", "Shorouk"):
+            self.assertIn((place, sales_fast.DELIVERY_WORDS), known)
+        for text in ("Mention delivery to Nasr City after the size.", "Mention delivery to Badr City after the size."):
+            self.assertEqual(note_guard(text, ["I live in Nasr City or Badr City"]), [], text)
+
+    def test_any_agents_pair_works_the_same_in_the_engine(self):
+        known = (("Zayed", ("go", "went")),)
+        self.assertTrue(engine_fast.guard("Ask Zayed about the size.", SALES, ["I am Zayed"], known=known))
+        self.assertEqual(engine_fast.guard("Ask if they go to Zayed.", SALES, ["I am in Zayed"], known=known), [])
+        self.assertTrue(engine_fast.guard("Ask if they go to Zayed.", SALES, ["I am in Zayed"],
+                                          known=(("Sheikh Zayed", ("go",)),)))  # a pair of more words: nothing
+
+    def test_every_sentence_that_writes_the_place_needs_a_delivery_word(self):
+        self.assertIn(NAMED + "zayed", note_guard("Mention delivery to Zayed. Ask Zayed the size.", ["I am Zayed"]))
+
+    def test_a_hidden_character_inside_the_delivery_word_does_not_make_it(self):
+        self.assertIn(NAMED + "zayed", note_guard("Ask Zayed about deli" + ZW + "very.", ["I am Zayed"]))
+
+    def test_the_fast_notes_pass_the_agents_pairs_to_the_check(self):
+        db = Db(":memory:")
+        self.addCleanup(db.close)
+        fast = engine_fast.FastNotes(db, SALES, writer=lambda plug, view: "Mention delivery to Zayed after the size.",
+                                     never=sales_fast.NEVER, known=sales_fast.known)
+        self.assertEqual(fast._write({}, ["I live in Zayed"]), ("Mention delivery to Zayed after the size.", None))
 
 
 if __name__ == "__main__":

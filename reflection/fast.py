@@ -37,7 +37,8 @@ then, last) and "once" are not numbers here: the order of questions is what most
 Only the fast note guard changed: the lessons' risk check still reads the plug's whole high list.
 The engine's name check lets known() through: the topic words, the catalogue's words and the
 delivery places, so a note may name the Vapor or Cairo the customer typed, never their name. A
-place of more words passes only whole ("Sheikh Zayed", never "Zayed" alone).
+place of more words passes only whole ("Sheikh Zayed", never "Zayed" alone), and a place of one
+word only in a sentence that also writes a delivery word ("Confirm Cairo for delivery").
 
 Every writer call is a model call, so it is counted in kit/limits.py under LIMIT_KEY, like a
 customer. A sweep stops once the writer is over a limit (FastNotes.sweep), so the endings left
@@ -191,10 +192,17 @@ def known():
     product added later counts; the store's own cache keeps it cheap. A zone's area is cut into its
     places at "and", "&", "/" and commas ("Cairo and Giza" gives Cairo and Giza), and each place stays
     whole, so a place of more words ("Sheikh Zayed") lets its words through only together, never a
-    first name like Zayed alone (red team gatefb round 1, item 3)."""
+    first name like Zayed alone (red team gatefb round 1, item 3). A place of one word comes as a pair
+    with DELIVERY_WORDS, so it passes only in a note sentence that also writes one of them: "Mention
+    delivery to Zayed" passes, "Ask Zayed about the size" does not (red team gatefb round 2, item D)."""
     places = {p.strip() for zone in store.delivery().get("zones", []) if isinstance(zone, dict)
               for p in _PLACE_CUT.split(str(zone.get("area", ""))) if p.strip()}
-    return frozenset(TOPIC_WORDS) | store.vocabulary() | places
+    return (frozenset(TOPIC_WORDS) | store.vocabulary()
+            | {p if len(re.findall(r"\w+", p)) > 1 else (p, DELIVERY_WORDS) for p in places})
+
+
+# the words a place of one word needs beside it in the same note sentence (red team gatefb round 2, item D)
+DELIVERY_WORDS = frozenset({"deliver", "delivery", "shipping", "ship", "zone", "area", "توصيل", "شحن"})
 
 
 # where a delivery zone's area lists its places: "Cairo and Giza", "Nasr City, Heliopolis", "A & B", "A / B"

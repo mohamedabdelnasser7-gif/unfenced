@@ -198,9 +198,10 @@ class PlacePhrases(unittest.TestCase):
 
     def test_the_sales_places_are_cut_at_and_and_commas_and_kept_whole(self):
         known = sales_fast.known()
-        for place in ("Cairo", "Giza", "Sayeda Zeinab", "El Rehab", "Sheikh Zayed", "Badr City", "Nasr City",
-                      "Ain Shams"):
+        for place in ("Sayeda Zeinab", "El Rehab", "Sheikh Zayed", "Badr City", "Nasr City", "Ain Shams"):
             self.assertIn(place, known)
+        for place in ("Cairo", "Giza"):  # one word: with the delivery words (red team gatefb round 2, item D)
+            self.assertIn((place, sales_fast.DELIVERY_WORDS), known)
         for word in ("Zeinab", "Zayed", "Nasr", "Shams", "Rehab", "Badr"):
             self.assertNotIn(word, known)
 

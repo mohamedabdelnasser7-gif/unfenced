@@ -36,7 +36,9 @@ round 2, finding 3; red team gatefb round 2, item E). The agent's own words pass
 the words its plug writes with a capital and the words the agent gives (known=: its catalogue,
 its places, its topic words), so a note may name a product or a place the source typed (review
 round 3). An entry of more than one word passes only where the note writes it whole: "Sheikh
-Zayed" passes, "Ask Zayed" does not (red team gatefb round 1, item 3). The never marks are what a note may never state, given by the agent as a Risk (words,
+Zayed" passes, "Ask Zayed" does not (red team gatefb round 1, item 3). An entry may be a pair, one
+word and its beside words: that word passes only where every note sentence that writes it also
+writes one of them (red team gatefb round 2, item D). The never marks are what a note may never state, given by the agent as a Risk (words,
 patterns and tools; never=). With none given they are the plug's whole high risk list, the
 strict default. An agent gives its own when its high list also holds words a note needs
 to name a topic: a note may say what to talk about, never state a figure, a cut, a promise or
@@ -133,6 +135,7 @@ _SENTENCE_ENDS = ".!?;:؟\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"
 # What a sentence of a note starts after: no ";" or ":", so "Ask the size; Ahmed wants it" reads Ahmed
 # past its sentence start (review gatefb round 2, finding 3)
 _NOTE_ENDS = _SENTENCE_ENDS.replace(";", "").replace(":", "")
+_NOTE_SPLIT = re.compile("[" + re.escape(_NOTE_ENDS) + "]")
 # After a word that opens a source's turn, line or sentence, what makes it a name the source gave
 # rather than a capital it has anyway: "here", "speaking" or "from", a comma, a colon, a sentence end,
 # or the end of the line or the turn ("Ahmed here", "Mona: do you have", "Youssef. Which one?"; red team
@@ -165,7 +168,8 @@ class FastNotes:
     reader(case id): the case's turns, a list of {"from", "text"} or {"from", "tools"}; optional.
     never: the marks a note may never carry, a plug.Risk; the plug's high risk list when left out.
     known(): the agent's own words a note may name although the source wrote them (its catalogue,
-    its places; an entry of more words is a phrase), read at each check; optional. When it fails,
+    its places; an entry of more words is a phrase; a pair (word, beside words) passes only beside
+    one of them), read at each check; optional. When it fails,
     no words pass (the stricter way)."""
 
     def __init__(self, db, plug, *, writer=None, reader=None, keep_days=KEEP_DAYS, never=None, known=None):
@@ -283,14 +287,16 @@ class FastNotes:
         return text, None
 
     def _known(self):
-        """The agent's own words from known(), as texts; () with none or when it fails."""
+        """The agent's own words from known(), as texts and pairs; () with none or when it fails."""
         if self.known is None:
             return ()
         try:
             got = self.known()
         except Exception:  # a catalogue that cannot answer lets no word through, never more
             return ()
-        return tuple(w for w in got if isinstance(w, str)) if isinstance(got, (set, frozenset, list, tuple)) else ()
+        if not isinstance(got, (set, frozenset, list, tuple)):
+            return ()
+        return tuple(w for w in got if isinstance(w, str) or _pair(w))
 
     def _save(self, case_id, source, ended_at, text, why, now):
         with self.db.tx() as c:
@@ -416,7 +422,8 @@ def guard(text, plug, theirs=(), never=None, known=()):
     never: the marks a note may never carry (a plug.Risk); the plug's high risk list when None.
     The core marks and NUMBERS are checked either way. known: the agent's own words (texts) a note
     may name although the source wrote them, an entry of more words only where the note writes it
-    whole; the words the plug writes with a capital pass too."""
+    whole, a pair (word, beside words) only where each note sentence with the word writes one of its
+    beside words; the words the plug writes with a capital pass too."""
     if not isinstance(text, str) or not text.strip():
         return ["not one line of text"]
     if len(text.splitlines()) > 1:  # every line break Python knows: \n, \r, U+2028, U+0085 and more
@@ -439,6 +446,7 @@ def guard(text, plug, theirs=(), never=None, known=()):
         every |= _capitalised(text, hidden=hidden, phrases=phrases, ends=_NOTE_ENDS)
     names = ((later & _their_words(theirs))
              | ((every - later) & _their_capitals(theirs))) - _own_words(plug, known)
+    names -= _beside_ok(text, names, _beside(known))
     if names:
         found.append("names a word from the source's own words: " + ", ".join(sorted(names)))
     return found
@@ -467,6 +475,34 @@ def _phrases(known):
     like "Sheikh Zayed" or "El Rehab" (red team gatefb round 1, item 3)."""
     runs = (tuple(_WORDS.findall(risk_mod.normalize(w))) for w in known if isinstance(w, str))
     return {r for r in runs if len(r) > 1}
+
+
+def _pair(entry):
+    """True when an entry of known is a pair: a text and a collection of texts."""
+    return (isinstance(entry, tuple) and len(entry) == 2 and isinstance(entry[0], str)
+            and isinstance(entry[1], (set, frozenset, list, tuple)))
+
+
+def _beside(known):
+    """The pairs of known whose first part is one word, as {word: its beside words}, all in the
+    normal form (red team gatefb round 2, item D). A pair of more words lets nothing through."""
+    out = {}
+    for entry in known:
+        if _pair(entry):
+            got = _WORDS.findall(risk_mod.normalize(entry[0]))
+            if len(got) == 1:
+                out.setdefault(got[0], set()).update(
+                    w for b in entry[1] if isinstance(b, str) for w in _WORDS.findall(risk_mod.normalize(b)))
+    return out
+
+
+def _beside_ok(text, names, beside):
+    """The words of names that beside lets through: every sentence of the note that writes the word
+    also writes one of its beside words, with a hidden character read as nothing and as a space."""
+    parts = [part for hidden in ("", " ") for part in _NOTE_SPLIT.split(_plain(text, hidden))]
+    sentences = [set(_WORDS.findall(risk_mod.normalize(part)))
+                 | {risk_mod.normalize(m.group(0)) for m in _NAME_WORD.finditer(part)} for part in parts]
+    return {w for w in names & beside.keys() if all(words & beside[w] for words in sentences if w in words)}
 
 
 def _plain(text, hidden=""):

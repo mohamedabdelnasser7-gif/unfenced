@@ -13,7 +13,10 @@ price     every amount in the reply (kit/send_check.py prices_in) is a price of 
           their Arabic and Franco spellings), or in a clause that names no product and no tier
           when the reply names the extra elsewhere (or, naming nothing, the customer's line does)
           and its sentence names no boot and no tier: "The Vapor 17 Elite is 400 EGP" fails,
-          "الطباعة 400 جنيه" passes (2026-10-31). For this rule a colon cuts a clause too, and a
+          "الطباعة 400 جنيه" passes (2026-10-31). An add-on word right beside the amount (more,
+          extra, plus, on top, زيادة) keeps the extra's price when its sentence names the extra
+          (else as above, the reply or the customer's line): "If you add printing to the Elite, it's 400 EGP more" passes (DECISIONS item 52). For
+          this rule a colon, a bracket and a spaced dash cut a clause too, and a
           clause that names no product and no tier takes those of the clauses before it in its
           sentence (red team round 2). A model number in a product's title (the 17 in Vapor 17,
           the 50 in F50) is never an amount, unless a currency or thousands word follows it.
@@ -109,6 +112,18 @@ TIER_CLAUSE = re.compile(r"(?:[^.!?؟\n,،;؛]|(?<=\d)[.,](?=\d))+")
 # time or a number (10:30)
 PRICE_SENTENCE = re.compile(r"(?:[^.!?؟\n]|(?<=\d)\.(?=\d))+")
 EXTRA_CLAUSE = re.compile(r"(?:[^.!?؟\n,،;؛:]|(?<=\d)[.,:](?=\d))+")
+# A bracket or a spaced dash sets an aside apart like a comma does, for the extra price rule only: "The
+# Vapor 17 Elite (with printing) is 400 EGP" (review round 3, item 4). The marks become ";", which
+# EXTRA_CLAUSE cuts at and which never sits inside a number.
+ASIDE = re.compile(r"[()\[\]]|(?<=\s)[-\u2013\u2014](?=\s)")
+# An add-on word right beside an amount in its clause, with at most a currency word between (DECISIONS
+# item 52): "400 EGP more", "400 extra", "400 on top", "400 جنيه زيادة", "plus 400", "+ 400", "an extra
+# 400", "زيادة 400". Such an amount is said to go on top of something, so an extra's price there is the extra's.
+ADDON_WORDS = r"more|extra|on\s+top|زيادة|زياده"
+ADDON = re.compile(
+    send_check.LETTER_BEFORE + r"(?:(?:plus|(?:an\s+)?extra|زيادة|زياده)[^\S\n]+|\+[^\S\n]*)(" + send_check.DIGITS + r")(?![\d.,]\d)"
+    r"|(?<![\d.,])(" + send_check.DIGITS + r")[^\S\n]*(?:" + send_check.CURRENCY + r")?[^\S\n]*(?:" + ADDON_WORDS + ")"
+    + send_check.NO_LETTER_AFTER, re.IGNORECASE)
 # Arabic and Franco spellings of an English word stem. Used only for a stem an extra's own title,
 # type or description carries (extra_words), so an extra with none of these stems gets none of them.
 STEM_FORMS = {
@@ -300,8 +315,13 @@ def check(reply, customer_text="", tool_results=(), orders=()):
     backdrop = extras_named(reply, extras, items)
     if not backdrop and not products_named(reply, items):
         backdrop = extras_named(customer_text, extras, items)
-    for clause, boot, kinds, sentence_boot in _extra_clauses(text, items, extras, all_tiers):
+    for clause, boot, kinds, sentence_boot, sentence in _extra_clauses(text, items, extras, all_tiers):
         here = extras_named(clause, extras, items)
+        # an extra the sentence names (else the backdrop) keeps its price beside an add-on word:
+        # "If you add printing to the Elite, it's 400 EGP more" (DECISIONS item 52)
+        on_top = _addon_amounts(clause) & _dec(send_check.amount(v["price"])
+                                               for e in (extras_named(sentence, extras, items) or backdrop)
+                                               for v in e.get("variants", []) if "price" in v)
         # the backdrop holds an extra's price only in a sentence that names no boot and no tier: "The
         # Vapor 17 Elite, with printing, is 400 EGP" fails (red team round 2, R2-1)
         own = _dec(send_check.amount(v["price"]) for e in (here if sentence_boot else here or backdrop)
@@ -314,7 +334,7 @@ def check(reply, customer_text="", tool_results=(), orders=()):
         else:
             ok = other | own | {d for d in amounts if d not in _dec(extra_prices)}
         for d in amounts:
-            if d in wrong or d in ok:
+            if d in wrong or d in ok or d in on_top:
                 continue
             wrong.add(d)
             if d in _dec(extra_prices):
@@ -394,17 +414,18 @@ def check(reply, customer_text="", tool_results=(), orders=()):
 
 
 def _extra_clauses(text, items, extras, all_tiers):
-    """(clause, boot, kinds, sentence_boot) for each clause of text the extra price rule reads
+    """(clause, boot, kinds, sentence_boot, sentence) for each clause of text the extra price rule reads
     (EXTRA_CLAUSE, inside each PRICE_SENTENCE). boot: the tiers or boots the clause names; kinds:
     the extras it names by their type or title, never by "your name" alone (an order asks for it).
     A clause that names no product (boot or extra) and no tier takes the boots, tiers and kinds of
     the clauses before it in its sentence: in "Vapor Elite, 400 EGP, with your name" the 400 sits
-    beside the boot (red team round 2, R2-1). sentence_boot: the sentence names a boot or a tier."""
+    beside the boot (red team round 2, R2-1). A bracket or a spaced dash cuts a clause too (ASIDE).
+    sentence_boot: the sentence names a boot or a tier."""
     out = []
     for sentence in PRICE_SENTENCE.findall(text):
         sentence_boot = bool(tiers_named(sentence, all_tiers) or _boots(products_named(sentence, items), extras))
         seen_boot, seen_kinds = [], []
-        for clause in EXTRA_CLAUSE.findall(sentence):
+        for clause in EXTRA_CLAUSE.findall(ASIDE.sub(";", sentence)):
             named = products_named(clause, items)
             boot = list(tiers_named(clause, all_tiers)) or _boots(named, extras)
             kinds = extras_named(clause, extras, items, kind=True) or [i for i in named if i in extras]
@@ -413,7 +434,19 @@ def _extra_clauses(text, items, extras, all_tiers):
                 seen_kinds += kinds
             else:
                 boot, kinds = list(seen_boot), list(seen_kinds)
-            out.append((clause, boot, kinds, sentence_boot))
+            out.append((clause, boot, kinds, sentence_boot, sentence))
+    return out
+
+
+def _addon_amounts(clause):
+    """The amounts of a clause that an add-on word sits right beside (ADDON), as Decimals."""
+    out = set()
+    for m in ADDON.finditer(clause):
+        raw = (m.group(1) or m.group(2)).replace(",", "")
+        try:
+            out.add(Decimal(raw))
+        except ArithmeticError:
+            continue
     return out
 
 

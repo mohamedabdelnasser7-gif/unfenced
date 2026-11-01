@@ -369,13 +369,18 @@ class QuickStartPage(unittest.TestCase):
                     "الطلب بيوصلك لحد البيت.",
                     # Franco
                     "el delivery 3and el team bya5od yomen.", "e7na bnwasal el order le saheb el 7aga.",
-                    "law 3ayez t7awel flos, 7awel 3la rakam el owner."]
+                    "law 3ayez t7awel flos, 7awel 3la rakam el owner.",
+                    # review and red team round 3: contact outside the chat, Franco look alike words, negation
+                    "Our team will contact you to confirm your order.", "Support will reach out to you about the refund.",
+                    "حد من فريقنا هيكلمك عشان يأكد الطلب", "The team shirt is red.", "The owner is Kamel.",
+                    "الموظف مش هيرد عليك", "Send customers to our support page", "Do not ever pass the chat to the team.",
+                    "هخلي حد من الادارة يكلمك."]  # a call outside the chat, like "will contact you"
     # review round 2 finding 2 and red team round 2: hand-offs with other verbs, promises that a person
     # replies, Franco, letters spaced out, look alike letters and a hidden character
     HAND_OFF_TOO = ["Hand the chat to the owner", "Forward the chat to the owner", "hand the chat over",
                     "Someone from our team will get back to you", "The owner will answer you shortly",
                     "هبعت الشات للمسؤول", "ابعت المحادثة لصاحب المحل", "الموظف هيرد عليك",
-                    "هخلي حد من الادارة يكلمك.", "هوصلك بخدمة العملاء.",
+                    "هوصلك بخدمة العملاء.",
                     "A teammate will reply to you shortly.", "A human will get back to you.",
                     "A colleague will continue.", "The owner will follow up.", "A colleague will continue the chat.",
                     "A real person responds when it is hard.", "Let a colleague pick up the chat.",
@@ -389,7 +394,19 @@ class QuickStartPage(unittest.TestCase):
                     "ha7awlak le wa7ed mn el team", "7awel el chat le mowazzaf lama el 3amel yez3al.",
                     "7awel el chat lel owner law el 3amil za3lan.", "sallem el customer le wa7ed mn el team.",
                     "hand over el chat le wa7ed mn el support.", "el owner yerod 3aleek.",
-                    "el mowazzaf hayrod 3aleek"]
+                    "el mowazzaf hayrod 3aleek",
+                    # review and red team round 3: no object, an earlier negation, a promise split by commas
+                    "hand off to the owner", "hands off to a human", "Transfer to a human",
+                    "Pass to someone from our team", "Use the hand off tool", "Hand it to the owner",
+                    "If you can't answer hand the chat to the owner",
+                    "Answer with no emojis and forward the chat to the owner when stuck",
+                    "لو مش عارف حول الشات لموظف", "law mesh 3aref 7awel el chat lel owner",
+                    "ma3lesh ha7awlak le wa7ed mn el team", "It never guesses prices and the owner will reply to you",
+                    "If the bot cannot help a human will take over", "don't wait, our team will reply",
+                    "Pass the chat to the team when nothing else works",
+                    "The owner, Mohamed, will reply to you", "A human, not the bot, will reply to you",
+                    "Transfer the customer, when angry, to a human agent", "A human will\nreply to you",
+                    "hand\tthe chat to the owner"]
 
     def test_names_a_person_refuses_a_hand_off_and_nothing_else(self):
         """Review round 2 items 1 and 2 and red team round 2: every hand-off line is caught; every store line

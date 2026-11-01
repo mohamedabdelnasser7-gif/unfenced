@@ -86,9 +86,11 @@ LEFT_OUT = ("exam", "kind", "owner", "hands_over")  # need files or other agents
 # a hand-over verb with the chat, the customer or the conversation as its object or its subject (hand,
 # pass, forward, transfer, حول, ابعت, سلم, 7awel, sallem), or a person (a human, a teammate, the owner,
 # موظف, حد من الفريق, wa7ed mn el team) taking over, answering, getting back to or going on with the
-# customer. The handoff tool and the with_person stage stand alone. Each clause is read on its own (a
-# card field, a sentence, a part between commas), and a negated clause passes ("never hand off a chat",
-# "ما تحولش الشات لحد"). The text is read in engine/risk.py's normal form first (look alike letters
+# customer, or a hand verb straight to a person ("hand off to the owner", "transfer to a human"). The
+# handoff tool and the with_person stage stand alone. Each clause is read on its own (a card field, a
+# sentence, a part between commas) and each sentence again with its commas and brackets gone; a negated
+# hand-off passes ("never hand off a chat", "ما تحولش الشات لحد"). A person writing or calling outside the
+# chat is not a hand-off ("our team will contact you to confirm"). The text is read in engine/risk.py's normal form first (look alike letters
 # folded, marks and hidden characters gone, lowercase, ة as ه), with letters spaced one by one read
 # joined ("h a n d o f f"). Arabic verbs are whole words with their usual prefixes, never inside another
 # word (بيوصل, توصيل and سلمى are not hand-offs).
@@ -122,12 +124,16 @@ _ON_IT = (r"(?=\s*$|\s*[^\w\s]|\s+(?:(?:to|with|on|for|from)\s+)?(?:you|ya|u|you
           r"me|us|it|the\s+agent)|as\s+soon)\b)")
 _TAKES = (r"(?:answer(?:s|ed|ing)?|repl(?:y|ies|ied|ying)|respond(?:s|ed|ing)?|get(?:s|ting)?\s+back|got\s+back"
           r"|call(?:s|ed|ing)?\s+(?:you|them|the\s+customer)\s+back|talk(?:s|ed|ing)?\s+(?:to|with)"
-          r"|speak(?:s|ing)?\s+(?:to|with)|spoke\s+(?:to|with)|chat(?:s|ted|ting)?\s+with|contact(?:s|ed|ing)?"
-          r"|reach(?:es|ed|ing)?\s+out|follow(?:s|ed|ing)?[\s-]+up|continu(?:e|es|ed|ing)|carr(?:y|ies|ied)\s+on"
+          r"|speak(?:s|ing)?\s+(?:to|with)|spoke\s+(?:to|with)|chat(?:s|ted|ting)?\s+with"
+          r"|follow(?:s|ed|ing)?[\s-]+up|continu(?:e|es|ed|ing)|carr(?:y|ies|ied)\s+on"
           r"|tak(?:e|es|en|ing)\s+over|took\s+over|step(?:s|ped|ping)?\s+in|jump(?:s|ed|ing)?\s+in"
           r"|join(?:s|ed|ing)?|pick(?:s|ed|ing)?\s+up|handl(?:e|es|ed|ing)|deal(?:s|t|ing)?\s+with)")
 _EN_HAND_OFF = [
-    r"(?<![a-z])hand[_-]?offs?(?![a-z])|with_person|\b(?:human|person|team|live|owner)[\s_-]*takeover\b",
+    r"(?<![a-z])hand[_-]?offs?(?![a-z])|\bhand\s+off\s+(?:tool|stage|step|function)s?\b|with_person"
+    r"|\b(?:human|person|team|live|owner)[\s_-]*takeover\b",
+    r"\b(?:hand(?:s|ed|ing)?(?:\s+(?:it|them|this|that|me|him|her|you))?(?:[\s_-]*(?:off|over))?|handover)"
+    + _TO_WHO % _WHO,  # hand off to the owner, hand it to the owner
+    r"\b(?:pass(?:es|ed|ing)?|forward(?:s|ed|ing)?|transfer(?:s|red|ring)?)" + _TO_WHO % _WHO_SURE,  # transfer to a human
     r"\b" + _HAND + r"\s+" + _DET + _CHAT,  # hand off the chat, pass the conversation
     r"\b(?:" + _HAND + r"\s+" + _DET + r"(?:" + _CHAT + r"|" + _CUST + r")(?:\s+[\w'’]+){0,3}?|" + _SEND + r"\s+"
     + _DET + r"(?:" + _CHAT + r"|" + _CUST + r"))" + _TO_WHO % _WHO,  # transfer the customer to a human
@@ -155,7 +161,7 @@ _AR_HAND_OFF = [re.compile(p) for p in (
     _AR_WHO + r"(?:\s+\S+){0,2}?\s+" + _AR_PRE + r"(?:رد|جاوب|كمل|ستلم|استلم|تولي)(?:(?:ك|كي|كم)(?!\w)|(?!\w)"
     + _AR_ON_IT + r")",  # الموظف هيرد عليك
     r"(?<!\w)[وف]?(?:ل|ب)?(?:حد|واحد|حدا)\s+من(?:\s+\S+){0,2}?\s+" + _AR_PRE
-    + r"(?:رد|جاوب|كمل|ستلم|استلم|تولي|كلم|تواصل|شوف)(?:(?:ك|كي|كم)(?!\w)|(?!\w)" + _AR_ON_IT + r")",
+    + r"(?:رد|جاوب|كمل|ستلم|استلم|تولي|شوف)(?:(?:ك|كي|كم)(?!\w)|(?!\w)" + _AR_ON_IT + r")",
 )]
 # Franco (Arabic in Latin letters and digits).
 _F_WHO = (r"(?:el\s+)?(?:(?:wa7ed|wahed|7ad|had|7ada)\s+(?:mn|men|min)\b|mowaz+af\w*|mwaz+af\w*|mas2o+l\w*|masool|"
@@ -168,15 +174,22 @@ _F_HAND_OFF = [re.compile(p, re.IGNORECASE) for p in (
     + _F_WHO,  # ha7awlak le wa7ed mn el team
     r"(?<!\w)" + _F_WHO + r"(?:\s+\S+){0,3}?\s+(?:ha|h|b|bi|be|bey|bay|hay|hey|y|ye|yi|t|te|hy|by)?"
     r"(?:rod|red|rd|rud|gawb|gaweb|kamel|kammel|kaml|stalam|stlem|estalam)(?:(?:ak|ik|ko)(?!\w)|(?!\w)"
-    r"(?=\s*$|\s*[^\w\s]|\s+(?:3alee?k|3alee?ki|3alekom|3leek|3lek|ma3ak|ma3aki|ma3ako|m3ak|3ala\s+el\s+3am[ei]e?l|"
+    r"(?=\s+(?:3alee?k|3alee?ki|3alekom|3leek|3lek|ma3ak|ma3aki|ma3ako|m3ak|3ala\s+el\s+3am[ei]e?l|"
     r"ma3\s+el\s+3am[ei]e?l|el\s+chat|bsor3a|7alan|delwa2ty|3ala\s+tool)(?!\w)))",  # el mowazaf hayrod 3aleek
 )]
 _NEGATED = re.compile(
     r"(?<!\w)(?:never|not|no|nobody|none|nothing|without|nor|cannot|(?:do|does|did|is|are|was|were|wo|ca|could|"
     r"should|would|must|have|has|had|need)n['’]?t|(?<!قبل )(?<!بعد )(?<!لحد )(?<!زي )(?<!كل )ما|مش|لا|لن|لم|ابدا|ممنوع|"
-    r"بلاش|مفيش|محدش|ma|mesh|msh|mosh|mish|abadan|la2|balash|mamno3|ma\w+sh)(?!\w)"
+    r"بلاش|مفيش|محدش|ma|mesh|msh|mosh|mish|abadan|la2|balash|mamno3|ma(?!3le)\w+sh)(?!\w)"
     r"|(?<!\w)[وف]?ما?[تيبنه]\w+ش(?!\w)", re.IGNORECASE)
-_CLAUSES = re.compile(r'[.!?؟;؛:\n"،,()\[\]{}]|\\n')
+_CLAUSES = re.compile(r'[.!?؟;؛:\n"،,()\[\]{}]|\\[nt]')
+_SENTENCES = re.compile(r"[.!?؟;؛:]")
+_JOIN = re.compile(r'[\s"،,()\[\]{}]+|\\[nt]')  # a promise split by a comma, a bracket or a line break
+_ASIDE = re.compile(r"[,،(\[]\s*[^,،()\[\]]{0,30}?\s*[,،)\]]")  # "The owner, Mohamed, will reply" read without the aside
+# A negation counts only inside the match or in the word just before it, with a few fillers between
+# ("never hand off", "Do not ever pass the chat"); one earlier in the clause does not ("If you can't
+# answer hand the chat to the owner").
+_NEAR = re.compile(r"\S+\s+(?:(?:ever|you|to|should|we|i|do|be|any|one|ابدا|abadan)\s+){0,2}$", re.IGNORECASE)
 _SPACED = re.compile(r"(?<![^\W\d_])(?:[^\W\d_][ ._-]){2,}[^\W\d_](?![^\W\d_])")
 
 
@@ -186,10 +199,12 @@ def names_a_person(text):
         return None
     plain = risk_mod.normalize(text, hidden="", letters=True)
     plain = _SPACED.sub(lambda m: re.sub(r"[ ._-]", "", m.group(0)), plain)
-    for clause in _CLAUSES.split(plain):
+    joined = [_JOIN.sub(" ", v) for s in _SENTENCES.split(plain) for v in (s, _ASIDE.sub(" ", s))]
+    for clause in (*_CLAUSES.split(plain), *joined):
         for rx in (*_EN_HAND_OFF, *_AR_HAND_OFF, *_F_HAND_OFF):
             for m in rx.finditer(clause):
-                if not _NEGATED.search(clause[:m.end()]):
+                near = _NEAR.search(clause[:m.start()])
+                if not _NEGATED.search((near.group(0) if near else "") + clause[m.start():m.end()]):
                     return m.group(0).strip()
     return None
 

@@ -229,6 +229,23 @@ class Graph(Channel):
                     code = 0
             raise SendRefused(e.code, code) from None
 
+    def typing(self, message_id):
+        """Marks the customer's message read and shows the typing dots until the reply is sent or
+        25 seconds pass (Meta's typing indicator). Only for a message we answer. Never raises: the
+        dots are a courtesy, so a refusal is logged and the reply goes out as usual."""
+        if not re.fullmatch(r"wamid\.[0-9A-Za-z_=+/-]{1,256}", message_id or ""):
+            return False
+        url = f"{GRAPH}/{self.version}/{self.phone_number_id}/messages"
+        body = {"messaging_product": "whatsapp", "status": "read", "message_id": message_id,
+                "typing_indicator": {"type": "text"}}
+        try:
+            with self._open(self._req(url, body), timeout=self.timeout) as r:
+                r.read(MAX_ERROR_BODY)
+            return True
+        except Exception as e:
+            log.warning("the typing dots were refused: %s", type(e).__name__)
+            return False
+
     def download(self, media_id, max_bytes):
         """(bytes, mime) for a media id. Raises TooBig past max_bytes without reading the rest."""
         if not re.fullmatch(r"[0-9A-Za-z_-]{1,128}", media_id or ""):
@@ -470,6 +487,9 @@ class App:
                           message_id=inc.message_id, timestamp=inc.timestamp,
                           rejected_images=1 if inc.kind == "image" else 0, audio_failed=inc.kind == "audio")
         else:
+            typing = getattr(self.graph, "typing", None)  # a test channel may have no dots
+            if typing:
+                typing(inc.message_id)  # before the media download and the model call
             msg = to_message(inc, self.graph)
         return loop.turn(msg, chats=self.chats, model=self.model, lessons=self.lessons,
                          results=self.results, send=self.graph.send, limits=self.limits, over=over, fast=self.fast)

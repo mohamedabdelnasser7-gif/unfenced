@@ -429,6 +429,33 @@ class Photos(unittest.TestCase):
         self.assertEqual((body["to"], body["type"], body["text"]["body"]), ("201111111111", "text", "تمام"))
 
 
+    def test_typing_shape(self):
+        seen = []
+
+        def opener(req, timeout):
+            seen.append(req)
+            return FakeResp(b'{"success":true}')
+
+        self.assertTrue(wa.Graph(BEARER, "111", opener=opener).typing("wamid.HBgM_abc="))
+        body = json.loads(seen[0].data)
+        self.assertEqual(seen[0].full_url, "https://graph.facebook.com/v26.0/111/messages")
+        self.assertEqual(body, {"messaging_product": "whatsapp", "status": "read", "message_id": "wamid.HBgM_abc=",
+                                "typing_indicator": {"type": "text"}})
+
+    def test_typing_never_raises_and_skips_odd_ids(self):
+        calls = []
+
+        def refused(req, timeout):
+            calls.append(req)
+            raise urllib.error.HTTPError(req.full_url, 400, "bad", {}, io.BytesIO(b"{}"))
+
+        g = wa.Graph(BEARER, "111", opener=refused)
+        self.assertFalse(g.typing("wamid.ok"))
+        for odd in ("", "abc", "wamid.", "wamid.a b", "wamid.a\n", None):
+            self.assertFalse(g.typing(odd))
+        self.assertEqual(len(calls), 1)
+
+
 OGG = b"OggS" + b"\x00" * 60
 
 

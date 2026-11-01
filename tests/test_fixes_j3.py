@@ -8,9 +8,8 @@ import unittest
 
 from sales import loop
 from kit.chats import FIXED
-from kit.tools import handoff
 from tests.fake_model import FakeModel, clean_env, say
-from tests.test_fixes_j import OPERATOR, RefusingOutbox, SendCheckBase, TurnBase, confirm_from_history, summary_reply
+from tests.test_fixes_j import SendCheckBase, TurnBase, confirm_from_history, summary_reply
 from tests.test_orders import ME, tool_call
 
 REVIEW_AMOUNTS = {16500, 60, 70, 33060, 1850, 1920}
@@ -92,46 +91,6 @@ class LineGapTest(NumberCheck):
         for reply in self.PASS:
             with self.subTest(reply=reply.encode("unicode_escape").decode()):
                 self.assertEqual(self.passes(reply), [])
-
-
-class OneTeamLineTest(TurnBase):
-    """Red team LOW: three handoff calls in one step while the team phone refuses sends. The
-    customer hears TEAM_WILL_REPLY once, the team phone is tried once and one summary is written."""
-
-    def setUp(self):
-        super().setUp()
-        clean_env(self, OPERATOR_WHATSAPP=OPERATOR)
-        self.out = RefusingOutbox()
-
-    def test_three_handoff_calls_send_one_team_line(self):
-        def three(messages, tools_sent):
-            out = tool_call("handoff", {"reason": "a"})
-            for reason in ("b", "c"):
-                out["tool_calls"] += tool_call("handoff", {"reason": reason})["tool_calls"]
-            return out
-        model = FakeModel(three, say("ملخص"), say("ملخص"), say("ملخص"))
-        r = self.turn(model, "عايز اكلم حد")
-        line = handoff.TEAM_WILL_REPLY["arabic"]
-        self.assertEqual((r.outcome, r.reply), ("handoff_failed", line))
-        self.assertEqual([t for to, t in self.out.sent if to == ME], [line])
-        self.assertEqual(len(model.calls), 2)                     # the step and one summary
-        fixed = [s for s in self.chats.steps(self.cid) if s["role"] == "assistant" and s["name"] == FIXED]
-        self.assertEqual(len(fixed), 1)
-        results = [json.loads(s["content"]) for s in self.chats.steps(self.cid) if s["role"] == "tool"]
-        self.assertEqual([x.get("turn_over") for x in results], [True, None, None])
-        self.assertEqual(results[1:], [loop.HANDOFF_RAN, loop.HANDOFF_RAN])
-
-    def test_a_confirm_after_a_refused_note_still_runs(self):
-        self.turn(FakeModel(tool_call("draft_order", self.args), summary_reply), "عايز اتنين الإيليت مقاس 43")
-
-        def both(messages, tools_sent):
-            out = tool_call("handoff", {"reason": "a"})
-            out["tool_calls"] += confirm_from_history(self.args)(messages, tools_sent)["tool_calls"]
-            out["tool_calls"] += tool_call("handoff", {"reason": "b"})["tool_calls"]
-            return out
-        self.turn(FakeModel(both, say("ملخص"), say("ملخص")), "تمام")
-        self.assertTrue(self.placed())
-        self.assertEqual([t for to, t in self.out.sent if to == ME][-2:], [handoff.TEAM_WILL_REPLY["arabic"], LINE])
 
 
 PLACED = "اوردرك اتسجل برقم #1001، والإجمالي 33060 جنيه."

@@ -197,10 +197,10 @@ class Cli(unittest.TestCase):
         self.assertEqual(code, 0, err)
         rp = json.loads(out)["replay"]
         self.assertEqual((rp["played"], rp["won"], rp["skipped"]), (4, 2, skipped))
-        # the two Arabic openings get the fake agent's English line, and the real Sales agent loop hands
-        # them to a person: judged by the same verdict as every match
-        self.assertEqual([(x["chat"], x["why"]) for x in rp["lost"]], [("c0006", "the chat went to a person"),
-                                                                       ("c0013", "the chat went to a person")])
+        # the two Arabic openings get the fake agent's English line, and the real Sales agent loop has no
+        # safe reply for them (DECISIONS item 53): judged by the same verdict as every match
+        self.assertEqual([(x["chat"], x["why"]) for x in rp["lost"]], [("c0006", "no safe reply could be sent"),
+                                                                       ("c0013", "no safe reply could be sent")])
         self.assertEqual([e["id"] for e, _, first in ready if any("\u0600" <= ch <= "\u06ff" for ch in first)],
                          ["c0006", "c0013"])  # the two Arabic openings in the plan
         saved = [json.loads(x) for x in (self.dir / run.MATCHES_FILE).read_text(encoding="utf-8").splitlines()]

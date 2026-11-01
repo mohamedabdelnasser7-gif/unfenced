@@ -222,7 +222,8 @@ class PhotoTurn(unittest.TestCase):
 
     def test_instructions_answer_a_photo_or_link_request(self):
         text = (ROOT / "sales" / "instructions.md").read_text(encoding="utf-8")
-        self.assertIn("A photo or link request alone is never a reason to hand off.", text)
+        self.assertIn("If the customer asks for a photo or a link of a product, call the store tool and send that "
+                      "product's image link from it.", text)
         self.assertIn("image link", store.DEFINITION["function"]["description"])
 
 

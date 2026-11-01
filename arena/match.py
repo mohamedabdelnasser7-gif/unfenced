@@ -9,7 +9,7 @@ lines. An unwinnable card is told it will not buy in this chat, whatever the sto
 The Sales agent is the real one: each customer line goes through sales/loop.py turn, with
 its tools and its send check, in a throwaway in-memory database, on the demo store with no
 Shopify keys and no operator number (as the exam runs it), so a match never places a real
-order or messages the team.
+order or messages anyone.
 
 The customer prompt. A tuned prompt stays out of the repo (DECISIONS item 17): it is read from
 a file given by path (--customer-prompt), refused when that file sits inside the repo. With no
@@ -18,7 +18,8 @@ $buy_trigger, $patience, $language, $length, $opening, $examples and $unwinnable
 from the card; any other $word is left as written.
 
 A match ends when the customer leaves (its reply holds LEAVE), the agent places an order,
-the chat goes to a person, or after max_turns customer lines. A model that does not answer (the
+the agent has no safe reply (sales/loop.py no_safe_reply: the chat counts as lost, DECISIONS
+item 53), or after max_turns customer lines. A model that does not answer (the
 agent's turn ends model_error, or the customer's model raises kit/model.py ModelError) voids the
 match: it ends VOID with the error in "error", and the Arena drops it as it drops a match the
 call cap stops, so a model fault is never a loss, a case or a lesson held. What it returns is a
@@ -26,9 +27,8 @@ plain dict (match_of); the score is arena/verdict.py and the fact checks arena/f
 
 Each turn record also says why the turn went as it did (2026-11-01; logging is off in a match, so
 this is the only trace): "checks", the send check feedback of each draft that failed it, and, when
-the chat went to a person, "handoff" with "by" (send_check, model, model_error or turn_failed) and
-the loop's own reason when it gave one (why_of). The failed drafts and the model's handoff words
-stay out.
+no safe reply could be sent, "no_safe_reply" with "by" (send_check, model_error or turn_failed)
+(why_of). The failed drafts stay out. Matches recorded before item 53 may end "handed_off".
 """
 import hashlib
 import json
@@ -242,8 +242,8 @@ def play(card, *, agent_model, customer_model, prompt=GENERIC_PROMPT, lessons=No
                 if out.outcome == "model_error":
                     ended, error = VOID, AGENT_SILENT
                     break
-                if out.outcome in ("handed_off", "handoff_failed", "waiting"):
-                    ended = "handed_off"
+                if out.outcome == "no_safe_reply":
+                    ended = "no_safe_reply"
                     break
                 if stop is not None and stop(turns):
                     ended = "sign"
@@ -270,16 +270,15 @@ def _last_row(results, chat_id):
 def why_of(results, chat_id, after):
     """Why the turn went as it did, from the result rows it wrote (rows after id `after`):
     "checks", the send check feedback of each reply that failed it (check_failed), and, when the
-    turn handed the chat on, "handoff" with who decided it ("by": send_check, model, model_error
-    or turn_failed) and the loop's own reason when it gave one. Code words and the check's
-    feedback only; the failed reply and the model's own handoff words are left out."""
+    turn had no safe reply, "no_safe_reply" with why ("by": send_check, model_error or
+    turn_failed). Code words and the check's feedback only; the failed reply is left out."""
     rows = [r for r in results.for_chat(chat_id) if r["id"] > after]
     out = {"checks": [r["detail"]["feedback"] for r in rows if r["outcome"] == "check_failed"
                       and isinstance(r.get("detail"), dict) and isinstance(r["detail"].get("feedback"), str)]}
     for r in rows:
-        if r["outcome"] in ("handed_off", "handoff_failed"):
+        if r["outcome"] == "no_safe_reply":
             d = r.get("detail") if isinstance(r.get("detail"), dict) else {}
-            out["handoff"] = {k: d[k] for k in ("by", "reason") if isinstance(d.get(k), str)}
+            out["no_safe_reply"] = {k: d[k] for k in ("by",) if isinstance(d.get(k), str)}
     return out
 
 

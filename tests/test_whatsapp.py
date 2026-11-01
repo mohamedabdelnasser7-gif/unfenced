@@ -22,7 +22,6 @@ from kit.chats import Chats
 from kit.db import Db
 from kit.limits import Limits
 from kit.model import ModelError
-from kit.tools import handoff
 from reflection.lessons import Lessons
 from reflection.results import Results
 from tests.fake_model import FakeModel, call, clean_env, say
@@ -647,12 +646,6 @@ class WorkerTurns(unittest.TestCase):
         self.assertEqual(r.outcome, "limited")
         self.assertEqual(self.chats.pending(), [])
 
-    def test_a_with_person_turn_leaves_nothing_pending(self):
-        self.chats.set_stage(self.chats.open("whatsapp", self.WHO), "with_person")
-        r = self.run_one(text_msg("m1", "hello?"))
-        self.assertEqual(r.outcome, "waiting")
-        self.assertEqual(self.chats.pending(), [])
-
     def test_an_over_limit_voice_note_is_never_downloaded(self):
         r = self.run_one(audio_msg("v1"), limits=self.over_limit())
         self.assertEqual((r.outcome, self.graph.calls), ("limited", 0))
@@ -718,14 +711,14 @@ class CrashedTurns(unittest.TestCase):
         self.assertEqual([(s["content"], s["media"]) for s in users], [(None, [{"kind": "image"}])])
         self.assertEqual(self.chats.pending(), [])
 
-    def test_a_second_crash_in_a_row_hands_off(self):
+    def test_a_second_crash_in_a_row_is_no_safe_reply_and_sends_nothing(self):
         self.crash(text_msg("m1", "عندكم جزم؟"), text_msg("m2", "عندكم جزم؟"))
         cid = self.chat()
-        self.assertEqual(self.chats.stage(cid), "with_person")
-        self.assertEqual(self.outcomes(), [("turn_failed", None, 1), ("handed_off", "turn_failed", 2)])
-        self.assertEqual(self.graph.sent, [(self.WHO, self.LINE), (self.WHO, handoff.TAKING_OVER["arabic"])])
+        self.assertEqual((self.chats.stage(cid), self.chats.model_errors(cid)), ("asking", 0))
+        self.assertEqual(self.outcomes(), [("turn_failed", None, 1), ("no_safe_reply", "turn_failed", 2)])
+        self.assertEqual(self.graph.sent, [(self.WHO, self.LINE)])
 
-    def test_a_model_error_then_a_crash_hands_off(self):
+    def test_a_model_error_then_a_crash_is_no_safe_reply_and_sends_nothing(self):
         def down(messages, tools_sent):
             raise ModelError("Baseten call failed: URLError")
 
@@ -734,8 +727,9 @@ class CrashedTurns(unittest.TestCase):
             self.assertEqual(self.app.work_one((None, wa.parse(payload(text_msg("m1", "عندكم جزم؟")))[0])).outcome,
                              "model_error")
         self.crash(text_msg("m2", "عندكم جزم؟"))
-        self.assertEqual(self.chats.stage(self.chat()), "with_person")
-        self.assertEqual(self.outcomes()[-1], ("handed_off", "turn_failed", 2))
+        self.assertEqual(self.chats.stage(self.chat()), "asking")
+        self.assertEqual(self.outcomes()[-1], ("no_safe_reply", "turn_failed", 2))
+        self.assertEqual(self.graph.sent, [(self.WHO, self.LINE)])  # the model error's line only
 
     def test_a_passing_reply_starts_the_count_again(self):
         self.crash(text_msg("m1", "عندكم جزم؟"))
@@ -744,14 +738,6 @@ class CrashedTurns(unittest.TestCase):
         self.crash(text_msg("m3", "عندكم جزم؟"))
         self.assertEqual(self.chats.stage(self.chat()), "asking")
         self.assertEqual(self.outcomes()[-1], ("turn_failed", None, 1))
-
-    def test_with_a_person_nothing_is_sent(self):
-        self.chats.set_stage(self.chat(), "with_person")
-        self.crash(text_msg("m1", "hello?"))
-        self.assertEqual(self.graph.sent, [])
-        self.assertEqual(self.outcomes(), [])
-        self.assertEqual([s["content"] for s in self.chats.steps(self.chat()) if s["role"] == "user"], ["hello?"])
-        self.assertEqual(self.chats.pending(), [])
 
     def test_a_crash_after_the_reply_went_out_sends_nothing_more(self):
         self.app.model = FakeModel(say("Ask me anything."))
@@ -773,17 +759,6 @@ class CrashedTurns(unittest.TestCase):
             self.app.work()  # the real turn: the second model step raises a plain bug
         self.assertEqual(self.graph.sent, [(self.WHO, self.LINE)])
         self.assertEqual(self.outcomes(), [("turn_failed", None, 1)])
-
-    def test_the_handoff_summary_counts_against_the_limits(self):
-        team = "201000000001"
-        limits = Limits(self.db, per_customer=1)
-        self.app = wa.App(self.chats, FakeModel(say("العميل بيسأل عن الجزمة")), Lessons(self.db), self.results,
-                          self.graph, limits=limits, operator=team)
-        with mock.patch.dict(os.environ, {"OPERATOR_WHATSAPP": team}):
-            self.crash(text_msg("m1", "عندكم جزم؟"), text_msg("m2", "عندكم جزم؟"))
-        self.assertEqual(self.chats.stage(self.chat()), "with_person")
-        self.assertEqual([to for to, _ in self.graph.sent], [self.WHO, team, self.WHO])
-        self.assertEqual(limits.over(limits_mod.key("whatsapp", self.WHO)), "customer")  # the summary call
 
     def test_a_note_to_the_team_is_not_a_line_to_the_customer(self):
         team = "201000000001"
@@ -814,17 +789,7 @@ class CrashedTurns(unittest.TestCase):
 
 
 class RequiredEnv(unittest.TestCase):
-    FULL = {**{n: "set" for n in wa.REQUIRED_ENV}, "OPERATOR_WHATSAPP": "201000000001",
-            "META_API_KEY": "fake-meta-key-for-tests"}
-
-    def test_operator_number_is_required(self):
-        self.assertIn("OPERATOR_WHATSAPP", wa.REQUIRED_ENV)
-        with mock.patch.dict(os.environ, self.FULL, clear=True):
-            self.assertEqual(wa.missing_env(), [])
-        for env in ({**self.FULL, "OPERATOR_WHATSAPP": " "},
-                    {k: v for k, v in self.FULL.items() if k != "OPERATOR_WHATSAPP"}):
-            with mock.patch.dict(os.environ, env, clear=True):
-                self.assertEqual(wa.missing_env(), ["OPERATOR_WHATSAPP"])
+    FULL = {**{n: "set" for n in wa.REQUIRED_ENV}, "META_API_KEY": "fake-meta-key-for-tests"}
 
     def test_one_model_key_of_either_kind_is_enough(self):
         """Review round 1 finding 1, red team finding 5: one Meta key starts the webhook."""
@@ -869,36 +834,6 @@ class RequiredEnv(unittest.TestCase):
                 wa.main()
         self.assertEqual(str(cm.exception.code), "Missing in .env: " + wa.MODEL_KEYS)
         server.assert_not_called()
-
-    def test_server_does_not_start_without_it(self):
-        env = {k: v for k, v in self.FULL.items() if k != "OPERATOR_WHATSAPP"}
-        with mock.patch.dict(os.environ, env, clear=True), mock.patch("kit.env.load", return_value=[]), \
-                mock.patch("logging.basicConfig"), mock.patch.object(wa, "ThreadingHTTPServer") as server:
-            with self.assertRaises(SystemExit) as cm:
-                wa.main()
-        self.assertIn("OPERATOR_WHATSAPP", str(cm.exception.code))
-        server.assert_not_called()
-
-    def test_operator_number_must_be_digits_with_the_country_code(self):
-        """Review 7: + or a leading 0 would turn every team reply into a customer message."""
-        for good in ("201000000001", "447700900123", "12025550143"):
-            with mock.patch.dict(os.environ, {**self.FULL, "OPERATOR_WHATSAPP": good}, clear=True):
-                self.assertEqual(wa.wrong_env(), [], good)
-        for bad in ("+201000000001", "01000000001", "0201000000001", "20 100 000 0001", "20-100-000-0001",
-                    "2010000000011234", "2010000", "٢٠١٠٠٠٠٠٠٠٠١"):
-            with mock.patch.dict(os.environ, {**self.FULL, "OPERATOR_WHATSAPP": bad}, clear=True):
-                self.assertEqual(wa.wrong_env(), ["OPERATOR_WHATSAPP"], bad)
-
-    def test_server_does_not_start_with_a_plus_or_a_leading_zero(self):
-        for bad in ("+201011112222", "01011112222"):
-            env = {**self.FULL, "OPERATOR_WHATSAPP": bad}
-            with mock.patch.dict(os.environ, env, clear=True), mock.patch("kit.env.load", return_value=[]), \
-                    mock.patch("logging.basicConfig"), mock.patch.object(wa, "ThreadingHTTPServer") as server:
-                with self.assertRaises(SystemExit) as cm:
-                    wa.main()
-            self.assertIn("OPERATOR_WHATSAPP", str(cm.exception.code))
-            self.assertNotIn(bad, str(cm.exception.code))
-            server.assert_not_called()
 
     def test_start_checks_prices_against_size_numbers(self):
         class Stop(Exception):

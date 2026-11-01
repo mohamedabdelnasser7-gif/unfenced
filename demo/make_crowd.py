@@ -37,7 +37,7 @@ NAMES_EN = ["Hany", "Nour", "Omar", "Laila", "Ziad", "Farida"]
 # (kind, stage, languages): what the customer asks; the templates below give the words
 KINDS = [("price", "asking", "ar fr en"), ("size", "asking", "ar fr en"), ("stock", "asking", "ar fr"),
          ("delivery", "asking", "ar fr en"), ("order", "ordering", "ar fr"), ("chase", "my_order", "ar fr en"),
-         ("exchange", "my_order", "ar en"), ("bot", "asking", "ar fr en"), ("complaint", "with_person", "ar"),
+         ("exchange", "my_order", "ar en"), ("bot", "asking", "ar fr en"), ("complaint", "my_order", "ar"),
          ("pay", "asking", "ar en"), ("printing", "asking", "ar fr en")]
 BOOTS_ONLY = {"size", "stock", "exchange", "order"}   # kinds about a pair of boots, never the printing alone
 ASK = {

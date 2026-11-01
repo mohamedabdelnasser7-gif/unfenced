@@ -15,7 +15,6 @@ from kit import send_check
 from kit.chats import Chats
 from kit.db import Db
 from kit.tools import store
-from kit.tools.handoff import TAKING_OVER
 from reflection import PLUG
 from reflection.lessons import Lessons
 from reflection.results import Results
@@ -25,7 +24,6 @@ from tests.kept import kept_lesson
 
 CUSTOMER = "201111111111"
 OTHER = "201222222222"
-OPERATOR = "201000000001"
 ASK = "التوصيل بكام؟"
 WRONG = "التوصيل بـ 500 جنيه."
 CLEAN = "التوصيل حسب المحافظة، قولّي إنت منين؟"
@@ -114,16 +112,15 @@ class LessonsStillPassTheSendCheck(LoopCase):
         self.assertEqual(self.rows(r.chat_id),
                          [("reply", "check_failed", [self.lid]), ("reply", "replied", [self.lid])])
 
-    def test_three_500_replies_hand_off_and_none_goes_out(self):
-        clean_env(self, OPERATOR_WHATSAPP=OPERATOR)
+    def test_three_500_replies_send_nothing_and_none_goes_out(self):
         self.assertTrue(self.lessons.approve(self.lid, "mohamed", share=1))
-        model = FakeModel(say(WRONG), say(WRONG), say(WRONG), say("العميل بيسأل عن التوصيل."))
+        model = FakeModel(say(WRONG), say(WRONG), say(WRONG))
         r = self.turn(model, ASK)
-        self.assertEqual(r.outcome, "handed_off")
+        self.assertEqual(r.outcome, "no_safe_reply")
         self.assertFalse([text for _, text in self.out.sent if "500" in text])
-        self.assertEqual([text for to, text in self.out.sent if to == CUSTOMER], [TAKING_OVER["arabic"]])
+        self.assertEqual(self.out.sent, [])
         self.assertEqual(self.rows(r.chat_id), [("reply", "check_failed", [self.lid])] * 3
-                         + [("hand_off", "handed_off", [self.lid])])
+                         + [("reply", "no_safe_reply", [self.lid])])
         self.assertTrue(all(LESSON_500 in p for p in self.prompts(model)[:3]))
 
 

@@ -1049,25 +1049,6 @@ class LoopTest(unittest.TestCase):
         self.assertEqual((r.outcome, r.reply), ("replied", summary))
         self.assertEqual(orders.Book(self.db).pending(self.cid)["draft"]["phone"], "447700900123")
 
-    def test_a_voice_note_passed_on_to_a_person_counts_its_transcript(self):
-        """Review t261028j finding 10 (r12): with a person, hearing a voice note for the team member is
-        a model call, so it counts against the customer's limits like the pass on itself."""
-        clean_env(self, OPERATOR_WHATSAPP="201000000001")
-        self.chats.set_stage(self.cid, "with_person")
-        model = FakeModel(say("فين الاوردر بتاعي"))
-        msg = Message(channel="whatsapp", customer_id=ME, audio=b"RIFF fake wav", audio_mime="audio/wav")
-        r = loop.turn(msg, chats=self.chats, model=model, lessons=Lessons(self.db), results=self.results,
-                      send=self.out, limits=Limits(self.db))
-        self.assertEqual(r.outcome, "waiting")
-        self.assertEqual(len(model.calls), 1)
-        notes = [t for to, t in self.out.sent if to == "201000000001"]
-        self.assertEqual(len(notes), 1)
-        self.assertIn("فين الاوردر بتاعي", notes[0])
-        with self.db.tx() as c:
-            counted = c.execute("SELECT COUNT(*) FROM model_calls WHERE customer = ?",
-                                (limits_mod.key("whatsapp", ME),)).fetchone()[0]
-        self.assertEqual(counted, 2)  # the pass on, then the transcript
-
     def test_a_made_up_total_is_still_blocked(self):
         args = order_args(governorate="Giza")
         r = self.turn(FakeModel(tool_call("draft_order", args), say("الاجمالي 1900 جنيه."), say("الاجمالي 16560 جنيه.")),

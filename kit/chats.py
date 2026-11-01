@@ -13,15 +13,11 @@ parsed message is dropped then, since the step holds it. A restart re-queues pen
 messages (at most MAX_ATTEMPTS times each), so nothing that Meta already got a 200 for
 is lost.
 
-Team notes: when a chat is handed to a person, each part of the note sent to the team
-member is saved by its channel message id, with the chat it belongs to and the number it
-went to. A reply that quotes one of those ids reaches that chat and no other, for
-NOTE_SECONDS (48 hours) after the note went out (red team t261028j F5). What the
-person writes back is saved as an assistant step whose name is PERSON, so the reflection
-can tell a person's reply from the agent's, and the id WhatsApp gave that message is
-kept with its step, so a late "failed" status can be matched to it. A fixed line the agent
-sends (model down, limit, handoff) is saved with the name FIXED, so it never counts as a
-reply the model wrote (an order summary).
+A team member's message in a chat imported from the store's past (reflection/importer.py) is
+saved as an assistant step whose name is PERSON, so the reflection can tell a person's reply
+from the agent's. The live agent never hands a chat to a person (DECISIONS item 53). A fixed
+line the agent sends (model down, limit, order placed) is saved with the name FIXED, so it
+never counts as a reply the model wrote (an order summary).
 """
 import json
 import time
@@ -62,18 +58,6 @@ CREATE TABLE IF NOT EXISTS seen_messages (
   payload TEXT,
   attempts INTEGER NOT NULL DEFAULT 0
 );
-CREATE TABLE IF NOT EXISTS team_notes (
-  message_id TEXT PRIMARY KEY,
-  chat_id TEXT NOT NULL REFERENCES chats (id),
-  sent_to TEXT NOT NULL,
-  at REAL NOT NULL
-);
-CREATE TABLE IF NOT EXISTS team_replies (
-  message_id TEXT PRIMARY KEY,
-  chat_id TEXT NOT NULL REFERENCES chats (id),
-  step INTEGER NOT NULL,
-  at REAL NOT NULL
-);
 """
 # Columns added after the first live tests, for databases made before them.
 CHAT_COLUMNS = (
@@ -87,9 +71,8 @@ SEEN_COLUMNS = (
 
 FIRST_STAGE = "asking"
 MAX_ATTEMPTS = 3
-NOTE_SECONDS = 48 * 3600   # a team note older than this no longer routes a reply
-PERSON = "person"   # the name on an assistant step a team member wrote
-FIXED = "fixed"     # the name on a fixed line the agent sent (model down, limit, handoff, photo or voice line)
+PERSON = "person"   # the name on an assistant step a team member wrote, in an imported chat
+FIXED = "fixed"     # the name on a fixed line the agent sent (model down, limit, order placed, photo or voice line)
 
 
 class Chats:
@@ -180,23 +163,6 @@ class Chats:
             if cur.rowcount:
                 self._add(c, chat_id, "event", content=json.dumps({"model_errors_reset": True}))
 
-    def hand_back(self, chat_id, message_id=None):
-        """A team member gives the chat back to the agent: stage asking, both counts at 0.
-
-        One event step records it, so branch() rebuilds the same state. message_id: the
-        team member's webhook id, marked done here. Returns the stage the chat was in.
-        """
-        with self.db.tx() as c:
-            row = c.execute("SELECT stage FROM chats WHERE id = ?", (chat_id,)).fetchone()
-            if row is None:
-                raise KeyError(chat_id)
-            c.execute("UPDATE chats SET stage = ?, failed_checks = 0, model_errors = 0, updated_at = ? WHERE id = ?",
-                      (FIRST_STAGE, time.time(), chat_id))
-            self._add(c, chat_id, "event", content=json.dumps(
-                {"stage": FIRST_STAGE, "checks_reset": True, "model_errors_reset": True, "handed_back": True}))
-            self._done(c, message_id)
-            return row["stage"]
-
     # steps
 
     def add_step(self, chat_id, role, content=None, tool_calls=None, tool_call_id=None, name=None, media=None,
@@ -207,35 +173,6 @@ class Chats:
             c.execute("UPDATE chats SET updated_at = ? WHERE id = ?", (time.time(), chat_id))
             self._done(c, message_id)
             return n
-
-    def add_person_reply(self, chat_id, text, message_id=None, sent_id=None):
-        """Save what a team member sent the customer, as written. Returns its step number.
-
-        message_id: the team member's webhook id, marked done here. sent_id: the id WhatsApp
-        gave the message the customer got, kept with the step.
-        """
-        with self.db.tx() as c:
-            n = self._add(c, chat_id, "assistant", content=text, name=PERSON)
-            c.execute("UPDATE chats SET updated_at = ? WHERE id = ?", (time.time(), chat_id))
-            self._done(c, message_id)
-            if sent_id:
-                c.execute("INSERT OR IGNORE INTO team_replies (message_id, chat_id, step, at) VALUES (?, ?, ?, ?)",
-                          (sent_id, chat_id, n, time.time()))
-            return n
-
-    def reply_step(self, sent_id):
-        """(chat_id, step) of the person's reply WhatsApp knows by sent_id, or None."""
-        if not (isinstance(sent_id, str) and sent_id):
-            return None
-        with self.db.tx() as c:
-            row = c.execute("SELECT chat_id, step FROM team_replies WHERE message_id = ?", (sent_id,)).fetchone()
-        return (row["chat_id"], row["step"]) if row else None
-
-    def not_delivered(self, chat_id, step, code, message_id=None):
-        """Record that the person's reply at step never reached the customer. message_id: marked done."""
-        with self.db.tx() as c:
-            self._add(c, chat_id, "event", content=json.dumps({"not_delivered": step, "code": code}))
-            self._done(c, message_id)
 
     def _add(self, c, chat_id, role, content=None, tool_calls=None, tool_call_id=None, name=None, media=None):
         n = c.execute("SELECT COALESCE(MAX(n), 0) + 1 FROM steps WHERE chat_id = ?", (chat_id,)).fetchone()[0]
@@ -343,7 +280,7 @@ class Chats:
         return row is not None and row["status"] == "done"
 
     def mark_done(self, message_id):
-        """Mark a webhook id done when it saves no step (a team reply that could not be sent)."""
+        """Mark a webhook id done when it saves no step."""
         with self.db.tx() as c:
             self._done(c, message_id)
 
@@ -369,27 +306,6 @@ class Chats:
             c.executemany("UPDATE seen_messages SET attempts = attempts + 1 WHERE message_id = ?",
                           [(r["message_id"],) for r in rows])
         return [json.loads(r["payload"]) for r in rows]
-
-    # team notes
-
-    def save_note(self, message_id, chat_id, sent_to):
-        """Remember one note part sent to a team member, by its channel message id."""
-        if not (isinstance(message_id, str) and message_id):
-            raise ValueError("a note needs its message id")
-        with self.db.tx() as c:
-            c.execute("INSERT OR IGNORE INTO team_notes (message_id, chat_id, sent_to, at) VALUES (?, ?, ?, ?)",
-                      (message_id, chat_id, sent_to, time.time()))
-
-    def note_chat(self, message_id, sender):
-        """The chat a note belongs to, only if that note went to this sender less than
-        NOTE_SECONDS ago. None otherwise."""
-        if not (isinstance(message_id, str) and message_id and isinstance(sender, str) and sender):
-            return None
-        with self.db.tx() as c:
-            row = c.execute("SELECT chat_id FROM team_notes WHERE message_id = ? AND sent_to = ? AND at >= ?",
-                            (message_id, sender, time.time() - NOTE_SECONDS)).fetchone()
-        return row["chat_id"] if row else None
-
 
 MEDIA_NOTE = {
     "image": "(The customer sent a photo earlier. It is not kept.)",

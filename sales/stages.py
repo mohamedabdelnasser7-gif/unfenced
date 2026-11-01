@@ -1,4 +1,4 @@
-"""The four stages of a Sales agent chat, and the tools each stage offers.
+"""The three stages of a Sales agent chat, and the tools each stage offers.
 
 GRID is the stage-to-tools grid from the approved layout (28 Oct), as is. A tool that is
 not built yet has no file in kit/tools, so the registry leaves it out; it appears in its
@@ -8,11 +8,9 @@ How a chat changes stage: from tool results, never from keyword rules.
 - switch_stage (a small control tool, offered in the three agent stages) moves between
   asking, ordering and my_order when the customer moves on. The model already reads the
   message in three languages and Franco; a keyword table would not.
-- handoff moves to with_person, because it also tells the team and the customer.
-- Leaving with_person is a person's call: the team member replies رجّع to the handoff
-  note on WhatsApp (channels/whatsapp.py), which moves the chat back to asking with both
-  counts at 0. Until then the agent waits, and the team member's replies to the note go
-  to the customer as typed.
+- The agent always keeps the chat: there is no stage where a person takes over (DECISIONS
+  item 53). A chat saved at a stage this file no longer has (with_person, before item 53)
+  resumes at asking.
 """
 from dataclasses import dataclass
 
@@ -24,23 +22,18 @@ class Stage:
     about: str
     tools: tuple          # the full row from the grid, built or not
     moves_to: tuple       # where switch_stage may take the chat from here
-    agent_replies: bool = True
-    images: bool = True   # customer photos go to the model in this stage
 
 
 GRID = {
-    "asking": ("store", "voice_note", "handoff", "delivery"),
-    "ordering": ("store", "voice_note", "handoff", "delivery", "draft_order", "cod_risk"),
-    "my_order": ("voice_note", "handoff", "find_order", "cancel"),
-    "with_person": (),
+    "asking": ("store", "voice_note", "delivery"),
+    "ordering": ("store", "voice_note", "delivery", "draft_order", "cod_risk"),
+    "my_order": ("voice_note", "find_order", "cancel"),
 }
 
 STAGES = {
     "asking": Stage("asking", "Asking", "price, size, stock", GRID["asking"], ("ordering", "my_order")),
     "ordering": Stage("ordering", "Ordering", "wants to buy", GRID["ordering"], ("asking", "my_order")),
     "my_order": Stage("my_order", "My order", "where is it, cancel", GRID["my_order"], ("asking", "ordering")),
-    "with_person": Stage("with_person", "With a person", "agent waits", GRID["with_person"], (),
-                         agent_replies=False, images=False),
 }
 
 FIRST = "asking"

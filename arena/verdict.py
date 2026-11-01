@@ -10,7 +10,8 @@ order made they fail the order fact check (arena/factcheck.py claims_order). The
 With fact checks on (the default; facts=False turns it off), a match with any failed fact
 check (arena/factcheck.py) is lost, quoting the first reply that failed, whatever else happened.
 Lost otherwise, quoting the turn the match ended on: the reply the customer left after, the
-handoff, or the last reply when the turns ran out.
+turn with no safe reply (nothing was sent, so its quote is empty), or the last reply when the
+turns ran out. A match recorded before DECISIONS item 53 may end "handed_off"; it reads as before.
 
 judge(match, facts=True) -> {"won": bool, "why": str, "quote": {"turn", "who", "text"}}.
 """
@@ -19,7 +20,8 @@ from arena.match import plain
 WON_ORDER = "order placed on the customer's yes"
 FAILED = "failed fact check"
 LEFT = "the customer left after this reply"
-HANDED = "the chat went to a person"
+HANDED = "the chat went to a person"  # matches recorded before item 53
+NO_SAFE = "no safe reply could be sent"
 OUT_OF_TURNS = "no sale within the turns"
 NO_TURNS = "no customer line"
 
@@ -47,5 +49,5 @@ def judge(match, facts=True):
         if t.get("order"):
             return {"won": True, "why": WON_ORDER, "quote": _quote(t["n"], "customer", t["customer"])}
     last = turns[-1]
-    why = {"left": LEFT, "handed_off": HANDED}.get(match.get("ended"), OUT_OF_TURNS)
+    why = {"left": LEFT, "no_safe_reply": NO_SAFE, "handed_off": HANDED}.get(match.get("ended"), OUT_OF_TURNS)
     return {"won": False, "why": why, "quote": _quote(last["n"], "agent", " ".join(last["replies"]))}

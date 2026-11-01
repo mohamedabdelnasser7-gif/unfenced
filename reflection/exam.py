@@ -5,7 +5,7 @@ Beyond the Limits demo boots and name printing only), in two parts: "guard", the
 lines of the 27 Oct language test, and "real", 25 patterns from real customer chats, rewritten.
 Each situation runs through the Sales agent's own reply path (sales.loop.turn) in a throwaway
 in-memory database, on the demo catalogue, with no Shopify keys and no operator number: an exam
-can never place a real order or message the team.
+can never place a real order or message anyone.
 
 One reply per situation: the model runs at low effort with a token cap and a cap on calls, and
 the first answer in words is graded (the send check's retry is not reached). The checks reuse
@@ -213,16 +213,6 @@ def check_bot_line(s, did):
     return "" if said else "asked if it is a bot: says yes, it is a bot"
 
 
-def check_handoff(s, did):
-    want = s["expect"].get("handoff")
-    called = "handoff" in _tool_names(did)
-    if want is True and not called:
-        return "no handoff where a person is needed"
-    if want is False and called:
-        return "a handoff where the agent should answer"
-    return ""
-
-
 def check_order(s, did):
     made, want = did["order"], s["expect"].get("order", False)
     if made and not draft_order.plain_yes(did["customer_text"]):
@@ -300,7 +290,7 @@ def check_cod_unasked(s, did):
 def check_with_team(s, did):
     if not s["expect"].get("team"):
         return ""
-    if "handoff" in _tool_names(did) or TEAM_WORD.search(did["reply"]):
+    if TEAM_WORD.search(did["reply"]):
         return ""
     return "not in the data: say you will check with the team"
 
@@ -317,7 +307,6 @@ CHECKS = {
     "stock_count": _named("stock"),
     "echo": check_echo,
     "bot_line": check_bot_line,
-    "handoff": check_handoff,
     "order": check_order,
     "days_from_tools": check_days_from_tools,
     "tools": check_tools,
@@ -345,7 +334,7 @@ def run(plug, model, *, kept=None, lesson=None, stop_at_first=False, sits=None):
     env = {k: v for k, v in os.environ.items() if k not in KEEP_OUT}
     store._cache.update(at=0.0, items=None)
     was = logging.root.manager.disable
-    logging.disable(logging.WARNING)  # the missing operator number warns on every handoff
+    logging.disable(logging.WARNING)  # a turn's warnings (no store keys, a model error) stay out of the run
     try:
         with mock.patch.dict(os.environ, env, clear=True):
             return engine_exam.sit(sits, lambda s, les: answer(s, les, model=model, kept=kept), CHECKS,

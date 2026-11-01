@@ -12,8 +12,8 @@ so two names are two lines, and the name is part of the draft the customer confi
 
 Step 2 (confirm set to that code) creates the order only when:
 - this chat has a pending draft with that code, less than a day old,
-- the model's own reply showing the draft's total went out after the summary (a fixed line or a
-  team member's reply does not count), the customer has written since, and every message they
+- the model's own reply showing the draft's total went out after the summary (a fixed line does
+  not count), the customer has written since, and every message they
   wrote after that reply is a plain yes: no question, no change, no photo (a voice note counts
   only in this turn, by its transcript), and
 - the same details, worked out again from the data now, still match the pending draft.
@@ -87,7 +87,7 @@ SUMMARY_NEXT = (
     "plain yes in a new message, call draft_order again with the same details and confirm set to the code. A "
     "question, or a yes with a change, needs a new summary: call draft_order again without confirm.")
 CREATED_NEXT = "Tell the customer the order is received, with its number, the total and the delivery days."
-NOT_SAVED = "The store did not take the order. Say you will check with the team, or call handoff."
+NOT_SAVED = "The store did not take the order. Say the order did not go through and ask them to try again later."
 ORDER_MADE_NOW = ("Order {order} was created in this turn, so no new summary is made. Tell the customer the "
                   "order is received, with its number, the total and the delivery days. For another order, "
                   "wait until the customer asks for one in a new message.")
@@ -139,7 +139,7 @@ def check(args, ctx):
             return False, f"print_name must be the name to print, {PRINT_MIN} to {PRINT_MAX} characters."
         q = it["quantity"]
         if isinstance(q, bool) or not isinstance(q, int) or not 1 <= q <= MAX_QUANTITY:
-            return False, f"quantity must be a whole number from 1 to {MAX_QUANTITY}. For more, call handoff."
+            return False, f"quantity must be a whole number from 1 to {MAX_QUANTITY}. Say that is the most for one order."
     for key, lo, hi in TEXT_LIMITS:
         v = args[key]
         if not isinstance(v, str) or not lo <= len(_text(v)) <= hi:
@@ -239,8 +239,8 @@ def created(steps):
 
 def summary_reply(steps, after, total):
     """The step number of the summary the customer saw: the first reply the model wrote after
-    step `after` that shows the draft's total. Fixed lines (model down, limit, handoff) and a
-    team member's replies never count. None when no such reply went out."""
+    step `after` that shows the draft's total. Fixed lines (model down, limit, order placed)
+    and a person's reply in an imported chat never count. None when no such reply went out."""
     want = send_check.amount(str(total))
     for s in steps:
         if (s["n"] > after and s["role"] == "assistant" and not s["tool_calls"] and s["name"] is None
@@ -326,11 +326,11 @@ def build(args, ctx):
         line = lines[key]
         line["quantity"] += it["quantity"]
         if line["quantity"] > MAX_QUANTITY:
-            return None, f"At most {MAX_QUANTITY} of one item. For more, call handoff."
+            return None, f"At most {MAX_QUANTITY} of one item. Say that is the most for one order."
         if v.get("currency"):
             currencies.add(v["currency"])
     if len(currencies) > 1:
-        return None, "The items are priced in different currencies. Call handoff."
+        return None, "The items are priced in different currencies. Order them one at a time."
     quote = delivery.quote(args["governorate"])
     if not quote["ok"]:
         return None, quote["note"]

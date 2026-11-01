@@ -27,9 +27,9 @@ DEFINITION = {"type": "function", "function": {
 
 OPEN = ("received", "confirmed", "shipped", "partly shipped", "on hold")
 NONE_FOUND = ("No orders under this WhatsApp number. Ask whether they ordered from another number; if so, "
-              "call handoff so the team can check. Never look an order up by its number.")
+              "ask them to write from that number. Never look an order up by its number.")
 NOT_THEIRS = ("None of the orders on this WhatsApp number has that order number. These are the orders on this "
-              "number. If the order was placed from another number, call handoff so the team can check.")
+              "number. If the order was placed from another number, ask them to write from that number.")
 
 
 def check(args, ctx):
@@ -46,7 +46,7 @@ def run(args, ctx):
     chat = ctx.chats.get(ctx.chat_id)
     key = orders.phone_key(chat["customer_id"]) if chat["channel"] == "whatsapp" else ""
     if not key:
-        return {"ok": False, "feedback": "This chat has no WhatsApp number to find orders by. Call handoff."}
+        return {"ok": False, "feedback": "This chat has no WhatsApp number to find orders by. Say you cannot look the order up here."}
     found = orders.Book(ctx.chats.db).for_phones({key})
     if not found:
         return {"ok": True, "orders": [], "note": NONE_FOUND}

@@ -9,10 +9,9 @@ import unittest
 
 from kit import orders
 from kit.chats import FIXED
-from kit.tools import draft_order, handoff
+from kit.tools import draft_order
 from tests.fake_model import FakeModel, clean_env, say
-from tests.test_fixes_j import (OPERATOR, IdOutbox, MaskTest, RefusingOutbox, SendCheckBase, TurnBase,
-                                confirm_from_history, summary_reply)
+from tests.test_fixes_j import MaskTest, SendCheckBase, TurnBase, confirm_from_history, summary_reply
 from tests.test_orders import ME, tool_call
 
 LINE = "اوردرك اتسجل برقم #1001، والإجمالي 33,060 جنيه."
@@ -55,149 +54,6 @@ class ReDraftTest(TurnBase):
         self.assertEqual(draft_order.created(steps(("user", "تمام", None), ("tool", body, "draft_order"))), made)
         self.assertIsNone(draft_order.created(steps(("tool", body, "draft_order"), ("user", "تمام", None))))
         self.assertIsNone(draft_order.created(steps(("user", "تمام", None), ("tool", "not json", "draft_order"))))
-
-
-class ModelHandoffOrderTest(TurnBase):
-    """New 2: an order, then the model's own handoff call: the customer hears ORDER_PLACED
-    first, once, and the team's note names the order."""
-
-    def setUp(self):
-        super().setUp()
-        clean_env(self, OPERATOR_WHATSAPP=OPERATOR)
-        self.out = IdOutbox()
-        self.turn(FakeModel(tool_call("draft_order", self.args), summary_reply), "عايز اتنين الإيليت مقاس 43")
-        self.start = self.chats.steps(self.cid)[-1]["n"]
-
-    def to_customer(self):
-        return [t for to, t in self.out.sent if to == ME]
-
-    def note(self):
-        return "\n".join(t for to, t in self.out.sent if to == OPERATOR)
-
-    def handoff(self, reason="the customer wants a person"):
-        return tool_call("handoff", {"reason": reason})
-
-    def test_the_order_line_goes_before_the_handoff_line(self):
-        r = self.turn(FakeModel(confirm_from_history(self.args), self.handoff(), say("العميل عايز حد")), "تمام")
-        self.assertTrue(self.placed())
-        self.assertEqual(r.outcome, "handed_off")
-        self.assertEqual(self.to_customer()[-2:], [LINE, handoff.TAKING_OVER["arabic"]])
-        self.assertEqual(self.to_customer().count(LINE), 1)
-        self.assertIn(handoff.ORDER_MADE.format(order="#1001", total=33060), self.note())
-        self.assertEqual(self.results.for_chat(self.cid)[-1]["detail"]["order"], "#1001")
-        turn = [(s["role"], bool(s["tool_calls"]), s["name"]) for s in self.chats.steps(self.cid)
-                if s["n"] > self.start and s["role"] != "event"]          # the stage change is an event row
-        self.assertEqual(turn, [("user", False, None), ("assistant", True, None), ("tool", False, "draft_order"),
-                                ("assistant", True, None), ("tool", False, "handoff"),
-                                ("assistant", False, FIXED), ("assistant", False, FIXED)])
-
-    def test_the_confirm_and_the_handoff_in_one_step(self):
-        def both(messages, tools_sent):
-            out = confirm_from_history(self.args)(messages, tools_sent)
-            out["tool_calls"] = out["tool_calls"] + self.handoff()["tool_calls"]
-            return out
-        r = self.turn(FakeModel(both, say("العميل عايز حد")), "تمام")
-        self.assertEqual(r.outcome, "handed_off")
-        self.assertEqual(self.to_customer()[-2:], [LINE, handoff.TAKING_OVER["arabic"]])
-        self.assertIn("#1001", self.note())
-
-    def test_two_handoff_calls_in_one_step_send_the_order_line_once(self):
-        self.out = RefusingOutbox()
-
-        def three(messages, tools_sent):
-            out = confirm_from_history(self.args)(messages, tools_sent)
-            out["tool_calls"] = out["tool_calls"] + self.handoff()["tool_calls"] + self.handoff("again")["tool_calls"]
-            return out
-        self.turn(FakeModel(three, say("العميل عايز حد")), "تمام")
-        self.assertTrue(self.placed())
-        self.assertEqual(self.to_customer().count(LINE), 1)
-
-    def test_a_note_that_reaches_no_one_still_comes_after_the_order_line(self):
-        self.out = RefusingOutbox()
-        r = self.turn(FakeModel(confirm_from_history(self.args), self.handoff(), say("العميل عايز حد")), "تمام")
-        self.assertEqual(r.outcome, "handoff_failed")
-        self.assertEqual(self.to_customer(), [LINE, handoff.TEAM_WILL_REPLY["arabic"]])
-
-    def test_an_order_made_after_a_refused_note_is_still_told(self):
-        self.out = RefusingOutbox()
-
-        def both(messages, tools_sent):
-            out = self.handoff()
-            out["tool_calls"] = out["tool_calls"] + confirm_from_history(self.args)(messages, tools_sent)["tool_calls"]
-            return out
-        r = self.turn(FakeModel(both, say("العميل عايز حد")), "تمام")
-        self.assertTrue(self.placed())
-        self.assertEqual(r.outcome, "handoff_failed")
-        self.assertEqual(self.to_customer(), [handoff.TEAM_WILL_REPLY["arabic"], LINE])
-
-    def test_a_handoff_call_that_does_not_run_sends_no_order_line(self):
-        r = self.turn(FakeModel(confirm_from_history(self.args), self.handoff(reason=" "),
-                                say("تمام، اوردرك اتسجل.")), "تمام")
-        self.assertTrue(self.placed())
-        self.assertEqual((r.outcome, self.to_customer()[-1]), ("replied", "تمام، اوردرك اتسجل."))
-        self.assertNotIn(LINE, self.to_customer())
-
-    def test_the_loops_own_handoff_note_names_the_order(self):
-        self.turn(FakeModel(confirm_from_history(self.args), say("الاجمالي 1900 جنيه."), say("الاجمالي 1901 جنيه."),
-                            say("الاجمالي 1902 جنيه."), say("ملخص")), "تمام")
-        self.assertEqual(self.to_customer()[-2:], [LINE, handoff.TAKING_OVER["arabic"]])
-        self.assertEqual(self.to_customer().count(LINE), 1)
-        self.assertIn("#1001", self.note())
-
-    def test_no_order_no_order_line_and_no_order_in_the_note(self):
-        self.turn(FakeModel(self.handoff(), say("العميل عايز حد")), "عايز اكلم حد")
-        self.assertEqual(self.to_customer()[-1], handoff.TAKING_OVER["arabic"])
-        self.assertNotIn(LINE, self.to_customer())
-        self.assertNotIn("اوردر برقم", self.note())
-
-
-class NotPassedOnTest(TurnBase):
-    """New 3: with a person, a customer message that reaches no one on the team goes to the
-    result log as relay_failed, and the customer hears TEAM_WILL_REPLY once."""
-
-    def setUp(self):
-        super().setUp()
-        clean_env(self, OPERATOR_WHATSAPP=OPERATOR)
-        self.out = RefusingOutbox()
-        self.chats.set_stage(self.cid, "with_person")
-
-    def to_customer(self):
-        return [t for to, t in self.out.sent if to == ME]
-
-    def last_result(self):
-        return self.results.for_chat(self.cid)[-1]
-
-    def test_a_refused_message_is_logged_and_the_customer_told_once(self):
-        r = self.turn(FakeModel(), "لسه مستني حد يرد")
-        self.assertEqual((r.outcome, r.reply), ("relay_failed", handoff.TEAM_WILL_REPLY["arabic"]))
-        self.assertEqual(self.to_customer(), [handoff.TEAM_WILL_REPLY["arabic"]])
-        self.assertEqual((self.last_result()["outcome"], self.last_result()["detail"]),
-                         ("relay_failed", {"why": "not_passed_on", "told": True}))
-        self.assertEqual(self.chats.steps(self.cid)[-1]["name"], FIXED)
-        r = self.turn(FakeModel(), "في حد؟")
-        self.assertEqual((r.outcome, r.reply), ("relay_failed", None))
-        self.assertEqual(self.to_customer(), [handoff.TEAM_WILL_REPLY["arabic"]])
-        self.assertEqual(self.last_result()["detail"], {"why": "not_passed_on", "told": False})
-        self.assertEqual(self.chats.stage(self.cid), "with_person")
-
-    def test_told_again_after_a_person_replied(self):
-        self.turn(FakeModel(), "لسه مستني حد يرد")
-        self.chats.add_person_reply(self.cid, "معاك، ثواني")
-        self.turn(FakeModel(), "hello, anyone there?")
-        self.assertEqual(self.to_customer(), [handoff.TEAM_WILL_REPLY["arabic"], handoff.TEAM_WILL_REPLY["english"]])
-
-    def test_an_error_whose_team_line_also_fails_is_logged_and_told(self):
-        from unittest import mock
-        with mock.patch.object(handoff, "pass_on", side_effect=RuntimeError("bug")):
-            r = self.turn(FakeModel(), "لسه مستني")
-        self.assertEqual(r.outcome, "relay_failed")
-        self.assertEqual(self.to_customer(), [handoff.TEAM_WILL_REPLY["arabic"]])
-
-    def test_a_message_that_reaches_the_team_tells_the_customer_nothing(self):
-        self.out = IdOutbox()
-        self.assertEqual(self.turn(FakeModel(), "لسه مستني").outcome, "waiting")
-        self.assertEqual(self.to_customer(), [])
-        self.assertNotIn("relay_failed", [x["outcome"] for x in self.results.for_chat(self.cid)])
 
 
 class LineGoesOnTest(SendCheckBase):
@@ -260,20 +116,6 @@ class SendCheckGapTest(SendCheckBase):
         for reply in self.PASS:
             with self.subTest(reply=reply):
                 self.assertEqual(self.number_problems(reply), [])
-
-
-class NotePartsCapTest(TurnBase):
-    """Sweep survivor f2-send-all-parts: one message too long to trim still sends 3 parts at most."""
-
-    def test_one_huge_message_sends_three_parts(self):
-        clean_env(self, OPERATOR_WHATSAPP=OPERATOR)
-        self.out = IdOutbox()
-        self.chats.set_stage(self.cid, "asking")
-        text = "عايز اكلم حد " + "كلام كتير " * 3000
-        self.assertGreater(len(handoff.split(text)), 3)          # the one message alone is 8 parts
-        model = FakeModel(tool_call("handoff", {"reason": "asks for a person"}), say("العميل عايز حد من الفريق"))
-        self.assertEqual(self.turn(model, text).outcome, "handed_off")
-        self.assertEqual(len([t for to, t in self.out.sent if to == OPERATOR]), 3)
 
 
 class DeadlineReaderTest(unittest.TestCase):

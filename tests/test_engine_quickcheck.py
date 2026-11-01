@@ -76,7 +76,7 @@ class QuickCheckGaps(unittest.TestCase):
                 self.assertIs(in_share(case, lesson_id, share), answer)
 
     def test_tool_names_are_high_risk_in_the_sales(self):
-        for text in ("Use switch_stage early.", "Call handoff when they ask twice.", "Send a voice_note back."):
+        for text in ("Use switch_stage early.", "Call find_order when they ask twice.", "Send a voice_note back."):
             with self.subTest(text=text):
                 self.assertEqual(risk.classify(text, PLUG.risk, always_low)[0], risk.HIGH)
 

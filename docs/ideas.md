@@ -1,5 +1,5 @@
 # The ideas behind Unfenced
-*Created: 2026-10-31. Last updated: 2026-10-31.*
+*Created: 2026-10-31. Last updated: 2026-11-01.*
 
 Unfenced is an engine that builds AI agents for any industry and keeps improving them from their own mistakes. The engine is the product. The Sales agent for Beyond the Limits is one example of what runs on it: Sales agent, personal assistant, and more...
 
@@ -66,6 +66,12 @@ A new agent of a kind the user already runs still starts with zero lessons. But 
 ## Failed lessons are material too
 
 A lesson that fails the eval gate is a mistake as well. It goes back into Reflection with what it broke, so the next try is written to avoid it. The failed lesson is never rewritten and never goes live on its own. This is built.
+
+## Hand-off to a person, as a human hotfix (planned)
+
+In this build the agent keeps every chat. When it cannot send a safe reply, it sends nothing and answers the next message itself. The chat still counts as lost, so Reflection and the Arena learn from it.
+
+We plan a hand-off to a person for later. A person's reply in a handed off chat would become a human hotfix: a "try this instead" from someone who knows the store, tested the way every correction is. It is not built.
 
 ## Daily feedback from the user (planned)
 

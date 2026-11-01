@@ -1,37 +1,35 @@
 """One Sales agent turn: a customer message in, at most one checked reply out.
 
-1. Load the chat and its stage. With a person, the agent saves the message, passes it on
-   to the team member and waits. When it reaches no one on the team, the result log gets
-   relay_failed and the customer hears TEAM_WILL_REPLY once.
+1. Load the chat and its stage. The agent always keeps the chat: no person takes it over
+   (DECISIONS item 53).
 2. Pick the lessons that fit (at most 8) and call the model with the instructions,
    the lessons and only this stage's tools. Tools and stage are sent fresh every step.
    When the customer's last chat ended without an order, fast reflection's note for this
    chat (reflection/fast.py) goes last in the prompt, read once a turn before the first
    model call; it is not a lesson and its id never joins the lesson ids a row keeps.
 3. At most MAX_TOOL_STEPS tool steps, then the model must answer in words. At most
-   MAX_CALLS_PER_STEP tool calls run in one step; the voice note is heard once per turn. A
-   handoff call after one that ended the turn in the same step is not run.
+   MAX_CALLS_PER_STEP tool calls run in one step; the voice note is heard once per turn.
 4. The send check runs on the reply. A failed reply is never sent: the model retries
-   with the check's feedback. After 3 failed checks in a row in a chat, handoff runs
-   (three refusals, then a person, as in Meta's legal-agent-workshop). A reply that
+   with the check's feedback. After 3 failed checks in a row in a chat, no safe reply can
+   be sent: nothing goes to the customer, the chat stays with the agent, and the row
+   no_safe_reply records the chat as lost for Reflection and the Arena (DECISIONS item 53).
+   Both counts start again, so the agent answers the next message itself. A reply that
    passes starts the count again.
 5. When the model is down, the customer gets one fixed line and the chat keeps its
-   stage. Fixed lines are saved with the name FIXED. The model down, limit and handoff
-   lines the loop sends itself drop any pending order summary, so an order is only
-   confirmed after the model's own summary reply. The photo and voice lines and the
-   model's own handoff call do not drop it; a confirm still needs every message after the
-   summary to be a plain yes, and a photo or voice mark never is. After MAX_MODEL_ERRORS
-   model errors in a row in a chat, handoff runs. A reply that passes starts the count
-   again. A turn that crashes in code counts the same way (failed_turn): the same line,
-   and the same count. Over a model call limit, the customer gets one fixed line, once
-   per window. When the turn already created an order, the customer gets ORDER_PLACED
-   (its number and total) instead of either line, and before the handoff line when the
-   turn ends in a handoff (failed checks, errors or the model's own handoff call); the
-   team's note names the order. ORDER_PLACED goes out once a turn.
+   stage. Fixed lines are saved with the name FIXED. The model down and limit lines the
+   loop sends itself, and a turn with no safe reply, drop any pending order summary, so an
+   order is only confirmed after the model's own summary reply. The photo and voice lines do not drop
+   it; a confirm still needs every message after the summary to be a plain yes, and a
+   photo or voice mark never is. The MAX_MODEL_ERRORS-th model error in a row in a chat
+   is no safe reply too, the same as after failed checks: no line goes out. A reply that
+   passes starts the count again. A turn that crashes in code counts the same way
+   (failed_turn): the same line, and the same count. Over a model call limit, the customer gets one fixed line,
+   once per window. When the turn already created an order, the customer gets
+   ORDER_PLACED (its number and total) instead of any of these lines, and also when there
+   is no safe reply. ORDER_PLACED goes out once a turn.
 6. Every outcome goes to the result log.
 
-Photos go to the model as image parts in that turn's user message, in every stage
-except with_person. SQLite keeps only their hash and type. A photo that could not be
+Photos go to the model as image parts in that turn's user message. SQLite keeps only their hash and type. A photo that could not be
 opened and a voice note that could not be fetched (or were not downloaded, over a limit)
 are saved as a mark with "opened": false, so a caption on them never reads as a plain
 yes to an order summary (review t261028j finding 3).
@@ -44,10 +42,10 @@ from pathlib import Path
 from engine.lessons import slot
 from sales import stages
 from kit import limits as limits_mod
-from kit import env, media, orders, send_check, tools
+from kit import media, orders, send_check, tools
 from kit.chats import FIXED
 from kit.model import ModelError
-from kit.tools import draft_order, find_order, handoff, store
+from kit.tools import draft_order, find_order, store
 from reflection import PLUG
 
 log = logging.getLogger("sales.loop")
@@ -86,27 +84,17 @@ ORDER_PLACED = {
     "franco": "el order bta3ak etsagel b ra2am {order}, w el egmaly {total} geneh.",
     "english": "Your order {order} is placed. The total is {total} EGP.",
 }
-# To the team member when a message from a customer they have could not be passed on to them
-# (review t261028j finding 9). Team lines are in Egyptian Arabic.
-PASS_ON_FAILED = "العميل {customer} بعت رسالة جديدة ومقدرناش نوصلهالك بسبب مشكلة عندنا، فاسأله عنها."
-HANDOFF_REASON = {  # the reason the team member's note gives when the model gave no summary
-    "model_error": "the model is not answering",
-    "turn_failed": "the agent hit an error and could not answer",
-}
 NOT_OPENED = {"opened": False}   # the media mark for a photo or voice note no one could open
 VOICE_NOTE = "(The customer sent a voice note. Call voice_note to hear it.)"
 PHOTO_ONLY = "(The customer sent a photo.)"
 RETRY = "(Store check, not from the customer.) Your last reply was not sent. {feedback} Write the reply again."
 TOO_MANY_CALLS = {"ok": False, "feedback": f"At most {MAX_CALLS_PER_STEP} tool calls run in one step. This one was not run."}
-# A handoff call after one whose result ended the turn (the note reached no one) is not run, so
-# the customer hears TEAM_WILL_REPLY once and the team phone is tried once (red team t261028j round 3).
-HANDOFF_RAN = {"ok": False, "feedback": "handoff already ran in this step. This call was not run."}
 
 
 @dataclass
 class TurnResult:
     chat_id: str
-    # replied, handed_off, handoff_failed, limited, model_error, turn_failed, relay_failed or waiting
+    # replied, no_safe_reply, limited, model_error or turn_failed
     outcome: str
     reply: str | None = None
 
@@ -155,7 +143,7 @@ def user_message(msg, stage):
     text = msg.text or ""
     if msg.audio:
         text = (text + "\n" + VOICE_NOTE).strip()
-    images = msg.images if stage.images else []
+    images = msg.images
     if not images:
         return {"role": "user", "content": text or "(empty message)"}
     parts = [{"type": "text", "text": text or PHOTO_ONLY}]
@@ -205,13 +193,6 @@ def turn(msg, *, chats, model, lessons, results, send, limits=None, over=None, f
     history = chats.messages(chat_id)
     chats.add_step(chat_id, "user", content=msg.text or None, media=kept or None,
                    message_id=msg.message_id or None)
-    if not stage.agent_replies:
-        if stage.name == "with_person":
-            failed = _pass_on(chat_id, stage, msg, chats=chats, model=model, send=send, limits=limits,
-                              results=results)
-            if failed is not None:
-                return failed
-        return TurnResult(chat_id, "waiting")
 
     customer_text = msg.text or last_customer_text(chats, chat_id)
     who = limits_mod.key(msg.channel, msg.customer_id)
@@ -259,72 +240,11 @@ def turn(msg, *, chats, model, lessons, results, send, limits=None, over=None, f
         return _model_error(t, msg, e, results=results, send=send)
 
 
-def _pass_on(chat_id, stage, msg, *, chats, model, send, limits, results):
-    """With a person: the new message goes on to the team member. Each one counts against the
-    customer's limits like a model call, so a customer over a limit cannot flood the team phone.
-    Any other error is logged and the team member gets PASS_ON_FAILED with the customer's number.
-    When nothing reaches the team member (no part of the message, and no PASS_ON_FAILED line),
-    returns _not_passed_on's TurnResult (review t261028j round 2, finding 3); else None."""
-    operator = env.get("OPERATOR_WHATSAPP")
-    if not operator:
-        return None
-    try:
-        if limits is not None:
-            who = limits_mod.key(msg.channel, msg.customer_id)
-            try:
-                limits.take(who)
-            except limits_mod.OverLimit:
-                return
-            model = limits.meter(model, who)
-        ctx = tools.Context(chat_id=chat_id, stage=stage, chats=chats, model=model, message=msg, send=send)
-        if handoff.pass_on(ctx, operator):
-            return None
-    except Exception:
-        log.exception("could not pass the message on to the team")
-        try:
-            send(operator, PASS_ON_FAILED.format(customer=msg.customer_id))
-            return None
-        except Exception:
-            log.exception("could not tell the team member either")
-    return _not_passed_on(chat_id, stage, msg, chats=chats, results=results, send=send)
-
-
-def _not_passed_on(chat_id, stage, msg, *, chats, results, send):
-    """The customer's message reached no one on the team (WhatsApp refused every part, for
-    example with 131047 after a quiet day): relay_failed goes to the result log, and the
-    customer hears handoff.TEAM_WILL_REPLY, saved as a fixed line. Once: not again while that
-    line is still the last one they got."""
-    log.error("a customer message reached no one on the team")
-    line, told = None, False
-    try:
-        last = next((s for s in reversed(chats.steps(chat_id)) if s["role"] == "assistant"
-                     and not s["tool_calls"] and (s["content"] or "").strip()), None)
-        if last is None or last["content"] not in handoff.TEAM_WILL_REPLY.values():
-            ctx = tools.Context(chat_id=chat_id, stage=stage, chats=chats, model=None, message=msg, send=send)
-            line = handoff.TEAM_WILL_REPLY[handoff.customer_script(ctx)]
-            send(msg.customer_id, line)
-            told = True
-            chats.add_step(chat_id, "assistant", content=line, name=FIXED)
-    except Exception:
-        log.exception("could not tell the customer the team will reply")
-    results.record(chat_id, "relay_failed", stage=stage.name, detail={"why": "not_passed_on", "told": told})
-    return TurnResult(chat_id, "relay_failed", line if told else None)
-
-
 def _answer(t, convo, msg, vocab, sizes, names=frozenset(), *, results, send):
     ctx = t.ctx
     chat_id = ctx.chat_id
     while True:
         reply = _draft(t, convo)
-        if reply is None:
-            made = order_made(ctx.chats, chat_id)
-            if made:  # told before the handoff line (_order_first), or now if the order came after it
-                _order_line(ctx.chats, chat_id, msg, t.customer_text, made, send)
-            outcome = _handoff_outcome(ctx)
-            results.record(chat_id, outcome, stage=ctx.stage.name, lessons=t.lesson_ids,
-                           detail={"by": "model", "tool_steps": t.tool_steps,
-                                   **({"order": made["order"]} if made else {})})
-            return TurnResult(chat_id, outcome, ctx.sent[-1] if ctx.sent else None)
         passed, feedback = send_check.check(reply, t.customer_text, t.amounts, vocab, sizes,
                                             orders=order_names(ctx.chats, chat_id),
                                             links=store_links(ctx.chats, chat_id), names=names)
@@ -340,31 +260,28 @@ def _answer(t, convo, msg, vocab, sizes, names=frozenset(), *, results, send):
         results.record(chat_id, "check_failed", stage=ctx.stage.name, lessons=t.lesson_ids,
                        detail={"reply": reply, "feedback": feedback})
         if failed >= MAX_FAILED_CHECKS:
-            made = order_made(ctx.chats, chat_id)
-            if made:  # the customer hears the order first, as after a limit or a model error
-                _order_line(ctx.chats, chat_id, msg, t.customer_text, made, send)
-            return _hand_off(t, results, f"{failed} replies failed the send check", {"by": "send_check"})
+            return _no_safe_reply(t, msg, results, send, {"by": "send_check", "in_a_row": failed})
         convo.append({"role": "assistant", "content": reply})
         convo.append({"role": "user", "content": RETRY.format(feedback=feedback)})
 
 
-def _hand_off(t, results, reason, detail):
+def _no_safe_reply(t, msg, results, send, detail):
+    """No safe reply can be sent: nothing goes to the customer, unless this turn created an order,
+    then ORDER_PLACED goes, saved as a fixed line (DECISIONS item 53, Mohamed's call 2026-11-01:
+    no line of its own). The chat keeps its stage and stays with the agent; both counts start
+    again, so the next message gets the agent's own reply. The row no_safe_reply counts as harm
+    and marks the chat lost for Reflection and the Arena."""
     ctx = t.ctx
-    stage = ctx.stage
-    start = len(ctx.sent)
     drop_draft(ctx.chats, ctx.chat_id)
-    out = tools.run("handoff", {"reason": reason}, ctx)
-    _apply_stage(t, out)
-    _save_sent(t, start)
-    outcome = _handoff_outcome(ctx)
-    results.record(ctx.chat_id, outcome, stage=stage.name, lessons=t.lesson_ids,
-                   detail={**detail, "reason": reason, "ok": bool(out.get("ok"))})
-    return TurnResult(ctx.chat_id, outcome, ctx.sent[-1] if ctx.sent else None)
-
-
-def _handoff_outcome(ctx):
-    """handed_off when a person has the chat now, handoff_failed when the note reached no one."""
-    return "handoff_failed" if ctx.stage.agent_replies else "handed_off"
+    made = order_made(ctx.chats, ctx.chat_id)
+    line = step = None
+    if made:
+        line, step = _order_line(ctx.chats, ctx.chat_id, msg, t.customer_text, made, send)
+    ctx.chats.reset_failed_checks(ctx.chat_id)
+    ctx.chats.reset_model_errors(ctx.chat_id)
+    results.record(ctx.chat_id, "no_safe_reply", step=step, stage=ctx.stage.name, lessons=t.lesson_ids,
+                   detail={**detail, **({"order": made["order"]} if made else {})})
+    return TurnResult(ctx.chat_id, "no_safe_reply", line)
 
 
 def model_down_line(customer_text):
@@ -373,7 +290,7 @@ def model_down_line(customer_text):
 
 def _model_error(t, msg, error, *, results, send, by="model_error"):
     """The model did not answer: one fixed line, and the chat keeps its stage. The
-    MAX_MODEL_ERRORS-th error in a row in this chat hands it to a person.
+    MAX_MODEL_ERRORS-th error in a row in this chat is no safe reply (_no_safe_reply).
 
     by: model_error, or turn_failed for a turn that crashed in code. Both share one count.
     """
@@ -382,10 +299,8 @@ def _model_error(t, msg, error, *, results, send, by="model_error"):
     n = ctx.chats.add_model_error(ctx.chat_id, str(error))
     made = order_made(ctx.chats, ctx.chat_id)
     if n >= MAX_MODEL_ERRORS:
-        log.warning("%s, %d in a row, handing the chat to a person: %s", by, n, error)
-        if made:
-            _order_line(ctx.chats, ctx.chat_id, msg, t.customer_text, made, send)
-        return _hand_off(t, results, HANDOFF_REASON[by], {"by": by, "in_a_row": n})
+        log.warning("%s, %d in a row, no safe reply: %s", by, n, error)
+        return _no_safe_reply(t, msg, results, send, {"by": by, "in_a_row": n})
     if made:
         log.warning("%s, %d in a row, after order %s was created: %s", by, n, made["order"], error)
         line, step = _order_line(ctx.chats, ctx.chat_id, msg, t.customer_text, made, send)
@@ -402,11 +317,11 @@ def _model_error(t, msg, error, *, results, send, by="model_error"):
 def failed_turn(msg, *, chats, model, results, send, limits=None, kind="text"):
     """A turn crashed in code. It counts like a model error: the customer gets the MODEL_DOWN
     line, and the MAX_MODEL_ERRORS-th failure in a row (crashes and model errors together)
-    hands the chat to a person.
+    is no safe reply.
 
     The customer's message is saved first if the crash came before that (kind: text, image
-    or audio, as the message came in). Nothing is sent when a person has the chat, or when a
-    reply already went out after the customer's last message. Returns a TurnResult, or None
+    or audio, as the message came in). Nothing is sent when a reply already went out after
+    the customer's last message. Returns a TurnResult, or None
     when nothing was sent.
     """
     chat_id = chats.open(msg.channel, msg.customer_id)
@@ -414,8 +329,6 @@ def failed_turn(msg, *, chats, model, results, send, limits=None, kind="text"):
         chats.add_step(chat_id, "user", content=msg.text or None,
                        media=[{"kind": kind}] if kind in ("image", "audio") else None, message_id=msg.message_id)
     stage = stages.get(chats.stage(chat_id))
-    if not stage.agent_replies:
-        return None
     steps = chats.steps(chat_id)
     last_user = max((s["n"] for s in steps if s["role"] == "user"), default=0)
     if any(s["n"] > last_user and s["role"] == "assistant" and not s["tool_calls"] and (s["content"] or "").strip()
@@ -539,24 +452,6 @@ def _told(chats, chat_id, line):
         return None
 
 
-def _order_first(t, args):
-    """Before the model's own handoff call: when this turn created an order, the customer hears
-    ORDER_PLACED before the handoff line (review t261028j round 2, finding 2). Only for a call
-    that handoff will run. Saved with the step's other lines after the tool results, so the
-    step order stays valid; once a turn."""
-    ctx = t.ctx
-    if not (handoff.NAME in tools.offered(ctx.stage) and isinstance(args, dict) and handoff.check(args, ctx)[0]):
-        return
-    made = order_made(ctx.chats, ctx.chat_id)
-    if not made:
-        return
-    line = _placed(t.customer_text, made)
-    if line in ctx.sent or _told(ctx.chats, ctx.chat_id, line) is not None:
-        return
-    ctx.send(ctx.message.customer_id, line)
-    ctx.sent.append(line)
-
-
 def _arguments(raw):
     """Tool arguments as a dict, or None. Some servers send a JSON string, others an object."""
     if isinstance(raw, dict):
@@ -570,8 +465,7 @@ def _arguments(raw):
 
 
 def _draft(t, convo):
-    """Run model steps until it answers in words. Returns the draft reply, or None after a handoff
-    (the chat moved to a person, or the note reached no one and the customer was told)."""
+    """Run model steps until it answers in words. Returns the draft reply."""
     ctx = t.ctx
     for step in range(MAX_TOOL_STEPS + 1):
         last = step == MAX_TOOL_STEPS
@@ -586,20 +480,13 @@ def _draft(t, convo):
         call_msg = {"role": "assistant", "content": out.get("content"), "tool_calls": calls}
         convo.append(call_msg)
         ctx.chats.add_step(ctx.chat_id, "assistant", content=out.get("content"), tool_calls=calls)
-        sent_before = len(ctx.sent)
-        over = False
         for i, call in enumerate(calls):
             fn = call.get("function") if isinstance(call.get("function"), dict) else {}
             name = fn.get("name") if isinstance(fn.get("name"), str) else ""
             if i >= MAX_CALLS_PER_STEP:
                 result = dict(TOO_MANY_CALLS)
-            elif over and name == handoff.NAME:
-                result = dict(HANDOFF_RAN)
             else:
-                args = _arguments(fn.get("arguments"))
-                if name == handoff.NAME:
-                    _order_first(t, args)
-                result = tools.run(name, args, ctx)
+                result = tools.run(name, _arguments(fn.get("arguments")), ctx)
             body = json.dumps(result, ensure_ascii=False)
             call_id = call.get("id") if isinstance(call.get("id"), str) else ""
             convo.append({"role": "tool", "tool_call_id": call_id, "content": body})
@@ -609,10 +496,6 @@ def _draft(t, convo):
             if name == "voice_note" and result.get("ok"):
                 t.customer_text = result.get("text", "")
             _apply_stage(t, result)
-            over = over or (isinstance(result, dict) and result.get("turn_over") is True)
-        _save_sent(t, sent_before)
-        if over or not ctx.stage.agent_replies:
-            return None
     return ""
 
 
@@ -631,15 +514,9 @@ def _apply_stage(t, result):
         t.ctx.stage = stages.STAGES[nxt]
 
 
-def _save_sent(t, start):
-    """Save the fixed lines a tool sent this step (the handoff line), named FIXED."""
-    for line in t.ctx.sent[start:]:
-        t.ctx.chats.add_step(t.ctx.chat_id, "assistant", content=line, name=FIXED)
-
-
 def drop_draft(chats, chat_id):
-    """Drop the chat's pending order summary. After a fixed line (model down, limit, handoff) the
-    customer may never have seen the summary, so a confirm needs a new one. Never raises."""
+    """Drop the chat's pending order summary. After a fixed line (model down, limit) or no safe
+    reply the customer may never have seen the summary, so a confirm needs a new one. Never raises."""
     try:
         orders.Book(chats.db).drop_draft(chat_id)
     except Exception:

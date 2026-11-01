@@ -1,8 +1,7 @@
 """switch_stage: the model moves the chat to another stage when the customer moves on.
 
 Offered in every stage where the agent replies. The allowed targets come from
-the current stage, so the model can never jump to "with_person" this way; only
-handoff does that, because it also tells the team and the customer.
+the current stage.
 """
 NAME = "switch_stage"
 

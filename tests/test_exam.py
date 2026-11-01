@@ -31,7 +31,7 @@ BY_NAME = {s["name"]: s for s in SITS}
 ROW = engine_exam.Row
 
 
-def fail(n=7, check="handoff"):
+def fail(n=7, check="order"):
     return lambda text, tags: engine_exam.Result(False, [ROW(n, "x", "guard", False, check, "why")], calls=3)
 
 
@@ -82,7 +82,7 @@ class PlugKey(unittest.TestCase):
         self.assertEqual(PLUG.exam.situations, Path(exam.ROOT) / "sales" / "exam" / "situations.json")
         self.assertIn("bot_line", PLUG.exam.checks)
         self.assertTrue(set(PLUG.exam.checks) <= set(exam.CHECKS))
-        self.assertEqual((PLUG.exam.checks, len(exam.CHECKS)), (tuple(exam.CHECKS), 19))  # the plug names all 19
+        self.assertEqual((PLUG.exam.checks, len(exam.CHECKS)), (tuple(exam.CHECKS), 18))  # the plug names all 18
 
     def test_no_exam_key_no_exam(self):
         d = self.base()
@@ -151,7 +151,7 @@ class Checks(unittest.TestCase):
                   [call("store", query="pink"), say("No pink. Only 3 left of the Phantom 6 Elite.")])
 
     def test_echo(self):
-        self.both("echo", "ar-angry", [call("handoff", reason="angry")],
+        self.both("echo", "ar-angry", [say("آسف على التأخير. ابعتلي رقم الطلب وأشوفهولك حالا.")],
                   [say("انت مستني الاوردر بقالي اسبوع ومحدش بيرد، هسأل الفريق")])
 
     def test_bot_line(self):
@@ -164,28 +164,15 @@ class Checks(unittest.TestCase):
         self.both("bot_line", "ar-price", [store, say("الجزمة بـ 16,500 جنيه.")],
                   [store, say("أنا بوت، الجزمة بـ 16,500 جنيه.")])
 
-    def test_handoff_both_ways(self):
-        self.both("handoff", "ar-angry", [call("handoff", reason="angry")], [say("هسأل الفريق وأرد عليك.")])
-        no = dict(BY_NAME["ar-price"], expect={"handoff": False})
-        store = call("store", query="boots")
-        self.both("handoff", no, [store, say("الجزمة بـ 16,500 جنيه.")], [call("handoff", reason="unsure")])
-
-    def test_printing_is_a_sale_never_a_handoff(self):
-        """The store prints the customer's name on the boot: a printing chat is sold, never handed off."""
+    def test_printing_is_a_sale(self):
+        """The store prints the customer's name on the boot: a printing chat is sold with the store's data."""
         asks = [s["name"] for s in SITS if any(re.search(r"طبع|مكتوب|يتكتب|print", t.get("customer", ""), re.I)
                                                for t in s["turns"])]
         sales = ["real-custom-name", "real-cod-prepay", "real-print", "real-other-name", "real-own-photo"]
         self.assertEqual(asks, ["ar-care"] + sales)  # ar-care asks a fact the data does not have
-        for name in asks:
-            with self.subTest(name):
-                self.assertIsNot(BY_NAME[name]["expect"].get("handoff"), True)
-                if name in sales:
-                    self.assertIs(BY_NAME[name]["expect"].get("handoff"), False)
         self.assertEqual((BY_NAME["real-custom-name"]["stage"], BY_NAME["real-custom-name"]["expect"]["tools"]),
                          ("ordering", ["store", "draft_order"]))
         store = call("store", query="name printing")
-        self.both("handoff", "real-print", [store, say("أيوه، بنطبع اسمك بالـ UV DTF، 400 جنيه لاستيكرين، واحد على كل فردة.")],
-                  [store, call("handoff", reason="printing")])
         self.both("tools", "real-print", [store, say("أيوه، بنطبع اسمك بالـ UV DTF، 400 جنيه لاستيكرين، واحد على كل فردة.")],
                   [say("أيوه، بنكتب اسمك على الجزمة.")])
 
@@ -303,7 +290,7 @@ class Gate(unittest.TestCase):
         les = self.lessons(fail())
         i = les.propose("Answer greetings warmly, then ask what they need.", ["asking"], sources=[])
         self.assertEqual((les.get(i)["state"], les.get(i)["yes_at"]), ("waiting", None))
-        self.assertEqual(engine_exam.held_line(les.exam_of(i)), "failed the exam: situation 7, check handoff")
+        self.assertEqual(engine_exam.held_line(les.exam_of(i)), "failed the exam: situation 7, check order")
 
     def test_passed_lesson_starts_as_before(self):
         les = self.lessons(ok)

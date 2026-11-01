@@ -1,15 +1,12 @@
 """The Sales agent's result log. Every agent turn is recorded with its outcome.
 
 Outcomes today: replied, check_failed (one row per blocked reply, with the check's
-feedback), handed_off, handoff_failed (no part of the note reached the team, so the
-chat stayed with the agent and the customer was told the team will reply), limited (over a model call limit, no model call made),
-model_error (the model did not answer; the customer was asked to write again) and turn_failed
-(the code crashed during the turn; the same line went out, and a second in a row hands off).
-With a person: person_replied (a team member's reply reached the customer; its step is
-the example the reflection reads), handed_back (the team member gave the chat back to the
-agent) and relay_failed (WhatsApp refused a team member's reply, for example because
-the 24 hour window closed, so nothing reached the customer; or a customer's message
-reached no one on the team, detail why "not_passed_on"). Orders: order_drafted (draft_order
+feedback), no_safe_reply (no safe reply could be sent, so nothing went out and the agent
+kept the chat; it counts as harm and the chat as lost), limited (over a model call limit,
+no model call made), model_error (the model did not answer; the customer was asked to write
+again) and turn_failed (the code crashed during the turn; the same line went out, and a second
+in a row is no safe reply). person_replied comes only from imported past chats (a team
+member's reply; its step is the example the reflection reads). Orders: order_drafted (draft_order
 made a summary, with its total) and order_created (the customer said yes and the store took
 the order, with its number, total and COD risk). delivered and refused come from Bosta's
 delivery webhook (channels/bosta.py), matched to the chat through the order number its
@@ -19,9 +16,9 @@ Rows live in the engine's log (engine/log.py) under the Sales agent plug
 (sales/plug.json); a case is one chat and an outcome is a result. A row's source is
 the person writing in, and one chat is one person, so the log keeps the chat id as it. The engine keeps no
 list of its own and refuses an outcome the plug did not declare. An outcome the plug says
-ends an action (replied ends a reply, handed_off a hand_off, order_created an order) is
-saved with that action and the ids of the lessons it was given; the rest (a team
-member's reply, delivered, refused) attach to the chat on their own.
+ends an action (replied ends a reply, order_created an order) is saved with that action and
+the ids of the lessons it was given; the rest (a team member's reply in an imported chat,
+delivered, refused) attach to the chat on their own.
 
 Before the engine the log was one results table keyed by chat_id. The first Results(db)
 on such a database moves every row into the engine's log under the same id and drops

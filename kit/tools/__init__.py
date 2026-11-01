@@ -13,12 +13,11 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from kit.tools import cod_risk, delivery, draft_order, find_order, handoff, store, switch_stage, voice_note
+from kit.tools import cod_risk, delivery, draft_order, find_order, store, switch_stage, voice_note
 
 log = logging.getLogger("kit.tools")
 
-TOOLS = {m.NAME: m for m in (store, voice_note, handoff, delivery, draft_order, cod_risk, find_order,
-                              switch_stage)}
+TOOLS = {m.NAME: m for m in (store, voice_note, delivery, draft_order, cod_risk, find_order, switch_stage)}
 
 # Control tools are offered in every stage where the agent replies, on top of the stage's own list.
 CONTROL = ("switch_stage",)
@@ -46,15 +45,12 @@ class Context:
     message: Any                    # channels.base.Message
     send: Callable[[str, str], Any] # send(to, text) on the customer's channel
     stages: dict = field(default_factory=dict)
-    sent: list = field(default_factory=list)   # texts already sent to the customer this turn
     cache: dict = field(default_factory=dict)  # per-turn results a tool keeps (the voice note, heard once)
     lesson_ids: set = field(default_factory=set)  # the lessons handed so far this turn; a tool's own rows keep them
 
 
 def offered(stage):
     """Tool names the model may call in this stage: the stage's built tools, then control tools."""
-    if not stage.agent_replies:
-        return []
     names = [n for n in stage.tools if n in TOOLS]
     return names + [n for n in CONTROL if n in TOOLS and stage.moves_to]
 

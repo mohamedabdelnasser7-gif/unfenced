@@ -53,8 +53,8 @@ class SalesFields(unittest.TestCase):
         self.assertEqual(PLUG.source.known_by, plug.CASE)
         self.assertIn("person writing in", PLUG.source.about.lower())
 
-    def test_harm_is_the_handoff_and_says_complaints_have_no_result_yet(self):
-        self.assertEqual(PLUG.harm.results, ("handed_off",))
+    def test_harm_is_no_safe_reply_and_says_complaints_have_no_result_yet(self):
+        self.assertEqual(PLUG.harm.results, ("no_safe_reply",))
         self.assertIn("complaint", PLUG.harm.about.lower())
         self.assertIn("no result", PLUG.harm.about.lower())
 

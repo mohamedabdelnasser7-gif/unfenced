@@ -4,7 +4,8 @@ Reproduced on the made-up cards with the real model: an English reply with a sto
 "16,500 جنيه" (as the price line in sales/instructions.md shows it) failed the script check, and
 "Here is the Nike Phantom 6" read 6 as an amount after "is". Three failed drafts in the turn, then
 the loop's own handoff, with no handoff tool step. The turn record now keeps the send check
-feedback and the hand-off reason, so the next run shows it.
+feedback and why no reply went out (since DECISIONS item 53 the loop has no hand-off: the turn
+is no_safe_reply and nothing is sent), so the next run shows it.
 """
 import json
 import unittest
@@ -33,24 +34,25 @@ class TurnRecordKeepsTheReason(unittest.TestCase):
     def setUp(self):
         clean_env(self)
 
-    def test_three_failed_checks_show_their_feedback_and_the_handoff_reason(self):
+    def test_three_failed_checks_show_their_feedback_and_the_no_safe_reply_reason(self):
         bad = f"Here is the Nike Phantom 6: Elite 16,500 {ARABIC_POUND}."
         agent = FakeModel(call("store", query="phantom"), say(bad), say(bad), say(bad))
         m = match.play(CARD, agent_model=agent, customer_model=FakeModel(), opening=PHOTO_ASK, max_turns=1)
         t = m["turns"][0]
-        self.assertEqual((t["outcome"], t["tools"], m["ended"]), ("handed_off", ["store"], "handed_off"))
+        self.assertEqual((t["outcome"], t["tools"], m["ended"]), ("no_safe_reply", ["store"], "no_safe_reply"))
+        self.assertEqual(t["replies"], [])  # nothing went to the customer
         self.assertEqual(len(t["checks"]), 3)
         self.assertTrue(all(ARABIC_POUND in c and "EGP" in c for c in t["checks"]), t["checks"])
-        self.assertEqual(t["handoff"], {"by": "send_check", "reason": "3 replies failed the send check"})
+        self.assertEqual(t["no_safe_reply"], {"by": "send_check"})
         self.assertNotIn("Elite 16,500", json.dumps(t, ensure_ascii=False))  # the failed drafts stay out
 
-    def test_a_reply_that_passes_keeps_no_checks_and_no_handoff(self):
+    def test_a_reply_that_passes_keeps_no_checks_and_no_no_safe_reply(self):
         good = f"Here is the Nike Phantom 6:\n{LINK}\n\nElite 16,500 EGP, Pro 11,000 EGP, Academy 7,500 EGP."
         agent = FakeModel(call("store", query="phantom"), say(good))
         m = match.play(CARD, agent_model=agent, customer_model=FakeModel(), opening=PHOTO_ASK, max_turns=1)
         t = m["turns"][0]
         self.assertEqual((t["outcome"], t["replies"], t["checks"]), ("replied", [good], []))
-        self.assertNotIn("handoff", t)
+        self.assertNotIn("no_safe_reply", t)
 
     def test_one_failed_draft_then_a_pass_keeps_the_one_feedback(self):
         agent = FakeModel(call("store", query="phantom"), say(f"Phantom 6 Elite 16,500 {ARABIC_POUND}."),
@@ -58,13 +60,6 @@ class TurnRecordKeepsTheReason(unittest.TestCase):
         m = match.play(CARD, agent_model=agent, customer_model=FakeModel(), opening=PHOTO_ASK, max_turns=1)
         t = m["turns"][0]
         self.assertEqual((t["outcome"], len(t["checks"])), ("replied", 1))
-
-    def test_the_models_own_handoff_shows_by_model_and_no_model_words(self):
-        agent = FakeModel(call("handoff", reason="customer wants a manager, secret words"))
-        m = match.play(CARD, agent_model=agent, customer_model=FakeModel(), opening="I want a manager now", max_turns=1)
-        t = m["turns"][0]
-        self.assertEqual(t["handoff"], {"by": "model"})
-        self.assertNotIn("secret words", json.dumps(t["handoff"]))
 
 
 class ModelNumbersAreNotAmounts(unittest.TestCase):

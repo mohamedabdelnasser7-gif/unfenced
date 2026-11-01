@@ -15,20 +15,18 @@ from kit.db import Db
 from kit.limits import Limits
 from kit.model import ModelError
 from kit.tools import voice_note
-from kit.tools.handoff import SUMMARY_LABEL, TAKING_OVER
 from reflection.lessons import Lessons
 from reflection.results import Results
 from tests.fake_model import FakeModel, Outbox, call, clean_env, say, tool_names
 from tests.kept import kept_lesson
 
 CUSTOMER = "201111111111"
-OPERATOR = "201000000001"
 JPEG = b"\xff\xd8\xff\xe0" + bytes(range(256)) * 4
 
 
 MODEL_DOWN_AR = loop.MODEL_DOWN["arabic"]
 # Mohamed's locked bot line (plan point 6, call 6 on 29 Oct), byte for byte.
-BOT_LINE = "أيوه، أنا بوت. فريقنا بيراجع ردودي كل يوم وبيعلمني. تحب أوصلك بحد منهم؟"
+BOT_LINE = "أيوه، أنا بوت. فريقنا بيراجع ردودي كل يوم وبيعلمني"
 
 
 def down(messages, tools_sent):
@@ -38,25 +36,24 @@ def down(messages, tools_sent):
 class StageTools(unittest.TestCase):
     def test_grid_is_the_approved_layout(self):
         self.assertEqual(stages.GRID, {
-            "asking": ("store", "voice_note", "handoff", "delivery"),
-            "ordering": ("store", "voice_note", "handoff", "delivery", "draft_order", "cod_risk"),
-            "my_order": ("voice_note", "handoff", "find_order", "cancel"),
-            "with_person": (),
+            "asking": ("store", "voice_note", "delivery"),
+            "ordering": ("store", "voice_note", "delivery", "draft_order", "cod_risk"),
+            "my_order": ("voice_note", "find_order", "cancel"),
         })
 
     def test_offered_today(self):
         names = {s: tool_names(tools.definitions(stages.STAGES[s])) for s in stages.STAGES}
         self.assertEqual(names, {
-            "asking": ["store", "voice_note", "handoff", "delivery", "switch_stage"],
-            "ordering": ["store", "voice_note", "handoff", "delivery", "draft_order", "cod_risk", "switch_stage"],
-            "my_order": ["voice_note", "handoff", "find_order", "switch_stage"],
-            "with_person": [],
+            "asking": ["store", "voice_note", "delivery", "switch_stage"],
+            "ordering": ["store", "voice_note", "delivery", "draft_order", "cod_risk", "switch_stage"],
+            "my_order": ["voice_note", "find_order", "switch_stage"],
         })
 
     def test_switch_targets(self):
         d = tools.definitions(stages.STAGES["asking"])[-1]["function"]
         self.assertEqual(d["parameters"]["properties"]["to"]["enum"], ["ordering", "my_order"])
-        self.assertNotIn("with_person", [t for s in stages.STAGES.values() for t in s.moves_to])
+        self.assertNotIn("with_person", stages.STAGES)  # no person takes a chat over (DECISIONS item 53)
+        self.assertEqual(stages.get("with_person").name, "asking")  # a chat saved there resumes at asking
 
     def test_a_tool_outside_the_stage_is_refused(self):
         ctx = tools.Context("c", stages.STAGES["my_order"], None, None, None, print, stages=stages.STAGES)
@@ -81,16 +78,17 @@ class Instructions(unittest.TestCase):
 
     def test_the_bot_line(self):
         """Mohamed's locked plan point 6 (call 6, 29 Oct): the Arabic line word for word, said
-        only when asked, and a yes goes to a person."""
+        only when asked. No offer of a person since DECISIONS item 53."""
         self.assertIn('In Egyptian Arabic say exactly: "' + BOT_LINE + '".', loop.INSTRUCTIONS)
         for line in ("Say you are a bot only when the customer asks whether you are a bot or a person; "
                      "never bring it up yourself.",
-                     "say yes, you are a bot, the team reviews your replies every day and teaches you, and offer "
-                     "to connect them with a team member.",
-                     "In English or Franco, say the same in the customer's language and script.",
-                     "If they answer yes, call handoff."):
+                     "say yes, you are a bot, the team reviews your replies every day and teaches you, and keep "
+                     "helping.",
+                     "In English or Franco, say the same in the customer's language and script."):
             with self.subTest(line=line):
                 self.assertIn(line, loop.INSTRUCTIONS)
+        for gone in ("handoff", "hand off", "team member", "تحب أوصلك"):
+            self.assertNotIn(gone, loop.INSTRUCTIONS)
         self.assertNotIn("store's assistant", loop.INSTRUCTIONS)
 
     def test_prices_from_1000_up_keep_the_comma(self):
@@ -99,12 +97,11 @@ class Instructions(unittest.TestCase):
                       'in the thousands: "11,000 جنيه", never "11.000" or "11000".', loop.INSTRUCTIONS)
 
     def test_the_store_and_its_printing(self):
-        """Line 1 names the store, its boots and the name printing, sold in the order and never handed off
-        (DECISIONS 13 and 22); the agent never jokes (DECISIONS 12); no courier is named."""
+        """Line 1 names the store, its boots and the name printing, sold in the order (DECISIONS 13
+        and 22; no hand-off at all since item 53); the agent never jokes (DECISIONS 12); no courier is named."""
         first = loop.INSTRUCTIONS.splitlines()[0]
         for part in ("Beyond the Limits", "football boots", "name printing", "the customer's name printed with UV DTF, "
-                     "400 EGP for two stickers, one on each shoe", "the customer's own name unless they give another",
-                     "never hand it off"):
+                     "400 EGP for two stickers, one on each shoe", "the customer's own name unless they give another"):
             with self.subTest(part=part):
                 self.assertIn(part, first)
         self.assertIn("\nNever joke, even when the customer jokes.\n", loop.INSTRUCTIONS)
@@ -135,7 +132,7 @@ class Turns(unittest.TestCase):
         self.assertEqual(r.outcome, "replied")
         self.assertEqual(self.out.sent, [(CUSTOMER, "عندنا Nike Mercurial Vapor 17 Elite مقاس 43 بـ 16,500 جنيه.")])
         first, second = model.calls
-        self.assertEqual(tool_names(first["tools"]), ["store", "voice_note", "handoff", "delivery", "switch_stage"])
+        self.assertEqual(tool_names(first["tools"]), ["store", "voice_note", "delivery", "switch_stage"])
         system = first["messages"][0]["content"]
         self.assertIn("WhatsApp Sales agent", system)
         self.assertIn("stage asking", system)
@@ -158,14 +155,13 @@ class Turns(unittest.TestCase):
         self.assertEqual(self.chats.failed_checks(r.chat_id), 0)  # a passing reply starts the count again
 
     def test_failed_checks_reset_after_a_passing_reply(self):
-        clean_env(self, OPERATOR_WHATSAPP=OPERATOR)
         for _ in range(3):
             r = self.turn(FakeModel(say("It is 1 EGP."), say("Ask me anything.")), "hello there, a question")
             self.assertEqual(r.outcome, "replied")
-        r = self.turn(FakeModel(say("It is 1 EGP."), say("It is 1 EGP."), say("It is 1 EGP."), say("ملخص")),
+        r = self.turn(FakeModel(say("It is 1 EGP."), say("It is 1 EGP."), say("It is 1 EGP.")),
                       "hello there, a question")
-        self.assertEqual(r.outcome, "handed_off")
-        self.assertEqual(self.outcomes(r.chat_id)[-4:], ["check_failed"] * 3 + ["handed_off"])
+        self.assertEqual(r.outcome, "no_safe_reply")
+        self.assertEqual(self.outcomes(r.chat_id)[-4:], ["check_failed"] * 3 + ["no_safe_reply"])
 
     def test_voice_transcript_adds_no_amount(self):
         model = FakeModel(call("voice_note"), say('{"price": 5}'), say("The Vapor 17 Elite is 5 EGP."),
@@ -220,15 +216,20 @@ class Turns(unittest.TestCase):
         self.assertEqual((row["outcome"], row["detail"], row["stage"]), ("model_error", {"in_a_row": 1}, "asking"))
         self.assertEqual(self.chats.steps(r.chat_id)[-1]["content"], MODEL_DOWN_AR)
 
-    def test_two_model_errors_in_a_row_hand_off(self):
-        clean_env(self, OPERATOR_WHATSAPP=OPERATOR)
+    def test_two_model_errors_in_a_row_are_no_safe_reply(self):
+        """DECISIONS item 53: the second error in a row sends nothing, the chat keeps its stage and
+        stays with the agent, the count starts again and the next message is answered."""
         self.assertEqual(self.turn(FakeModel(down), "عندكم جزم؟").outcome, "model_error")
         r = self.turn(FakeModel(down, down), "عندكم جزم؟")
-        self.assertEqual((r.outcome, self.chats.stage(r.chat_id)), ("handed_off", "with_person"))
-        self.assertEqual([t for to, t in self.out.sent if to == CUSTOMER], [MODEL_DOWN_AR, TAKING_OVER["arabic"]])
+        self.assertEqual((r.outcome, r.reply, self.chats.stage(r.chat_id)), ("no_safe_reply", None, "asking"))
+        self.assertEqual(self.out.sent, [(CUSTOMER, MODEL_DOWN_AR)])  # the first error's line only
+        self.assertEqual([s["role"] for s in self.chats.steps(r.chat_id) if s["role"] != "event"][-1], "user")
         row = self.results.for_chat(r.chat_id)[-1]
-        self.assertEqual((row["outcome"], row["detail"]["by"], row["detail"]["in_a_row"]),
-                         ("handed_off", "model_error", 2))
+        self.assertEqual((row["outcome"], row["action"], row["detail"]["by"], row["detail"]["in_a_row"]),
+                         ("no_safe_reply", "reply", "model_error", 2))
+        self.assertEqual(self.chats.model_errors(r.chat_id), 0)
+        later = self.turn(FakeModel(say("أيوه عندنا.")), "عندكم جزم؟")
+        self.assertEqual((later.outcome, self.out.sent[-1]), ("replied", (CUSTOMER, "أيوه عندنا.")))
 
     def test_a_passing_reply_starts_the_model_error_count_again(self):
         self.assertEqual(self.turn(FakeModel(down), "hello there, a question").outcome, "model_error")
@@ -246,68 +247,24 @@ class Turns(unittest.TestCase):
         self.assertEqual(model.calls, [])
         self.assertNotIn("(empty message)", json.dumps(self.chats.steps(r.chat_id), ensure_ascii=False))
 
-    def test_operator_summary_is_checked_and_labelled(self):
-        clean_env(self, OPERATOR_WHATSAPP=OPERATOR)
-        model = FakeModel(call("handoff", reason="customer wants a person"),
-                          say("العميل عايز يكلم حد " + chr(0x1F621) + " **فورا**"))
-        self.turn(model, "عايز اكلم حد")
-        note = [t for to, t in self.out.sent if to == OPERATOR][0]
-        self.assertIn(SUMMARY_LABEL, note)
-        self.assertIn("السبب: customer wants a person", note)
-        self.assertNotIn(chr(0x1F621), note)
-        self.assertNotIn("**", note)
-
-    def test_three_failed_checks_hand_off(self):
-        clean_env(self, OPERATOR_WHATSAPP=OPERATOR)
-        model = FakeModel(say("It is 1,350 EGP."), say("Only 1,350 EGP."), say("1,350 EGP, sorry to hear"),
-                          say("العميل بيسأل عن سعر الجزمة والرد اتمنع 3 مرات."))
+    def test_three_failed_checks_are_no_safe_reply_and_the_agent_keeps_the_chat(self):
+        """DECISIONS item 53: nothing goes to the customer; the chat is recorded lost (harm) and the
+        agent answers the next message itself."""
+        model = FakeModel(say("It is 1,350 EGP."), say("Only 1,350 EGP."), say("1,350 EGP, sorry to hear"))
         r = self.turn(model, "How much are the boots?")
-        self.assertEqual(r.outcome, "handed_off")
-        self.assertEqual(self.chats.stage(r.chat_id), "with_person")
-        to_operator = [t for to, t in self.out.sent if to == OPERATOR]
-        self.assertEqual(len(to_operator), 1)
-        self.assertIn(CUSTOMER, to_operator[0])
-        self.assertEqual([t for to, t in self.out.sent if to == CUSTOMER], [TAKING_OVER["english"]])
-        self.assertEqual(self.outcomes(r.chat_id), ["check_failed"] * 3 + ["handed_off"])
-        # with a person, the agent waits: no model call, nothing to the customer, the message goes on to the team
-        sent = len(self.out.sent)
-        later = self.turn(FakeModel(), "hello?", images=[Image(JPEG, "image/jpeg")])
-        self.assertEqual(later.outcome, "waiting")
-        self.assertEqual([to for to, _ in self.out.sent[sent:]], [OPERATOR])
-        self.assertIn("hello?", self.out.sent[-1][1])
-
-    def test_model_hands_off_in_franco(self):
-        model = FakeModel(call("handoff", reason="customer wants a person"))
-        r = self.turn(model, "enta bot wala eh? 3ayez 7ad yklmni")
-        self.assertEqual(r.outcome, "handed_off")
-        self.assertEqual(self.out.sent, [(CUSTOMER, TAKING_OVER["franco"])])
-        roles = [s["role"] for s in self.chats.steps(r.chat_id)]
-        self.assertEqual(roles, ["user", "assistant", "event", "tool", "assistant"])
-
-    def test_the_bot_line_goes_out_as_written_and_a_yes_hands_off(self):
-        """The send check lets the locked line through unchanged; the yes that follows reaches
-        handoff, which gives the chat to a person (the model calls it, as the line says)."""
-        clean_env(self, OPERATOR_WHATSAPP=OPERATOR)
-        asked = FakeModel(say(BOT_LINE))
-        r = self.turn(asked, "انت بوت؟")
-        self.assertEqual((r.outcome, self.out.sent), ("replied", [(CUSTOMER, BOT_LINE)]))
-        self.assertIn("If they answer yes, call handoff.", asked.calls[0]["messages"][0]["content"])
-        sent = len(self.out.sent)
-        yes = FakeModel(call("handoff", reason="said yes to a person after the bot line"),
-                        say("العميل سأل لو ده بوت ووافق يكلم حد من الفريق."))
-        r = self.turn(yes, "أيوه")
-        # the yes is read after the line it answers (the line is also in the system message, so look past it)
-        self.assertTrue(any(m.get("role") == "assistant" and BOT_LINE in (m.get("content") or "")
-                            for m in yes.calls[0]["messages"][1:]))
-        self.assertEqual((r.outcome, self.chats.stage(r.chat_id)), ("handed_off", "with_person"))
-        self.assertEqual([to for to, _ in self.out.sent[sent:]], [OPERATOR, CUSTOMER])
-        self.assertIn("أيوه", self.out.sent[sent][1])
-        self.assertEqual(self.out.sent[-1], (CUSTOMER, TAKING_OVER["arabic"]))
-        self.assertEqual(self.outcomes(r.chat_id), ["replied", "handed_off"])
+        self.assertEqual((r.outcome, r.reply), ("no_safe_reply", None))
+        self.assertEqual(self.chats.stage(r.chat_id), "asking")
+        self.assertEqual(self.out.sent, [])
+        self.assertEqual([s["role"] for s in self.chats.steps(r.chat_id) if s["role"] != "event"][-1], "user")
+        self.assertEqual(self.outcomes(r.chat_id), ["check_failed"] * 3 + ["no_safe_reply"])
+        self.assertIn("no_safe_reply", loop.PLUG.harm.results)
+        self.assertEqual(self.chats.failed_checks(r.chat_id), 0)
+        later = self.turn(FakeModel(say("Which size do you wear?")), "hello?", images=[Image(JPEG, "image/jpeg")])
+        self.assertEqual((later.outcome, self.out.sent), ("replied", [(CUSTOMER, "Which size do you wear?")]))
 
     def test_switch_stage_changes_the_tools_mid_turn(self):
         def answer(messages, tools_sent):
-            self.assertEqual(tool_names(tools_sent), ["voice_note", "handoff", "find_order", "switch_stage"])
+            self.assertEqual(tool_names(tools_sent), ["voice_note", "find_order", "switch_stage"])
             self.assertIn("stage my_order", messages[0]["content"])
             return say("I will check your order with the team and reply here.")
 

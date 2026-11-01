@@ -13,8 +13,9 @@ from reflection.results import Results
 from tests import plugs
 
 ROOT = Path(__file__).resolve().parent.parent
-TODAYS_14 = {"replied", "check_failed", "handed_off", "handoff_failed", "limited", "model_error", "turn_failed",
-             "person_replied", "handed_back", "relay_failed", "order_drafted", "order_created", "delivered", "refused"}
+TODAYS_11 = {"replied", "check_failed", "no_safe_reply", "limited", "model_error", "turn_failed",
+             "person_replied", "order_drafted", "order_created", "delivered", "refused"}
+GONE = ("handed_off", "handoff_failed", "handed_back", "relay_failed")  # the hand-off left (DECISIONS item 53)
 BUSINESS = re.compile(r"chat|customer|order|sales|store|whatsapp|price|waterer|ledger", re.IGNORECASE)
 
 
@@ -36,8 +37,8 @@ class EngineHasNoBusinessWords(unittest.TestCase):
 
 
 class SalesPlug(unittest.TestCase):
-    def test_declares_todays_14_results(self):
-        self.assertEqual(set(PLUG.results), TODAYS_14)
+    def test_declares_todays_11_results(self):
+        self.assertEqual(set(PLUG.results), TODAYS_11)
         self.assertEqual(PLUG.agent, "sales")
 
     def test_fast_and_slow(self):
@@ -52,9 +53,10 @@ class SalesPlug(unittest.TestCase):
         after = {n: r.after for n, r in PLUG.results.items()}
         self.assertEqual(after["replied"], "reply")
         self.assertEqual(after["check_failed"], "reply")
-        self.assertEqual(after["handed_off"], "hand_off")
+        self.assertEqual(after["no_safe_reply"], "reply")
         self.assertEqual(after["order_created"], "order")
-        for later in ("delivered", "refused", "person_replied", "handed_back", "relay_failed"):
+        self.assertEqual(set(PLUG.actions), {"reply", "order"})
+        for later in ("delivered", "refused", "person_replied"):
             self.assertIsNone(after[later], later)
 
     def test_causes_not_its_fault(self):
@@ -76,9 +78,9 @@ class SalesPlug(unittest.TestCase):
     def test_the_log_refuses_an_outcome_the_plug_did_not_declare(self):
         r = Results(Db(":memory:"))
         self.addCleanup(r.db.close)
-        for outcome in TODAYS_14:
+        for outcome in TODAYS_11:
             r.record("c1", outcome)
-        for bad in ("made_up", "grew", "soaked", ""):
+        for bad in ("made_up", "grew", "soaked", "") + GONE:
             with self.assertRaises(ValueError):
                 r.record("c1", bad)
 

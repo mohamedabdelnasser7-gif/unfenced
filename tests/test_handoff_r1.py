@@ -263,7 +263,8 @@ class CompiledOnce(Base):
 
 
 class TurnRecordGaps(Base):
-    """Mutants the review left alive: each turn's own checks, handoff_failed, and the feedback names."""
+    """Mutants the review left alive: each turn's own checks, the no safe reply row (handoff_failed before
+    DECISIONS item 53), and the feedback names."""
 
     def test_each_turn_keeps_only_its_own_checks(self):
         bad = "Phantom 6 Elite 16,500 جنيه."
@@ -273,15 +274,14 @@ class TurnRecordGaps(Base):
                        opening="How much is the Phantom 6?", max_turns=2)
         self.assertEqual([len(t["checks"]) for t in m["turns"]], [1, 0])
 
-    def test_why_of_reads_only_later_rows_and_check_failed_and_handoff_failed(self):
+    def test_why_of_reads_only_later_rows_and_check_failed_and_no_safe_reply(self):
         rows = [{"id": 1, "outcome": "check_failed", "detail": {"feedback": "old"}},
                 {"id": 2, "outcome": "check_failed", "detail": {"feedback": "new"}},
-                {"id": 3, "outcome": "relay_failed", "detail": {"feedback": "not a check"}},
-                {"id": 4, "outcome": "handoff_failed", "detail": {"by": "send_check", "reason": "3 replies failed",
-                                                                  "ok": False}}]
+                {"id": 3, "outcome": "model_error", "detail": {"feedback": "not a check"}},
+                {"id": 4, "outcome": "no_safe_reply", "detail": {"by": "send_check", "in_a_row": 3}}]
         results = mock.Mock(for_chat=lambda chat_id: rows)
         self.assertEqual(match.why_of(results, "c", 1),
-                         {"checks": ["new"], "handoff": {"by": "send_check", "reason": "3 replies failed"}})
+                         {"checks": ["new"], "no_safe_reply": {"by": "send_check"}})
 
     def test_the_franco_feedback_names_up_to_three_arabic_words(self):
         found = problems("el vapor b 16,500 جنيه يا باشا موجود", FR)

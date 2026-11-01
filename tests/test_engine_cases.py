@@ -33,11 +33,11 @@ OLD_ROWS = [  # (agent, chat_id, step, stage, outcome, lessons, detail, at), as 
     ("sales", "b2", None, "asking", "limited", "[]", '{"limit": "customer", "told": true}', 104.0),
     ("sales", "b2", 3, "asking", "model_error", "[3]", '{"in_a_row": 1}', 105.0),
     ("sales", "b2", 5, "asking", "turn_failed", "[]", '{"in_a_row": 2}', 106.0),
-    ("sales", "b2", None, "asking", "handed_off", "[3]", '{"by": "model", "ok": true}', 107.0),
-    ("sales", "b2", 7, "with_person", "person_replied", "[]", '{"note": "wamid.1"}', 108.0),
-    ("sales", "b2", None, "with_person", "relay_failed", "[]", '{"why": "not_sent", "code": 131047}', 109.0),
-    ("sales", "b2", None, "with_person", "handed_back", "[]", None, 110.0),
-    ("sales", "c3", None, "asking", "handoff_failed", "[]", '{"by": "send_check", "ok": false}', 111.0),
+    ("sales", "b2", None, "asking", "no_safe_reply", "[3]", '{"by": "turn_failed", "in_a_row": 2}', 107.0),
+    ("sales", "b2", 7, "asking", "person_replied", "[]", '{"note": "wamid.1"}', 108.0),
+    ("sales", "b2", None, "asking", "check_failed", "[]", '{"reply": "z", "feedback": "w"}', 109.0),
+    ("sales", "b2", 9, "asking", "replied", "[]", None, 110.0),
+    ("sales", "c3", None, "asking", "no_safe_reply", "[]", '{"by": "send_check", "in_a_row": 3}', 111.0),
     ("sales", "a1", None, None, "delivered", "[]", None, 112.0),
     ("sales", "c3", None, None, "refused", None, None, 113.0),
 ]
@@ -149,11 +149,11 @@ class SalesCases(unittest.TestCase):
         self.results.record("c1", "check_failed", stage="asking", lessons={2, 1}, detail={"feedback": "x"})
         self.results.record("c1", "replied", step=4, stage="asking", lessons={2, 1})
         self.results.record("c1", "order_created", stage="ordering", detail={"order": "#1001"})
-        self.results.record("c1", "handed_off", stage="ordering", lessons=[2])
+        self.results.record("c1", "no_safe_reply", stage="ordering", lessons=[2], detail={"by": "send_check"})
         rows = self.results.query(case="c1")
         self.assertEqual([(r["action"], r["result"], r["lessons"]) for r in rows],
                          [("reply", "check_failed", [1, 2]), ("reply", "replied", [1, 2]),
-                          ("order", "order_created", []), ("hand_off", "handed_off", [2])])
+                          ("order", "order_created", []), ("reply", "no_safe_reply", [2])])
 
     def test_a_later_result_attaches_by_chat(self):
         self.results.record("c1", "replied", step=4, stage="asking", lessons=[1])

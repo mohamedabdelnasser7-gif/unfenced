@@ -14,7 +14,7 @@ from kit.chats import FIXED, PERSON, Chats
 from kit.db import Db
 from kit.limits import Limits
 from kit.model import ModelError
-from kit.tools import draft_order, handoff
+from kit.tools import draft_order
 from reflection.lessons import Lessons
 from reflection.results import Results
 from tests.fake_model import FakeModel, Outbox, clean_env, say
@@ -96,16 +96,6 @@ class SummaryReplyTest(TurnBase):
         self.turn(self.done(), "اوك", limits=lim)
         self.assertFalse(self.placed())
 
-    def test_pa3_the_handoff_line_then_a_hand_back_is_not_the_summary(self):
-        m = FakeModel(tool_call("draft_order", self.args), say("الاجمالي 1900 جنيه."), say("الاجمالي 1901 جنيه."),
-                      say("الاجمالي 1902 جنيه."), say("العميل عايز يطلب"))
-        self.assertEqual(self.turn(m, "عايز اتنين الإيليت مقاس 43").outcome, "handed_off")
-        self.assertIsNone(orders.Book(self.db).pending(self.cid))
-        self.chats.hand_back(self.cid)
-        self.chats.set_stage(self.cid, "ordering")
-        self.turn(self.done(), "تمام")
-        self.assertFalse(self.placed())
-
     def test_fixed_lines_are_saved_with_their_name(self):
         self.turn(FakeModel(tool_call("draft_order", self.args), down), "عايز اتنين الإيليت مقاس 43")
         lines = [s for s in self.chats.steps(self.cid) if s["role"] == "assistant" and not s["tool_calls"]]
@@ -129,89 +119,12 @@ class SummaryReplyTest(TurnBase):
             self.assertEqual([s["content"] for s in got], ["تمام"], text)
 
 
-OPERATOR = "201000000001"
-
-
 class IdOutbox(Outbox):
     """An outbox that answers like WhatsApp, with a message id for each send."""
 
     def __call__(self, to, text):
         super().__call__(to, text)
         return {"messages": [{"id": f"wamid.{len(self.sent)}"}]}
-
-
-class NoteCapTest(TurnBase):
-    """F2: the note carries the last 20 messages and one count line, in 3 parts at most."""
-
-    def setUp(self):
-        super().setUp()
-        clean_env(self, OPERATOR_WHATSAPP=OPERATOR)
-        self.out = IdOutbox()
-        self.chats.set_stage(self.cid, "asking")
-        self.chats.add_step(self.cid, "user", content="ازيك")
-        self.chats.add_step(self.cid, "assistant", content="اهلا بيك")
-
-    def handoff(self):
-        model = FakeModel(tool_call("handoff", {"reason": "asks for a person"}), say("العميل عايز حد من الفريق"))
-        return self.turn(model, "عايز اكلم حد من الفريق")
-
-    def to_team(self):
-        return [t for to, t in self.out.sent if to == OPERATOR]
-
-    def test_a_flood_of_long_messages_makes_three_parts_at_most(self):
-        for i in range(300):
-            self.chats.add_step(self.cid, "user", content=f"رسالة رقم {i} " + ("كلام كتير " * 390)[:3990])
-        self.assertEqual(self.handoff().outcome, "handed_off")
-        notes = self.to_team()
-        self.assertLessEqual(len(notes), 3)
-        self.assertIn("عايز اكلم حد من الفريق", "".join(notes))   # the latest message is never the one cut
-        self.assertRegex("\n".join(notes), r"رسايل أقدم مش ظاهرة هنا: \d+")
-
-    def test_only_the_last_20_messages_show_with_a_count_line(self):
-        for i in range(25):
-            self.chats.add_step(self.cid, "user", content=f"سؤال {i}")
-        self.handoff()
-        note = "\n".join(self.to_team())
-        self.assertIn("رسايل أقدم مش ظاهرة هنا: 6", note)       # 26 waiting with this one, 20 shown
-        self.assertNotIn("سؤال 5\n", note + "\n")
-        self.assertIn("سؤال 6", note)
-
-
-class RefusingOutbox(IdOutbox):
-    """WhatsApp refuses every message to the team phone (131047: no message from it in 24 hours)."""
-
-    def __call__(self, to, text):
-        if to == OPERATOR:
-            raise RuntimeError("WhatsApp refused the send: error 131047")
-        return super().__call__(to, text)
-
-
-class NoteNotReachedTest(TurnBase):
-    """F3: when no part of the note reaches the team, the chat stays with the agent and the
-    customer is told a team member will reply."""
-
-    def setUp(self):
-        super().setUp()
-        clean_env(self, OPERATOR_WHATSAPP=OPERATOR)
-        self.out = RefusingOutbox()
-        self.chats.set_stage(self.cid, "asking")
-
-    def test_a_refused_note_keeps_the_chat_with_the_agent(self):
-        model = FakeModel(tool_call("handoff", {"reason": "asks for a person"}), say("العميل عايز حد"))
-        r = self.turn(model, "عايز اكلم حد من الفريق")
-        self.assertEqual(r.outcome, "handoff_failed")
-        self.assertEqual(self.chats.stage(self.cid), "asking")
-        self.assertEqual(self.out.sent, [(ME, handoff.TEAM_WILL_REPLY["arabic"])])
-        self.assertEqual(len(model.calls), 2)                    # the turn, and the note's summary; no reply after
-        self.assertEqual(self.results.for_chat(self.cid)[-1]["outcome"], "handoff_failed")
-
-    def test_the_fixed_handoff_after_model_errors_does_the_same(self):
-        self.chats.add_model_error(self.cid, "down")
-        r = self.turn(FakeModel(down, say("ملخص")), "hello there")
-        self.assertEqual(r.outcome, "handoff_failed")
-        self.assertEqual(self.chats.stage(self.cid), "asking")
-        self.assertEqual(self.out.sent, [(ME, handoff.TEAM_WILL_REPLY["english"])])
-
 
 
 class SendCheckBase(unittest.TestCase):
@@ -309,47 +222,6 @@ class CodRiskResultTest(unittest.TestCase):
         self.assertNotIn("Refused", json.dumps(out))
 
 
-class StaleNoteTest(unittest.TestCase):
-    """F5: notes route replies for 48 hours; a reply after a hand back puts the chat back with the person."""
-
-    def setUp(self):
-        from channels.whatsapp import App
-        clean_env(self)
-        self.db = Db(":memory:")
-        self.addCleanup(self.db.close)
-        self.chats = Chats(self.db)
-        self.cid = self.chats.open("whatsapp", ME)
-        self.chats.set_stage(self.cid, "with_person")
-        self.chats.save_note("wamid.note1", self.cid, OPERATOR)
-        self.graph = type("Graph", (), {"send": IdOutbox()})()
-        self.app = App(self.chats, None, Lessons(self.db), Results(self.db), self.graph, operator=OPERATOR)
-
-    def reply(self, text, mid):
-        from channels.whatsapp import Incoming
-        return self.app.work_one((None, Incoming(mid, OPERATOR, "2", "text", text=text, context_id="wamid.note1")))
-
-    def to_customer(self):
-        return [t for to, t in self.graph.send.sent if to == ME]
-
-    def test_a_note_older_than_48_hours_routes_nothing(self):
-        with self.db.tx() as c:
-            c.execute("UPDATE team_notes SET at = at - ?", (49 * 3600,))
-        self.assertIsNone(self.chats.note_chat("wamid.note1", OPERATOR))
-        self.assertIsNone(self.app.team_chat(type("Inc", (), {"customer_id": OPERATOR, "context_id": "wamid.note1"})))
-
-    def test_a_note_inside_48_hours_still_routes(self):
-        with self.db.tx() as c:
-            c.execute("UPDATE team_notes SET at = at - ?", (47 * 3600,))
-        self.assertEqual(self.chats.note_chat("wamid.note1", OPERATOR), self.cid)
-
-    def test_a_reply_after_a_hand_back_reaches_the_customer_and_takes_the_chat_back(self):
-        self.assertEqual(self.reply("رجّع", "wamid.o1").outcome, "handed_back")
-        self.assertEqual(self.chats.stage(self.cid), "asking")
-        self.assertEqual(self.reply("الاوردر هيوصل بكرة", "wamid.o2").outcome, "person_replied")
-        self.assertEqual(self.to_customer(), ["الاوردر هيوصل بكرة"])
-        self.assertEqual(self.chats.stage(self.cid), "with_person")
-
-
 class OrderLineTest(TurnBase):
     """Review 2: an order created in a turn that then hits the limit, a model error or a crash
     is still told to the customer, with its number and total, instead of the usual line."""
@@ -397,21 +269,23 @@ class OrderLineTest(TurnBase):
         self.assertTrue(self.placed())
         self.assertEqual((r.outcome, r.reply), ("turn_failed", "Your order #1001 is placed. The total is 33,060 EGP."))
 
-    def test_the_second_model_error_hands_off_after_the_order_line(self):
+    def test_the_second_model_error_is_no_safe_reply_and_only_the_order_line_goes(self):
         self.summary()
         self.chats.add_model_error(self.cid, "down")
-        r = self.turn(FakeModel(confirm_from_history(self.args), down, say("ملخص")), "تمام")
-        self.assertEqual(r.outcome, "handed_off")
-        self.assertEqual(self.to_customer()[-2:], [self.LINE, handoff.TAKING_OVER["arabic"]])
-
-    def test_three_failed_checks_hand_off_after_the_order_line(self):
-        self.summary()
-        r = self.turn(FakeModel(confirm_from_history(self.args), say("الاجمالي 1900 جنيه."),
-                                say("الاجمالي 1901 جنيه."), say("الاجمالي 1902 جنيه."), say("ملخص")), "تمام")
+        before = len(self.to_customer())
+        r = self.turn(FakeModel(confirm_from_history(self.args), down), "تمام")
         self.assertTrue(self.placed())
-        self.assertEqual(r.outcome, "handed_off")
-        self.assertEqual(self.to_customer()[-2:], [self.LINE, handoff.TAKING_OVER["arabic"]])
-        self.assertEqual(self.to_customer().count(self.LINE), 1)
+        self.assertEqual((r.outcome, r.reply), ("no_safe_reply", self.LINE))
+        self.assertEqual(self.to_customer()[before:], [self.LINE])
+
+    def test_three_failed_checks_are_no_safe_reply_and_only_the_order_line_goes(self):
+        self.summary()
+        before = len(self.to_customer())
+        r = self.turn(FakeModel(confirm_from_history(self.args), say("الاجمالي 1900 جنيه."),
+                                say("الاجمالي 1901 جنيه."), say("الاجمالي 1902 جنيه.")), "تمام")
+        self.assertTrue(self.placed())
+        self.assertEqual((r.outcome, r.reply), ("no_safe_reply", self.LINE))
+        self.assertEqual(self.to_customer()[before:], [self.LINE])
 
     def test_franco_and_no_order_keep_the_usual_lines(self):
         self.summary()
@@ -458,7 +332,7 @@ class MediaMarkTest(TurnBase):
     def test_over_a_limit_a_photo_with_a_yes_caption_is_marked(self):
         from channels.whatsapp import App, Incoming
         self.summary()
-        app = App(self.chats, None, Lessons(self.db), self.results, NoGraph(), limits=Limits(self.db), operator=None)
+        app = App(self.chats, None, Lessons(self.db), self.results, NoGraph(), limits=Limits(self.db))
         self.chats.first_seen("wamid.p1")
         r = app.work_one(("customer", Incoming("wamid.p1", ME, 1, "image", text="تمام", media_id="111",
                                                media_mime="image/jpeg")))
@@ -467,17 +341,6 @@ class MediaMarkTest(TurnBase):
         self.chats.first_seen("wamid.v1")
         app.work_one(("customer", Incoming("wamid.v1", ME, 2, "audio", media_id="112", media_mime="audio/ogg")))
         self.assertEqual(self.media(), [{"kind": "audio", "opened": False}])
-
-    def test_the_handoff_note_shows_an_unopened_photo_once(self):
-        clean_env(self, OPERATOR_WHATSAPP=OPERATOR)
-        self.out = IdOutbox()
-        self.chats.set_stage(self.cid, "asking")
-        model = FakeModel(tool_call("handoff", {"reason": "asks for a person"}), say("العميل بعت صورة"))
-        self.turn(model, "عايز اكلم حد", rejected_images=1)
-        note = "\n".join(t for to, t in self.out.sent if to == OPERATOR)
-        self.assertEqual(note.count(handoff.PHOTO), 1)
-
-
 
 class RiskBeforeTakeTest(TurnBase):
     """Review 6: a cod_risk lookup that fails never loses the draft; the order goes in tagged unknown."""
@@ -566,44 +429,6 @@ class NoRedirectTest(unittest.TestCase):
         cm.exception.close()
         self.assertEqual((cm.exception.code, hits), (302, [("POST", "/a", "test-token-not-real")]))
 
-
-
-class PassOnFailedTest(TurnBase):
-    """Review 9: with a person, an error passing a message on never drops it silently; the team
-    member gets a line naming the customer's number."""
-
-    def setUp(self):
-        super().setUp()
-        clean_env(self, OPERATOR_WHATSAPP=OPERATOR)
-        self.out = IdOutbox()
-        self.chats.set_stage(self.cid, "with_person")
-        self.line = loop.PASS_ON_FAILED.format(customer=ME)
-
-    def to_team(self):
-        return [t for to, t in self.out.sent if to == OPERATOR]
-
-    def test_an_error_in_the_limits_tells_the_team(self):
-        from unittest import mock
-        lim = Limits(self.db)
-        with mock.patch.object(lim, "take", side_effect=RuntimeError("database is locked")):
-            r = self.turn(FakeModel(), "لسه مستني", limits=lim)
-        self.assertEqual(r.outcome, "waiting")
-        self.assertEqual(self.to_team(), [self.line])
-        self.assertIn(ME, self.line)
-
-    def test_an_error_passing_the_message_on_tells_the_team(self):
-        from unittest import mock
-        with mock.patch.object(handoff, "pass_on", side_effect=RuntimeError("bug")):
-            self.assertEqual(self.turn(FakeModel(), "لسه مستني").outcome, "waiting")
-        self.assertEqual(self.to_team(), [self.line])
-
-    def test_over_the_limit_still_sends_nothing(self):
-        lim = Limits(self.db, per_customer=1, window=600, daily=1000, customer_daily=150)
-        self.turn(FakeModel(), "رسالة 1", limits=lim)
-        before = len(self.to_team())
-        self.turn(FakeModel(), "رسالة 2", limits=lim)
-        self.assertEqual(len(self.to_team()), before)
-        self.assertNotIn(self.line, self.to_team())
 
 
 if __name__ == "__main__":

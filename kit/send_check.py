@@ -1155,7 +1155,7 @@ def named_problems(reply, customer_text="", amounts=(), vocabulary=frozenset(), 
     if wrong:
         nums = ", ".join(s if len(s) <= MAX_INT_DIGITS else s[:MAX_INT_DIGITS] + "..." for s in map(str, wrong))
         problems.append(("amounts", f"These amounts are not in the store or delivery data: {nums}. "
-                         "Use only prices and fees from tool results, or say you will check with the team. "
+                         "Use only prices and fees from tool results, or say you do not have that number. "
                          "If a number is not a price, say what it is: size 43, 2 days, order #1234, model 2026."))
     digits = _plain(reply)
     if (SPELLED_AMOUNT.search(digits) or SHORT_AMOUNT.search(digits) or amount_in_words(digits)

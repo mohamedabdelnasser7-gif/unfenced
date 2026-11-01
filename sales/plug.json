@@ -3,10 +3,9 @@
   "about": "Answers a store's customers on WhatsApp and takes orders after a plain yes.",
   "case": "One WhatsApp chat with one customer; the case id is the chat id.",
   "fields": ["retail"],
-  "stages": ["asking", "ordering", "my_order", "with_person"],
+  "stages": ["asking", "ordering", "my_order"],
   "actions": {
     "reply": "One answer to a customer message: a reply checked before it goes out, or a fixed line.",
-    "hand_off": "The chat goes to a person on the team.",
     "order": "An order summary, then the order once the customer says a plain yes."
   },
   "results": {
@@ -19,21 +18,15 @@
     "model_error": {"speed": "fast", "shows_in_days": [0, 0], "after": "reply",
                     "about": "The model did not answer; the customer was asked to write again."},
     "turn_failed": {"speed": "fast", "shows_in_days": [0, 0], "after": "reply",
-                    "about": "The code crashed during the turn; the same line went out, and a second in a row hands off."},
-    "handed_off": {"speed": "fast", "shows_in_days": [0, 0], "after": "hand_off",
-                   "about": "A person has the chat now."},
-    "handoff_failed": {"speed": "fast", "shows_in_days": [0, 0], "after": "hand_off",
-                       "about": "No part of the note reached the team, so the chat stayed with the agent and the customer was told the team will reply."},
+                    "about": "The code crashed during the turn; the same line went out, and a second in a row is no safe reply."},
+    "no_safe_reply": {"speed": "fast", "shows_in_days": [0, 0], "after": "reply",
+                      "about": "No safe reply could be sent (three failed send checks or two model errors in a row): nothing went out (only the order line, when the turn made an order) and the agent kept the chat. The chat counts as lost for Reflection and the Arena."},
     "order_drafted": {"speed": "fast", "shows_in_days": [0, 0], "after": "order",
                       "about": "draft_order made a summary, with its total."},
     "order_created": {"speed": "fast", "shows_in_days": [0, 1], "after": "order",
                       "about": "The customer said yes and the store took the order, with its number, total and COD risk. It settles a case as good; a chat with no order a day after the agent last acted went quiet, which counts as not good."},
     "person_replied": {"speed": "fast", "shows_in_days": [0, 1],
-                       "about": "A team member's reply reached the customer; its step is the example the reflection reads."},
-    "handed_back": {"speed": "fast", "shows_in_days": [0, 1],
-                    "about": "The team member gave the chat back to the agent."},
-    "relay_failed": {"speed": "fast", "shows_in_days": [0, 1],
-                     "about": "WhatsApp refused a team member's reply, or a customer's message reached no one on the team."},
+                       "about": "A team member's reply in a chat imported from the store's past; its step is the example the reflection reads."},
     "delivered": {"speed": "slow", "shows_in_days": [2, 7],
                   "about": "The courier delivered the order (Bosta, optional). Recorded for the team and the delivery cards; it never decides a case."},
     "refused": {"speed": "slow", "shows_in_days": [2, 7],
@@ -49,8 +42,8 @@
     "known_by": "case"
   },
   "harm": {
-    "results": ["handed_off"],
-    "about": "A handoff counts as harm. Complaints count too, but they have no result yet; they join this list once one is declared."
+    "results": ["no_safe_reply"],
+    "about": "A turn with no safe reply counts as harm. Complaints count too, but they have no result yet; they join this list once one is declared."
   },
   "decides": {"good": "order_created", "bad": []},
   "risk": {
@@ -102,7 +95,7 @@
         "number": ["[0-9]", "[%$£€¥]"],
         "personal_data": ["@"]
       },
-      "tools": ["store", "delivery", "draft_order", "cod_risk", "find_order", "switch_stage", "handoff", "voice_note"]
+      "tools": ["store", "delivery", "draft_order", "cod_risk", "find_order", "switch_stage", "voice_note"]
     },
     "low": {
       "about": "Low risk: tone, wording, the order of questions, when to ask for the size, greetings."
@@ -122,7 +115,7 @@
   },
   "exam": {
     "situations": "exam/situations.json",
-    "checks": ["script", "banned_words", "style", "amounts", "stock_count", "echo", "bot_line", "handoff", "order",
+    "checks": ["script", "banned_words", "style", "amounts", "stock_count", "echo", "bot_line", "order",
                "days_from_tools", "tools", "amount_from_tool", "late_order", "exchange_line", "lookup_line",
                "rule_change", "cod_unasked", "check_with_team", "no_shop"]
   }

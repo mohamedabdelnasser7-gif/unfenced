@@ -4,7 +4,7 @@ Per customer: LIMIT_CUSTOMER_CALLS model calls (default 20) in LIMIT_CUSTOMER_SE
 and LIMIT_CUSTOMER_DAILY model calls (default 150) in the last 24 hours, so no single number
 can use up the shared daily ceiling.
 Overall: LIMIT_DAILY_CALLS model calls (default 1000) in the last 24 hours.
-Every model call counts: drafts, the voice note and the handoff summary.
+Every model call counts: drafts and the voice note.
 
 The webhook checks before it queues a message, and every model call checks again, so a
 burst queued before the first answer still stops at the cap. Over a limit, the customer

@@ -335,3 +335,91 @@ class LiveJudge(unittest.TestCase):
             finally:
                 db.close()
 
+
+class JudgeOutsideTheLock(unittest.TestCase):
+    """Stack review round 1, item 1: the live page's judge is a model call, so it runs before the answer
+    takes the write lock, for a correction, Modify, Edit and an idea. While it runs the live agent's
+    process can still write to the same database."""
+
+    def setUp(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.path = str(Path(d.name) / "ascent.db")
+        self.db = Db(self.path)
+        self.addCleanup(self.db.close)
+        self.seen = []
+
+    def judge(self, text, high_about, low_about):
+        import sqlite3
+        other = sqlite3.connect(self.path, timeout=0.2)  # the live agent writing a message meanwhile
+        try:
+            other.execute("CREATE TABLE IF NOT EXISTS ping (x)")
+            other.execute("INSERT INTO ping VALUES (1)")
+            other.commit()
+            wrote = True
+        except sqlite3.OperationalError:
+            wrote = False
+        finally:
+            other.close()
+        self.seen.append((text, self.db.conn.in_transaction, wrote))
+        return risk.LOW
+
+    def test_the_judge_never_runs_inside_the_answers_transaction(self):
+        plugs = [plug_mod.load(ROOT / "sales" / "plug.json")]
+        m = mo.Morning(self.db, plugs, judge=self.judge, exams={"sales": examiner(True, [])})
+        L = m.lessons["sales"]
+        m.correct("sales", LOW, now=NOW)
+        live = L.mine()[-1]
+        self.assertEqual(live["state"], TRYING)
+        m.idea("sales", SIZE, "all", now=NOW + 10)
+        m.edit(live["id"], "Ask which colour they like before you write the summary.", now=NOW + 20)
+        trying = [les for les in L.mine() if les["state"] == TRYING][0]
+        m.modify(trying["id"], "Ask which brand they wear before naming ours.", "", now=NOW + 30)
+        rated = [t for t, _, _ in self.seen]
+        for line in (LOW, SIZE, "Ask which brand they wear before naming ours.",
+                     "Ask which colour they like before you write the summary."):
+            self.assertIn(line, rated)
+        self.assertEqual([(t, tx, wrote) for t, tx, wrote in self.seen if tx or not wrote], [])
+
+    def test_a_line_changed_after_its_rating_is_refused(self):
+        plugs = [plug_mod.load(ROOT / "sales" / "plug.json")]
+        m = mo.Morning(self.db, plugs, judge=low)
+        L = m.lessons["sales"]
+        rated = L.rate(LOW)
+        with self.assertRaisesRegex(ValueError, "changed after its risk was rated"):
+            L.add(SIZE, ["all"], "typed", yes_by="mona", rated=rated, now=NOW)
+        self.assertEqual(L.mine(), [])
+
+
+class JudgeHighHolds(Base):
+    """Stack review round 1, item 6 (engine/lessons.py marked_high): a judge that says high outright holds a
+    person's edited line for a yes, though the code check found no mark."""
+
+    def test_judge_high_holds_an_edit(self):
+        said = {"v": risk.LOW}
+        m = mo.Morning(self.db, self.plugs, judge=lambda t, h, lo: said["v"], exams={"sales": examiner(True, [])})
+        L = m.lessons["sales"]
+        m.correct("sales", LOW, now=NOW)
+        live = L.mine()[-1]
+        self.assertEqual(live["state"], TRYING)
+        said["v"] = risk.HIGH
+        m.edit(live["id"], SIZE, now=NOW + 10)
+        new = L.mine()[-1]
+        self.assertEqual((new["text"], new["risk"], new["state"], new["yes_at"]), (SIZE, "high", WAITING, None))
+        self.assertIn(new["id"], self.card_ids_of(m, NOW + 20))
+
+    @staticmethod
+    def card_ids_of(m, now):
+        return [c["id"] for c in m.view(now=now)["cards"]]
+
+
+class DemoReadsEnv(unittest.TestCase):
+    """Stack review round 1, item 6 (morning.py _demo): the sample days read .env, so Quick start finds its key."""
+
+    def test_demo_loads_env_first(self):
+        from unittest import mock
+        with mock.patch.object(mo.env, "load") as load, \
+                mock.patch.object(mo, "demo_pages", side_effect=mo.Refused("stop here")):
+            with mock.patch("sys.stderr"):
+                self.assertEqual(mo._demo(ROOT / "sim"), 2)
+        load.assert_called_once_with()

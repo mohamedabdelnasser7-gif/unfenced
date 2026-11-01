@@ -504,18 +504,20 @@ class Refused(Exception):
     """An answer the page cannot take; the message says why, and nothing changed."""
 
 
-def person_line(lessons, text, stages, *, by, old, now=None, exam=None, hold_high=True):
+def person_line(lessons, text, stages, *, by, old, now=None, exam=None, hold_high=True, rated=None):
     """What a person's new line becomes. It follows the engine's rule for a person's own line
     (Lessons.add): it needs no yes, a person wrote it, so it starts a trial like any other
     lesson, or waits its turn when its stage has a trial; its risk is still checked and saved,
     and its origin is "person". hold_high: a high risk line waits for a yes on its card, the same
     as a correction (Lessons.add hold_high), so new words are never a way round that yes. Its
     source line names the lesson it came from: 'edited by <by> from lesson <id>: "<old line>"'.
-    Returns the new lesson's id."""
+    rated: the new line's risk, rated before the answer's transaction (Lessons.rate). Returns the new
+    lesson's id."""
     source = f'{EDITED}{by} from lesson {old["id"]}: "{old["text"]}"'
     if exam is not None:  # Modify on the two tab page: the new words took the exam first (Morning.modify)
-        return lessons.add(text, stages, source, yes_by=by, exam=exam, hold_high=hold_high, now=now)
-    return lessons.add(text, stages, source, yes_by=by, skip_exam=True, hold_high=hold_high, now=now)  # Edit runs no exam
+        return lessons.add(text, stages, source, yes_by=by, exam=exam, hold_high=hold_high, rated=rated, now=now)
+    return lessons.add(text, stages, source, yes_by=by, skip_exam=True, hold_high=hold_high, rated=rated,
+                       now=now)  # Edit runs no exam
 
 
 def repo_plugs(root=ROOT):
@@ -610,7 +612,8 @@ class Morning:
         les, lessons = self._mine(lesson_id)
         self._edit_checked(les, lessons, text, now)  # a refused line takes no exam; edit checks again
         result = self._exam_for(lessons, text, les["stages"])
-        return self.edit(lesson_id, text, now=now, exam=result)
+        rated = lessons.rate(text)  # the judge, outside the transaction (edit)
+        return self.edit(lesson_id, text, now=now, exam=result, rated=rated)
 
     def correct(self, agent, line, now=None):
         """A correction or an idea the user sends on an agent's page: a hotfix (DECISIONS 56,
@@ -623,10 +626,11 @@ class Morning:
         result = self._correction_exam(lessons, text)
         if result is None:
             raise Refused(NO_EXAM)
+        rated = lessons.rate(text)  # the judge is a model call: never inside the write lock
         with self.page.one():
             lessons, text, stage = self._idea_checked(agent, line, plug_mod.ALL)  # again: the lessons may have moved
             try:
-                new_id = lessons.correct(text, [stage], yes_by=self.by, exam=result, now=now)
+                new_id = lessons.correct(text, [stage], yes_by=self.by, exam=result, now=now, rated=rated)
             except ValueError as e:
                 raise Refused(f"The correction was refused: {e}.") from None
             state = lessons.get(new_id)["state"]
@@ -721,18 +725,25 @@ class Morning:
             return f"Nothing to roll back: the lessons given now were all given the night of {night}."
         return f"Rolled back to the night of {night}."
 
-    def edit(self, lesson_id, line, now=None, exam=None):
+    def edit(self, lesson_id, line, now=None, exam=None, rated=None):
         """Add the new line (person_line) and pull the old lesson, each naming the other, in one
         transaction: when the pull fails, the new line is not kept either. The new line waits
         its turn behind the old lesson's trial, so once the old one is pulled the turns whose
         stages are free start (Lessons.start_turns). A high risk new line waits for a yes on its card
-        (person_line hold_high)."""
+        (person_line hold_high). The new line's risk is rated before the transaction (rated, from Modify, or
+        here after the cheap refusals), so the judge, a model call, never holds the write lock."""
+        if rated is None:
+            les, lessons = self._mine(lesson_id)
+            text = _one_line(line, "the new line")
+            self._edit_checked(les, lessons, text, now)  # a refused line costs no judge call
+            rated = lessons.rate(text)
         with self.page.one():
             les, lessons = self._mine(lesson_id)
             text = _one_line(line, "the new line")
             self._edit_checked(les, lessons, text, now)
             try:
-                new_id = person_line(lessons, text, les["stages"], by=self.by, old=les, now=now, exam=exam)
+                new_id = person_line(lessons, text, les["stages"], by=self.by, old=les, now=now, exam=exam,
+                                     rated=rated)
             except ValueError as e:
                 raise Refused(f"The new line was refused: {e}.") from None
             if not lessons.pull(les["id"], f"{EDITED}{self.by} into lesson {new_id}", now=now):
@@ -857,11 +868,12 @@ class Morning:
         one back). It takes the exam first when the page has one for the agent (idea_exam)."""
         lessons, text, stage = self._idea_checked(agent, line, stage)  # a refused idea takes no exam
         result = self.idea_exam(lessons, text, stage)  # before the transaction: no write lock held
+        rated = lessons.rate(text)  # the judge too
         with self.page.one():
             lessons, text, stage = self._idea_checked(agent, line, stage)  # again: the lessons may have moved
             try:
                 new_id = lessons.add(text, [stage], f"an idea {self.by} typed on the morning page", yes_by=self.by,
-                                     exam=result, now=now)
+                                     exam=result, now=now, rated=rated)
             except ValueError as e:
                 raise Refused(f"The idea was refused: {e}.") from None
             row = lessons.get(new_id)

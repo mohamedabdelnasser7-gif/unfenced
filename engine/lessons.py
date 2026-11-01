@@ -312,7 +312,17 @@ class Lessons:
         return self._new(text, stages, source=source, sources=sources, source_lesson_id=source_lesson_id,
                          trial=trial, now=now)
 
-    def add(self, text, stages, source="", score=0.0, *, yes_by, exam=None, skip_exam=False, hold_high=False, now=None):
+    def rate(self, text, *, sources=()):
+        """The line's risk, rated now: (the line, HIGH or LOW, the lines that decided it). The code check,
+        then the judge, which for the live agent is a model call. A page rates a person's line before it
+        takes the write lock and passes the result to add or correct (rated), so the judge never runs
+        inside a write transaction and the live agent's writes never wait on it."""
+        text = (text or "").strip()
+        level, why = risk_mod.classify(text, self.plug.risk, self.judge, sources=sources)
+        return text, level, tuple(why)
+
+    def add(self, text, stages, source="", score=0.0, *, yes_by, exam=None, skip_exam=False, hold_high=False, now=None,
+            rated=None):
         """A person's own line. It needs no yes, a person wrote it, so it starts a trial like any
         other lesson, at whatever risk, at the level that applies when its trial starts (see the
         top); or it waits its turn when its stage has a trial. With a person's yes it never needs
@@ -323,21 +333,22 @@ class Lessons:
         skip_exam: True for an edited line (Edit runs no exam). hold_high: True for a correction sent on an
         agent's page (LOCKS "Product shape: two tabs": high risk waits for a yes on Today): when the code
         check marks the line high, or the judge says high outright (marked_high), it is saved with no yes and
-        waits for one like an agent's high risk lesson; a judge that is only unsure holds nothing. Returns its id."""
+        waits for one like an agent's high risk lesson; a judge that is only unsure holds nothing. rated: the
+        line's risk from rate(), run before the caller's transaction; None rates it here. Returns its id."""
         return self._new(text, stages, source=source, score=score, yes_by=_line(yes_by, "yes_by"), origin=PERSON,
-                         kind=IDEA, exam_given=exam, skip_exam=skip_exam, hold_high=hold_high, now=now)
+                         kind=IDEA, exam_given=exam, skip_exam=skip_exam, hold_high=hold_high, rated=rated, now=now)
 
-    def correct(self, text, stages, *, yes_by, exam=None, now=None):
+    def correct(self, text, stages, *, yes_by, exam=None, now=None, rated=None):
         """A correction a person sends from the agent page: a person's own line (add) that is a hotfix
         (Decision 56). It takes the exam first; once it passes it starts at once on HOTFIX_SHARE of the cases
         for the fast level's days, whatever the level switch says, and never waits behind a lesson already on
         trial on its stage. A high risk one waits for a yes (approve), then starts the same way. With no
         examiner and no exam result it is refused (fail closed: a correction never starts untested; red team
-        handoff2 round 1, item 2). Returns its id."""
+        handoff2 round 1, item 2). rated: as in add. Returns its id."""
         if exam is None and self.examiner is None:
             raise ValueError("a correction takes the exam first: give an examiner or its exam result")
         return self._new(text, stages, source=HOTFIX_SOURCE, yes_by=_line(yes_by, "yes_by"), origin=PERSON,
-                         kind=IDEA, exam_given=exam, hotfix=True, now=now)
+                         kind=IDEA, exam_given=exam, hotfix=True, rated=rated, now=now)
 
     def borrow(self, source_id, stages, *, source="", now=None):
         """A new lesson for this agent from another agent's lesson in the same field. It keeps the
@@ -759,14 +770,21 @@ class Lessons:
         return picked
 
     def _new(self, text, stages, *, source, sources=(), score=0.0, yes_by=None, source_lesson_id=None, trial=True,
-             origin=AGENT, kind=PATTERN, exam_given=None, skip_exam=False, hold_high=False, hotfix=False, now=None):
+             origin=AGENT, kind=PATTERN, exam_given=None, skip_exam=False, hold_high=False, hotfix=False, rated=None,
+             now=None):
         text = (text or "").strip()
         if not text or "\n" in text or "\r" in text:
             raise ValueError("a lesson is one line of text")
         if len(text) > MAX_LEN:
             raise ValueError(f"a lesson is {MAX_LEN} characters at most")
         tags = self.plug.stage_tags(stages)
-        level, why = risk_mod.classify(text, self.plug.risk, self.judge, sources=sources)
+        if rated is None:
+            level, why = risk_mod.classify(text, self.plug.risk, self.judge, sources=sources)
+        else:  # rated before the caller's transaction (rate)
+            if not isinstance(rated, tuple) or len(rated) != 3 or rated[0] != text or rated[1] not in (
+                    risk_mod.HIGH, risk_mod.LOW):
+                raise ValueError("the line changed after its risk was rated")
+            level, why = rated[1], list(rated[2])
         held = origin == PERSON and hold_high and level == risk_mod.HIGH and marked_high(why)
         if held:
             yes_by = None  # a person's line held for a yes: the yes comes on its card (approve)

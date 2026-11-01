@@ -210,8 +210,10 @@ class QuickStartPage(unittest.TestCase):
         self.assertNotIn("handoff", qs.TOOLS)
         self.assertIsNotNone(qs.check_plug(qs.clean_plug(plug_dict(stages=["watching", "with_person"]), "a", [])))
         self.page(card_reply(needs=[{"what": "A person to take over", "tool": "handoff"}]))
-        self.send("an agent for my stock")
-        self.assertIn("Not connected yet", self.get())
+        with self.assertRaises(mo.Refused) as e:  # a card that hands a chat to a person is refused whole
+            self.send("an agent for my stock")
+        self.assertIn("No chat goes to a person", str(e.exception))
+        self.assertFalse((self.folder / qs.DRAFT_FILE).exists())
 
     def test_a_plug_that_fails_twice_writes_nothing(self):
         bad = plug_dict(results={})
@@ -308,6 +310,182 @@ class QuickStartPage(unittest.TestCase):
         (self.folder / qs.DRAFT_FILE).write_text('{"turns": [{"card": "x"}]}', encoding="utf-8")
         self.page()
         self.assertNotIn('class="plan"', self.get())
+
+    # ---- review round 1 (2026-11-01) ----
+
+    def test_a_plugs_tools_are_exactly_the_connected_tools(self):
+        """Review item 2 and the red team: a card that connects only the store gives a plug whose tools are
+        the store alone, whatever the model wrote (draft_order, find_order, cod_risk), and a turn that offers
+        only the store."""
+        from kit import turn as turn_mod
+        plug = plug_dict(risk={"high": {"about": "Anything that goes out.", "tools": ["draft_order", "find_order",
+                                                                                     "cod_risk"]},
+                               "low": {"about": "tone"}})
+        self.page(card_reply(needs=[{"what": "Your store's stock", "tool": "store"}]), plug_reply(plug))
+        self.send("I want a stock watcher")
+        self.build()
+        where = self.folder / "agents" / "stock_watcher"
+        self.assertEqual(plug_mod.load(where / "plug.json").risk.tools, ("store",))
+        self.assertEqual(json.loads((where / "card.json").read_text(encoding="utf-8"))["tools"], ["store"])
+        self.assertEqual(turn_mod.load(where).tools, ("store",))
+        self.assertEqual(qs.clean_plug(plug_dict(risk={"high": {"about": "a", "tools": ["cod_risk"]}}), "a", [])
+                         ["risk"]["high"]["tools"], [])
+
+    HAND_OFF = ["When unsure, hand off the chat to the owner.", "Use the hand-off when stuck.", "Use the handoff tool.",
+                "Call hand_off when the customer asks.", "Hand over the chat to the team.",
+                "If the customer is angry, pass the chat to a team member.",
+                "Transfer the customer to a human agent when asked.", "Let a person take over.",
+                "The owner takes over when it gets hard.", "Escalate to a manager.", "Pass it on to someone from our team.",
+                "حول المحادثة لموظف لو العميل زعلان.", "حوّل العميل لحد من الفريق.", "حد من الفريق هيرد عليك.",
+                "سلم الشات لصاحب المحل.", "الموظف هيكمل معاك.", "تحويل العميل لخدمة العملاء."]
+    NOT_HAND_OFF = ["Tell the owner which items run low.", "Send the owner a short note each morning.",
+                    "Pay by bank transfer to the owner's account.", "It passes the check before it sends.",
+                    "أسئلة حول المنتج والمقاسات.", "أسئلة حول البيانات الشخصية."]
+
+    def test_instructions_that_hand_a_chat_to_a_person_are_refused(self):
+        """Review item 3 (DECISIONS 53): each phrase, English and Arabic, refuses the build twice over and writes
+        nothing; plain lines that only name the owner still build."""
+        for words in self.HAND_OFF:
+            with self.subTest(words=words):
+                self.page(card_reply(needs=[]), plug_reply(instructions=words), plug_reply(instructions=words))
+                self.p.actions["/quickstart/clear"](self.m, {})
+                self.send("an agent for my stock")
+                with self.assertRaises(mo.Refused) as e:
+                    self.build()
+                self.assertIn("no chat goes to a person", str(e.exception))
+                self.assertFalse((self.folder / "agents" / "stock_watcher").exists())
+        for words in self.NOT_HAND_OFF:
+            with self.subTest(words=words):
+                self.assertIsNone(qs.names_a_person(words))
+
+    def test_a_card_that_hands_a_chat_to_a_person_is_refused(self):
+        """Review item 3: every card field, the question and the second message are read too."""
+        base = json.loads(card_reply(needs=[])["content"])
+        places = [lambda d, w: d["card"].update(name=w), lambda d, w: d["card"].update(does=w),
+                  lambda d, w: d["card"].update(good=w), lambda d, w: d["card"].update(never=[w]),
+                  lambda d, w: d["card"].update(needs=[{"what": w, "tool": ""}]), lambda d, w: d.update(question=w),
+                  lambda d, w: d.update(follow=w)]
+        for i, put in enumerate(places):
+            for words in self.HAND_OFF:
+                with self.subTest(field=i, words=words):
+                    d = json.loads(json.dumps(base))
+                    put(d, words)
+                    self.page(say(json.dumps(d)))
+                    self.p.actions["/quickstart/clear"](self.m, {})
+                    with self.assertRaises(mo.Refused) as e:
+                        self.send("an agent for my stock")
+                    self.assertIn("No chat goes to a person", str(e.exception))
+                    self.assertFalse((self.folder / qs.DRAFT_FILE).exists())
+
+    def test_build_presses_are_capped_per_chat(self):
+        """Review item 5: at most MAX_BUILDS presses reach the model in one chat; the next is refused with no call."""
+        bad = plug_reply(plug_dict(fields="x"))
+        self.page(card_reply(needs=[]), *([bad] * 10))
+        self.send("an agent for my stock")
+        for _ in range(qs.MAX_BUILDS):
+            with self.assertRaises(mo.Refused) as e:
+                self.build()
+            self.assertIn("Not built", str(e.exception))
+        self.assertEqual(len(self.model.calls), 1 + 2 * qs.MAX_BUILDS)
+        with self.assertRaises(mo.Refused) as e:
+            self.build()
+        self.assertIn(f"tried {qs.MAX_BUILDS} times", str(e.exception))
+        self.assertEqual(len(self.model.calls), 1 + 2 * qs.MAX_BUILDS)
+        self.assertEqual(qs.QuickStart().draft(self.m)["builds"], qs.MAX_BUILDS)
+        d = json.loads((self.folder / qs.DRAFT_FILE).read_text(encoding="utf-8"))
+        (self.folder / qs.DRAFT_FILE).write_text(json.dumps(dict(d, builds="0")), encoding="utf-8")
+        self.assertEqual(qs.QuickStart().draft(self.m)["builds"], qs.MAX_BUILDS)  # an odd count is used up
+
+    def test_the_plug_and_instructions_size_caps(self):
+        """Review item 6: each cap refuses with its own reason, twice over, and writes nothing."""
+        big = plug_dict(about="Watches stock. " * 5000)
+        self.page(card_reply(needs=[]), plug_reply(big), plug_reply(big))
+        self.send("an agent for my stock")
+        with self.assertRaises(mo.Refused) as e:
+            self.build()
+        self.assertIn(f"over {qs.MAX_PLUG // 1000} KB", str(e.exception))
+        long_words = "You watch the stock. " * 500
+        self.assertGreater(len(long_words), qs.MAX_INSTRUCTIONS)
+        self.page(plug_reply(instructions=long_words), plug_reply(instructions=long_words))
+        with self.assertRaises(mo.Refused) as e:
+            self.build()
+        self.assertIn(f"over {qs.MAX_INSTRUCTIONS} characters", str(e.exception))
+        self.assertFalse((self.folder / "agents" / "stock_watcher").exists())
+
+    def test_a_chat_has_at_most_max_turns_answers(self):
+        """Review item 6: MAX_TURNS answers, then the box asks to build or start over, with no model call."""
+        self.page(*[card_reply() for _ in range(qs.MAX_TURNS + 1)])
+        tick = iter(range(0, 100_000, 61))
+        self.p.quick._clock = lambda: next(tick)  # past the per minute cap: this test is about turns
+        for i in range(qs.MAX_TURNS):
+            self.send(f"change {i}")
+        with self.assertRaises(mo.Refused) as e:
+            self.send("one more change")
+        self.assertIn("This chat is long", str(e.exception))
+        self.assertEqual(len(self.model.calls), qs.MAX_TURNS)
+
+    def test_the_draft_file_is_read_only_when_plain_and_small(self):
+        """Review item 6: a draft over MAX_DRAFT, or a link, reads as empty; a built name that is not a safe
+        name reads as not built."""
+        self.page(card_reply())
+        self.send("an agent for my stock")
+        path = self.folder / qs.DRAFT_FILE
+        text = path.read_text(encoding="utf-8")
+        self.assertEqual(len(qs.QuickStart().draft(self.m)["turns"]), 1)
+        path.write_text(text + " " * qs.MAX_DRAFT, encoding="utf-8")  # still valid JSON, just too big
+        self.assertEqual(qs.QuickStart().draft(self.m)["turns"], [])
+        other = tempfile.TemporaryDirectory()
+        self.addCleanup(other.cleanup)
+        real = Path(other.name) / "draft.json"
+        real.write_text(text, encoding="utf-8")
+        path.unlink()
+        os.symlink(real, path)
+        self.assertEqual(qs.QuickStart().draft(self.m)["turns"], [])
+        path.unlink()
+        path.write_text(json.dumps(dict(json.loads(text), built="../../outside")), encoding="utf-8")
+        self.assertIsNone(qs.QuickStart().draft(self.m)["built"])
+
+    def test_a_draft_link_is_never_written_through(self):
+        """Review item 6: saving the chat refuses when quickstart.json is a link."""
+        other = tempfile.TemporaryDirectory()
+        self.addCleanup(other.cleanup)
+        real = Path(other.name) / "elsewhere.json"
+        real.write_text("{}", encoding="utf-8")
+        os.symlink(real, self.folder / qs.DRAFT_FILE)
+        self.page(card_reply())
+        with self.assertRaises(mo.Refused) as e:
+            self.send("an agent for my stock")
+        self.assertIn("is a link", str(e.exception))
+        self.assertEqual(real.read_text(encoding="utf-8"), "{}")
+
+    def test_control_marks_are_taken_out_of_every_line(self):
+        """Review item 6: direction overrides and control characters never reach the card."""
+        self.assertEqual(qs.line("Stock\u202e watcher\x00\u200b", 60), "Stock watcher")
+        self.page(card_reply(name="Stock\u202e\u2066 watcher"))
+        self.send("an agent for my stock")
+        self.assertEqual(qs.QuickStart().draft(self.m)["turns"][-1]["card"]["name"], "Stock watcher")
+
+    def test_slug_takes_off_leading_digits(self):
+        self.assertEqual(qs.slug("123 stock watcher"), "stock_watcher")
+
+    def test_a_folder_that_appears_meanwhile_is_never_overwritten(self):
+        """Review item 6: _write_folder refuses when the agent's folder is there by the time it renames, and
+        leaves no hidden folder behind."""
+        agents = self.folder / "agents"
+        (agents / "late").mkdir(parents=True)
+        (agents / "late" / "mine.txt").write_text("keep", encoding="utf-8")
+        with self.assertRaises(qs.Refused):
+            qs._write_folder(agents, "late", {"plug.json": "{}"})
+        self.assertEqual(sorted(p.name for p in agents.iterdir()), ["late"])
+        self.assertEqual(os.listdir(agents / "late"), ["mine.txt"])
+
+    def test_the_question_is_escaped(self):
+        """Review item 6 (pages.py h() on the question)."""
+        self.page(card_reply(question="<b onclick=x()>Which store</b>?"))
+        self.send("an agent for my stock")
+        page = self.get().split("</style>")[1]
+        self.assertNotIn("<b onclick", page)
+        self.assertIn("&lt;b onclick=x()&gt;Which store&lt;/b&gt;?", page)
 
 
 class QuickStartServer(unittest.TestCase):

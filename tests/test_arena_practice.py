@@ -456,7 +456,7 @@ class QuickStartFit(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in folder.iterdir()), sorted(turn.FILES))
         agent = turn.load(folder)
         self.assertEqual((agent.name, agent.tools, agent.missing, agent.full_check), ("stock_watcher", ("store",), (),
-                                                                                       False))
+                                                                                       True))  # it connects whatsapp
         self.assertEqual(agent.card["needs"], ["Your store's stock", "Customer chats", "Bosta stock levels"])
         world = World()
         out, err = io.StringIO(), io.StringIO()
@@ -487,6 +487,102 @@ class QuickStartFit(unittest.TestCase):
         with self.assertRaises(turn.Refused) as e:
             turn.load(folder)
         self.assertIn("its folder is stock_watcher", str(e.exception))
+
+
+class StackReviewRound1(unittest.TestCase):
+    """Review round 1 (2026-11-01), items 2, 4 and 6 on kit/turn.py: the card's tools bound the plug, an agent
+    whose card connects whatsapp gets the full send check, at most MAX_CALLS_PER_STEP calls run in one step,
+    and no file in the folder is read through a link."""
+
+    def setUp(self):
+        clean_env(self)
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.root = Path(d.name).resolve()
+
+    def built(self, needs):
+        page = types.SimpleNamespace(reports=self.root, plugs={})
+        quick = qs.QuickStart(FakeModel(card_reply(needs=needs), plug_reply()))
+        quick.say(page, "an agent that tells my customers what is in stock")
+        quick.build(page)
+        return self.root / qs.AGENTS / "stock_watcher"
+
+    def turn(self, agent, model):
+        db = Db(":memory:")
+        sent = []
+        try:
+            chats = Chats(db)
+            cid = chats.open("whatsapp", "201000000099")
+            with practice.match_mod.demo_store():
+                out = turn.turn(agent, OPENING, chats=chats, chat_id=cid, model=model,
+                                send=lambda to, text: sent.append(text), customer_id="201000000099")
+            steps = chats.steps(cid)
+        finally:
+            db.close()
+        return out, sent, steps
+
+    def test_a_plug_tool_the_card_does_not_connect_is_refused(self):
+        folder = self.built([{"what": "Your store's stock", "tool": "store"}])
+        self.assertEqual(turn.load(folder).tools, ("store",))
+        plug = json.loads((folder / "plug.json").read_text(encoding="utf-8"))
+        plug["risk"]["high"]["tools"] = ["store", "cod_risk", "draft_order"]
+        (folder / "plug.json").write_text(json.dumps(plug), encoding="utf-8")
+        with self.assertRaises(turn.Refused) as e:
+            turn.load(folder)
+        self.assertIn("the card does not connect: cod_risk, draft_order", str(e.exception))
+        card = json.loads((folder / "card.json").read_text(encoding="utf-8"))
+        (folder / "card.json").write_text(json.dumps(dict(card, tools="store")), encoding="utf-8")
+        with self.assertRaises(turn.Refused) as e:
+            turn.load(folder)
+        self.assertIn("card.json tools", str(e.exception))
+
+    def test_an_agent_that_connects_whatsapp_gets_the_full_send_check(self):
+        """A made up price is refused for an agent that talks to customers, though its plug has no reply action."""
+        folder = self.built([{"what": "Your store's stock", "tool": "store"}, {"what": "Customer chats", "tool": "whatsapp"}])
+        agent = turn.load(folder)
+        self.assertNotIn(turn.REPLY_ACTION, agent.plug.actions)
+        self.assertTrue(agent.full_check)
+        price = "It is 99,999 EGP."
+        out, sent, _ = self.turn(agent, World(agent=lambda m, t: say(price)))
+        self.assertEqual((out.outcome, sent, len(out.failed)), ("no_safe_reply", [], turn.MAX_FAILED_CHECKS))
+        quiet = turn.load(self.built_again([{"what": "Your store's stock", "tool": "store"}]))
+        self.assertFalse(quiet.full_check)  # no customers: the style check only
+        out, sent, _ = self.turn(quiet, World(agent=lambda m, t: say(price)))
+        self.assertEqual((out.outcome, sent), ("replied", [price]))
+
+    def built_again(self, needs):
+        shutil.rmtree(self.root / qs.AGENTS)
+        (self.root / qs.DRAFT_FILE).unlink()
+        return self.built(needs)
+
+    def test_at_most_max_calls_per_step_run(self):
+        folder = self.built([{"what": "Your store's stock", "tool": "store"}])
+        many = turn.MAX_CALLS_PER_STEP + 1
+
+        def agent(messages, tools):
+            if messages[-1]["role"] == "tool":
+                return say(ANSWER)
+            call = tool_call("store", {"query": "mercurial"})
+            call["tool_calls"] = [dict(call["tool_calls"][0], id=f"c{i}") for i in range(many)]
+            return call
+        out, sent, steps = self.turn(turn.load(folder), World(agent=agent))
+        self.assertEqual((out.outcome, sent), ("replied", [ANSWER]))
+        results = [json.loads(s["content"]) for s in steps if s["role"] == "tool"]
+        self.assertEqual(len(results), many)
+        self.assertEqual(results[-1], dict(turn.loop.TOO_MANY_CALLS))
+        self.assertTrue(all(r != turn.loop.TOO_MANY_CALLS for r in results[:-1]))
+
+    def test_no_file_is_read_through_a_link(self):
+        folder = self.built([{"what": "Your store's stock", "tool": "store"}])
+        outside = tempfile.TemporaryDirectory()
+        self.addCleanup(outside.cleanup)
+        real = Path(outside.name) / "instructions.md"
+        real.write_text("Words from outside the folder.", encoding="utf-8")
+        (folder / "instructions.md").unlink()
+        os.symlink(real, folder / "instructions.md")
+        with self.assertRaises(turn.Refused) as e:
+            turn.load(folder)
+        self.assertIn("no instructions.md", str(e.exception))
 
 
 class SalesUnchanged(unittest.TestCase):

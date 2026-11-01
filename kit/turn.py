@@ -15,14 +15,15 @@ what any agent has:
 1. instructions.md is the system prompt. The lessons it has earned go under the plug's slot line
    (none in the Arena's first runs: every agent starts from zero, DECISIONS item 20).
 2. The chat so far comes from kit/chats.py, so the tools read it the way they read a Sales chat.
-3. Tools: only the ones the plug names (its high risk tools, the one list of tools a plug has)
+3. Tools: card.json's tools, when Build wrote them, are the most the plug may name: a plug that
+   names another is refused. Then only the ones the plug names (its high risk tools, the one list of tools a plug has)
    that exist in kit/tools, minus switch_stage, since a new agent has one stage. Quick start names
    what it connects by its own keys (reflection/quickstart.py TOOLS): QUICK_TOOLS reads those as the
    kit/tools files behind them, and whatsapp as the channel the chat is on, no tool. A name with no
    tool file is left out and listed in Agent.missing. At most MAX_TOOL_STEPS tool steps a turn
    and MAX_CALLS_PER_STEP calls a step, then the model must answer in words.
 4. The send check: the full check (kit/send_check.py) when the plug declares a "reply" action, as
-   the Sales plug does, so script, style, amounts from tools only, stock counts and links all
+   the Sales plug does, or its card connects whatsapp (it talks to customers), so script, style, amounts from tools only, stock counts and links all
    hold; the house style part only (banned words, dashes, emoji, markdown) for any other agent,
    whose replies are not a store's answers to a customer. A failed reply is never sent: the model
    retries with the feedback, and after MAX_FAILED_CHECKS failed drafts no safe reply can be sent:
@@ -63,6 +64,7 @@ MAX_TOOL_STEPS = 4
 MAX_CALLS_PER_STEP = 3
 MAX_FAILED_CHECKS = 3
 REPLY_ACTION = "reply"  # a plug with this action answers customers: the full send check applies
+CHANNEL = "whatsapp"   # a card that connects it talks to customers: the full send check applies too
 RETRY = loop.RETRY
 
 
@@ -114,6 +116,22 @@ def _lines(v, what):
     return [_line(x.get("what") if isinstance(x, dict) and what == "needs" else x, what) for x in items]
 
 
+def card_tools(text):
+    """The tools card.json says are connected (Build writes them), as a set, or None when it names none
+    (a folder written by hand). A list of plain tool names, else Refused."""
+    try:
+        d = json.loads(text)
+    except ValueError:
+        raise Refused("card.json is not JSON") from None
+    if not isinstance(d, dict) or "tools" not in d:
+        return None
+    got = d["tools"]
+    if not isinstance(got, list) or len(got) > MAX_CARD_ITEMS or not all(
+            isinstance(t, str) and plug_mod.NAME.fullmatch(t) for t in got):
+        raise Refused(f"card.json tools: a list of at most {MAX_CARD_ITEMS} tool names")
+    return set(got)
+
+
 def read_card(text, agent=None):
     """card.json as {name, does, good, never, needs}: good is required, it decides the Arena. The keys
     Build adds (BUILT_KEYS) are allowed; its agent, when there, must be this agent."""
@@ -161,11 +179,18 @@ def load(folder):
     instructions = _read(folder, "instructions.md").strip()
     if not instructions:
         raise Refused("instructions.md is empty")
-    card = read_card(_read(folder, "card.json"), p.agent)
+    text = _read(folder, "card.json")
+    card = read_card(text, p.agent)
+    connected = card_tools(text)
+    if connected is not None:  # the plug offers nothing the card the owner said yes to does not connect
+        extra = sorted(set(p.risk.tools) - connected)
+        if extra:
+            raise Refused(f"plug.json names tools the card does not connect: {', '.join(extra)}")
     offered, missing = tools_of(p)
     stage = Stage(p.stages[0] if p.stages else "all", card["name"], card["does"], offered, ())
+    talks = REPLY_ACTION in p.actions or (connected is not None and CHANNEL in connected)
     return Agent(name=p.agent, folder=folder, plug=p, instructions=instructions, card=card, tools=offered,
-                 missing=missing, stage=stage, full_check=REPLY_ACTION in p.actions)
+                 missing=missing, stage=stage, full_check=talks)
 
 
 @dataclass

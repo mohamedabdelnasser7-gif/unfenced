@@ -60,7 +60,7 @@ from contextlib import contextmanager
 from engine import exam as exam_mod
 from engine import risk as risk_mod
 from engine import switches as switches_mod
-from engine.plug import ALL
+from engine.plug import ALL, FAST_LEVEL
 
 MAX_PICK = 8
 MAX_LEN = 300
@@ -77,6 +77,11 @@ def takes_exam(origin):
     """True when a new lesson of this origin takes the exam before its trial: the one switchable place."""
     return origin == AGENT or (origin == PERSON and PERSON_TAKES_EXAM)
 
+# A correction a person sends (a person's own line, an idea) is a hotfix: once its exam passes it starts at once
+# on half the cases, whatever its level, and never waits behind a lesson already on trial on its stage; a high
+# risk one still waits for a yes (Decision 56). The other half keeps the agent as it was.
+HOTFIX_SHARE = 0.5
+HOTFIX_SOURCE = "correction from the agent page"  # the source a correction is saved with (correct)
 PATTERN, IDEA = "pattern", "idea"  # its kind: found in past cases, or a lesson with no past cases behind it
 KINDS = (PATTERN, IDEA)
 FROM_STUDY = ("night study of ", "adapted ", "borrowed from ")  # how the study's own source lines start
@@ -307,6 +312,14 @@ class Lessons:
         return self._new(text, stages, source=source, score=score, yes_by=_line(yes_by, "yes_by"), origin=PERSON,
                          kind=IDEA, exam_given=exam, skip_exam=skip_exam, now=now)
 
+    def correct(self, text, stages, *, yes_by, exam=None, now=None):
+        """A correction a person sends from the agent page: a person's own line (add) that is a hotfix
+        (Decision 56). It takes the exam first; once it passes it starts at once on HOTFIX_SHARE of the cases
+        for the fast level's days, whatever the level switch says, and never waits behind a lesson already on
+        trial on its stage. A high risk one waits for a yes (approve), then starts the same way. Returns its id."""
+        return self._new(text, stages, source=HOTFIX_SOURCE, yes_by=_line(yes_by, "yes_by"), origin=PERSON,
+                         kind=IDEA, exam_given=exam, hotfix=True, now=now)
+
     def borrow(self, source_id, stages, *, source="", now=None):
         """A new lesson for this agent from another agent's lesson in the same field. It keeps the
         text and links its source; risk, stage tags and state are this agent's own."""
@@ -348,10 +361,11 @@ class Lessons:
                 raise ValueError("share is more than 0 and at most 1; days is more than 0")
         yes_by = _line(yes_by, "yes_by")
         with self.db.tx() as c:
-            row = c.execute(  # no yes yet, or a person's line its exam held (PERSON_TAKES_EXAM)
-                "SELECT * FROM lessons WHERE id = ? AND agent = ? AND state = 'waiting' AND (yes_at IS NULL OR ("
-                "id IN (SELECT lesson_id FROM lesson_exams WHERE passed = 0) AND id NOT IN (SELECT lesson_id FROM trials)))",
-                (lesson_id, self.agent)).fetchone()
+            row = c.execute(  # no yes yet, or a person's line its exam or its high risk held (PERSON_TAKES_EXAM, Decision 56)
+                "SELECT * FROM lessons WHERE id = ? AND agent = ? AND state = 'waiting' AND (yes_at IS NULL OR (("
+                "id IN (SELECT lesson_id FROM lesson_exams WHERE passed = 0) OR (origin = 'person' AND risk = 'high' "
+                "AND source = ?)) AND id NOT IN (SELECT lesson_id FROM trials)))",
+                (lesson_id, self.agent, HOTFIX_SOURCE)).fetchone()
             if row is None:
                 return False
             given = None
@@ -360,7 +374,8 @@ class Lessons:
                 given = (lv_share if share is None else share, lv_days if days is None else days)
             c.execute("UPDATE lessons SET yes_by = ?, yes_at = ? WHERE id = ? AND yes_at IS NULL",
                       (yes_by, now, lesson_id))  # a person's held line keeps its writer as its yes
-            self._try(c, lesson_id, _row(row)["stages"], now, given=given)
+            self._try(c, lesson_id, _row(row)["stages"], now, given=given,
+                      hotfix=row["origin"] == PERSON and row["source"] == HOTFIX_SOURCE)
             return True
 
     def keep(self, lesson_id, holdback=0.0, *, c=None):
@@ -592,19 +607,22 @@ class Lessons:
         c.execute("UPDATE lessons SET yes_by = ?, yes_at = ? WHERE id = ?",
                   (f'{row["by"]} ({switches_mod.MARK})', now, lesson_id))
 
-    def _try(self, c, lesson_id, stages, now, *, given=None, accept=None):
+    def _try(self, c, lesson_id, stages, now, *, given=None, accept=None, hotfix=False):
         """Start the lesson's trial now, or have it wait its turn when another lesson is ahead of
         it on its stages. A lesson already waiting keeps its place. given: (share, days) a person
         gave with the yes; else the level that applies when the trial starts. accept: the Accept
         high risk row a high risk lesson with no yes goes on trial under; its marked yes is
         written only if the trial starts now, and a lesson that waits its turn keeps the row's id
-        so start_turns reads the switch again."""
+        so start_turns reads the switch again. hotfix: a person's correction starts now on HOTFIX_SHARE for the
+        fast level's days, unless the person gave numbers, and waits behind no lesson (Decision 56)."""
         if given is not None:
             share, days, level = given[0], given[1], GIVEN
+        elif hotfix:
+            share, days, level = HOTFIX_SHARE, float(self.plug.level(FAST_LEVEL).days), GIVEN
         else:
             share, days, level = self._level_now(c, lesson_id)
         accept_id = None if accept is None else accept["id"]
-        if self._ahead(c, stages, now, lesson_id):  # only given numbers are kept; a level is read at the start
+        if not hotfix and self._ahead(c, stages, now, lesson_id):  # only given numbers are kept; a level is read at the start
             c.execute("INSERT INTO trials (lesson_id, agent, share, days, queued_at, level, accept_high_id) "
                       "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (lesson_id) DO UPDATE SET share = excluded.share, "
                       "days = excluded.days, level = excluded.level, accept_high_id = excluded.accept_high_id",
@@ -718,7 +736,7 @@ class Lessons:
         return picked
 
     def _new(self, text, stages, *, source, sources=(), score=0.0, yes_by=None, source_lesson_id=None, trial=True,
-             origin=AGENT, kind=PATTERN, exam_given=None, skip_exam=False, now=None):
+             origin=AGENT, kind=PATTERN, exam_given=None, skip_exam=False, hotfix=False, now=None):
         text = (text or "").strip()
         if not text or "\n" in text or "\r" in text:
             raise ValueError("a lesson is one line of text")
@@ -736,7 +754,8 @@ class Lessons:
                 if switches_mod.accept_on(row, now):
                     accept = row  # its marked yes is written only as its trial starts (_try, start_turns)
             # a person's own line needs no yes; the agent's starts when low risk, or high under Accept high risk
-            start = origin == PERSON or trial and (accept is not None or (yes_by is None and level == risk_mod.LOW))
+            start = (origin == PERSON and not (hotfix and level == risk_mod.HIGH)  # a high risk correction waits for a yes
+                     or trial and (accept is not None or (yes_by is None and level == risk_mod.LOW)))
             cur = c.execute(  # written as waiting, then its trial starts or it waits its turn
                 "INSERT INTO lessons (agent, text, stages, fields, risk, risk_why, state, share, ends_at, score, source, "
                 "source_lesson_id, origin, kind, yes_by, yes_at, added_at) "
@@ -748,7 +767,7 @@ class Lessons:
             if exam is not None:
                 exam_mod.save(c, self.agent, cur.lastrowid, exam, now)
             if start:
-                self._try(c, cur.lastrowid, tags, now, accept=accept)
+                self._try(c, cur.lastrowid, tags, now, accept=accept, hotfix=hotfix)
             return cur.lastrowid
 
     def _exam(self, text, tags, level, why, yes_by, origin, now):

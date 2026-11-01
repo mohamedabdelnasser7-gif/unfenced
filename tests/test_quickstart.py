@@ -173,6 +173,28 @@ class QuickStartPage(unittest.TestCase):
         self.assertIn("level", card)
         self.assertNotIn("bosta", json.dumps(json.loads((where / "plug.json").read_text(encoding="utf-8"))["risk"]))
 
+    def test_a_need_on_a_service_no_tool_reaches_is_not_connected(self):
+        """The screenshot: the model matched "Bosta stock" to the store tool. The store tool reads Shopify
+        or a catalogue file, not a courier's stock, so the need shows Not connected yet and stays out of the plug."""
+        needs = [{"what": "Bosta stock levels", "tool": "store"}, {"what": "مخزون ببوسطة", "tool": "store"},
+                 {"what": "Your Shopify stock", "tool": "store"}]
+        self.page(card_reply(needs=needs), plug_reply())
+        self.send("i want an agent to track my stock in bosta")
+        page = self.get()
+        bosta = page.split("Bosta stock levels")[1].split("</small>")[0]
+        self.assertIn("Not connected yet", bosta)
+        self.assertNotIn("Connected: Store", bosta)
+        self.assertIn("Connected: Store", page.split("Your Shopify stock")[1].split("</small>")[0])
+        self.build()
+        card = json.loads((self.folder / "agents" / "stock_watcher" / "card.json").read_text(encoding="utf-8"))
+        self.assertEqual([(n["tool"], n["connected"]) for n in card["needs"]], [("", False), ("", False), ("store", True)])
+        self.assertEqual(card["tools"], ["store"])
+        self.assertEqual((qs.outside("Stock in BOSTA"), qs.outside("Aramex tracking"), qs.outside("J&T parcels")),
+                         ("BOSTA", "Aramex", "J&T"))
+        self.assertIsNone(qs.outside("the store's stock, checked at noon"))
+        self.assertIsNone(qs.outside("bostal codes"))
+        self.assertIn("a need on another service", self.model.calls[0]["messages"][0]["content"])
+
     def test_an_invalid_plug_is_fixed_once_or_refused(self):
         bad = plug_dict(decides={"good": "nothing_declared", "bad": []})
         self.page(card_reply(), plug_reply(bad), plug_reply())

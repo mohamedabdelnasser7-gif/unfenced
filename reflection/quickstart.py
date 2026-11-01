@@ -14,7 +14,8 @@ Build turns the card into a plug folder, <database folder>/agents/<name>/, with 
 pass engine/plug.py from_dict), instructions.md (the agent's prompt) and card.json (the card, its
 "good" line in plain words, and the tools that are connected). The practice side reads exactly
 those three names. Tools come only from what the repo has (TOOLS); anything else the card names is
-marked not connected yet and the plug leaves it out. No chat goes to a person (DECISIONS 53): the
+marked not connected yet and the plug leaves it out, and so is a need that names a service no repo tool
+reaches (OUTSIDE), whatever tool the model matched it to. No chat goes to a person (DECISIONS 53): the
 card never promises it, and a plug or instructions that name a handoff tool or a with_person stage
 are refused. Trials start strict: the plug's two levels are the ones every repo plug uses, and a new
 agent's level switch starts on careful (engine/switches.py), the stricter one; accept high risk
@@ -64,6 +65,16 @@ TOOLS = {
     "email": "Email: an uploaded mailbox export; sort mail and write reply drafts, nothing goes out without the user's yes",
     "calendar": "Calendar: book or move meetings with no clash, inside the user's rules",
 }
+# Services no repo tool reaches. A need that names one is not connected yet, even when the model
+# matched it to a tool for something close (a courier's stock is not the store's stock): the store
+# tool reads Shopify or a catalogue file, nothing else. Shopify, WhatsApp and a mailbox export are
+# reached, so they are not here.
+OUTSIDE = ("bosta", "بوسطة", "aramex", "أرامكس", "mylerco", "j&t", "r2s", "dhl", "fedex", "odoo", "zoho",
+           "hubspot", "salesforce", "airtable", "notion", "google sheets", "excel", "instagram", "facebook",
+           "messenger", "tiktok", "telegram", "slack", "paymob", "fawry", "instapay", "vodafone cash", "salla",
+           "zid", "woocommerce", "wix", "amazon", "jumia", "talabat", "breadfast")
+_OUTSIDE = re.compile(r"(?<![A-Za-z0-9_&])(?:" + "|".join(re.escape(w) for w in OUTSIDE) + r")(?![A-Za-z0-9_&])",
+                      re.IGNORECASE)  # English names whole; an Arabic name with its prefix too
 # Trial levels: the values every repo plug uses (sales, assistant, marketing). The level switch
 # starts on careful for a new agent, the stricter of the two.
 STRICT_TRIAL = {"fast": {"share": 0.5, "days": 7}, "careful": {"share": 0.2, "days": 14}}
@@ -89,7 +100,7 @@ The card:
 - does: one plain sentence on what it does and for whom.
 - good: one plain sentence on what a good result looks like for one case.
 - never: one to four short lines, each a thing it never does.
-- needs: what it needs connected or handed over, each {{"what": a few plain words, "tool": one key from the list below, or "" when nothing there fits}}.
+- needs: what it needs connected or handed over, each {{"what": a few plain words, "tool": one key from the list below, or "" when nothing there fits}}. A tool fits only when it does that very thing; a need on another service (a courier, another app or site) gets "" even when a tool does something close, and its "what" names that service.
 
 Tools that can be connected today:
 {tools}
@@ -155,7 +166,7 @@ def clean_card(raw):
     for n in (c.get("needs") if isinstance(c.get("needs"), list) else [])[:MOST_NEEDS]:
         what = line(n.get("what"), CAPS["what"]) if isinstance(n, dict) else line(n, CAPS["what"])
         tool = n.get("tool") if isinstance(n, dict) else ""
-        tool = tool if isinstance(tool, str) and tool in TOOLS else ""
+        tool = tool if isinstance(tool, str) and tool in TOOLS and not outside(what) else ""
         if what:
             needs.append({"what": what, "tool": tool, "connected": bool(tool)})
     card = {"name": line(c.get("name"), CAPS["name"]), "key": line(c.get("key"), CAPS["key"]),
@@ -165,6 +176,12 @@ def clean_card(raw):
     if not (card["name"] and card["does"] and card["good"] and follow):
         raise Refused("Unfenced left part of the card empty. Send it again.")
     return {"card": card, "question": one_question(raw.get("question")), "follow": follow}
+
+
+def outside(what):
+    """The service a need names that no repo tool reaches (OUTSIDE), or None."""
+    m = _OUTSIDE.search(what or "")
+    return m.group(0) if m else None
 
 
 def read_json(content, cap):

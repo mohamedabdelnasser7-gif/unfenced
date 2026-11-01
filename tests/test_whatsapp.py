@@ -429,6 +429,34 @@ class Photos(unittest.TestCase):
         self.assertEqual(seen[0].full_url, "https://graph.facebook.com/v26.0/111/messages")
         self.assertEqual((body["to"], body["type"], body["text"]["body"]), ("201111111111", "text", "تمام"))
 
+    def test_send_refusal_carries_metas_error_code(self):
+        """SendRefused from None with Meta's code, reading at most MAX_ERROR_BODY of the error body
+        (moved here from the old relay tests; review handoff2 round 1, finding 7)."""
+        reads = []
+
+        class Body(io.BytesIO):
+            def read(self, n=-1):
+                reads.append(n)
+                return super().read(n)
+
+        def opener(body):
+            def open_(req, timeout):
+                raise urllib.error.HTTPError(req.full_url, 400, "Bad Request", {}, Body(body))
+            return open_
+
+        window = json.dumps({"error": {"message": "(#131047) Re-engagement message", "code": 131047}}).encode()
+        past_cap = b" " * wa.MAX_ERROR_BODY + window  # the code sits past the cap, so it is never read
+        for body, code in ((window, 131047), (b"not json", 0), (b'{"error": "x"}', 0),
+                           (b'{"error": {"code": true}}', 0), (past_cap, 0)):
+            with self.subTest(body=body[:40]):
+                reads.clear()
+                with self.assertRaises(wa.SendRefused) as cm:
+                    wa.Graph(BEARER, "111", opener=opener(body)).send("201111111111", "hi")
+                self.assertEqual((cm.exception.status, cm.exception.code), (400, code))
+                self.assertIsNone(cm.exception.__cause__)
+                self.assertTrue(cm.exception.__suppress_context__)
+                self.assertTrue(reads and all(0 <= n <= wa.MAX_ERROR_BODY for n in reads), reads)
+
 
     def test_typing_shape(self):
         seen, waits = [], []

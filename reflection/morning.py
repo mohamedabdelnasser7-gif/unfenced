@@ -767,12 +767,9 @@ class Morning:
 
     @staticmethod
     def _card(les, lessons, now=None):
-        """Does it wait for a person's first yes, or a yes on a person's line its exam held? Not when
-        it waits its turn."""
-        held = les["state"] == WAITING and exam_mod.held_line(lessons.exam_of(les["id"])) and \
-            lessons.trial(les["id"]) is None
-        return (les["state"] == WAITING and (les["yes_at"] is None or bool(held))
-                and lessons.waits_for(les["id"], now) is None)
+        """Is it held for a person's yes (engine.lessons WANTS_YES: no yes yet, a person's line its exam
+        held, a high risk correction)? Not when it waits its turn."""
+        return lessons.wants_yes(les["id"]) and lessons.waits_for(les["id"], now) is None
 
     # ---- switches and fact cards (calls 16, 20 and 10) -----------------------------------
 
@@ -940,8 +937,10 @@ class Morning:
                                                   "ORDER BY lesson_id, live_id")]
             backs = {r["lesson_id"]: r["from_id"] for r in c.execute("SELECT lesson_id, from_id FROM lesson_returns")}
             exams = {r["lesson_id"]: dict(r) for r in c.execute("SELECT * FROM lesson_exams")}
+            wanting = lessons_mod.wants_yes_ids(c)
             working = self._working(c)
         k = _Ctx(now, rows, trials, marks, clashes, self.read_reports(), backs=backs, exams=exams)
+        k.wanting = wanting  # the lessons held for a yes, as approve reads them
         arena, bad = self.read_arena()
         modes, bad_modes = self.read_mode_cards()
         k.problems = list(k.problems) + bad + bad_modes
@@ -1015,7 +1014,7 @@ class Morning:
         queued = t is not None and t["started_at"] is None and les["state"] == WAITING
         ahead = (lessons.waits_for(les["id"], k.now) if lessons is not None else None) if queued else None
         held = _held(les, k)
-        card = les["state"] == WAITING and (les["yes_at"] is None or bool(held)) and not queued
+        card = les["id"] in k.wanting and not queued
         report = k.cards.get(les["id"]) or {}
         item = dict(les, card=card, exam=held, queued=queued, ahead=ahead or [], numbers=_numbers(report),
                     gate=exam_mod.effect_of(k.exams.get(les["id"])),  # fixed and broke in the gate, or None
@@ -1117,6 +1116,7 @@ class _Ctx:
     def __init__(self, now, rows, trials, marks, clashes, reports, *, backs=None, exams=None):
         self.now = now
         self.exams = dict(exams or {})  # {lesson id: its exam row}
+        self.wanting = set()  # the lessons held for a yes (engine.lessons.wants_yes_ids); view fills it
         self.by_id = {les["id"]: les for les in rows}
         self.states = {i: les["state"] for i, les in self.by_id.items()}
         self.back_from = dict(backs or {})  # {lesson id: the pulled lesson it was brought back from}

@@ -120,7 +120,11 @@ class CountShapes(Base):
             [("Only Vapor 17 remain right now.", EN), ("3 remain so hurry.", EN), ("Only 3 pairs currently available.", EN),
              ("We have 3 pieces in 43.", EN), ("We have 3 pcs in 43.", EN), ("We have Vapor 17 units in 43.", EN),
              ("3 goz bas", FR), ("3andena 3 pairs bs", FR), ("متوفر 3 بس", AR), ("المتوفر 3", AR),
-             ("Only Vapor 17 remain available in 43.", EN)], "stock")
+             ("Only Vapor 17 remain available in 43.", EN),
+             # is or are after the count word (review handoff2 round 1, finding 5)
+             ("Only 3 pairs are in stock.", EN), ("Only 3 pairs are still in stock.", EN),
+             ("Only 2 pieces are available.", EN), ("Hurry, 2 pairs are in stock.", EN),
+             ("Only 2 pairs are now available.", EN)], "stock")
 
     def test_remains_as_a_verb_is_not_a_count(self):
         self.assert_sent([("The Superfly 11 remains in our range.", EN), ("The Superfly 11 remains at the same price.", EN),
@@ -142,7 +146,8 @@ class OrdinaryLines(Base):
                           ("tamam, el order 2 goz bs, size 43", FR), ("تمام، الأوردر 2 جوز بس، مقاس 43", AR)])
 
     def test_a_size_or_an_option_in_stock_is_not_a_count(self):
-        self.assert_sent([("Yes, UK 8 is in stock, that is EU 42.", EN), ("Option 2 is available in 43.", EN)])
+        self.assert_sent([("Yes, UK 8 is in stock, that is EU 42.", EN), ("Option 2 is available in 43.", EN),
+                          ("UK 8 is in stock.", EN), ("Option 2 is available.", EN), ("Your order has 2 pairs.", EN)])
         self.assert_sent([("The Air Max 90 is available in 43.", EN)], names=store.titles() | {"Nike Air Max 90"})
 
     def test_english_with_clock_ranges_mesh_and_w_o_stays_english(self):

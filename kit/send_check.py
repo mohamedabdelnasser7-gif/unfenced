@@ -535,10 +535,12 @@ def without_model_numbers(text, titles):
 # جوز" with بس after it or عندنا before it are counts too (red team handoff round 2, item 3; round 3, item 4);
 # an order ("Your order has 2 pairs", "There are 2 pairs in your cart", "el order 2 goz bs": stock_counts
 # passes a goz line that names the order), an offer ("Buy 2 pairs") and a description ("2 pairs of laces")
-# are not (review handoff round 3, finding 1). A code is not a count: "BO-2936845 is in stock".
+# are not (review handoff round 3, finding 1). A code is not a count: "BO-2936845 is in stock". After a count
+# word, is or are may come before in stock or available ("Only 3 pairs are in stock"); with no count word
+# they may not, so "UK 8 is in stock" still names a size (review handoff2 round 1, finding 5).
 GOZ = r"(?:جوز|goz|gozat|أجواز|اجواز)"
 STOCK_COUNT = re.compile(
-    rf"(?<![\w-])\d+\s+(?:(?:pairs?|pieces?|pcs|pc|items?|units?|more)\s+)?(?:(?:{COUNT_BRIDGE}\s+){{0,2}}"
+    rf"(?<![\w-])\d+\s+(?:(?:pairs?|pieces?|pcs|pc|items?|units?|more)\s+(?:(?:are|is)\s+)?)?(?:(?:{COUNT_BRIDGE}\s+){{0,2}}"
     rf"(?:left|{REMAIN})|(?:{STOCK_BRIDGE}\s+){{0,2}}(?:in\s+stock|available))" + NO_LETTER_AFTER
     + r"|" + LETTER_BEFORE + r"(?:we(?:'ve|\u2019ve)?\s+(?:(?:still|only|just|also|currently)\s+)?(?:have|got)"
     r"|3andena|3ndena|3andi)\s+(?:[^\W\d_]+\s+){0,3}?\d+\s*(?:pairs?|pieces?|pcs|pc|units?)" + NO_LETTER_AFTER

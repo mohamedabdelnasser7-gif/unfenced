@@ -190,17 +190,17 @@ def turn(msg, *, chats, model, lessons, results, send, limits=None, over=None, f
     typing: called with no arguments right before the first model call (the channel's typing
     dots); left out, none are shown. A failure there is logged and the turn goes on.
     """
-    chat_id = chats.open(msg.channel, msg.customer_id)
-    stage = stages.get(chats.stage(chat_id))
     kept = [media.fingerprint("image", i.data, i.mime) for i in msg.images]
     kept += [dict(NOT_OPENED, kind="image") for _ in range(msg.rejected_images or 0)]
     if msg.audio:
         kept.append(media.fingerprint("audio", msg.audio, msg.audio_mime))
     elif msg.audio_failed:
         kept.append(dict(NOT_OPENED, kind="audio"))
-    history = chats.messages(chat_id)
-    chats.add_step(chat_id, "user", content=msg.text or None, media=kept or None,
-                   message_id=msg.message_id or None)
+    # the open chat and the customer's step in one transaction: a quiet close never comes in between
+    chat_id, n = chats.receive(msg.channel, msg.customer_id, content=msg.text or None, media=kept or None,
+                               message_id=msg.message_id or None)
+    stage = stages.get(chats.stage(chat_id))
+    history = chats.messages(chat_id, upto=n - 1)
     if switch.is_paused(PLUG.agent, db=chats.db):
         return TurnResult(chat_id, PAUSED)
 
@@ -345,10 +345,12 @@ def failed_turn(msg, *, chats, model, results, send, limits=None, kind="text"):
     the customer's last message, or while the agent is paused. Returns a TurnResult, or None
     when nothing was sent.
     """
-    chat_id = chats.open(msg.channel, msg.customer_id)
     if msg.message_id and not chats.saved(msg.message_id):
-        chats.add_step(chat_id, "user", content=msg.text or None,
-                       media=[{"kind": kind}] if kind in ("image", "audio") else None, message_id=msg.message_id)
+        chat_id, _ = chats.receive(msg.channel, msg.customer_id, content=msg.text or None,
+                                   media=[{"kind": kind}] if kind in ("image", "audio") else None,
+                                   message_id=msg.message_id)
+    else:
+        chat_id = chats.open(msg.channel, msg.customer_id)
     if switch.is_paused(PLUG.agent, db=chats.db):
         return None
     stage = stages.get(chats.stage(chat_id))

@@ -23,6 +23,16 @@ A chat ends after quiet (DECISIONS item 54, sales/quiet.py): notice_at is when t
 the customer the chat closes soon, closed_at is when it closed. open() never returns a closed
 chat: the customer's next message starts a new chat on the same channel and customer_id.
 first_chat() names the customer across their chats: the id of their first chat on that channel.
+receive() finds the open chat and saves the customer's step in one transaction, so a close can never
+come between the two: the step lands in an open chat, or in a new one when the last closed first.
+mark_notice() and close() take the tick's view of the chat (last_n, its last customer or agent step)
+and do nothing when a newer customer or agent step was saved since, or when the customer has a
+message accepted from the webhook and not saved yet (pending in seen_messages): the tick never
+closes, nor sends the notice in, a chat the customer just wrote in.
+
+A database made before the quiet columns gets them added, and every chat in it with no customer or
+agent step in the last OLD_AFTER seconds is closed then, with no notice and no result: the first tick
+after the upgrade sends no customer a message about a chat that went quiet long ago.
 
 Every time here comes from clock (time.time unless a test gives its own).
 """
@@ -80,6 +90,11 @@ SEEN_COLUMNS = (
     ("attempts", "INTEGER NOT NULL DEFAULT 0"),
 )
 
+OLD_AFTER = 60 * 60  # sales/quiet.py NOTICE_AFTER + CLOSE_AFTER: older chats close when the quiet columns arrive
+# A customer's webhook message not saved yet: pending, with its payload, and still to be worked (attempts left).
+PENDING_FOR = ("EXISTS (SELECT 1 FROM seen_messages m WHERE m.status = 'pending' AND m.payload IS NOT NULL "
+               "AND m.attempts < {attempts} AND json_valid(m.payload) "
+               "AND json_extract(m.payload, '$.customer_id') = {customer})")
 FIRST_STAGE = "asking"
 MAX_ATTEMPTS = 3
 PERSON = "person"   # the name on an assistant step a team member wrote, in an imported chat
@@ -97,6 +112,16 @@ class Chats:
                 for name, decl in columns:
                     if name not in have:
                         c.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+                        if (table, name) == ("chats", "closed_at"):
+                            self._close_old(c)
+
+    def _close_old(self, c):
+        """The quiet columns just arrived: close every chat quiet OLD_AFTER seconds or more (its last
+        customer or agent step, else when it was made), with no notice and no result."""
+        now = self.clock()
+        c.execute("UPDATE chats SET closed_at = ?, updated_at = ? WHERE parent_id IS NULL AND COALESCE("
+                  "(SELECT MAX(at) FROM steps s WHERE s.chat_id = chats.id AND s.role IN ('user', 'assistant')), "
+                  "created_at) <= ?", (now, now, now - OLD_AFTER))
 
     # chats
 
@@ -104,12 +129,25 @@ class Chats:
         """The customer's current chat on this channel, or a new one on the same channel and
         customer_id once the last one closed. Branches and closed chats are never reopened."""
         with self.db.tx() as c:
-            row = c.execute(
-                "SELECT id, closed_at FROM chats WHERE channel = ? AND customer_id = ? AND parent_id IS NULL "
-                "ORDER BY created_at DESC, rowid DESC LIMIT 1", (channel, customer_id)).fetchone()
-            if row and row["closed_at"] is None:
-                return row["id"]
-            return self._new(c, channel, customer_id)
+            return self._open(c, channel, customer_id)
+
+    def _open(self, c, channel, customer_id):
+        row = c.execute(
+            "SELECT id, closed_at FROM chats WHERE channel = ? AND customer_id = ? AND parent_id IS NULL "
+            "ORDER BY created_at DESC, rowid DESC LIMIT 1", (channel, customer_id)).fetchone()
+        if row and row["closed_at"] is None:
+            return row["id"]
+        return self._new(c, channel, customer_id)
+
+    def receive(self, channel, customer_id, content=None, media=None, message_id=None):
+        """Save a customer's message as a user step in their open chat, or in a new chat when the last
+        one closed, in one transaction (open and add_step together). Returns (chat_id, step number)."""
+        with self.db.tx() as c:
+            chat_id = self._open(c, channel, customer_id)
+            n = self._add(c, chat_id, "user", content, media=media)
+            c.execute("UPDATE chats SET updated_at = ? WHERE id = ?", (self.clock(), chat_id))
+            self._done(c, message_id)
+            return chat_id, n
 
     def first_chat(self, chat_id):
         """The id of the customer's first chat on this chat's channel (never a branch): it names the
@@ -134,31 +172,50 @@ class Chats:
 
     def open_chats(self, channel):
         """The open chats on a channel (never a branch), oldest first, each {id, customer_id, stage,
-        notice_at, last, last_customer}: last is the time of the last customer or agent step,
-        last_customer of the last customer step (None with none)."""
+        notice_at, last, last_n, last_customer, waiting}: last is the time of the last customer or agent
+        step and last_n its number, last_customer the time of the last customer step (None with none),
+        waiting True when the customer has a webhook message not saved yet."""
         with self.db.tx() as c:
             rows = c.execute(
                 "SELECT c.id, c.customer_id, c.stage, c.notice_at, "
                 "(SELECT MAX(at) FROM steps s WHERE s.chat_id = c.id AND s.role IN ('user', 'assistant')) AS last, "
-                "(SELECT MAX(at) FROM steps s WHERE s.chat_id = c.id AND s.role = 'user') AS last_customer "
+                "(SELECT MAX(n) FROM steps s WHERE s.chat_id = c.id AND s.role IN ('user', 'assistant')) AS last_n, "
+                "(SELECT MAX(at) FROM steps s WHERE s.chat_id = c.id AND s.role = 'user') AS last_customer, "
+                + PENDING_FOR.format(attempts=MAX_ATTEMPTS, customer="c.customer_id") + " AS waiting "
                 "FROM chats c WHERE c.channel = ? AND c.parent_id IS NULL AND c.closed_at IS NULL "
                 "ORDER BY c.created_at, c.rowid", (channel,)).fetchall()
-        return [dict(r) for r in rows]
+        return [dict(r, waiting=bool(r["waiting"])) for r in rows]
 
-    def mark_notice(self, chat_id, at=None):
-        """Record that the quiet notice went (or was tried) in this chat. False when it already had one."""
+    @staticmethod
+    def _still_quiet(last_n):
+        """The SQL that holds a tick's change to a chat (UPDATE chats ... WHERE) to the view it saw: no
+        customer or agent step after step last_n, and no customer message waiting to be saved; "" with
+        no view given."""
+        if last_n is None:
+            return "", ()
+        return (" AND NOT EXISTS (SELECT 1 FROM steps s WHERE s.chat_id = chats.id AND s.role IN ('user', 'assistant') "
+                "AND s.n > ?) AND NOT " + PENDING_FOR.format(attempts=MAX_ATTEMPTS, customer="chats.customer_id"),
+                (last_n,))
+
+    def mark_notice(self, chat_id, at=None, last_n=None):
+        """Record that the quiet notice went (or was tried) in this chat. False when it already had one,
+        or (with last_n, the tick's view) when the customer or agent spoke after it or a customer
+        message waits to be saved."""
         at = self.clock() if at is None else at
+        still, args = self._still_quiet(last_n)
         with self.db.tx() as c:
-            cur = c.execute("UPDATE chats SET notice_at = ?, updated_at = ? WHERE id = ? AND notice_at IS NULL",
-                            (at, at, chat_id))
+            cur = c.execute("UPDATE chats SET notice_at = ?, updated_at = ? WHERE id = ? AND notice_at IS NULL "
+                            "AND closed_at IS NULL" + still, (at, at, chat_id, *args))
             return cur.rowcount == 1
 
-    def close(self, chat_id, at=None):
-        """Close the chat, recorded as an event step. False when it was closed already."""
+    def close(self, chat_id, at=None, last_n=None):
+        """Close the chat, recorded as an event step. False when it was closed already, or (with last_n,
+        the tick's view) when the customer or agent spoke after it or a customer message waits to be saved."""
         at = self.clock() if at is None else at
+        still, args = self._still_quiet(last_n)
         with self.db.tx() as c:
-            cur = c.execute("UPDATE chats SET closed_at = ?, updated_at = ? WHERE id = ? AND closed_at IS NULL",
-                            (at, at, chat_id))
+            cur = c.execute("UPDATE chats SET closed_at = ?, updated_at = ? WHERE id = ? AND closed_at IS NULL" + still,
+                            (at, at, chat_id, *args))
             if cur.rowcount != 1:
                 return False
             self._add(c, chat_id, "event", content=json.dumps({"closed": "quiet"}))

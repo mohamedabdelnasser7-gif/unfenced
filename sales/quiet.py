@@ -16,6 +16,14 @@ thread (channels/whatsapp.py), with a clock tests can set.
   and that night's Reflection reads the chat as lost. A chat with an order closes with no row.
 - The customer's next message starts a new chat on the same customer_id (kit/chats.py).
 - A paused agent (kit/switch.py) sends no notice and closes no chat.
+- A notice is never late: a chat found quiet LATE seconds or more past NOTICE_AFTER with no notice
+  yet (after a restart, an upgrade or a stop of the sweep thread) closes then, silently, with its
+  result as above. No customer gets a message about a chat that went quiet long ago.
+- The tick works from one view of the open chats, and a notice send can take seconds. So the
+  notice and the close each hold to that view inside their own write (kit/chats.py mark_notice,
+  close): a chat whose customer wrote meanwhile, or has a message accepted from the webhook and
+  not saved yet, is left alone. The close, its check for an order and its result are one step
+  under the database lock, so no turn saves a step or an order in between.
 """
 import logging
 
@@ -29,6 +37,7 @@ log = logging.getLogger("sales.quiet")
 
 NOTICE_AFTER = 30 * 60  # quiet seconds before the notice
 CLOSE_AFTER = 30 * 60   # quiet seconds after the notice before the chat closes
+LATE = 5 * 60           # a notice due this long ago (ten 30 second ticks) is not sent: the chat closes silently
 CLOSED = "chat_closed"
 NOTICE = {
     "arabic": "المحادثة دي هتتقفل كمان 30 دقيقة. ابعتلي في أي وقت ونكمل.",
@@ -50,11 +59,14 @@ def tick(*, chats, results, send, channel, now=None, limits=None, agent=PLUG.age
     resumed = switch.resumed_at(agent, db=chats.db) or 0
     done = []
     for ch in chats.open_chats(channel):
-        if ch["last"] is None:
+        if ch["last"] is None or ch.get("waiting"):  # a message from the customer is on its way in
             continue
         quiet = now - max(ch["last"], ch["notice_at"] or 0, resumed)
         if ch["notice_at"] is None:
-            if quiet >= NOTICE_AFTER and _notice(ch, chats, send, channel, limits, now):
+            if quiet >= NOTICE_AFTER + LATE:
+                if _close(ch, chats, results, now):
+                    done.append((ch["id"], "closed"))
+            elif quiet >= NOTICE_AFTER and _notice(ch, chats, send, channel, limits, now):
                 done.append((ch["id"], "notice"))
             continue
         came_back = ch["last_customer"] is not None and ch["last_customer"] > ch["notice_at"]
@@ -66,8 +78,8 @@ def tick(*, chats, results, send, channel, now=None, limits=None, agent=PLUG.age
 
 def _notice(ch, chats, send, channel, limits, now):
     """Send the notice once. The chat counts it as tried whatever happens, so it is never sent
-    twice; False only when another tick marked it first."""
-    if not chats.mark_notice(ch["id"], now):
+    twice; False when another tick marked it first or the chat moved since the tick's view."""
+    if not chats.mark_notice(ch["id"], now, last_n=ch.get("last_n")):
         return False
     if limits is not None and limits.over(limits_mod.key(channel, ch["customer_id"])):
         return True
@@ -82,9 +94,12 @@ def _notice(ch, chats, send, channel, limits, now):
 
 
 def _close(ch, chats, results, now):
-    if not chats.close(ch["id"], now):
-        return False
-    if not results.query(case=ch["id"], result=PLUG.decides.good):
-        results.result(ch["id"], CLOSED, stage=ch["stage"], at=now,
-                       detail={"quiet_minutes": (NOTICE_AFTER + CLOSE_AFTER) // 60})
+    """Close the chat if it is as the tick saw it, and give it chat_closed unless it holds an order,
+    all under one hold of the database lock (kit/db.py is one connection behind one lock)."""
+    with chats.db.tx():
+        if not chats.close(ch["id"], now, last_n=ch.get("last_n")):
+            return False
+        if not results.query(case=ch["id"], result=PLUG.decides.good):
+            results.result(ch["id"], CLOSED, stage=ch["stage"], at=now,
+                           detail={"quiet_minutes": (NOTICE_AFTER + CLOSE_AFTER) // 60})
     return True

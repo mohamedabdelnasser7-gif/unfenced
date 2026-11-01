@@ -32,6 +32,8 @@ It listens on 127.0.0.1:PORT (default 8080). Meta must reach it through a public
   FAST_EVERY seconds, with no model call. After 30 quiet minutes the customer gets one notice
   that the chat closes in 30 minutes, through Graph.send like any reply; after 30 more the chat
   closes, and the next message starts a new chat. A paused agent (kit/switch.py) sends nothing.
+  A chat whose customer has a message here not saved yet is left alone, and a notice more than
+  5 minutes late (after a restart) is never sent: that chat closes silently.
 - Fast reflection (reflection/fast.py): the same thread then sweeps for chats that ended without
   an order and writes each one note for that customer's next chat only; the turn reads it into
   the prompt. A tick or sweep that fails is logged and the next one tries again.

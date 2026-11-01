@@ -82,6 +82,18 @@ def takes_exam(origin):
 # risk one still waits for a yes (Decision 56). The other half keeps the agent as it was.
 HOTFIX_SHARE = 0.5
 HOTFIX_SOURCE = "correction from the agent page"  # the source a correction is saved with (correct)
+# A lesson held for a person's yes: waiting with no yes yet, or a person's line its exam held, or a high risk
+# correction (Decision 56), neither on trial nor waiting its turn. The one home for approve, the morning card and
+# the page (review handoff2 round 1, finding 4); its one parameter is HOTFIX_SOURCE.
+WANTS_YES = ("state = 'waiting' AND (yes_at IS NULL OR ((id IN (SELECT lesson_id FROM lesson_exams WHERE passed = 0) "
+             "OR (origin = 'person' AND risk = 'high' AND source = ?)) AND id NOT IN (SELECT lesson_id FROM trials)))")
+
+
+def wants_yes_ids(c):
+    """The ids of every agent's lessons held for a person's yes (WANTS_YES), in the caller's transaction."""
+    return {r[0] for r in c.execute(f"SELECT id FROM lessons WHERE {WANTS_YES}", (HOTFIX_SOURCE,))}
+
+
 PATTERN, IDEA = "pattern", "idea"  # its kind: found in past cases, or a lesson with no past cases behind it
 KINDS = (PATTERN, IDEA)
 FROM_STUDY = ("night study of ", "adapted ", "borrowed from ")  # how the study's own source lines start
@@ -316,7 +328,11 @@ class Lessons:
         """A correction a person sends from the agent page: a person's own line (add) that is a hotfix
         (Decision 56). It takes the exam first; once it passes it starts at once on HOTFIX_SHARE of the cases
         for the fast level's days, whatever the level switch says, and never waits behind a lesson already on
-        trial on its stage. A high risk one waits for a yes (approve), then starts the same way. Returns its id."""
+        trial on its stage. A high risk one waits for a yes (approve), then starts the same way. With no
+        examiner and no exam result it is refused (fail closed: a correction never starts untested; red team
+        handoff2 round 1, item 2). Returns its id."""
+        if exam is None and self.examiner is None:
+            raise ValueError("a correction takes the exam first: give an examiner or its exam result")
         return self._new(text, stages, source=HOTFIX_SOURCE, yes_by=_line(yes_by, "yes_by"), origin=PERSON,
                          kind=IDEA, exam_given=exam, hotfix=True, now=now)
 
@@ -342,6 +358,12 @@ class Lessons:
             raise ValueError("only a kept lesson is borrowed")
         return src
 
+    def wants_yes(self, lesson_id):
+        """True when the lesson is held for a person's yes (WANTS_YES): what approve takes."""
+        with self.db.tx() as c:
+            return c.execute(f"SELECT 1 FROM lessons WHERE id = ? AND agent = ? AND {WANTS_YES}",
+                             (lesson_id, self.agent, HOTFIX_SOURCE)).fetchone() is not None
+
     def exam_of(self, lesson_id):
         """The exam the lesson took before its trial, as a dict, or None when it took none."""
         with self.db.tx() as c:
@@ -361,10 +383,8 @@ class Lessons:
                 raise ValueError("share is more than 0 and at most 1; days is more than 0")
         yes_by = _line(yes_by, "yes_by")
         with self.db.tx() as c:
-            row = c.execute(  # no yes yet, or a person's line its exam or its high risk held (PERSON_TAKES_EXAM, Decision 56)
-                "SELECT * FROM lessons WHERE id = ? AND agent = ? AND state = 'waiting' AND (yes_at IS NULL OR (("
-                "id IN (SELECT lesson_id FROM lesson_exams WHERE passed = 0) OR (origin = 'person' AND risk = 'high' "
-                "AND source = ?)) AND id NOT IN (SELECT lesson_id FROM trials)))",
+            row = c.execute(  # held for a yes (WANTS_YES)
+                f"SELECT * FROM lessons WHERE id = ? AND agent = ? AND {WANTS_YES}",
                 (lesson_id, self.agent, HOTFIX_SOURCE)).fetchone()
             if row is None:
                 return False
@@ -745,7 +765,7 @@ class Lessons:
         tags = self.plug.stage_tags(stages)
         level, why = risk_mod.classify(text, self.plug.risk, self.judge, sources=sources)
         now = _now(now)
-        wants = (self.examiner is not None or exam_given is not None) and takes_exam(origin) and not skip_exam
+        wants = (self.examiner is not None or exam_given is not None) and (takes_exam(origin) or hotfix) and not skip_exam
         exam = exam_given if exam_given is not None or not wants else self._exam(text, tags, level, why, yes_by, origin, now)
         with self.db.tx() as c:  # the switch is read in the same transaction the lesson is written in
             accept = None

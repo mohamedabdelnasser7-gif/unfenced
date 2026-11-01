@@ -1,0 +1,30 @@
+{
+  "agent": "stock_watch",
+  "about": "Tells a store's customers whether an item is in stock.",
+  "case": "One WhatsApp chat with one customer; the case id is the chat id.",
+  "fields": ["retail"],
+  "stages": ["asking"],
+  "actions": {
+    "reply": "One answer to a customer message, checked before it goes out."
+  },
+  "results": {
+    "replied": {"speed": "fast", "shows_in_days": [0, 0], "after": "reply", "about": "The reply passed the send check and went out."},
+    "no_safe_reply": {"speed": "fast", "shows_in_days": [0, 0], "after": "reply", "about": "No reply passed the send check, so nothing went out."},
+    "answered": {"speed": "fast", "shows_in_days": [0, 1], "about": "The customer got a clear stock answer."}
+  },
+  "causes": {"out_of_stock": "The item ran out."},
+  "source": {"about": "The person writing in.", "known_by": "case"},
+  "harm": {"results": ["no_safe_reply"]},
+  "decides": {"good": "answered", "bad": []},
+  "risk": {
+    "high": {
+      "about": "High risk: any number, any promise of a date, and a customer's personal data.",
+      "words": {"promise": ["tomorrow", "guarantee"]},
+      "patterns": {"number": ["[0-9]"]},
+      "tools": ["store", "bosta_stock", "switch_stage"]
+    },
+    "low": {"about": "Low risk: tone and greetings."}
+  },
+  "trial": {"fast": {"share": 0.5, "days": 7}, "careful": {"share": 0.2, "days": 14}},
+  "slot": "Lessons from past chats:"
+}

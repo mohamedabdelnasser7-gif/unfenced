@@ -1,0 +1,7 @@
+{
+  "name": "Stock watch",
+  "does": "tells a store's customers whether an item is in stock",
+  "good": "The customer gets a clear in stock or out of stock answer for the item they asked about, read from the store tool.",
+  "never": ["Never promise a delivery date.", "Never give a price."],
+  "needs": ["the store catalogue"]
+}

@@ -352,6 +352,8 @@ def load_trust(path, agent=AGENT):
 
 
 class Arena:
+    agent = AGENT  # the name its report and Morning page item carry; arena/practice.py sets its own
+
     def __init__(self, cards, *, agent_model, customer_model, calls, trust=None, prompt=match_mod.GENERIC_PROMPT,
                  prompt_file=None, held_out=None, matches=10, rounds=DEFAULT_ROUNDS, fact_checks=None, seed=0,
                  learn=None, between=None, lessons=None, state, reports=None, now=time.time, pool=None):
@@ -477,7 +479,7 @@ class Arena:
         return out
 
     def _report(self, rounds, stopped):
-        rep = {"agent": AGENT, "run": self.run_id, "stopped": stopped, "trust": self.trust, "fact_checks": self.facts,
+        rep = {"agent": self.agent, "run": self.run_id, "stopped": stopped, "trust": self.trust, "fact_checks": self.facts,
                "training_cards": [c["id"] for c in self.train], "held_out_cards": [c["id"] for c in self.held],
                "rounds": rounds, "calls": {"day": self.calls.day, "used": self.calls.count, "cap": self.calls.cap}}
         if self.calls.problem:
@@ -510,7 +512,7 @@ class Arena:
         """The run's rounds with their Reflection counts as a Morning page item, written next to
         the database as the stuck item is (a run that got stuck writes that one, with the same rows)."""
         last = rounds[-1]["gate"]
-        item = {"agent": AGENT, "kind": "arena_rounds", "at": self.now(), "run": self.run_id, "stopped": stopped,
+        item = {"agent": self.agent, "kind": "arena_rounds", "at": self.now(), "run": self.run_id, "stopped": stopped,
                 "rounds": len(rounds), "gate_won": last["won"], "gate_played": last["played"],
                 "needs": self.trust["wins"], "lost": [], "reflection": self.reflection_rows(rounds),
                 "line": f"The Arena ran {len(rounds)} round{'' if len(rounds) == 1 else 's'} and stopped, {stopped}: "
@@ -520,7 +522,7 @@ class Arena:
     def stuck_item(self, rounds):
         """The stuck point as a Morning page item, written next to the database."""
         last = rounds[-1]["gate"]
-        item = {"agent": AGENT, "kind": "arena_stuck", "at": self.now(), "run": self.run_id,
+        item = {"agent": self.agent, "kind": "arena_stuck", "at": self.now(), "run": self.run_id,
                 "rounds": len(rounds), "gate_won": last["won"], "gate_played": last["played"],
                 "needs": self.trust["wins"], "lost": last["lost"][:3],
                 "line": f"The Arena is stuck: {last['won']} of {last['played']} held-out matches won after "
@@ -531,7 +533,7 @@ class Arena:
 
     def _write_item(self, item):
         self.reports.mkdir(parents=True, exist_ok=True)
-        path = self.reports / f"arena-{AGENT}-{self.run_id}.json"
+        path = self.reports / f"arena-{self.agent}-{self.run_id}.json"
         path.write_text(json.dumps(item, ensure_ascii=False, indent=1), encoding="utf-8")
         item["file"] = path.name
         return item

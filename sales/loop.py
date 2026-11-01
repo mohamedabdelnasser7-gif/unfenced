@@ -28,6 +28,7 @@
    ORDER_PLACED (its number and total) instead of any of these lines, and also when there
    is no safe reply. ORDER_PLACED goes out once a turn.
 6. Every outcome goes to the result log.
+7. A paused agent (kit/switch.py) saves the message and sends nothing: no line, no row.
 
 Photos go to the model as image parts in that turn's user message. SQLite keeps only their hash and type. A photo that could not be
 opened and a voice note that could not be fetched (or were not downloaded, over a limit)
@@ -42,7 +43,7 @@ from pathlib import Path
 from engine.lessons import slot
 from sales import stages
 from kit import limits as limits_mod
-from kit import media, orders, send_check, tools
+from kit import media, orders, send_check, switch, tools
 from kit.chats import FIXED
 from kit.model import ModelError
 from kit.tools import draft_order, find_order, store
@@ -84,6 +85,7 @@ ORDER_PLACED = {
     "franco": "el order bta3ak etsagel b ra2am {order}, w el egmaly {total} geneh.",
     "english": "Your order {order} is placed. The total is {total} EGP.",
 }
+PAUSED = "paused"   # the turn of a paused agent: the message is saved, nothing goes out
 NOT_OPENED = {"opened": False}   # the media mark for a photo or voice note no one could open
 VOICE_NOTE = "(The customer sent a voice note. Call voice_note to hear it.)"
 PHOTO_ONLY = "(The customer sent a photo.)"
@@ -94,7 +96,7 @@ TOO_MANY_CALLS = {"ok": False, "feedback": f"At most {MAX_CALLS_PER_STEP} tool c
 @dataclass
 class TurnResult:
     chat_id: str
-    # replied, no_safe_reply, limited, model_error or turn_failed
+    # replied, no_safe_reply, limited, model_error or turn_failed; paused (no row) when the agent is paused
     outcome: str
     reply: str | None = None
 
@@ -193,6 +195,8 @@ def turn(msg, *, chats, model, lessons, results, send, limits=None, over=None, f
     history = chats.messages(chat_id)
     chats.add_step(chat_id, "user", content=msg.text or None, media=kept or None,
                    message_id=msg.message_id or None)
+    if switch.is_paused(PLUG.agent, db=chats.db):
+        return TurnResult(chat_id, PAUSED)
 
     customer_text = msg.text or last_customer_text(chats, chat_id)
     who = limits_mod.key(msg.channel, msg.customer_id)
@@ -321,13 +325,15 @@ def failed_turn(msg, *, chats, model, results, send, limits=None, kind="text"):
 
     The customer's message is saved first if the crash came before that (kind: text, image
     or audio, as the message came in). Nothing is sent when a reply already went out after
-    the customer's last message. Returns a TurnResult, or None
+    the customer's last message, or while the agent is paused. Returns a TurnResult, or None
     when nothing was sent.
     """
     chat_id = chats.open(msg.channel, msg.customer_id)
     if msg.message_id and not chats.saved(msg.message_id):
         chats.add_step(chat_id, "user", content=msg.text or None,
                        media=[{"kind": kind}] if kind in ("image", "audio") else None, message_id=msg.message_id)
+    if switch.is_paused(PLUG.agent, db=chats.db):
+        return None
     stage = stages.get(chats.stage(chat_id))
     steps = chats.steps(chat_id)
     last_user = max((s["n"] for s in steps if s["role"] == "user"), default=0)

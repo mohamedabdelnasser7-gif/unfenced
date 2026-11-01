@@ -1,8 +1,9 @@
-"""A chat ends after quiet (DECISIONS item 54; sales/quiet.py).
+"""A chat ends after quiet, and the pause switch (DECISIONS item 54; sales/quiet.py, kit/switch.py).
 
 30 quiet minutes and the customer gets one notice in their own script, once per chat; 30 more and
 the chat closes. A closed chat with no order gets chat_closed at once, so the fast note is written
-in the same pass and goes into the customer's next chat, a new chat on the same customer_id. The
+in the same pass and goes into the customer's next chat, a new chat on the same customer_id. A
+paused agent saves what comes in and sends nothing: no reply, no notice, and no chat closes. The
 clock is a fake one the test moves; no model call, no network."""
 import json
 import threading
@@ -11,6 +12,7 @@ from unittest import mock
 
 from channels import whatsapp as wa
 from channels.base import Message
+from kit import switch
 from kit.chats import FIXED, Chats
 from kit.db import Db
 from kit.limits import Limits
@@ -242,6 +244,61 @@ class TheNoteFollowsTheCustomer(Base):
         _, prompt = self.prompt("انا تاني")
         self.assertNotIn(NOTE, prompt)
         self.assertEqual(self.fast.state(note_id), "done")
+
+
+class ThePauseSwitch(Base):
+    def test_the_three_functions(self):
+        self.assertFalse(switch.is_paused("sales", db=self.db))
+        switch.pause("sales", db=self.db, now=T0)
+        self.assertTrue(switch.is_paused("sales", db=self.db))
+        self.assertFalse(switch.is_paused("marketing", db=self.db))
+        self.assertIsNone(switch.resumed_at("sales", db=self.db))
+        switch.resume("sales", db=self.db, now=T0 + 5)
+        self.assertFalse(switch.is_paused("sales", db=self.db))
+        self.assertEqual(switch.resumed_at("sales", db=self.db), T0 + 5)
+        with self.assertRaises(ValueError):
+            switch.pause("", db=self.db)
+
+    def test_it_is_kept_in_the_database(self):
+        switch.pause(db=self.db)
+        with self.db.tx() as c:
+            self.assertEqual(dict(c.execute("SELECT agent, paused FROM agent_switch").fetchone()),
+                             {"agent": "sales", "paused": 1})
+
+    def test_a_paused_agent_saves_the_message_and_sends_nothing(self):
+        switch.pause(db=self.db)
+        model = FakeModel(say(ANSWER))
+        r = self.turn("التوصيل بكام؟", model=model)
+        self.assertEqual((r.outcome, r.reply), ("paused", None))
+        self.assertEqual((self.out.sent, model.calls), ([], []))
+        self.assertEqual([(s["role"], s["content"]) for s in self.chats.steps(r.chat_id)], [("user", "التوصيل بكام؟")])
+        self.assertEqual(self.results.for_chat(r.chat_id), [])
+
+    def test_a_paused_agent_sends_no_notice_and_closes_no_chat(self):
+        chat_id = self.turn().chat_id
+        switch.pause(db=self.db, now=self.now)
+        self.later(quiet.NOTICE_AFTER + quiet.CLOSE_AFTER + 60)
+        self.assertEqual(self.tick(), [])
+        self.assertEqual([t for _, t in self.out.sent], [ANSWER])
+        self.assertEqual((self.chats.get(chat_id)["notice_at"], self.chats.get(chat_id)["closed_at"]), (None, None))
+
+    def test_after_a_resume_the_agent_answers_and_quiet_counts_from_the_resume(self):
+        chat_id = self.turn().chat_id
+        switch.pause(db=self.db, now=self.now)
+        self.later(3 * 3600)
+        switch.resume(db=self.db, now=self.now)
+        self.assertEqual(self.tick(), [])  # not closed for the hours it was paused
+        self.later(quiet.NOTICE_AFTER)
+        self.assertEqual(self.tick(), [(chat_id, "notice")])
+        r = self.turn("لسه معاك")
+        self.assertEqual((r.chat_id, r.outcome), (chat_id, "replied"))
+
+    def test_a_crashed_turn_of_a_paused_agent_sends_nothing(self):
+        switch.pause(db=self.db)
+        msg = Message(channel="whatsapp", customer_id=WHO, text="hi", message_id="m1")
+        self.chats.first_seen("m1")
+        self.assertIsNone(loop.failed_turn(msg, chats=self.chats, model=None, results=self.results, send=self.out))
+        self.assertEqual(self.out.sent, [])
 
 
 class TheRunningAgent(Base):

@@ -2,7 +2,7 @@
 thread (channels/whatsapp.py), with a clock tests can set.
 
 - Quiet is counted from the last customer or agent step in the chat (and from the quiet notice,
-  whichever came last).
+  and from a resume of the agent, whichever came last).
 - After NOTICE_AFTER quiet seconds the customer gets NOTICE once per chat, in the script of
   their last text (Egyptian Arabic when none can be told, like the other fixed lines). It goes
   through the channel's normal send (plain text, no reply-to) and is saved as a fixed line. A
@@ -15,11 +15,12 @@ thread (channels/whatsapp.py), with a clock tests can set.
   result, so the fast reflection sweep (reflection/fast.py) writes its note in the same sweep
   and that night's Reflection reads the chat as lost. A chat with an order closes with no row.
 - The customer's next message starts a new chat on the same customer_id (kit/chats.py).
+- A paused agent (kit/switch.py) sends no notice and closes no chat.
 """
 import logging
 
 from kit import limits as limits_mod
-from kit import send_check
+from kit import send_check, switch
 from kit.chats import FIXED
 from reflection import PLUG
 from sales.loop import last_customer_text
@@ -40,15 +41,18 @@ def notice_line(customer_text):
     return NOTICE[send_check.detect_script(customer_text or "") or "arabic"]
 
 
-def tick(*, chats, results, send, channel, now=None, limits=None):
+def tick(*, chats, results, send, channel, now=None, limits=None, agent=PLUG.agent):
     """One pass over the open chats on a channel. send(to, text) is the channel's send.
     Returns [(chat_id, "notice" or "closed")] for what it did."""
     now = chats.clock() if now is None else now
+    if switch.is_paused(agent, db=chats.db):
+        return []
+    resumed = switch.resumed_at(agent, db=chats.db) or 0
     done = []
     for ch in chats.open_chats(channel):
         if ch["last"] is None:
             continue
-        quiet = now - max(ch["last"], ch["notice_at"] or 0)
+        quiet = now - max(ch["last"], ch["notice_at"] or 0, resumed)
         if ch["notice_at"] is None:
             if quiet >= NOTICE_AFTER and _notice(ch, chats, send, channel, limits, now):
                 done.append((ch["id"], "notice"))

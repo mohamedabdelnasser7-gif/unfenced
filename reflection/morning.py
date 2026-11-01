@@ -495,20 +495,25 @@ CSP = ("default-src 'none'; style-src 'sha256-" + base64.b64encode(hashlib.sha25
        + "'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 
 
+STALE_PLAN = "Not rolled back: the lessons changed after the plan was shown. Look at the plan again."
+
+
 class Refused(Exception):
     """An answer the page cannot take; the message says why, and nothing changed."""
 
 
-def person_line(lessons, text, stages, *, by, old, now=None, exam=None):
+def person_line(lessons, text, stages, *, by, old, now=None, exam=None, hold_high=True):
     """What a person's new line becomes. It follows the engine's rule for a person's own line
     (Lessons.add): it needs no yes, a person wrote it, so it starts a trial like any other
     lesson, or waits its turn when its stage has a trial; its risk is still checked and saved,
-    and its origin is "person". Its source line names the lesson it came from: 'edited by
-    <by> from lesson <id>: "<old line>"'. Returns the new lesson's id."""
+    and its origin is "person". hold_high: a high risk line waits for a yes on its card, the same
+    as a correction (Lessons.add hold_high), so new words are never a way round that yes. Its
+    source line names the lesson it came from: 'edited by <by> from lesson <id>: "<old line>"'.
+    Returns the new lesson's id."""
     source = f'{EDITED}{by} from lesson {old["id"]}: "{old["text"]}"'
     if exam is not None:  # Modify on the two tab page: the new words took the exam first (Morning.modify)
-        return lessons.add(text, stages, source, yes_by=by, exam=exam, now=now)
-    return lessons.add(text, stages, source, yes_by=by, skip_exam=True, now=now)  # Edit runs no exam
+        return lessons.add(text, stages, source, yes_by=by, exam=exam, hold_high=hold_high, now=now)
+    return lessons.add(text, stages, source, yes_by=by, skip_exam=True, hold_high=hold_high, now=now)  # Edit runs no exam
 
 
 def repo_plugs(root=ROOT):
@@ -592,11 +597,16 @@ class Morning:
     def modify(self, lesson_id, line, note="", now=None):
         """Modify on a Today card (the two tab page): the card's new words, with the optional note
         added after them, go the Edit way (person_line, the old lesson pulled) but take the idea
-        exam first (idea_exam, outside the transaction), so a fail waits for a yes on Today again."""
+        exam first (idea_exam, outside the transaction), so a fail waits for a yes on Today again. A
+        high risk line waits for a yes on Today too: Modify is never the yes (person_line hold_high).
+        The cheap refusals (too long, the same words, a card that cannot be edited) come before the exam."""
         text = _one_line(line, "the new line")
         extra = _one_line(note, "the note", required=False)
         text = f"{text} {extra}" if extra else text
+        if len(text) > MAX_LEN:
+            raise Refused(f"The new line and the note: at most {MAX_LEN} characters together.")
         les, lessons = self._mine(lesson_id)
+        self._edit_checked(les, lessons, text, now)  # a refused line takes no exam; edit checks again
         result = self._exam_for(lessons, text, les["stages"])
         return self.edit(lesson_id, text, now=now, exam=result)
 
@@ -623,40 +633,31 @@ class Morning:
 
     def roll_back(self, agent, code, now=None):
         """Roll back to the latest night snapshot, the plan the page showed (code), through
-        snapshots.rollback; refused when the plan changed meanwhile."""
+        snapshots.rollback; refused in plain words when the plan changed meanwhile."""
         lessons = self._plugged(agent)
         snap = snapshots.latest(self.db, agent)
         if snap is None:
             raise Refused(f"No night snapshot of {agent} yet, so there is nothing to roll back to.")
+        night = _date(snap["at"])
         try:
             steps, row = snapshots.rollback(self.db, lessons, snap, self.by, now, code=str(code or ""))
         except snapshots.Refused as e:
-            raise Refused(f"Not rolled back: {e}.") from None
+            stale = str(e).startswith("the plan changed")  # the CLI's words; the page says it plainly
+            raise Refused(STALE_PLAN if stale else f"Not rolled back: {e}.") from None
         if row is None:
-            return f"Nothing to roll back: the lessons given now were all given the night of {snap['night']}."
-        return f"Rolled back to the night of {snap['night']}."
+            return f"Nothing to roll back: the lessons given now were all given the night of {night}."
+        return f"Rolled back to the night of {night}."
 
     def edit(self, lesson_id, line, now=None, exam=None):
         """Add the new line (person_line) and pull the old lesson, each naming the other, in one
         transaction: when the pull fails, the new line is not kept either. The new line waits
         its turn behind the old lesson's trial, so once the old one is pulled the turns whose
-        stages are free start (Lessons.start_turns)."""
+        stages are free start (Lessons.start_turns). A high risk new line waits for a yes on its card
+        (person_line hold_high)."""
         with self.page.one():
             les, lessons = self._mine(lesson_id)
             text = _one_line(line, "the new line")
-            if not (les["state"] in (KEPT, TRYING) or self._card(les, lessons, now)):
-                raise Refused(f"Lesson {les['id']} is neither live nor waiting for a yes, so it is not edited here.")
-            clash = lessons.clashes(les["id"])["replaces"] if les["state"] == WAITING else []
-            if clash:  # an edited line would drop the clash and stand next to the line it goes against
-                raise Refused(f"Lesson {les['id']} asks to replace lesson {', '.join(str(i) for i in clash)}, so it "
-                              "is not edited here. Answer Yes or No on its card, then edit the line that stays.")
-            named = [i for i in lessons.clashes(les["id"])["replaced_by"]
-                     if (lessons.get(i) or {}).get("state") == WAITING] if les["state"] != WAITING else []
-            if named:  # the edited line would drop the card's clash, and a later yes would pull nothing
-                raise Refused(f"Lesson {les['id']} is named on the card of lesson {', '.join(str(i) for i in named)}, "
-                              "so it is not edited here. Answer that card first.")
-            if text == les["text"]:
-                raise Refused("The new line is the same as the old one; nothing changed.")
+            self._edit_checked(les, lessons, text, now)
             try:
                 new_id = person_line(lessons, text, les["stages"], by=self.by, old=les, now=now, exam=exam)
             except ValueError as e:
@@ -664,11 +665,31 @@ class Morning:
             if not lessons.pull(les["id"], f"{EDITED}{self.by} into lesson {new_id}", now=now):
                 raise Refused(f"Lesson {les['id']} changed meanwhile; nothing done.")
             lessons.start_turns(now)
-            state = lessons.get(new_id)["state"]
-        where = "It is on trial." if state == TRYING else "It waits its turn."
-        if exam is not None and not exam.passed and state == WAITING:
+            new = lessons.get(new_id)
+            held = new["state"] == WAITING and new["yes_at"] is None and lessons.waits_for(new_id, now) is None
+        where = "It is on trial." if new["state"] == TRYING else "It waits its turn."
+        if exam is not None and not exam.passed and new["state"] == WAITING:
             where = f"It waits for a yes: it {exam.line()}."
+        elif held:
+            where = "It is high risk, so it waits for your yes on its card."
         return f"Lesson {les['id']} edited: the new line is lesson {new_id}. {where}"
+
+    def _edit_checked(self, les, lessons, text, now=None):
+        """Refused when a lesson is not edited into these words: not live and no card, a card that
+        replaces or is named on another card, or the same words."""
+        if not (les["state"] in (KEPT, TRYING) or self._card(les, lessons, now)):
+            raise Refused(f"Lesson {les['id']} is neither live nor waiting for a yes, so it is not edited here.")
+        clash = lessons.clashes(les["id"])["replaces"] if les["state"] == WAITING else []
+        if clash:  # an edited line would drop the clash and stand next to the line it goes against
+            raise Refused(f"Lesson {les['id']} asks to replace lesson {', '.join(str(i) for i in clash)}, so it "
+                          "is not edited here. Answer Yes or No on its card, then edit the line that stays.")
+        named = [i for i in lessons.clashes(les["id"])["replaced_by"]
+                 if (lessons.get(i) or {}).get("state") == WAITING] if les["state"] != WAITING else []
+        if named:  # the edited line would drop the card's clash, and a later yes would pull nothing
+            raise Refused(f"Lesson {les['id']} is named on the card of lesson {', '.join(str(i) for i in named)}, "
+                          "so it is not edited here. Answer that card first.")
+        if text == les["text"]:
+            raise Refused("The new line is the same as the old one; nothing changed.")
 
     def longer(self, lesson_id, days, now=None):
         """Keep an unclear lesson on trial longer: given again in the same share of cases until
@@ -1111,6 +1132,7 @@ class Morning:
         report = k.cards.get(les["id"]) or {}
         item = dict(les, card=card, exam=held, queued=queued, ahead=ahead or [], numbers=_numbers(report),
                     gate=exam_mod.effect_of(k.exams.get(les["id"])),  # fixed and broke in the gate, or None
+                    exam_result=_exam_result(k.exams.get(les["id"])),
                     accept_high=None if t is None else t["accept_by"],
                     replaces=[_short(k.by_id.get(i), i) for i in k.replaces.get(les["id"], [])],
                     cases=list((k.links.get(les["id"]) or {}).get("cases") or []))
@@ -1265,6 +1287,16 @@ def _handed(rep):
     """The notes a night report handed over to other agents, each {to, text}; the page shows no more."""
     return [{"to": n["to"], "text": n["text"]} for n in _dicts(_dict(rep.get("hand_over")).get("notes"))
             if isinstance(n.get("to"), str) and isinstance(n.get("text"), str)]
+
+
+def _exam_result(row):
+    """What the exam a lesson took said, from its saved row: "passed", "failed", "not run" (the
+    examiner raised, engine.exam.could_not_run), or None when it took no exam."""
+    if not row:
+        return None
+    if row["passed"]:
+        return "passed"
+    return "not run" if row.get("check_name") == exam_mod.NOT_RUN else "failed"
 
 
 def _held(les, k):
@@ -2343,25 +2375,32 @@ def _agent_form(token, action, agent, button, *, hidden=(), extra="", quiet=Fals
 
 # ---- the server -------------------------------------------------------------------------------
 
-ACTIONS = {"/stop": lambda m, f: m.stop(_field(f, "lesson"), _field(f, "why")),
-           "/edit": lambda m, f: m.edit(_field(f, "lesson"), _field(f, "line")),
-           "/yes": lambda m, f: m.yes(_field(f, "lesson"), _field(f, "shown")),
-           "/no": lambda m, f: m.no(_field(f, "lesson"), _field(f, "why")),
-           "/back": lambda m, f: m.bring_back(_field(f, "lesson")),
-           "/longer": lambda m, f: m.longer(_field(f, "lesson"), _field(f, "days")),
-           "/drop": lambda m, f: m.drop(_field(f, "lesson")),
-           "/idea": lambda m, f: m.idea(_field(f, "agent"), _field(f, "line"), _field(f, "stage")),
-           "/level": lambda m, f: m.set_level(_field(f, "agent"), _field(f, "level")),
-           "/accept": lambda m, f: m.set_accept(_field(f, "agent"), _field(f, "on"), _field(f, "auto"),
-                                                _field(f, "days")),
-           "/lesson_level": lambda m, f: m.lesson_level(_field(f, "lesson"), _field(f, "level")),
-           "/keep_fact": lambda m, f: m.keep_fact(_field(f, "agent"), _field(f, "key"), _field(f, "shown")),
-           "/dismiss_fact": lambda m, f: m.dismiss_fact(_field(f, "agent"), _field(f, "key"), _field(f, "shown")),
-           "/modify": lambda m, f: m.modify(_field(f, "lesson"), _field(f, "line"), _field(f, "note") if "note" in f else ""),
-           "/correct": lambda m, f: m.correct(_field(f, "agent"), _field(f, "line")),
-           "/rollback": lambda m, f: m.roll_back(_field(f, "agent"), _field(f, "code")),
-           "/mode": lambda m, f: m.answer_mode(_field(f, "agent"), _field(f, "card"), _field(f, "choice"),
-                                               _field(f, "name") if "name" in f else "")}
+ACTIONS = {"/stop": lambda m, f, now=None: m.stop(_field(f, "lesson"), _field(f, "why"), now=now),
+           "/edit": lambda m, f, now=None: m.edit(_field(f, "lesson"), _field(f, "line"), now=now),
+           "/yes": lambda m, f, now=None: m.yes(_field(f, "lesson"), _field(f, "shown"), now=now),
+           "/no": lambda m, f, now=None: m.no(_field(f, "lesson"), _field(f, "why"), now=now),
+           "/back": lambda m, f, now=None: m.bring_back(_field(f, "lesson"), now=now),
+           "/longer": lambda m, f, now=None: m.longer(_field(f, "lesson"), _field(f, "days"), now=now),
+           "/drop": lambda m, f, now=None: m.drop(_field(f, "lesson"), now=now),
+           "/idea": lambda m, f, now=None: m.idea(_field(f, "agent"), _field(f, "line"), _field(f, "stage"), now=now),
+           "/level": lambda m, f, now=None: m.set_level(_field(f, "agent"), _field(f, "level"), now=now),
+           "/accept": lambda m, f, now=None: m.set_accept(_field(f, "agent"), _field(f, "on"), _field(f, "auto"),
+                                                          _field(f, "days"), now=now),
+           "/lesson_level": lambda m, f, now=None: m.lesson_level(_field(f, "lesson"), _field(f, "level"), now=now),
+           "/keep_fact": lambda m, f, now=None: m.keep_fact(_field(f, "agent"), _field(f, "key"), _field(f, "shown"),
+                                                            now=now),
+           "/dismiss_fact": lambda m, f, now=None: m.dismiss_fact(_field(f, "agent"), _field(f, "key"),
+                                                                  _field(f, "shown"), now=now),
+           "/modify": lambda m, f, now=None: m.modify(_field(f, "lesson"), _field(f, "line"),
+                                                      _field(f, "note") if "note" in f else "", now=now),
+           "/correct": lambda m, f, now=None: m.correct(_field(f, "agent"), _field(f, "line"), now=now),
+           "/rollback": lambda m, f, now=None: m.roll_back(_field(f, "agent"), _field(f, "code"), now=now),
+           "/mode": lambda m, f, now=None: m.answer_mode(_field(f, "agent"), _field(f, "card"), _field(f, "choice"),
+                                                         _field(f, "name") if "name" in f else "", now=now)}
+# The A3 page's own answers the two tab page never sends: they run no hold and no exam of the two tab kind
+# (Modify and the correction box do), so its server does not take them.
+A3_ONLY = ("/idea", "/edit")
+TWO_TAB_ACTIONS = {k: v for k, v in ACTIONS.items() if k not in A3_ONLY}
 
 
 def make_server(morning, *, port=int(PORT_DEFAULT), token=None, pages=None):
@@ -2410,7 +2449,11 @@ def _handler(morning, token, pages=None):
             if pages is not None:
                 parts = urllib.parse.urlsplit(self.path)
                 flash = box["flash"]
-                got = pages.get(parts.path, urllib.parse.parse_qs(parts.query, max_num_fields=8), token, flash)
+                try:
+                    query = urllib.parse.parse_qs(parts.query, max_num_fields=8)
+                except ValueError:  # too many fields
+                    return self._send(400, "Not a page address.\n")
+                got = pages.get(parts.path, query, token, flash)
                 if got is None:
                     return self._send(404, "Not found.\n")
                 box["flash"] = None
@@ -2423,7 +2466,7 @@ def _handler(morning, token, pages=None):
         def do_POST(self):
             if not self._allowed("Host") or not self._allowed("Origin", "http://"):
                 return self._send(403, "Refused: a change comes only from this page on 127.0.0.1 or localhost.\n")
-            act = ACTIONS.get(urllib.parse.urlsplit(self.path).path)
+            act = (ACTIONS if pages is None else TWO_TAB_ACTIONS).get(urllib.parse.urlsplit(self.path).path)
             if act is None:
                 return self._send(404, "Not found.\n")
             try:
@@ -2442,10 +2485,14 @@ def _handler(morning, token, pages=None):
             given = form.get("token") or [""]
             if len(given) != 1 or not hmac.compare_digest(given[0].encode("utf-8"), token.encode("utf-8")):
                 return self._send(403, "Refused: the page's token is missing or wrong. Reload the page.\n")
-            back = pages.back(_field(form, "back")) if pages is not None and "back" in form else "/"
-            m = pages.morning_for(back) if pages is not None else morning  # demo: the throwaway copy of that day
             try:
-                box["flash"] = act(m, form)
+                back = pages.back(_field(form, "back")) if pages is not None and "back" in form else "/"
+            except Refused:  # more than one back
+                return self._send(400, "Not a form.\n")
+            m = pages.morning_for(back) if pages is not None else morning  # demo: the throwaway copy of that day
+            now = pages.now_for(back) if pages is not None else None  # demo: that day's own clock
+            try:
+                box["flash"] = act(m, form, now=now)
             except Refused as e:
                 box["flash"] = str(e)
             except (ValueError, sqlite3.Error) as e:

@@ -111,15 +111,17 @@ class ThreeDays(unittest.TestCase):
             for a in v["agents"]:
                 lines = pages_mod.night_lines(a, v["at"])
                 self.assertNotIn("A quiet night. Nothing changed.", lines, (d, a["agent"]))
-                said[(d, a["agent"])] = " ".join(lines)
+                self.assertLessEqual(len(lines), 2, (d, a["agent"]))  # LOCKS: one line per agent, two at most
+                said[(d, a["agent"])] = lines
         for d in (1, 2, 3):
-            self.assertIn("Reflection read ", said[(d, "sales")])
-            self.assertIn("It practised with made-up customers in the Arena.", said[(d, "sales")])
-            self.assertIn("It found a new mode for you", said[(d, "assistant")])
-        self.assertIn("and wrote a new lesson.", said[(1, "sales")])
-        self.assertIn("Your correction passed the exam and waits for your yes.", said[(2, "sales")])
-        self.assertRegex(said[(3, "sales")], r"Your correction ran in \d+ chats, no harm seen\.")
-        self.assertTrue(any("got a hotfix note" in said[(d, "sales")] for d in (2, 3)))
+            self.assertIn("It found a new mode for you", " ".join(said[(d, "assistant")]))
+        self.assertRegex(said[(1, "sales")][0], r"^Reflection read \d+ chats and wrote a new lesson\.$")
+        self.assertEqual(said[(1, "sales")][1], "It practised with made-up customers in the Arena.")
+        self.assertEqual(said[(2, "sales")][0], "Your correction passed the exam and waits for your yes.")
+        self.assertRegex(said[(2, "sales")][1], r"^Reflection read \d+ chats\.$")
+        self.assertRegex(said[(3, "sales")][0], r"^Your correction ran in \d+ chats, no harm seen\.$")
+        self.assertRegex(said[(3, "sales")][1], r"^Reflection read \d+ chats")
+        said = {k: " ".join(v) for k, v in said.items()}
         for text in said.values():
             for bad in ("sim-sales-", "—", "–", "held-out"):
                 self.assertNotIn(bad, text)

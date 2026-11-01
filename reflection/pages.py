@@ -2,14 +2,15 @@
 page: A"), served by reflection/morning.py. It draws from Morning.view() and answers through the
 Morning methods only, so no engine rule lives here.
 
-    /              Today: only what needs the user's yes, one light sage card each, then one line
-                   per agent about last night (the same agents the Agents tab lists); an empty state
-                   when nothing waits (DECISIONS 35).
+    /              Today: only what needs the user's yes, one light sage card each, then at most two
+                   lines per agent about last night, the most important first (the same agents the
+                   Agents tab lists); an empty state when nothing waits (DECISIONS 35).
     /agents        the agents (the plugs in the repo and the agents in the database) and New agent.
                    An agent shows Live when it works on real chats or cases (Morning._live), else
                    Training: only Arena practice.
     /agents/<name> one agent: its status with Pull and Roll back, the box for an idea or a
                    correction (Morning.correct), then its lessons and Reflection notes as rows.
+    /agents/<name>/rollback  what Roll back would do, lesson by lesson, and its one button.
     /new           New agent, Quick start B screen 1; ?ask= routes to a plug or says not yet.
     /new/build     screen 2: the newest Arena run saved next to the database, as tiles and a path.
 
@@ -29,6 +30,7 @@ import re
 import urllib.parse
 
 from reflection import morning as mo
+from reflection import snapshots
 from reflection.page_css import CSS
 
 CSP = ("default-src 'none'; style-src 'sha256-" + base64.b64encode(hashlib.sha256(CSS.encode("utf-8")).digest()).decode()
@@ -39,6 +41,7 @@ CORRECTED = "sent on the agent page"   # in the source line of a correction (Mor
 ASKS = (("sales", ("sales", "sell", "store", "shop", "order", "customer", "boots")),
         ("assistant", ("assistant", "personal", "calendar", "inbox", "email", "remind", "schedule")))
 _AGENT = re.compile(r"^[a-z][a-z_]{0,30}$")
+ROLLBACK = "/rollback"  # /agents/<name>/rollback: the plan a rollback would carry out, and its one button
 _BACK = re.compile(r"^/(?:agents(?:/[a-z][a-z_]{0,30})?|new(?:/build)?)?$")
 ICON = dict(mo.ICONS, pen='<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
             loop='<path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3"/><path d="M18 3v4h-4M6 21v-4h4"/>',
@@ -124,6 +127,13 @@ class Pages:
             return self.morning
         return self._m(self._day(urllib.parse.parse_qs(urllib.parse.urlsplit(back).query)))
 
+    def now_for(self, back):
+        """The clock an answer runs on: a sample day's own morning (at), so what it adds is dated that
+        day; None (the real clock) on Live and with no sample days."""
+        if not self.demo:
+            return None
+        return self.at.get(self._day(urllib.parse.parse_qs(urllib.parse.urlsplit(back).query)))
+
     def _m(self, day):
         return self.live if day == self.LIVE else self.days[day]
 
@@ -144,14 +154,17 @@ class Pages:
         day = self._day(query)
         m = self._m(day) if self.demo else self.morning
         q = f"?day={day}" if self.demo else ""
-        ctx = {"token": token, "q": q, "day": day, "path": path, "m": m}
         now = self.at.get(day) if self.demo else None
+        ctx = {"token": token, "q": q, "day": day, "path": path, "m": m, "now": now}
         if path == "/":
             return self.shell(today(m.view(now=now), ctx), "today", ctx, flash)
         if path == "/agents":
             return self.shell(agents(m, m.view(now=now), ctx), "agents", ctx, flash)
         if path.startswith("/agents/") and _AGENT.match(path[8:]):
             body = agent_page(m, m.view(now=now), path[8:], ctx)
+            return None if body is None else self.shell(body, "agents", ctx, flash)
+        if path.startswith("/agents/") and path.endswith(ROLLBACK) and _AGENT.match(path[8:-len(ROLLBACK)]):
+            body = rollback_page(m, path[8:-len(ROLLBACK)], ctx)
             return None if body is None else self.shell(body, "agents", ctx, flash)
         if path == "/new":
             return self.shell(new_agent(m, (query.get("ask") or [""])[0], ctx), "agents", ctx, flash)
@@ -300,14 +313,27 @@ def _corrected(i):
     return CORRECTED in (i.get("source") or "")
 
 
+# Under the box on an agent's page: what a correction does (Morning.correct), and nothing it does not.
+SAY_NOTE = ("Starts in the next chats when its turn comes, unless it needs your yes on Today first. "
+            "Reflection reads it tonight.")
 ANSWERED = "Answered chats today. Reflection reads them tonight."
 
 
+# What the exam a waiting correction took said, by Morning._item exam_result (None: it took none).
+EXAM_SAID = {"passed": "Your correction passed the exam and waits for your yes.",
+             "failed": "Your correction did not pass the exam and waits for your yes.",
+             "not run": "The exam could not run on your correction, so it waits for your yes.",
+             None: "Your correction waits for your yes."}
+NIGHT_MAX = 2  # lines an agent gets under Last night (LOCKS: one line per agent), the most important first
+
+
 def night_lines(a, now, answered=0):
-    """Plain lines about an agent's last night: the chats Reflection read, a lesson it wrote, an
-    exam, the trials it checked, the hotfix notes, the Arena and a new mode. answered: the real
-    chats it answered since the night (Morning.answered_since), said in one line with no count.
-    Never a count of what is left; a quiet night only when a night ran and did nothing at all."""
+    """Plain lines about an agent's last night, at most NIGHT_MAX, the most important first: a
+    correction that waits for the user's yes, a trial where chats may have gone worse, the user's
+    correction on trial, a lesson pulled or kept, the chats Reflection read and a lesson it wrote, a
+    lesson on trial, a new mode, the hotfix notes, the Arena. answered: the real chats it answered
+    since the night (Morning.answered_since), said in one line with no count. Never a count of what
+    is left; a quiet night only when a night ran and did nothing at all."""
     day = mo.DAY
     rep = a.get("night") or {}
     fresh = (rep.get("until") or 0) >= now - day
@@ -315,42 +341,41 @@ def night_lines(a, now, answered=0):
     new = [i for i in a["new"] if i.get("origin") != "person"]
     kept = [t for t in a["live"] if t["state"] == mo.KEPT and (t.get("decided_at") or 0) >= now - day]
     pulled = [i for i in a["pulled"] if (i["pulled_at"] or 0) >= now - day and not str(i.get("pulled_why") or "").startswith(mo.EDITED)]
-    lines = []
+    lines = []  # (rank, line): the lower rank first
     read = rep.get("chats") if fresh else None
     wrote = ("a new lesson" if len(new) == 1 else f"{len(new)} new lessons") if new else ""
     if read and wrote:
-        lines.append(f"Reflection read {_plural(read, 'chat')} and wrote {wrote}.")
+        lines.append((5, f"Reflection read {_plural(read, 'chat')} and wrote {wrote}."))
     elif read:
-        lines.append(f"Reflection read {_plural(read, 'chat')}.")
+        lines.append((5, f"Reflection read {_plural(read, 'chat')}."))
     elif wrote:
-        lines.append(f"Reflection wrote {wrote}.")
+        lines.append((5, f"Reflection wrote {wrote}."))
     for i in a["waiting"]:
         if _corrected(i) and i["card"] and i["added_at"] >= now - day:
-            g = i.get("gate")
-            passed = "passed the exam" if g is None or not g.get("broke") else "took the exam"
-            lines.append(f"Your correction {passed} and waits for your yes.")
+            lines.append((0, EXAM_SAID.get(i.get("exam_result"), EXAM_SAID[None])))
     for t in (rep.get("trials") or []) if fresh else []:
         i = items.get(t["lesson_id"])
         if t["status"] != "on trial" or i is None or not t.get("cases"):
             continue
         who = "Your correction" if _corrected(i) else "A lesson on trial"
         harm = "no harm seen" if not t.get("harm") else f"{_plural(t['harm'], 'chat')} may have gone worse"
-        lines.append(f"{who} ran in {_plural(t['cases'], 'chat')}, {harm}.")
-    if kept:
-        lines.append("A trial ended and its lesson is kept.")
+        rank = 1 if t.get("harm") else 2 if _corrected(i) else 6
+        lines.append((rank, f"{who} ran in {_plural(t['cases'], 'chat')}, {harm}."))
     if pulled:
-        lines.append("A lesson was pulled.")
+        lines.append((3, "A lesson was pulled."))
+    if kept:
+        lines.append((4, "A trial ended and its lesson is kept."))
+    if a.get("mode_card") and (a["mode_card"].get("at") or 0) >= now - day:
+        lines.append((7, "It found a new mode for you and tried it on your past days in the Arena."))
     if fresh and rep.get("hotfix"):
         n = rep["hotfix"]
-        lines.append(f"{_plural(n, 'chat')} that ended with no order got a hotfix note for that customer's next chat.")
+        lines.append((8, f"{_plural(n, 'chat')} that ended with no order got a hotfix note for that customer's next chat."))
     if a.get("arena") and a["arena"]["at"] >= now - day:
-        lines.append("It practised with made-up customers in the Arena.")
-    if a.get("mode_card") and (a["mode_card"].get("at") or 0) >= now - day:
-        lines.append("It found a new mode for you and tried it on your past days in the Arena.")
+        lines.append((9, "It practised with made-up customers in the Arena."))
     if answered:
-        lines.append(ANSWERED)
+        lines.append((10, ANSWERED))
     if lines:
-        return lines
+        return [line for _, line in sorted(lines, key=lambda r: r[0])[:NIGHT_MAX]]
     return ["A quiet night. Nothing changed."] if rep else ["No night yet."]
 
 
@@ -441,10 +466,9 @@ def agent_page(m, view, agent, ctx):
                      for s in ("Training", "Live", "Paused"))
     tok = ctx["token"] if a["buttons"] else None
     roll = ""
-    plan = m.rollback_plan(agent) if a["buttons"] else None
-    if tok and plan is not None:
-        snap, steps, code = plan
-        roll = _post(ctx, "rollback", f'{icon("undo")}Roll back', "gb", agent=agent, code=code)
+    plan = m.rollback_plan(agent, ctx.get("now")) if a["buttons"] else None
+    if tok and plan is not None:  # the plan first, on its own screen; the rollback is the button there
+        roll = f'<a class="gb" href="/agents/{h(agent)}{ROLLBACK}{ctx["q"]}">{icon("undo")}Roll back</a>'
     elif a["buttons"]:
         roll = f'<button class="gb" type="button" disabled>{icon("undo")}Roll back</button>'
     out = [f'<div class="colhead"><a class="back" href="/agents{ctx["q"]}">{icon("back")}Agents</a>'
@@ -457,8 +481,7 @@ def agent_page(m, view, agent, ctx):
         out.append(f'<section class="say sq" aria-label="Send an idea or a correction"><form method="post" action="/correct">'
                    f'{_hidden(ctx, agent=agent)}<span class="lab">Send an idea or a correction</span><div class="box">'
                    f'<textarea name="line" aria-label="Your idea or correction" maxlength="{mo.MAX_LEN}" dir="auto" required>'
-                   f'</textarea></div><div class="say-f"><p class="quiet">{icon("loop")}Goes to a hotfix now and to '
-                   f'Reflection tonight.</p><button class="send" type="submit">Send{icon("arrow")}</button></div></form></section>')
+                   f'</textarea></div><div class="say-f"><p class="quiet">{icon("loop")}{SAY_NOTE}</p><button class="send" type="submit">Send{icon("arrow")}</button></div></form></section>')
     rows = []
     for i in a["live"] + a["waiting"] + a["pulled"][:5]:
         cls, chip, small = _chip(i, a)
@@ -483,6 +506,41 @@ def agent_page(m, view, agent, ctx):
     out.append('<section class="grp sq" aria-labelledby="r-h"><h3 id="r-h">Reflection notes</h3>'
                + ("".join(notes) or '<div class="nr"><p>Nothing yet.</p></div>') + "</section></div>")
     return "".join(out)
+
+
+# What a rollback does to each lesson the plan names (reflection/snapshots.py plan), in plain words:
+# (chip, why). A lesson that stays as it is, or is back already as another lesson, is not listed.
+ROLL_STEPS = {snapshots.PULL: ("Pulled", "Given now but not that night, so it is pulled."),
+              snapshots.BACK: ("Stays pulled", "Given that night and pulled since. It stays pulled."),
+              snapshots.CANNOT: ("Stays as it is", "Given that night, but it cannot come back."),
+              snapshots.LEFT: ("Waiting", "Added after that night. It still waits for your yes.")}
+
+
+def rollback_page(m, agent, ctx):
+    """The plan a rollback to the latest night snapshot would carry out now, each lesson it changes
+    in plain words, then one button that sends the plan's code (Morning.roll_back refuses when the
+    lessons changed since). None for an agent with no plug or no snapshot."""
+    if agent not in m.plugs:
+        return None
+    plan = m.rollback_plan(agent, ctx.get("now"))
+    if plan is None:
+        return None
+    snap, steps, code = plan
+    q = ctx["q"]
+    rows = [f'<div class="lr"><b dir="auto">{h(s["line"] or "A lesson no longer here")}</b>'
+            f'<span class="vchip">{ROLL_STEPS[s["do"]][0]}</span><small>{ROLL_STEPS[s["do"]][1]}</small></div>'
+            for s in steps if s["do"] in ROLL_STEPS]
+    pulls = any(s["do"] == snapshots.PULL for s in steps)
+    if not pulls:
+        rows.insert(0, '<div class="lr"><b>Nothing to roll back: the lessons given now were all given that night.</b></div>')
+    out = [f'<div class="colhead"><a class="back" href="/agents/{h(agent)}{q}">{icon("back")}{h(name(agent))}</a>'
+           '<section class="top ag-top"><h1>Roll back</h1></section></div><div class="col">',
+           f'<section class="grp sq" aria-labelledby="rb-h"><h3 id="rb-h">Back to the night of {h(mo._date(snap["at"]))}'
+           f'</h3>{"".join(rows)}</section>']
+    if pulls and ctx["token"]:
+        out.append('<div class="act">' + _post(dict(ctx, path=f"/agents/{agent}"), "rollback",
+                                               f'{icon("undo")}Roll back now', "yes", agent=agent, code=code) + "</div>")
+    return "".join(out) + "</div>"
 
 
 # ---- New agent (Quick start B) -----------------------------------------------------------------

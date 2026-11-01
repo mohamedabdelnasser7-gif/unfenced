@@ -12,7 +12,8 @@ Morning methods only, so no engine rule lives here.
 
 A correction sent on an agent's page that is high risk waits for a yes on Today (Morning.correct); its
 card says why in one plain sentence (plain_risk), never the engine's word lists, and the Hotfix chip
-marks a correction that runs in the chats. With demo days each day shows its own morning (day.json).
+marks a correction that runs in the chats. With demo days each day shows its own morning (day.json); with --db too a Live tab follows the days and
+serves the real database with real answers and the real clock, never marked Sample data.
 
 No count of what is left anywhere (item 35), no trust level and no won and lost total (item 17,
 LOCKS Quick start B). No script: Modify is a details element inside its card. Every field is
@@ -93,12 +94,17 @@ def route_ask(ask, plugs):
 
 
 class Pages:
-    """The page for one Morning, or for demo days {1: Morning, 2: ..., 3: ...} (sample copies)."""
+    """The page for one Morning, or for demo days {1: Morning, 2: ..., 3: ...} (sample copies), with
+    live: the Morning on the real database, a Live tab after the days (no Sample data label there)."""
 
-    def __init__(self, morning=None, *, days=None, at=None):
-        """at: {day: the time that day's page shows}, a sample's own clock; the real clock otherwise."""
+    LIVE = "live"
+
+    def __init__(self, morning=None, *, days=None, at=None, live=None):
+        """at: {day: the time that day's page shows}, a sample's own clock; the real clock otherwise
+        and always on Live."""
         self.days = dict(days or {})
         self.at = dict(at or {})
+        self.live = live if self.days else None  # with no sample days the page has no switch
         self.demo = bool(self.days)
         self.morning = morning if morning is not None else (self.days[min(self.days)] if self.days else None)
         self.csp = CSP
@@ -113,13 +119,19 @@ class Pages:
     def morning_for(self, back):
         if not self.demo:
             return self.morning
-        return self.days[self._day(urllib.parse.parse_qs(urllib.parse.urlsplit(back).query))]
+        return self._m(self._day(urllib.parse.parse_qs(urllib.parse.urlsplit(back).query)))
+
+    def _m(self, day):
+        return self.live if day == self.LIVE else self.days[day]
 
     def _day(self, query):
         if not self.demo:
             return None
+        got = (query.get("day") or [""])[0]
+        if got == self.LIVE and self.live is not None:
+            return self.LIVE
         try:
-            d = int((query.get("day") or [""])[0])
+            d = int(got)
         except ValueError:
             d = min(self.days)
         return d if d in self.days else min(self.days)
@@ -127,7 +139,7 @@ class Pages:
     def get(self, path, query, token, flash=None):
         """The page for a GET path, or None for an unknown path."""
         day = self._day(query)
-        m = self.days[day] if self.demo else self.morning
+        m = self._m(day) if self.demo else self.morning
         q = f"?day={day}" if self.demo else ""
         ctx = {"token": token, "q": q, "day": day, "path": path, "m": m}
         now = self.at.get(day) if self.demo else None
@@ -152,12 +164,13 @@ class Pages:
                       f'{" aria-current=page" if t == on else ""}>{icon(i)}{w}</a>' for t, u, i, w in tabs)
         bar = "".join(f'<a class="tab{" on" if t == on else ""}" href="{u}{q}"'
                       f'{" aria-current=page" if t == on else ""}>{icon(i)}{w}</a>' for t, u, i, w in tabs)
-        right = '<span class="sample">Sample data</span>' if self.demo else ""
+        right = '<span class="sample">Sample data</span>' if self.demo and ctx["day"] != self.LIVE else ""
         days = ""
         if self.demo:
-            days = '<nav class="days" aria-label="Sample day">' + "".join(
-                f'<a class="{"on" if d == ctx["day"] else ""}" href="{h(ctx["path"])}?day={d}">Day {d}</a>'
-                for d in sorted(self.days)) + "</nav>"
+            tabs = [(d, f"Day {d}") for d in sorted(self.days)] + ([(self.LIVE, "Live")] if self.live is not None else [])
+            days = '<nav class="days" aria-label="Sample days and live">' + "".join(
+                f'<a class="{"on" if d == ctx["day"] else ""}" href="{h(ctx["path"])}?day={d}">{w}</a>'
+                for d, w in tabs) + "</nav>"
         logo = f'<span class="logo">{mo.LOGO}</span><span class="word">Unfenced</span>'
         return "\n".join([
             '<!doctype html><html lang="en"><head><meta charset="utf-8">',
@@ -274,26 +287,63 @@ def waiting(view):
     return out
 
 
-def night_line(a, now):
-    """One plain line about an agent's last night, from its lessons; never a count of what is left."""
+def _plural(n, word):
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def _corrected(i):
+    return CORRECTED in (i.get("source") or "")
+
+
+def night_lines(a, now):
+    """Plain lines about an agent's last night: the chats Reflection read, a lesson it wrote, an
+    exam, the trials it checked, the hotfix notes, the Arena and a new mode. Never a count of what
+    is left; a quiet night only when the night did nothing at all."""
     day = mo.DAY
+    rep = a.get("night") or {}
+    fresh = (rep.get("until") or 0) >= now - day
+    items = {i["id"]: i for i in a["live"] + a["waiting"] + a["pulled"]}
     new = [i for i in a["new"] if i.get("origin") != "person"]
     kept = [t for t in a["live"] if t["state"] == mo.KEPT and (t.get("decided_at") or 0) >= now - day]
     pulled = [i for i in a["pulled"] if (i["pulled_at"] or 0) >= now - day and not str(i.get("pulled_why") or "").startswith(mo.EDITED)]
-    bits = []
-    if new:
-        bits.append("Reflection wrote a new lesson." if len(new) == 1 else f"Reflection wrote {len(new)} new lessons.")
+    lines = []
+    read = rep.get("chats") if fresh else None
+    wrote = ("a new lesson" if len(new) == 1 else f"{len(new)} new lessons") if new else ""
+    if read and wrote:
+        lines.append(f"Reflection read {_plural(read, 'chat')} and wrote {wrote}.")
+    elif read:
+        lines.append(f"Reflection read {_plural(read, 'chat')}.")
+    elif wrote:
+        lines.append(f"Reflection wrote {wrote}.")
+    for i in a["waiting"]:
+        if _corrected(i) and i["card"] and i["added_at"] >= now - day:
+            g = i.get("gate")
+            passed = "passed the exam" if g is None or not g.get("broke") else "took the exam"
+            lines.append(f"Your correction {passed} and waits for your yes.")
+    for t in (rep.get("trials") or []) if fresh else []:
+        i = items.get(t["lesson_id"])
+        if t["status"] != "on trial" or i is None or not t.get("cases"):
+            continue
+        who = "Your correction" if _corrected(i) else "A lesson on trial"
+        harm = "no harm seen" if not t.get("harm") else f"{_plural(t['harm'], 'chat')} may have gone worse"
+        lines.append(f"{who} ran in {_plural(t['cases'], 'chat')}, {harm}.")
     if kept:
-        bits.append("A trial ended and its lesson is kept.")
+        lines.append("A trial ended and its lesson is kept.")
     if pulled:
-        bits.append("A lesson was pulled.")
-    if any(CORRECTED in (i.get("source") or "") for i in a["live"]):
-        bits.append("Your correction runs in its chats now.")
-    if a.get("arena"):
-        bits.append("It practised in the Arena.")
+        lines.append("A lesson was pulled.")
+    if fresh and rep.get("hotfix"):
+        n = rep["hotfix"]
+        lines.append(f"{_plural(n, 'chat')} that ended with no order got a hotfix note for that customer's next chat.")
+    if a.get("arena") and a["arena"]["at"] >= now - day:
+        lines.append("It practised with made-up customers in the Arena.")
     if a.get("mode_card") and (a["mode_card"].get("at") or 0) >= now - day:
-        bits.append("It found a new mode for you.")
-    return " ".join(bits) or "A quiet night. Nothing changed."
+        lines.append("It found a new mode for you and tried it on your past days in the Arena.")
+    return lines or ["A quiet night. Nothing changed."]
+
+
+def night_line(a, now):
+    """The night's lines as one string (tests and the old callers)."""
+    return " ".join(night_lines(a, now))
 
 
 def status_of(m, agent):
@@ -306,7 +356,7 @@ def night_html(m, view):
         st = status_of(m, a["agent"])
         rows.append(f'<div class="nl"><span class="av">{mo._agent_icon(a["agent"])}</span><div><b>{h(name(a["agent"]))} '
                     f'<span class="st{" live" if st == "Live" else ""}">{st}</span></b>'
-                    f'<p>{h(night_line(a, view["at"]))}</p></div></div>')
+                    + "".join(f"<p>{h(x)}</p>" for x in night_lines(a, view["at"])) + "</div></div>")
     if not rows:
         rows.append('<div class="nl"><span class="av">' + icon("spark") + '</span><div><b>No agents yet</b>'
                     '<p>Make one under Agents.</p></div></div>')
@@ -342,9 +392,14 @@ def agents(m, view, ctx):
             f'<section class="grp sq" aria-label="Your agents">{rows}</section></div>')
 
 
-def _chip(i):
-    if i["state"] == mo.TRYING and CORRECTED in (i.get("source") or ""):
-        return "hot", "Hotfix", f'From your correction, {mo._date(i["added_at"])}. Reflection checks it tonight.'
+def _chip(i, a=None):
+    if i["state"] == mo.TRYING and _corrected(i):
+        said = f'From your correction, {mo._date(i["added_at"])}. On trial.'
+        rep = (a or {}).get("night") or {}
+        t = next((t for t in rep.get("trials") or [] if t["lesson_id"] == i["id"] and t["status"] == "on trial"), None)
+        if t is not None and t.get("cases"):
+            return "hot", "Hotfix", f'{said} Reflection checked it last night: it ran in {_plural(t["cases"], "chat")}.'
+        return "hot", "Hotfix", f"{said} Reflection checks it tonight."
     if i["state"] == mo.TRYING:
         return "trial", "On trial", f'Until {mo._date(i["ends_at"])}' if i.get("ends_at") else "On trial"
     if i["state"] == mo.KEPT:
@@ -384,7 +439,7 @@ def agent_page(m, view, agent, ctx):
                    f'Reflection tonight.</p><button class="send" type="submit">Send{icon("arrow")}</button></div></form></section>')
     rows = []
     for i in a["live"] + a["waiting"] + a["pulled"][:5]:
-        cls, chip, small = _chip(i)
+        cls, chip, small = _chip(i, a)
         rows.append(f'<div class="lr"><b dir="auto">{h(i["text"])}</b><span class="vchip {cls}">{chip}</span>'
                     f'<small>{h(small)}</small></div>')
     out.append('<section class="grp sq" aria-labelledby="l-h"><h3 id="l-h">Lessons</h3>'
@@ -398,9 +453,11 @@ def agent_page(m, view, agent, ctx):
             whose = "Your correction" if CORRECTED in (i.get("source") or "") else "Your idea"
             notes.append(f'<div class="nr"><span class="to">{icon("bulb")}{whose}, {h(mo._date(i["added_at"]))}</span>'
                          f'<p dir="auto">{h(i["text"])}</p></div>')
-    if a.get("arena"):
-        notes.append(f'<div class="nr"><span class="to">{icon("note")}From the Arena</span>'
-                     f'<p dir="auto">{h(a["arena"]["line"])}</p></div>')
+    if a.get("arena"):  # its own words, never the Arena item's line: that line counts matches won
+        day = f'&day={ctx["day"]}' if ctx["day"] else ""
+        notes.append(f'<div class="nr"><span class="to">{icon("note")}From the Arena, {h(mo._date(a["arena"]["at"]))}</span>'
+                     f'<p>It practised with made-up customers. <a class="lk" href="/new/build?agent={h(agent)}{day}">'
+                     'See where it slipped</a></p></div>')
     out.append('<section class="grp sq" aria-labelledby="r-h"><h3 id="r-h">Reflection notes</h3>'
                + ("".join(notes) or '<div class="nr"><p>Nothing yet.</p></div>') + "</section></div>")
     return "".join(out)
@@ -445,6 +502,11 @@ CLIMB = ('<svg class="climb" viewBox="0 0 400 130" role="img" aria-label="On its
          '<circle cx="384" cy="18" r="3.5" fill="none" stroke="#fff" stroke-opacity=".7" stroke-width="1.5"/></svg>')
 
 
+def _cap(t):
+    t = str(t or "").rstrip(".")
+    return t[:1].upper() + t[1:]
+
+
 def build(m, agent, ctx):
     """Screen 2: the newest Arena run saved next to the database for this agent: the climb as a
     path, the matches it lost as tiles with why. No total of won and lost (the trust level stays
@@ -452,12 +514,15 @@ def build(m, agent, ctx):
     arena, _ = m.read_arena()
     run = arena.get(agent) if agent else None
     title = f"Building your {name(agent).lower()}" if agent else "Building your agent"
-    tiles = []
-    for x in (run or {}).get("lost") or []:
+    tiles, seen = [], set()
+    for x in (run or {}).get("lost") or []:  # one tile a practice customer and line; the card's id is never shown
+        if (x["card"], x["text"]) in seen:
+            continue
+        seen.add((x["card"], x["text"]))
         quote = f'<p class="out" dir="auto">"{h(x["text"])}"</p>' if x["text"] else ""
-        tiles.append(f'<article class="tile lost"><div class="t-h"><span class="pav">{h((x["card"] or "?")[:1].upper())}'
-                     f'</span><div><b dir="auto">{h(x["card"] or "Practice customer")}</b><small>Practice customer</small>'
-                     f'</div><span class="res">Lost</span></div><p class="persona" dir="auto">{h(x["why"])}</p>{quote}</article>')
+        tiles.append(f'<article class="tile lost"><div class="t-h"><span class="pav">{icon("chat")}</span><div>'
+                     '<b>Practice customer</b><small>Made up for the Arena</small></div><span class="res">Lost</span>'
+                     f'</div><p class="persona" dir="auto">{h(_cap(x["why"]))}.</p>{quote}</article>')
     if not tiles:
         tiles.append('<div class="ghost"><span class="pav" aria-hidden="true"></span>No saved practice run yet.</div>')
     when = f'Newest run, {mo._when(run["at"])}.' if run else "No saved run yet."

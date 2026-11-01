@@ -11,6 +11,10 @@ The rules, on the cleaned customer turns it is sent:
                football boots, a football kit, or something from the shop, by the words used
   buy_trigger  one fixed line for each worry of the example recipe, else a plain one
   patience     the customer's questions that got another customer line before any answer
+
+PracticePersona and PracticeAgent (2026-11-01): a scripted customer and Sales agent for the small
+practice run the three sample days save each night (sim/three_days.py), so that run makes no model
+call either. The Arena's own play, verdict and saving code run on their lines.
 """
 import copy
 import json
@@ -62,3 +66,33 @@ class ScriptedModel:
         self.calls.append(copy.deepcopy(messages))
         data = json.loads(messages[-1]["content"])
         return {"role": "assistant", "content": json.dumps(tags_for(data, self.recipe))}
+
+
+class PracticePersona:
+    """A scripted made-up customer for a small practice run (sim/three_days.py): one first line about
+    its worry, then it leaves. No model call."""
+    label = "scripted (no model call)"
+    FIRST = {"size": "Are these boots true to size?", "price": "How much are the Vapor boots?",
+             "delivery time": "When would the boots reach me?", "cash on delivery": "Can I pay when they arrive?",
+             "trust": "Are these boots original?"}
+
+    def chat(self, messages, tools=None, effort="medium", max_tokens=1500, whole=False):
+        if len(messages) > 2:
+            return {"role": "assistant", "content": "[leave]"}
+        system = messages[0]["content"]
+        worry = system.split("Your worry is ", 1)[-1].split(".", 1)[0]
+        return {"role": "assistant", "content": self.FIRST.get(worry, "Hi, do you have football boots?")}
+
+
+class PracticeAgent:
+    """A scripted Sales agent for a small practice run (sim/three_days.py) that answers around the
+    question, so the customer leaves and the run has lost matches to show. No model call."""
+    label = "scripted (no model call)"
+
+    def chat(self, messages, tools=None, effort="medium", max_tokens=1500, whole=False):
+        said = next((m.get("content") or "" for m in reversed(messages) if m.get("role") == "user"), "").casefold()
+        if "size" in said:
+            return {"role": "assistant", "content": "Which colour would you like?"}
+        if "much" in said:
+            return {"role": "assistant", "content": "These are one of our most loved boots this season."}
+        return {"role": "assistant", "content": "Thanks for writing to us. Which model do you like?"}

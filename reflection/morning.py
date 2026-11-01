@@ -1215,7 +1215,23 @@ class _Ctx:
             self.newest[agent] = {"file": name, "until": _until(rep),
                                   "notes": [str(n) for n in notes if isinstance(n, (str, int, float))],
                                   "switches": _dict(rep.get("switches")) or None,
-                                  "handed": _handed(rep)}
+                                  "handed": _handed(rep), **_night_counts(rep, mine)}
+
+
+def _night_counts(rep, mine):
+    """What a night did, for the two tab page's Last night line: the chats it read, the hotfix notes
+    written in its last day (engine/fast.py, a note with text only) and its trials, each {lesson_id,
+    status, cases, harm} for a lesson of this agent."""
+    until = _until(rep)
+    hotfix = sum(1 for n in _dicts(rep.get("fast_notes")) if isinstance(n.get("text"), str) and n["text"]
+                 and until is not None and (_num(n.get("written_at")) or 0) >= until - DAY)
+    trials = []
+    for d in _dicts(_dict(rep.get("trials")).get("trials")):
+        lid, side = d.get("lesson_id"), _dict(d.get("with"))
+        if isinstance(lid, int) and lid in mine:
+            trials.append({"lesson_id": lid, "status": str(d.get("status") or ""), "cases": _num(side.get("cases")),
+                           "harm": _num(side.get("harm"))})
+    return {"chats": _num(_dict(rep.get("read")).get("cases")), "hotfix": hotfix, "trials": trials}
 
 
 def _handed(rep):
@@ -2432,37 +2448,39 @@ def page_exams(plugs, morning, db=None):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="The morning page: what the engine learned, for every agent.")
-    ap.add_argument("--db", default=str(DEFAULT_PATH), help="the agents' database (default: data/ascent.db)")
+    ap.add_argument("--db", default=None, help="the agents' database (default: data/ascent.db)")
     ap.add_argument("--html", metavar="OUT", help="write the page once as a static file with no buttons, and serve nothing")
     ap.add_argument("--demo-days", metavar="DIR", default=None,
-                    help="serve the sample days in DIR (day1, day2, day3, from sim/three_days.py), each from a throwaway copy")
+                    help="serve the sample days in DIR (day1, day2, day3, from sim/three_days.py), each from a throwaway "
+                         "copy; with --db too a Live tab follows them and serves that database")
     ap.add_argument("--assistant-state", default=None,
                     help="the personal assistant's folder a mode card's answer goes to (default: data/assistant)")
     args = ap.parse_args(argv)
-    if args.demo_days:
+    if args.demo_days and args.html:
+        print("Not run: --html writes the real page only, not the sample days.", file=sys.stderr)
+        return 2
+    if args.demo_days and args.db is None:
         return _demo(args.demo_days)
+    db_path = str(DEFAULT_PATH) if args.db is None else args.db
     try:
         modes_state = night_mod.assistant_state(args.assistant_state)
     except night_mod.Refused as e:
         print(f"Not run: {e}.", file=sys.stderr)
         return 2
-    if not Path(args.db).is_file():
-        print(f"Not run: no database at {args.db}. The Sales agent makes it when it first runs.", file=sys.stderr)
+    if not Path(db_path).is_file():
+        print(f"Not run: no database at {db_path}. The Sales agent makes it when it first runs.", file=sys.stderr)
         return 2
     plugs = repo_plugs()
-    db = Db(args.db)
+    db = Db(db_path)
     try:
-        if any(p.agent == "sales" for p in plugs):  # moves a database made before the engine, as the night does
-            from reflection.lessons import Lessons as SalesLessons
-            SalesLessons(db)
-        other = Path(args.db).resolve() != DEFAULT_PATH.resolve()
-        morning = Morning(db, plugs, reports=Path(args.db).resolve().parent, db_file=args.db if other else None,
-                          modes_state=modes_state)
+        morning = live_morning(db, db_path, plugs, modes_state)
         if args.html:
             print(f"written: {write_html(morning, args.html)}")
             return 0
         env.load()
-        morning.exams = page_exams(plugs, morning, args.db)  # after env.load(): the model reads its key
+        morning.exams = page_exams(plugs, morning, db_path)  # after env.load(): the model reads its key
+        if args.demo_days:
+            return _demo(args.demo_days, live=morning)
         try:
             port = int(env.get("MORNING_PORT", PORT_DEFAULT))
         except ValueError:
@@ -2482,13 +2500,24 @@ def main(argv=None):
     return 0
 
 
-def _demo(folder):
+def live_morning(db, db_path, plugs, modes_state):
+    """The Morning on the real database (main's, and the Live tab's next to the sample days)."""
+    if any(p.agent == "sales" for p in plugs):  # moves a database made before the engine, as the night does
+        from reflection.lessons import Lessons as SalesLessons
+        SalesLessons(db)
+    other = Path(db_path).resolve() != DEFAULT_PATH.resolve()
+    return Morning(db, plugs, reports=Path(db_path).resolve().parent, db_file=db_path if other else None,
+                   modes_state=modes_state)
+
+
+def _demo(folder, live=None):
     """Serve the sample days (sim/three_days.py): each day's folder copied to a throwaway folder,
-    so an answer there never touches the sample files; no model, no exam (the sample has none)."""
+    so an answer there never touches the sample files; no model, no exam (the sample has none).
+    live: the Morning on the real database, served on the Live tab with real answers."""
     import tempfile
     with tempfile.TemporaryDirectory(prefix="unfenced-demo-") as tmp:
         try:
-            pages, dbs = demo_pages(folder, tmp)
+            pages, dbs = demo_pages(folder, tmp, live=live)
         except Refused as e:
             print(f"Not run: {e}", file=sys.stderr)
             return 2
@@ -2498,7 +2527,8 @@ def _demo(folder):
             port = int(PORT_DEFAULT)
         server = make_server(pages.morning, port=port, pages=pages)
         first = min(pages.days)
-        print(f"Sample days: http://127.0.0.1:{server.server_address[1]}/?day={first} (Ctrl+C stops it)")
+        print(f"Sample days: http://127.0.0.1:{server.server_address[1]}/?day={first}"
+              + (" and Live on the same page" if live is not None else "") + " (Ctrl+C stops it)")
         try:
             server.serve_forever()
         except KeyboardInterrupt:
@@ -2510,10 +2540,11 @@ def _demo(folder):
     return 0
 
 
-def demo_pages(folder, tmp):
+def demo_pages(folder, tmp, live=None):
     """The two tab page over the sample days in folder (day1, day2, ... from sim/three_days.py), each
     copied into tmp first. Each day shows the morning its day.json names (a sample has its own clock).
-    Returns (Pages, the open databases, for the caller to close); Refused when folder has no day."""
+    live: the Morning on the real database for the Live tab (the caller opens and closes it).
+    Returns (Pages, the open sample databases, for the caller to close); Refused when folder has no day."""
     import shutil
     from reflection import pages as pages_mod
     src = Path(folder)
@@ -2529,7 +2560,7 @@ def demo_pages(folder, tmp):
         dbs.append(db)
         days[d] = Morning(db, plugs, reports=dest, db_file=None, modes_state=dest / "assistant")
         at[d] = _sample_clock(dest / "day.json")
-    return pages_mod.Pages(days=days, at=at), dbs
+    return pages_mod.Pages(days=days, at=at, live=live), dbs
 
 
 def _sample_clock(path):

@@ -1,16 +1,28 @@
 {
  "about": "Made-up lines for the three sample days (sim/three_days.py). Not real data.",
  "agent": "sales",
- "correction": "When a buyer asks about delivery, say the team confirms the exact day on WhatsApp.",
+ "first_morning": "2026-11-01",
+ "correction": "Before you give delivery days, ask the customer which area they are in.",
+ "hotfix": "Answer the question they asked first, then help them choose.",
  "moments": [
-  {"said": "At the gym, only urgent calls please", "day": 5},
-  {"said": "Gym now, hold my messages", "day": 6},
-  {"said": "Going to the gym after work, remind me after", "day": 6}
+  {"said": "At the gym, only urgent calls please", "on": -2, "kept": 0},
+  {"said": "Gym now, hold my messages", "on": -1, "kept": 0},
+  {"said": "Going to the gym after work, remind me after", "on": -1, "kept": 0},
+  {"said": "Lunch break, back soon", "on": -1, "kept": 1},
+  {"said": "At lunch with family", "on": 0, "kept": 1},
+  {"said": "Lunch now, reply later", "on": 0, "kept": 1},
+  {"said": "Heading to prayer", "on": 0, "kept": 2},
+  {"said": "At prayer for a bit", "on": 0, "kept": 2},
+  {"said": "Prayer time, answer after", "on": 1, "kept": 2}
  ],
  "past_days": [
   {"day": 1, "needs": "gym"},
   {"day": 2, "needs": null},
   {"day": 3, "needs": "gym"},
-  {"day": 4, "needs": null}
+  {"day": 4, "needs": "lunch"},
+  {"day": 5, "needs": "prayer"},
+  {"day": 6, "needs": null},
+  {"day": 7, "needs": "prayer"},
+  {"day": 8, "needs": "lunch"}
  ]
 }

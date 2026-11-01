@@ -427,6 +427,8 @@ form{margin:0; display:contents}
 .agl{display:grid; grid-template-columns:40px minmax(0,1fr) auto; gap:12px; align-items:center; padding:14px 0; border-top:1px solid var(--line)}
 .agl:first-child{border-top:0}
 .gb[disabled]{opacity:.55; cursor:not-allowed}
+.nr a.lk{text-decoration:underline; text-underline-offset:3px; color:var(--ink)}
+.days a.live{display:inline-flex; align-items:center; gap:5px}
 .no-yet{margin-top:16px; padding:14px 16px; border-radius:var(--r-inner); background:rgba(255,255,255,.7); font:400 15px/22px var(--font)}
 @media (min-width: 1024px){ .page{max-width:1376px} }
 textarea.typed{width:100%; border:0; background:transparent; resize:none; outline:0}  /* no style attribute: the CSP allows only this sheet */

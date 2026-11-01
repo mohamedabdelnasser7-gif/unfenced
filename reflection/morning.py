@@ -492,13 +492,15 @@ class Refused(Exception):
     """An answer the page cannot take; the message says why, and nothing changed."""
 
 
-def person_line(lessons, text, stages, *, by, old, now=None):
+def person_line(lessons, text, stages, *, by, old, now=None, exam=None):
     """What a person's new line becomes. It follows the engine's rule for a person's own line
     (Lessons.add): it needs no yes, a person wrote it, so it starts a trial like any other
     lesson, or waits its turn when its stage has a trial; its risk is still checked and saved,
     and its origin is "person". Its source line names the lesson it came from: 'edited by
     <by> from lesson <id>: "<old line>"'. Returns the new lesson's id."""
     source = f'{EDITED}{by} from lesson {old["id"]}: "{old["text"]}"'
+    if exam is not None:  # Modify on the two tab page: the new words took the exam first (Morning.modify)
+        return lessons.add(text, stages, source, yes_by=by, exam=exam, now=now)
     return lessons.add(text, stages, source, yes_by=by, skip_exam=True, now=now)  # Edit runs no exam
 
 
@@ -580,7 +582,52 @@ class Morning:
                 raise Refused(f"Lesson {les['id']} was pulled already.")
         return f"Lesson {les['id']} stopped. It is never given again."
 
-    def edit(self, lesson_id, line, now=None):
+    def modify(self, lesson_id, line, note="", now=None):
+        """Modify on a Today card (the two tab page): the card's new words, with the optional note
+        added after them, go the Edit way (person_line, the old lesson pulled) but take the idea
+        exam first (idea_exam, outside the transaction), so a fail waits for a yes on Today again."""
+        text = _one_line(line, "the new line")
+        extra = _one_line(note, "the note", required=False)
+        text = f"{text} {extra}" if extra else text
+        les, lessons = self._mine(lesson_id)
+        result = self._exam_for(lessons, text, les["stages"])
+        return self.edit(lesson_id, text, now=now, exam=result)
+
+    def correct(self, agent, line, now=None):
+        """A correction or an idea the user sends on an agent's page. It goes the way of a person's
+        own line (Morning.idea, kind idea): the exam first where the page has one, then it starts in
+        the next chats at once at the level that applies, or waits its turn; a line the exam holds
+        waits for a yes on Today. The night's Reflection studies it like any idea."""
+        return self.idea(agent, line, plug_mod.ALL, now=now, source=f"a correction {self.by} sent on the agent page")
+
+    def rollback_plan(self, agent, now=None):
+        """The latest night snapshot of an agent with a plug and what a rollback to it would do now:
+        (snapshot, steps, code), or None with no snapshot (reflection/snapshots.py)."""
+        self._plugged(agent)
+        snap = snapshots.latest(self.db, agent)
+        if snap is None:
+            return None
+        now = time.time() if now is None else float(now)
+        with self.db.tx() as c:
+            steps = snapshots.plan(c, agent, snap, now)
+        return snap, steps, snapshots.plan_code(snap, steps)
+
+    def roll_back(self, agent, code, now=None):
+        """Roll back to the latest night snapshot, the plan the page showed (code), through
+        snapshots.rollback; refused when the plan changed meanwhile."""
+        lessons = self._plugged(agent)
+        snap = snapshots.latest(self.db, agent)
+        if snap is None:
+            raise Refused(f"No night snapshot of {agent} yet, so there is nothing to roll back to.")
+        try:
+            steps, row = snapshots.rollback(self.db, lessons, snap, self.by, now, code=str(code or ""))
+        except snapshots.Refused as e:
+            raise Refused(f"Not rolled back: {e}.") from None
+        if row is None:
+            return f"Nothing to roll back: the lessons given now were all given the night of {snap['night']}."
+        return f"Rolled back to the night of {snap['night']}."
+
+    def edit(self, lesson_id, line, now=None, exam=None):
         """Add the new line (person_line) and pull the old lesson, each naming the other, in one
         transaction: when the pull fails, the new line is not kept either. The new line waits
         its turn behind the old lesson's trial, so once the old one is pulled the turns whose
@@ -602,7 +649,7 @@ class Morning:
             if text == les["text"]:
                 raise Refused("The new line is the same as the old one; nothing changed.")
             try:
-                new_id = person_line(lessons, text, les["stages"], by=self.by, old=les, now=now)
+                new_id = person_line(lessons, text, les["stages"], by=self.by, old=les, now=now, exam=exam)
             except ValueError as e:
                 raise Refused(f"The new line was refused: {e}.") from None
             if not lessons.pull(les["id"], f"{EDITED}{self.by} into lesson {new_id}", now=now):
@@ -610,6 +657,8 @@ class Morning:
             lessons.start_turns(now)
             state = lessons.get(new_id)["state"]
         where = "It is on trial." if state == TRYING else "It waits its turn."
+        if exam is not None and not exam.passed and state == WAITING:
+            where = f"It waits for a yes: it {exam.line()}."
         return f"Lesson {les['id']} edited: the new line is lesson {new_id}. {where}"
 
     def longer(self, lesson_id, days, now=None):
@@ -694,7 +743,7 @@ class Morning:
         where = "It is on trial." if state == TRYING else "It waits its turn."
         return f"Lesson {les['id']} is back as lesson {new_id}; lesson {les['id']} stays pulled. {where}"
 
-    def idea(self, agent, line, stage, now=None):
+    def idea(self, agent, line, stage, now=None, source=None):
         """A person's idea, typed on the page: a lesson with no past cases behind it, for one
         agent with a plug, on one of its stages or "all". It goes the way of any person's own
         line (Lessons.add): kind idea, origin person, signed by the page's person, no yes
@@ -708,7 +757,7 @@ class Morning:
         with self.page.one():
             lessons, text, stage = self._idea_checked(agent, line, stage)  # again: the lessons may have moved
             try:
-                new_id = lessons.add(text, [stage], f"an idea {self.by} typed on the morning page", yes_by=self.by,
+                new_id = lessons.add(text, [stage], source or f"an idea {self.by} typed on the morning page", yes_by=self.by,
                                      exam=result, now=now)
             except ValueError as e:
                 raise Refused(f"The idea was refused: {e}.") from None
@@ -743,11 +792,15 @@ class Morning:
         """The exam a person's idea takes, run outside any transaction: None when the page has no
         examiner for the agent or the rule says a person's line takes none (engine.lessons.takes_exam).
         An examiner that raises fails the idea, so it waits for a yes (fail closed)."""
+        return self._exam_for(lessons, text, [stage])
+
+    def _exam_for(self, lessons, text, stages):
+        """idea_exam on a list of stages (Modify keeps the lesson's own stages)."""
         examiner = self.exams.get(lessons.agent)
         if examiner is None or not lessons_mod.takes_exam(lessons_mod.PERSON):
             return None
         try:
-            return examiner(text, lessons.plug.stage_tags([stage]))
+            return examiner(text, lessons.plug.stage_tags(stages))
         except Exception as e:
             return exam_mod.could_not_run(e)
 
@@ -879,6 +932,13 @@ class Morning:
         if lessons is None:
             raise Refused("No plug for that agent in this repo, so nothing is changed here.")
         return lessons
+
+    def _live(self):
+        """The agents with a plug here that have answered chats in this database (a log row)."""
+        with self.db.tx() as c:
+            if not c.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'trace'").fetchone():
+                return set()
+            return {r["agent"] for r in c.execute("SELECT DISTINCT agent FROM trace")} & set(self.plugs)
 
     def _working(self, c):
         """The agents with a plug here that have worked in this database (a log row, a switch
@@ -2246,19 +2306,23 @@ ACTIONS = {"/stop": lambda m, f: m.stop(_field(f, "lesson"), _field(f, "why")),
            "/lesson_level": lambda m, f: m.lesson_level(_field(f, "lesson"), _field(f, "level")),
            "/keep_fact": lambda m, f: m.keep_fact(_field(f, "agent"), _field(f, "key"), _field(f, "shown")),
            "/dismiss_fact": lambda m, f: m.dismiss_fact(_field(f, "agent"), _field(f, "key"), _field(f, "shown")),
+           "/modify": lambda m, f: m.modify(_field(f, "lesson"), _field(f, "line"), _field(f, "note") if "note" in f else ""),
+           "/correct": lambda m, f: m.correct(_field(f, "agent"), _field(f, "line")),
+           "/rollback": lambda m, f: m.roll_back(_field(f, "agent"), _field(f, "code")),
            "/mode": lambda m, f: m.answer_mode(_field(f, "agent"), _field(f, "card"), _field(f, "choice"),
                                                _field(f, "name") if "name" in f else "")}
 
 
-def make_server(morning, *, port=int(PORT_DEFAULT), token=None):
-    """The page's server on 127.0.0.1 (port 0: any free port). Its token is server.token."""
+def make_server(morning, *, port=int(PORT_DEFAULT), token=None, pages=None):
+    """The page's server on 127.0.0.1 (port 0: any free port). Its token is server.token.
+    pages: the two tab page (reflection/pages.py, a Pages); None serves the A3 page on / only."""
     token = secrets.token_urlsafe(32) if token is None else token
-    server = HTTPServer((HOST, port), _handler(morning, token))
+    server = HTTPServer((HOST, port), _handler(morning, token, pages))
     server.token = token
     return server
 
 
-def _handler(morning, token):
+def _handler(morning, token, pages=None):
     box = {"flash": None}
 
     class Handler(BaseHTTPRequestHandler):
@@ -2274,12 +2338,12 @@ def _handler(morning, token):
             value = (self.headers.get(header) or "").strip().lower()
             return value in {f"{scheme}127.0.0.1:{port}", f"{scheme}localhost:{port}"}
 
-        def _send(self, code, body, *, page=False, location=None):
+        def _send(self, code, body, *, page=False, location=None, csp=CSP):
             data = body.encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", "text/html; charset=utf-8" if page else "text/plain; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
-            self.send_header("Content-Security-Policy", CSP)
+            self.send_header("Content-Security-Policy", csp)
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("X-Frame-Options", "DENY")
             self.send_header("Referrer-Policy", "same-origin")  # no-referrer makes Chrome send Origin null on the page's own POSTs
@@ -2292,6 +2356,14 @@ def _handler(morning, token):
         def do_GET(self):
             if not self._allowed("Host"):
                 return self._send(403, "Refused: the page answers only on 127.0.0.1 or localhost.\n")
+            if pages is not None:
+                parts = urllib.parse.urlsplit(self.path)
+                flash = box["flash"]
+                got = pages.get(parts.path, urllib.parse.parse_qs(parts.query, max_num_fields=8), token, flash)
+                if got is None:
+                    return self._send(404, "Not found.\n")
+                box["flash"] = None
+                return self._send(200, got, page=True, csp=pages.csp)
             if urllib.parse.urlsplit(self.path).path != "/":
                 return self._send(404, "Not found.\n")
             flash, box["flash"] = box["flash"], None
@@ -2319,13 +2391,15 @@ def _handler(morning, token):
             given = form.get("token") or [""]
             if len(given) != 1 or not hmac.compare_digest(given[0].encode("utf-8"), token.encode("utf-8")):
                 return self._send(403, "Refused: the page's token is missing or wrong. Reload the page.\n")
+            back = pages.back(_field(form, "back")) if pages is not None and "back" in form else "/"
+            m = pages.morning_for(back) if pages is not None else morning  # demo: the throwaway copy of that day
             try:
-                box["flash"] = act(morning, form)
+                box["flash"] = act(m, form)
             except Refused as e:
                 box["flash"] = str(e)
             except (ValueError, sqlite3.Error) as e:
                 box["flash"] = f"Not done: {e}"
-            self._send(303, "Done.\n", location="/")
+            self._send(303, "Done.\n", location=back)
 
     return Handler
 
@@ -2352,9 +2426,13 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="The morning page: what the engine learned, for every agent.")
     ap.add_argument("--db", default=str(DEFAULT_PATH), help="the agents' database (default: data/ascent.db)")
     ap.add_argument("--html", metavar="OUT", help="write the page once as a static file with no buttons, and serve nothing")
+    ap.add_argument("--demo-days", metavar="DIR", default=None,
+                    help="serve the sample days in DIR (day1, day2, day3, from sim/three_days.py), each from a throwaway copy")
     ap.add_argument("--assistant-state", default=None,
                     help="the personal assistant's folder a mode card's answer goes to (default: data/assistant)")
     args = ap.parse_args(argv)
+    if args.demo_days:
+        return _demo(args.demo_days)
     try:
         modes_state = night_mod.assistant_state(args.assistant_state)
     except night_mod.Refused as e:
@@ -2382,7 +2460,8 @@ def main(argv=None):
         except ValueError:
             print("Not run: MORNING_PORT is not a number.", file=sys.stderr)
             return 2
-        server = make_server(morning, port=port)
+        from reflection import pages as pages_mod
+        server = make_server(morning, port=port, pages=pages_mod.Pages(morning))
         print(f"The morning page: http://127.0.0.1:{server.server_address[1]}/ (Ctrl+C stops it)")
         try:
             server.serve_forever()
@@ -2392,6 +2471,44 @@ def main(argv=None):
             server.server_close()
     finally:
         db.close()
+    return 0
+
+
+def _demo(folder):
+    """Serve the sample days (sim/three_days.py): each day's folder copied to a throwaway folder,
+    so an answer there never touches the sample files; no model, no exam (the sample has none)."""
+    import shutil
+    import tempfile
+    from reflection import pages as pages_mod
+    src = Path(folder)
+    found = sorted(int(p.name[3:]) for p in src.glob("day[0-9]") if (p / "ascent.db").is_file())
+    if not found:
+        print(f"Not run: no day1/ascent.db in {folder}. Build them with python3 -I sim/three_days.py {folder}.",
+              file=sys.stderr)
+        return 2
+    plugs = repo_plugs()
+    with tempfile.TemporaryDirectory(prefix="unfenced-demo-") as tmp:
+        dbs, days = [], {}
+        for d in found:
+            shutil.copytree(src / f"day{d}", Path(tmp) / f"day{d}")
+            db = Db(str(Path(tmp) / f"day{d}" / "ascent.db"))
+            dbs.append(db)
+            days[d] = Morning(db, plugs, reports=Path(tmp) / f"day{d}", db_file=None,
+                              modes_state=Path(tmp) / f"day{d}" / "assistant")
+        try:
+            port = int(env.get("MORNING_PORT", PORT_DEFAULT))
+        except ValueError:
+            port = int(PORT_DEFAULT)
+        server = make_server(days[found[0]], port=port, pages=pages_mod.Pages(days=days))
+        print(f"Sample days: http://127.0.0.1:{server.server_address[1]}/?day={found[0]} (Ctrl+C stops it)")
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            server.server_close()
+            for db in dbs:
+                db.close()
     return 0
 
 

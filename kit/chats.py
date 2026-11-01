@@ -433,14 +433,17 @@ class Chats:
     def pending(self, limit=100):
         """Payloads queued but never saved (the process stopped first), oldest first.
 
-        Each call counts one attempt; a message comes back at most MAX_ATTEMPTS times.
+        Each call counts one attempt; a message comes back at most MAX_ATTEMPTS times. The attempt also
+        moves its arrival time to now, so the PENDING_HOLD on its chat counts from the requeue, not from
+        before the stop.
         """
         with self.db.tx() as c:
             rows = c.execute(
                 "SELECT message_id, payload FROM seen_messages WHERE status = 'pending' AND payload IS NOT NULL "
-                "AND attempts < ? ORDER BY at LIMIT ?", (MAX_ATTEMPTS, limit)).fetchall()
-            c.executemany("UPDATE seen_messages SET attempts = attempts + 1 WHERE message_id = ?",
-                          [(r["message_id"],) for r in rows])
+                "AND attempts < ? ORDER BY at, rowid LIMIT ?", (MAX_ATTEMPTS, limit)).fetchall()
+            now = self.clock()
+            c.executemany("UPDATE seen_messages SET attempts = attempts + 1, at = ? WHERE message_id = ?",
+                          [(now, r["message_id"]) for r in rows])
         return [json.loads(r["payload"]) for r in rows]
 
 def _now():

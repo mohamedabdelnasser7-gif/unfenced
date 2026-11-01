@@ -39,6 +39,7 @@ log = logging.getLogger("sales.quiet")
 
 NOTICE_AFTER = 30 * 60  # quiet seconds before the notice
 CLOSE_AFTER = 30 * 60   # quiet seconds after the notice before the chat closes
+START_GRACE = 5 * 60    # a notice due this close before the start still goes out after a quick restart
 CLOSED = "chat_closed"
 NOTICE = {
     "arabic": "المحادثة دي هتتقفل كمان 30 دقيقة. ابعتلي في أي وقت ونكمل.",
@@ -53,8 +54,8 @@ def notice_line(customer_text):
 
 def tick(*, chats, results, send, channel, now=None, limits=None, agent=PLUG.agent, started=None):
     """One pass over the open chats on a channel. send(to, text) is the channel's send. started is
-    when this process started (channels/whatsapp.py App): a notice due before then is not sent and
-    the chat closes silently; None means every due notice goes out.
+    when this process started (channels/whatsapp.py App): a notice due more than START_GRACE before
+    then is not sent and the chat closes silently; None means every due notice goes out.
     Returns [(chat_id, "notice" or "closed")] for what it did."""
     now = chats.clock() if now is None else now
     if switch.is_paused(agent, db=chats.db):
@@ -69,7 +70,7 @@ def tick(*, chats, results, send, channel, now=None, limits=None, agent=PLUG.age
         if ch["notice_at"] is None:
             if quiet < NOTICE_AFTER:
                 continue
-            if started is not None and since + NOTICE_AFTER < started:  # due before this process started
+            if started is not None and since + NOTICE_AFTER < started - START_GRACE:  # due well before the start
                 if _close(ch, chats, results, now, quiet):
                     done.append((ch["id"], "closed"))
             elif _notice(ch, chats, send, channel, limits, now):

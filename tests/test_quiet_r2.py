@@ -84,8 +84,8 @@ class Due(Base):
         self.assertEqual(self.tick(started=start), [(chat_id, "notice")])
         other = self.turn(who=OTHER).chat_id
         self.later(quiet.NOTICE_AFTER + 60)  # the first chat is due to close now too
-        self.assertEqual(self.tick(started=self.now - 59), [(chat_id, "closed"), (other, "closed")])
-        self.assertIsNone(self.chats.get(other)["notice_at"])  # its notice was due a second before the start
+        self.assertEqual(self.tick(started=self.now - 59 + quiet.START_GRACE), [(chat_id, "closed"), (other, "closed")])
+        self.assertIsNone(self.chats.get(other)["notice_at"])  # its notice was due a second past the grace
 
     def test_the_app_skips_only_notices_due_before_it_started(self):
         old = self.turn(who=OTHER).chat_id

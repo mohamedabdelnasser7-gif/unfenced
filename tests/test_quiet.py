@@ -59,7 +59,7 @@ class Base(unittest.TestCase):
 class TheNotice(Base):
     def test_one_notice_after_30_quiet_minutes_and_never_a_second(self):
         chat_id = self.turn().chat_id
-        self.later(quiet.NOTICE_AFTER - 1)
+        self.later(30 * 60 - 1)
         self.assertEqual(self.tick(), [])
         self.later(1)
         self.assertEqual(self.tick(), [(chat_id, "notice")])
@@ -129,14 +129,14 @@ class TheNotice(Base):
 class TheClose(Base):
     def test_the_chat_closes_after_60_quiet_minutes_and_goes_to_the_hotfix_lost(self):
         chat_id = self.turn().chat_id
-        self.later(quiet.NOTICE_AFTER)
-        self.tick()
-        self.later(quiet.CLOSE_AFTER - 1)
+        self.later(30 * 60)  # minutes as the decision says them, not the constants
+        self.assertEqual(self.tick(), [(chat_id, "notice")])
+        self.later(30 * 60 - 1)
         self.assertEqual(self.tick(), [])
         self.assertIsNone(self.chats.get(chat_id)["closed_at"])
         self.later(1)
         self.assertEqual(self.tick(), [(chat_id, "closed")])
-        self.assertEqual(self.chats.get(chat_id)["closed_at"], T0 + quiet.NOTICE_AFTER + quiet.CLOSE_AFTER)
+        self.assertEqual(self.chats.get(chat_id)["closed_at"], T0 + 60 * 60)
         row, = self.rows(chat_id, "chat_closed")
         self.assertEqual((row["action"], row["at"]), (None, self.now))
         self.assertEqual(self.tick(), [])  # closed once

@@ -7,7 +7,7 @@ from pathlib import Path
 from engine import exam as exam_mod
 from engine import plug as plug_mod
 from engine import risk
-from engine.lessons import IDEA, PULLED, TRYING, WAITING
+from engine.lessons import HOTFIX_SHARE, HOTFIX_SOURCE, IDEA, PULLED, TRYING, WAITING
 from kit.db import Db
 from reflection import morning as mo
 from reflection import pages
@@ -19,6 +19,10 @@ LINE = "Ask which size they wear in Adidas before naming ours."
 
 def high(text, high_about, low_about):
     return risk.HIGH
+
+
+def low(text, high_about, low_about):
+    return risk.LOW
 
 
 def examiner(passed, calls):
@@ -75,28 +79,62 @@ class TwoTabs(unittest.TestCase):
         new = [les for les in self.m.lessons["sales"].mine() if les["state"] == WAITING]
         self.assertEqual([les["text"] for les in new], [LINE + " Never on the new drop."])
 
-    def test_correction_starts_now_and_is_an_idea_line(self):
-        calls = []
-        self.m = mo.Morning(self.db, self.plugs)  # the page's own judge, never sure: a plain line is no high risk mark
+    def page(self, judge=risk.no_judge, passed=True, calls=None):
+        """A page whose Sales agent has an exam, as main() gives it (page_exams)."""
+        self.m = mo.Morning(self.db, self.plugs, judge=judge, exams={"sales": examiner(passed, [] if calls is None else calls)})
         self.p = pages.Pages(self.m)
-        self.m.exams = {"sales": examiner(True, calls)}
-        self.m.correct("sales", "When someone asks for a photo, send the product link first.")
-        les = self.m.lessons["sales"].mine()[-1]
-        self.assertEqual((les["kind"], les["state"]), (IDEA, TRYING))
+        return self.m
+
+    def test_correction_is_a_hotfix_on_half_the_chats_at_once(self):
+        calls = []
+        self.page(judge=low, calls=calls)
+        first = self.m.lessons["sales"].add("Ask which colour they like first.", ["all"], "typed", yes_by="the user",
+                                            now=NOW)  # a lesson on trial on every stage: a correction never waits behind it
+        said = self.m.correct("sales", "When someone asks for a photo, send the product link first.", now=NOW + 1)
+        L = self.m.lessons["sales"]
+        les = L.mine()[-1]
+        self.assertEqual((les["kind"], les["state"], les["share"]), (IDEA, TRYING, HOTFIX_SHARE))
+        self.assertEqual(L.get(first)["state"], TRYING)
+        self.assertEqual(L.trial(les["id"])["days"], float(L.plug.level(plug_mod.FAST_LEVEL).days))
+        self.assertEqual(les["source"], HOTFIX_SOURCE)
         self.assertIn(pages.CORRECTED, les["source"])
-        self.assertEqual(len(calls), 1)
+        self.assertTrue(L.exam_of(les["id"])["passed"])
+        self.assertEqual(len(calls), 1)  # the page's exam, run once, is the one Lessons.correct saves
+        self.assertIn("runs now as a hotfix in half the chats", said)
         page = self.get("/agents/sales")
         self.assertIn("Hotfix", page)
         self.assertIn('action="/correct"', page)
 
+    def test_correction_with_no_exam_is_refused_and_nothing_is_added(self):
+        self.m = mo.Morning(self.db, self.plugs, judge=low)  # no exam for the Sales agent here
+        with self.assertRaises(mo.Refused) as e:
+            mo.TWO_TAB_ACTIONS["/correct"](self.m, {"agent": ["sales"], "line": [LINE]}, now=NOW)
+        self.assertEqual(str(e.exception), mo.NO_EXAM)
+        self.assertEqual(self.m.lessons["sales"].mine(), [])
+        with self.assertRaises(mo.Refused):
+            self.page(judge=low).correct("assistant", LINE, now=NOW)  # the assistant has no exam either
+        self.assertEqual(self.m.lessons["assistant"].mine(), [])
+
+    def test_a_failed_exam_holds_a_correction_for_a_yes(self):
+        self.page(judge=low, passed=False)
+        said = self.m.correct("sales", "When someone asks for a photo, send the side view.", now=NOW)
+        L = self.m.lessons["sales"]
+        les = L.mine()[-1]
+        self.assertEqual(les["state"], WAITING)
+        self.assertIn("waits for your yes on Today", said)
+        self.assertIn(les["id"], [c["id"] for c in self.m.view(now=NOW + 1)["cards"]])
+        self.m.yes(les["id"], "", now=NOW + 60)
+        self.assertEqual((L.get(les["id"])["state"], L.get(les["id"])["share"]), (TRYING, HOTFIX_SHARE))
+
     def test_high_risk_correction_waits_for_a_yes_on_today(self):
-        self.m = mo.Morning(self.db, self.plugs)
-        self.p = pages.Pages(self.m)
+        self.page(judge=low)
         line = "When someone asks about the price, send the total with delivery first."
         said = self.m.correct("sales", line, now=NOW)
-        self.assertIn("waits for your yes on Today", said)
-        les = self.m.lessons["sales"].mine()[-1]
-        self.assertEqual((les["origin"], les["state"], les["risk"], les["yes_at"]), ("person", WAITING, "high", None))
+        self.assertIn("high risk, so it waits for your yes on Today", said)
+        L = self.m.lessons["sales"]
+        les = L.mine()[-1]
+        self.assertEqual((les["origin"], les["state"], les["risk"], les["yes_by"]), ("person", WAITING, "high", mo.BY))
+        self.assertTrue(L.wants_yes(les["id"]))  # engine.lessons WANTS_YES: its writer's name is not the yes
         page = self.get("/")
         self.assertIn(line, page)
         self.assertIn("Your correction", page)
@@ -106,21 +144,30 @@ class TwoTabs(unittest.TestCase):
         self.assertIn("Waits for your yes on Today", self.get("/agents/sales"))
         self.assertNotIn("Hotfix", self.get("/agents/sales"))
         self.m.yes(les["id"], "", now=NOW + 60)
-        self.assertEqual(self.m.lessons["sales"].get(les["id"])["state"], TRYING)
+        self.assertEqual((L.get(les["id"])["state"], L.get(les["id"])["share"]), (TRYING, HOTFIX_SHARE))
         self.assertIn("Hotfix", self.get("/agents/sales"))
 
     def test_judge_that_says_high_holds_a_correction_too(self):
+        self.page(judge=high)
         self.m.correct("sales", "When someone asks for a photo, send the side view.", now=NOW)
         les = self.m.lessons["sales"].mine()[-1]
         self.assertEqual(les["state"], WAITING)
         self.assertIn("the risk check marked it high", self.get("/"))
 
-    def test_held_correction_follows_accept_high_risk(self):
-        self.m = mo.Morning(self.db, self.plugs)
+    def test_a_judge_that_is_not_sure_holds_a_correction_too(self):
+        """Lessons.correct: any high risk waits for a yes, a judge that is only unsure included (fail closed)."""
+        self.page()
+        self.m.correct("sales", "When someone asks for a photo, send the side view.", now=NOW)
+        self.assertEqual(self.m.lessons["sales"].mine()[-1]["state"], WAITING)
+
+    def test_accept_high_risk_is_not_the_yes_on_a_correction(self):
+        """A high risk correction waits for a yes on Today even under Accept high risk (Lessons.correct)."""
+        self.page(judge=low)
         self.m.lessons["sales"].switches.set_accept_high(True, "the user", now=NOW)
         self.m.correct("sales", "When someone asks about the price, send the total first.", now=NOW + 1)
         les = self.m.lessons["sales"].mine()[-1]
-        self.assertEqual((les["origin"], les["state"]), ("person", TRYING))
+        self.assertEqual((les["origin"], les["state"]), ("person", WAITING))
+        self.assertIn(les["id"], [c["id"] for c in self.m.view(now=NOW + 2)["cards"]])
 
     def test_plain_risk_reads_plainly(self):
         self.assertEqual(pages.plain_risk("tool: delivery"),

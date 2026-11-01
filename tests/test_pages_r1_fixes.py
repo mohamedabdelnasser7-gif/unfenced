@@ -14,6 +14,7 @@ from pathlib import Path
 
 from engine import exam as exam_mod
 from engine import plug as plug_mod
+from engine import risk
 from engine.lessons import MAX_LEN, PULLED, TRYING, WAITING
 from kit.db import Db
 from reflection import morning as mo
@@ -36,6 +37,10 @@ def examiner(passed, calls):
     return run
 
 
+def low(text, high_about, low_about):
+    return risk.LOW
+
+
 def raises(text, tags):
     raise RuntimeError("model down")
 
@@ -56,25 +61,24 @@ class ModifyHoldsHighRisk(Base):
     """Review finding 1 and red team finding 1: Modify is never the yes on a high risk line."""
 
     def test_modify_on_a_held_correction_waits_for_a_yes_again(self):
-        for exams in ({}, {"sales": examiner(True, [])}):
-            with self.subTest(exam=bool(exams)):
-                db = Db(":memory:")
-                self.addCleanup(db.close)
-                m = mo.Morning(db, self.plugs, exams=exams)
-                L = m.lessons["sales"]
-                m.correct("sales", HIGH, now=NOW)
-                held = L.mine()[-1]
-                self.assertEqual((held["state"], held["yes_at"]), (WAITING, None))
-                said = m.modify(held["id"], HIGH, "Be kind.", now=NOW + 10)
-                new = L.mine()[-1]
-                self.assertEqual((new["text"], new["state"], new["risk"], new["yes_at"]),
-                                 (HIGH + " Be kind.", WAITING, "high", None))
-                self.assertIsNone(L.trial(new["id"]))
-                self.assertEqual(L.get(held["id"])["state"], PULLED)
-                self.assertIn("It is high risk, so it waits for your yes on its card.", said)
-                self.assertIn(new["id"], [c["id"] for c in m.view(now=NOW + 20)["cards"]])
-                m.yes(new["id"], "", now=NOW + 30)  # the yes on its card starts it
-                self.assertEqual(L.get(new["id"])["state"], TRYING)
+        db = Db(":memory:")
+        self.addCleanup(db.close)
+        m = mo.Morning(db, self.plugs, exams={"sales": examiner(True, [])})
+        L = m.lessons["sales"]
+        m.correct("sales", HIGH, now=NOW)
+        held = L.mine()[-1]
+        self.assertEqual(held["state"], WAITING)
+        self.assertTrue(L.wants_yes(held["id"]))  # a high risk correction (Lessons.correct, WANTS_YES)
+        said = m.modify(held["id"], HIGH, "Be kind.", now=NOW + 10)
+        new = L.mine()[-1]
+        self.assertEqual((new["text"], new["state"], new["risk"], new["yes_at"]),
+                         (HIGH + " Be kind.", WAITING, "high", None))
+        self.assertIsNone(L.trial(new["id"]))
+        self.assertEqual(L.get(held["id"])["state"], PULLED)
+        self.assertIn("It is high risk, so it waits for your yes on its card.", said)
+        self.assertIn(new["id"], [c["id"] for c in m.view(now=NOW + 20)["cards"]])
+        m.yes(new["id"], "", now=NOW + 30)  # the yes on its card starts it
+        self.assertEqual(L.get(new["id"])["state"], TRYING)
 
     def test_a_high_risk_note_on_a_reflection_card_waits_for_a_yes(self):
         lid = self.L.propose(SIZE, ["asking"], sources=[], now=NOW)
@@ -84,6 +88,8 @@ class ModifyHoldsHighRisk(Base):
         self.assertIn(new["id"], self.card_ids(NOW + 20))
 
     def test_edit_of_a_live_lesson_into_high_risk_words_waits_for_a_yes(self):
+        self.m = mo.Morning(self.db, self.plugs, judge=low, exams={"sales": examiner(True, [])})
+        self.L = self.m.lessons["sales"]
         self.m.correct("sales", LOW, now=NOW)
         live = self.L.mine()[-1]
         self.assertEqual(live["state"], TRYING)
@@ -137,10 +143,13 @@ class NightLineSaysWhatTheExamSaid(Base):
         self.assertIn("The exam could not run on your correction, so it waits for your yes.", night)
         self.assertNotIn("passed the exam", night)
 
-    def test_no_exam(self):
-        night = self.night(None, HIGH)
-        self.assertIn("Your correction waits for your yes.", night)
-        self.assertNotIn("exam", night)
+    def test_no_exam_no_correction(self):
+        """Review finding 3: a correction is a hotfix and never starts untested (Lessons.correct), so with
+        no exam on the page it is refused and Last night has nothing to say about it."""
+        with self.assertRaises(mo.Refused):
+            self.night(None, HIGH)
+        self.assertEqual(self.L.mine(), [])
+        self.assertEqual(pages.EXAM_SAID[None], "Your correction waits for your yes.")  # a row from before
 
 
 class LastNightTwoLines(unittest.TestCase):
@@ -169,6 +178,7 @@ class RollBackShowsItsPlan(Base):
         super().setUp()
         self.p = pages.Pages(self.m)
         t = time.time() - 600  # the page reads the real clock here
+        self.m.exams = {"sales": examiner(True, [])}
         self.m.correct("sales", LOW, now=t)
         snapshots.take(self.db, "sales", t + 100)
         self.lid = self.L.propose(SIZE, ["asking"], sources=[], now=t + 300)
@@ -212,12 +222,13 @@ class RollBackShowsItsPlan(Base):
 
 
 class BoxCopy(Base):
-    """Review finding 3, the copy only: the box no longer promises a hotfix now."""
+    """Review finding 3: the box says a correction starts at once as a hotfix, now that it does."""
 
     def test_the_box_says_what_a_correction_does(self):
         page = pages.Pages(self.m).get("/agents/sales", {}, "t")
         self.assertIn(pages.h(pages.SAY_NOTE), page)
-        self.assertNotIn("hotfix now", page)
+        for said in ("short exam", "at once as a hotfix in half the chats", "high risk", "your yes on Today"):
+            self.assertIn(said, pages.SAY_NOTE)
 
 
 class TwoTabServer(unittest.TestCase):
@@ -232,6 +243,7 @@ class TwoTabServer(unittest.TestCase):
         live_path.parent.mkdir()
         cls.live_db = Db(str(live_path))
         live = mo.live_morning(cls.live_db, str(live_path), mo.repo_plugs(), root / "live" / "assistant")
+        live.exams = {"sales": examiner(True, [])}  # main() gives the live page its exam (page_exams)
         cls.pages, cls.dbs = mo.demo_pages(root / "days", root / "served", live=live)
         cls.server = mo.make_server(cls.pages.morning, port=0, pages=cls.pages)
         cls.port = cls.server.server_address[1]

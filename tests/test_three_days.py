@@ -250,6 +250,7 @@ class LiveTab(unittest.TestCase):
         live_path.parent.mkdir()
         cls.live_db = Db(str(live_path))
         live = mo.live_morning(cls.live_db, str(live_path), mo.repo_plugs(), root / "live" / "assistant")
+        live.exams = {"sales": three_days.examiner}  # main() gives the live page its exam (page_exams)
         cls.pages, cls.dbs = mo.demo_pages(root / "days", root / "served", live=live)
         cls.server = mo.make_server(cls.pages.morning, port=0, pages=cls.pages)
         cls.port = cls.server.server_address[1]
@@ -295,6 +296,9 @@ class LiveTab(unittest.TestCase):
             self.assertIn("Ask which colour they like", r.read().decode("utf-8"))
         texts = [i["text"] for a in self.pages.live.view()["agents"] for i in a["live"] + a["waiting"]]
         self.assertIn("Ask which colour they like before you send the summary.", texts)
+        held = self.pages.live.lessons["sales"].mine()[-1]  # the page's judge is not sure, so it waits for a yes
+        self.assertEqual(held["state"], "waiting")
+        self.pages.live.no(held["id"], "a test")  # Live's Today is empty again for the other tests
         one = self.pages.days[1].view(now=self.pages.at[1])
         self.assertNotIn("Ask which colour", json.dumps(one))
         self.assertEqual((self.root / "days" / "day1" / "ascent.db").read_bytes(), sample)

@@ -8,8 +8,9 @@ Morning methods only, so no engine rule lives here.
     /agents        the agents (the plugs in the repo and the agents in the database) and New agent.
                    An agent shows Live when it works on real chats or cases (Morning._live), else
                    Training: only Arena practice.
-    /agents/<name> one agent: its status with Pull and Roll back, the box for an idea or a
-                   correction (Morning.correct), then its lessons and Reflection notes as rows.
+    /agents/<name> one agent: its status with Pull (the pause switch, Resume when paused) and Roll
+                   back, the box for an idea or a correction (Morning.correct, a hotfix), then its
+                   lessons and Reflection notes as rows.
     /agents/<name>/rollback  what Roll back would do, lesson by lesson, and its one button.
     /new           New agent, Quick start B screen 1; ?ask= routes to a plug or says not yet.
     /new/build     screen 2: the newest Arena run saved next to the database, as tiles and a path.
@@ -29,6 +30,7 @@ import hashlib
 import re
 import urllib.parse
 
+from engine import lessons as lessons_mod
 from reflection import morning as mo
 from reflection import snapshots
 from reflection.page_css import CSS
@@ -37,7 +39,7 @@ CSP = ("default-src 'none'; style-src 'sha256-" + base64.b64encode(hashlib.sha25
        + "'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 h = mo.h
 NAMES = {"sales": "Sales agent", "assistant": "Personal assistant", "marketing": "Marketing agent"}
-CORRECTED = "sent on the agent page"   # in the source line of a correction (Morning.correct)
+CORRECTED = lessons_mod.HOTFIX_SOURCE  # the source line of a correction (Morning.correct, Lessons.correct)
 ASKS = (("sales", ("sales", "sell", "store", "shop", "order", "customer", "boots")),
         ("assistant", ("assistant", "personal", "calendar", "inbox", "email", "remind", "schedule")))
 _AGENT = re.compile(r"^[a-z][a-z_]{0,30}$")
@@ -314,8 +316,8 @@ def _corrected(i):
 
 
 # Under the box on an agent's page: what a correction does (Morning.correct), and nothing it does not.
-SAY_NOTE = ("Starts in the next chats when its turn comes, unless it needs your yes on Today first. "
-            "Reflection reads it tonight.")
+SAY_NOTE = ("Takes a short exam, then starts at once as a hotfix in half the chats. If it is high risk or "
+            "does not pass, it waits for your yes on Today. Reflection reads it tonight.")
 ANSWERED = "Answered chats today. Reflection reads them tonight."
 
 
@@ -385,7 +387,15 @@ def night_line(a, now, answered=0):
 
 
 def status_of(m, agent):
+    """Paused while its pause switch is on (Morning.paused), else Live or Training."""
+    if m.paused(agent):
+        return "Paused"
     return "Live" if agent in m._live() else "Training"
+
+
+# The line under the status on an agent's page.
+STATUS_SAID = {"Live": "Answering chats", "Training": "Practising in the Arena",
+               "Paused": "Paused: it sends nothing until you press Resume"}
 
 
 def agent_names(m, view):
@@ -471,12 +481,16 @@ def agent_page(m, view, agent, ctx):
         roll = f'<a class="gb" href="/agents/{h(agent)}{ROLLBACK}{ctx["q"]}">{icon("undo")}Roll back</a>'
     elif a["buttons"]:
         roll = f'<button class="gb" type="button" disabled>{icon("undo")}Roll back</button>'
+    if tok and m.pausable(agent):  # the real pause switch (DECISIONS 54, Morning.pause and resume)
+        pull = (_post(ctx, "resume", f'{icon("loop")}Resume', "gb", agent=agent) if st == "Paused"
+                else _post(ctx, "pause", f'{icon("pause")}Pull', "gb", agent=agent))
+    else:
+        pull = f'<button class="gb" type="button" disabled title="Not built for this agent yet">{icon("pause")}Pull</button>'
     out = [f'<div class="colhead"><a class="back" href="/agents{ctx["q"]}">{icon("back")}Agents</a>'
            f'<section class="top ag-top"><h1>{h(name(agent))}</h1></section></div><div class="col">',
            f'<section class="status sq" aria-label="Status"><div class="st-l"><span class="states" role="img" '
-           f'aria-label="Status: {st}">{states}</span><small>{"Answering chats" if st == "Live" else "Practising in the Arena"}'
-           f'</small></div><div class="st-r">{roll}<button class="gb" type="button" disabled title="Not built yet">'
-           f'{icon("pause")}Pull</button></div></section>']
+           f'aria-label="Status: {st}">{states}</span><small>{STATUS_SAID[st]}'
+           f'</small></div><div class="st-r">{roll}{pull}</div></section>']
     if tok:
         out.append(f'<section class="say sq" aria-label="Send an idea or a correction"><form method="post" action="/correct">'
                    f'{_hidden(ctx, agent=agent)}<span class="lab">Send an idea or a correction</span><div class="box">'

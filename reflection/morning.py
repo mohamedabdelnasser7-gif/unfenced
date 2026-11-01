@@ -166,6 +166,7 @@ from engine import switches as switches_mod
 from engine import trial as trial_mod
 from engine.lessons import KEPT, MAX_LEN, PULLED, TRYING, WAITING, Lessons
 from kit import env
+from kit import switch as switch_mod
 from kit.db import DEFAULT_PATH, Db
 from reflection import PLUG as SALES
 from reflection import facts as facts_mod
@@ -496,6 +497,7 @@ CSP = ("default-src 'none'; style-src 'sha256-" + base64.b64encode(hashlib.sha25
 
 
 STALE_PLAN = "Not rolled back: the lessons changed after the plan was shown. Look at the plan again."
+NO_EXAM = "A correction takes a short exam first, and this agent has no exam here yet, so nothing was added."
 
 
 class Refused(Exception):
@@ -611,13 +613,84 @@ class Morning:
         return self.edit(lesson_id, text, now=now, exam=result)
 
     def correct(self, agent, line, now=None):
-        """A correction or an idea the user sends on an agent's page. It goes the way of a person's
-        own line (Morning.idea, kind idea): the exam first where the page has one, then it starts in
-        the next chats at once at the level that applies, or waits its turn; a line the exam holds
-        waits for a yes on Today. A high risk line waits for a yes on Today too (LOCKS "Product shape: two
-        tabs"; engine Lessons.add hold_high). The night's Reflection studies it like any idea."""
-        return self.idea(agent, line, plug_mod.ALL, now=now, source=f"a correction {self.by} sent on the agent page",
-                         hold_high=True)
+        """A correction or an idea the user sends on an agent's page: a hotfix (DECISIONS 56,
+        Lessons.correct). It takes the short exam first, the one the page already runs (outside the
+        transaction); once it passes it starts at once on half the chats, whatever the level, and never
+        waits behind a lesson on trial. A high risk one, or one the exam holds, waits for a yes on Today
+        (engine.lessons WANTS_YES). An agent with no exam here is refused: a correction never starts
+        untested. The night's Reflection reads it like any idea; its source is Lessons.HOTFIX_SOURCE."""
+        lessons, text, stage = self._idea_checked(agent, line, plug_mod.ALL)  # a refused line takes no exam
+        result = self._correction_exam(lessons, text)
+        if result is None:
+            raise Refused(NO_EXAM)
+        with self.page.one():
+            lessons, text, stage = self._idea_checked(agent, line, plug_mod.ALL)  # again: the lessons may have moved
+            try:
+                new_id = lessons.correct(text, [stage], yes_by=self.by, exam=result, now=now)
+            except ValueError as e:
+                raise Refused(f"The correction was refused: {e}.") from None
+            state = lessons.get(new_id)["state"]
+            held = self._card(lessons.get(new_id), lessons, now)
+        from arena import gate  # the past wins the Arena rerun skipped, said in one line
+        note = gate.skipped_note(result)
+        note = f" {note}" if note else ""
+        if state == TRYING:
+            return (f"Your correction is lesson {new_id}. It passed the exam and runs now as a hotfix in half the chats. "
+                    f"Reflection checks it tonight.{note}")
+        if not result.passed:
+            return f"Your correction is lesson {new_id}. It waits for your yes on Today: it {result.line()}.{note}"
+        if held:
+            return (f"Your correction is lesson {new_id}. It passed the exam but is high risk, so it waits for your yes "
+                    f"on Today.{note}")
+        return f"Your correction is lesson {new_id}. It waits its turn.{note}"
+
+    def _correction_exam(self, lessons, text):
+        """The short exam a correction takes, run outside any transaction: always, when the page has an
+        examiner for the agent (a hotfix takes it whatever takes_exam says); None with no examiner. An
+        examiner that raises fails the correction, so it waits for a yes (fail closed)."""
+        examiner = self.exams.get(lessons.agent)
+        if examiner is None:
+            return None
+        try:
+            return examiner(text, lessons.plug.stage_tags([plug_mod.ALL]))
+        except Exception as e:
+            return exam_mod.could_not_run(e)
+
+    def paused(self, agent):
+        """True while the agent's pause switch is on (kit/switch.py). Reads only: a database with no
+        switch table yet is not paused, and a page view never makes the table."""
+        with self.db.tx() as c:
+            if not _has_table(c, "agent_switch"):
+                return False
+        return switch_mod.is_paused(agent, db=self.db)
+
+    def pausable(self, agent):
+        """Does Pull stop this agent? It has a plug here and its code reads the switch (switch.HONOURED)."""
+        return agent in self.lessons and agent in switch_mod.HONOURED
+
+    def pause(self, agent, now=None):
+        """Pull on an agent's page: the real pause switch (DECISIONS 54, kit/switch.py), signed by the
+        page's person. A paused agent sends nothing until Resume; messages are still saved."""
+        self._switchable(agent)
+        if self.paused(agent):
+            return "It is paused already. Resume starts it again."
+        switch_mod.pause(agent, db=self.db, now=now, by=self.by)
+        return "Paused. It sends nothing until you press Resume; messages that come in are still saved."
+
+    def resume(self, agent, now=None):
+        """Resume on a paused agent's page: the switch off, signed by the page's person; quiet counts
+        from now (sales/quiet.py)."""
+        self._switchable(agent)
+        if not self.paused(agent):
+            return "It is running already."
+        switch_mod.resume(agent, db=self.db, now=now, by=self.by)
+        return "Resumed. It answers the next message."
+
+    def _switchable(self, agent):
+        if not isinstance(agent, str) or agent not in self.lessons:
+            raise Refused("No plug for that agent in this repo, so nothing is changed here.")
+        if not self.pausable(agent):
+            raise Refused("Pull is not built for this agent yet, so nothing is changed.")
 
     def rollback_plan(self, agent, now=None):
         """The latest night snapshot of an agent with a plug and what a rollback to it would do now:
@@ -773,7 +846,7 @@ class Morning:
         where = "It is on trial." if state == TRYING else "It waits its turn."
         return f"Lesson {les['id']} is back as lesson {new_id}; lesson {les['id']} stays pulled. {where}"
 
-    def idea(self, agent, line, stage, now=None, source=None, hold_high=False):
+    def idea(self, agent, line, stage, now=None):
         """A person's idea, typed on the page: a lesson with no past cases behind it, for one
         agent with a plug, on one of its stages or "all". It goes the way of any person's own
         line (Lessons.add): kind idea, origin person, signed by the page's person, no yes
@@ -781,15 +854,14 @@ class Morning:
         as an agent's idea, or waits its turn. Refused for an agent with no plug, a line that
         is empty, too long or more than one line, a stage the plug does not have, a line with
         the same words as a live or waiting lesson, and a pulled line (Bring back brings that
-        one back). It takes the exam first when the page has one for the agent (idea_exam). hold_high: a
-        high risk line waits for a yes (correct)."""
+        one back). It takes the exam first when the page has one for the agent (idea_exam)."""
         lessons, text, stage = self._idea_checked(agent, line, stage)  # a refused idea takes no exam
         result = self.idea_exam(lessons, text, stage)  # before the transaction: no write lock held
         with self.page.one():
             lessons, text, stage = self._idea_checked(agent, line, stage)  # again: the lessons may have moved
             try:
-                new_id = lessons.add(text, [stage], source or f"an idea {self.by} typed on the morning page", yes_by=self.by,
-                                     exam=result, hold_high=hold_high, now=now)
+                new_id = lessons.add(text, [stage], f"an idea {self.by} typed on the morning page", yes_by=self.by,
+                                     exam=result, now=now)
             except ValueError as e:
                 raise Refused(f"The idea was refused: {e}.") from None
             row = lessons.get(new_id)
@@ -800,8 +872,6 @@ class Morning:
         if result is not None and not result.passed and state == WAITING:
             return (f"Your idea is lesson {new_id}. It waits for a yes: it {result.line()}. Yes on its card starts it "
                     f"anyway.{note}")
-        if state == WAITING and row["yes_at"] is None and lessons.waits_for(new_id, now) is None:
-            return f"Your line is lesson {new_id}. It is high risk, so it waits for your yes on Today.{note}"
         where = "It is on trial." if state == TRYING else "It waits its turn."
         return f"Your idea is lesson {new_id}. {where}{note}"
 
@@ -2394,6 +2464,8 @@ ACTIONS = {"/stop": lambda m, f, now=None: m.stop(_field(f, "lesson"), _field(f,
            "/modify": lambda m, f, now=None: m.modify(_field(f, "lesson"), _field(f, "line"),
                                                       _field(f, "note") if "note" in f else "", now=now),
            "/correct": lambda m, f, now=None: m.correct(_field(f, "agent"), _field(f, "line"), now=now),
+           "/pause": lambda m, f, now=None: m.pause(_field(f, "agent"), now=now),
+           "/resume": lambda m, f, now=None: m.resume(_field(f, "agent"), now=now),
            "/rollback": lambda m, f, now=None: m.roll_back(_field(f, "agent"), _field(f, "code"), now=now),
            "/mode": lambda m, f, now=None: m.answer_mode(_field(f, "agent"), _field(f, "card"), _field(f, "choice"),
                                                          _field(f, "name") if "name" in f else "", now=now)}
@@ -2586,7 +2658,8 @@ def live_morning(db, db_path, plugs, modes_state):
 
 def _demo(folder, live=None):
     """Serve the sample days (sim/three_days.py): each day's folder copied to a throwaway folder,
-    so an answer there never touches the sample files; no model, no exam (the sample has none).
+    so an answer there never touches the sample files; no model call: a correction takes the sample's
+    scripted exam (demo_pages).
     live: the Morning on the real database, served on the Live tab with real answers."""
     import tempfile
     with tempfile.TemporaryDirectory(prefix="unfenced-demo-") as tmp:
@@ -2618,9 +2691,12 @@ def demo_pages(folder, tmp, live=None):
     """The two tab page over the sample days in folder (day1, day2, ... from sim/three_days.py), each
     copied into tmp first. Each day shows the morning its day.json names (a sample has its own clock).
     live: the Morning on the real database for the Live tab (the caller opens and closes it).
+    A correction there takes the scripted exam the sample's own correction took (sim/three_days.py
+    examiner, marked a simulated situation, no model call), since a correction never starts untested.
     Returns (Pages, the open sample databases, for the caller to close); Refused when folder has no day."""
     import shutil
     from reflection import pages as pages_mod
+    from sim import three_days as sample
     src = Path(folder)
     found = sorted(int(p.name[3:]) for p in src.glob("day[0-9]") if (p / "ascent.db").is_file())
     if not found:
@@ -2632,7 +2708,8 @@ def demo_pages(folder, tmp, live=None):
         shutil.copytree(src / f"day{d}", dest)
         db = Db(str(dest / "ascent.db"))
         dbs.append(db)
-        days[d] = Morning(db, plugs, reports=dest, db_file=None, modes_state=dest / "assistant")
+        days[d] = Morning(db, plugs, reports=dest, db_file=None, modes_state=dest / "assistant",
+                          exams={SALES.agent: sample.examiner})
         at[d] = _sample_clock(dest / "day.json")
     return pages_mod.Pages(days=days, at=at, live=live), dbs
 

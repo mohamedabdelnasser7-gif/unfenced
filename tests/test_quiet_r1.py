@@ -245,7 +245,7 @@ class NeverLate(Base):
     is never sent."""
 
     def test_a_chat_found_long_quiet_after_a_restart_closes_silently(self):
-        for gap in (quiet.NOTICE_AFTER + 1, quiet.NOTICE_AFTER + quiet.CLOSE_AFTER, 3 * 3600, 3 * 86400):
+        for gap in (quiet.NOTICE_AFTER + quiet.START_GRACE + 1, quiet.NOTICE_AFTER + quiet.CLOSE_AFTER, 3 * 3600, 3 * 86400):
             with self.subTest(gap=gap):
                 who = f"2010{gap:08d}"
                 chat_id = self.turn(who=who).chat_id
@@ -288,11 +288,12 @@ class OldDatabase(unittest.TestCase):
         sent = []
         did = quiet.tick(chats=chats, results=results, send=lambda to, text: sent.append((to, text)),
                          channel="whatsapp", started=T0)
-        # both were due their notice before the process started: closed silently, with their result
-        self.assertEqual(sorted((names[c], w) for c, w in did), [("31 minutes", "closed"), ("40 minutes", "closed")])
-        self.assertEqual(sent, [])
+        # 40 minutes: due 10 minutes before the start, past the grace, closed silently with its result;
+        # 31 minutes: due a minute before the start, inside the grace, so its notice still goes
+        self.assertEqual(sorted((names[c], w) for c, w in did), [("31 minutes", "notice"), ("40 minutes", "closed")])
+        self.assertEqual(len(sent), 1)
         Chats(self.db, clock=lambda: self.now)  # a restart: the columns are there, nothing more closes
-        self.assertEqual(self.db.conn.execute("SELECT COUNT(*) FROM chats WHERE closed_at IS NULL").fetchone()[0], 1)
+        self.assertEqual(self.db.conn.execute("SELECT COUNT(*) FROM chats WHERE closed_at IS NULL").fetchone()[0], 2)
 
 
 if __name__ == "__main__":

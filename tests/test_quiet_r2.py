@@ -97,7 +97,7 @@ class Due(Base):
         self.assertEqual(self.rows(old, quiet.CLOSED)[0]["detail"]["quiet_minutes"], 120)
 
     def test_a_silent_close_records_its_real_quiet_minutes(self):
-        for gap, minutes in ((quiet.NOTICE_AFTER + 1, 30), (3 * 3600 + 59, 180), (3 * 86400, 3 * 1440)):
+        for gap, minutes in ((quiet.NOTICE_AFTER + quiet.START_GRACE + 1, 35), (3 * 3600 + 59, 180), (3 * 86400, 3 * 1440)):
             with self.subTest(gap=gap):
                 chat_id = self.turn(who=f"2010{gap:08d}").chat_id
                 self.later(gap)

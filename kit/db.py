@@ -24,17 +24,44 @@ class Db:
         if str(path) != ":memory:":
             self.conn.execute("PRAGMA journal_mode = WAL")
         self._lock = threading.RLock()
+        self._depth = 0  # how many tx() blocks this lock's holder is inside
 
     @contextmanager
     def tx(self):
-        """One transaction: commits on success, rolls back on any error."""
+        """One transaction: commits on success, rolls back on any error. A tx() inside another is a
+        savepoint: its error undoes only its own writes, and only the outer block commits, so the
+        outer block's writes land together or not at all."""
         with self._lock:
+            if self._depth:
+                yield from self._savepoint()
+                return
+            self._depth = 1
             try:
                 yield self.conn
                 self.conn.commit()
             except BaseException:
                 self.conn.rollback()
                 raise
+            finally:
+                self._depth = 0
+
+    def _savepoint(self):
+        if not self.conn.in_transaction:
+            self.conn.execute("BEGIN")  # else the savepoint would open its own transaction and commit it
+        name = f"tx{self._depth}"
+        self.conn.execute(f"SAVEPOINT {name}")
+        self._depth += 1
+        try:
+            yield self.conn
+        except BaseException:
+            if self.conn.in_transaction:  # some errors end the whole transaction in SQLite itself
+                self.conn.execute(f"ROLLBACK TO {name}")
+                self.conn.execute(f"RELEASE {name}")
+            raise
+        else:
+            self.conn.execute(f"RELEASE {name}")
+        finally:
+            self._depth -= 1
 
     def script(self, sql):
         with self._lock:

@@ -48,9 +48,9 @@ class Base(unittest.TestCase):
         return loop.turn(msg, chats=self.chats, model=model, lessons=self.lessons, results=self.results,
                          send=self.out)
 
-    def tick(self, limits=None, send=None):
+    def tick(self, limits=None, send=None, started=None):
         return quiet.tick(chats=self.chats, results=self.results, send=send or self.out, channel="whatsapp",
-                          limits=limits)
+                          limits=limits, started=started)
 
     def rows(self, chat_id, result):
         return self.results.query(case=chat_id, result=result)

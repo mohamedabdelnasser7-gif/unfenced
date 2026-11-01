@@ -27,11 +27,14 @@ receive() finds the open chat and saves the customer's step in one transaction, 
 come between the two: the step lands in an open chat, or in a new one when the last closed first.
 mark_notice() and close() take the tick's view of the chat (last_n, its last customer or agent step)
 and do nothing when a newer customer or agent step was saved since, or when the customer has a
-message accepted from the webhook and not saved yet (pending in seen_messages): the tick never
-closes, nor sends the notice in, a chat the customer just wrote in.
+message accepted from the webhook and not saved yet (pending in seen_messages, accepted less than
+PENDING_HOLD seconds ago, so a message stuck pending never holds a chat open for good): the tick never
+closes, nor sends the notice in, a chat the customer just wrote in. A partial index on the pending rows
+keeps that check off the done ones, however many pile up.
 
 A database made before the quiet columns gets them added, and every chat in it with no customer or
-agent step in the last OLD_AFTER seconds is closed then, with no notice and no result: the first tick
+agent step in the last OLD_AFTER seconds is closed then, with no notice and no result, unless its
+customer has a message pending (of any age: the restart works it next, in that chat): the first tick
 after the upgrade sends no customer a message about a chat that went quiet long ago.
 
 Every time here comes from clock (time.time unless a test gives its own).
@@ -91,10 +94,14 @@ SEEN_COLUMNS = (
 )
 
 OLD_AFTER = 60 * 60  # sales/quiet.py NOTICE_AFTER + CLOSE_AFTER: older chats close when the quiet columns arrive
-# A customer's webhook message not saved yet: pending, with its payload, and still to be worked (attempts left).
-PENDING_FOR = ("EXISTS (SELECT 1 FROM seen_messages m WHERE m.status = 'pending' AND m.payload IS NOT NULL "
-               "AND m.attempts < {attempts} AND json_valid(m.payload) "
+PENDING_HOLD = 30 * 60  # sales/quiet.py CLOSE_AFTER: a pending message older than this holds no chat
+# A customer's webhook message not saved yet: pending, with its payload, still to be worked (attempts left),
+# and accepted after {since} (an SQL value).
+PENDING_FOR = ("EXISTS (SELECT 1 FROM seen_messages m WHERE m.status = 'pending' AND m.at > {since} "
+               "AND m.payload IS NOT NULL AND m.attempts < {attempts} AND json_valid(m.payload) "
                "AND json_extract(m.payload, '$.customer_id') = {customer})")
+# Only pending rows are ever looked up by state; done ones pile up and are never read again.
+PENDING_INDEX = "CREATE INDEX IF NOT EXISTS seen_pending ON seen_messages (at) WHERE status = 'pending'"
 FIRST_STAGE = "asking"
 MAX_ATTEMPTS = 3
 PERSON = "person"   # the name on an assistant step a team member wrote, in an imported chat
@@ -107,21 +114,27 @@ class Chats:
         self.clock = clock if clock is not None else _now
         self.db.script(SCHEMA)
         with self.db.tx() as c:
+            close_old = False
             for table, columns in (("chats", CHAT_COLUMNS), ("seen_messages", SEEN_COLUMNS)):
                 have = {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
                 for name, decl in columns:
                     if name not in have:
                         c.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
-                        if (table, name) == ("chats", "closed_at"):
-                            self._close_old(c)
+                        close_old = close_old or (table, name) == ("chats", "closed_at")
+            c.execute(PENDING_INDEX)
+            if close_old:  # after seen_messages has its columns, which the pending check reads
+                self._close_old(c)
 
     def _close_old(self, c):
         """The quiet columns just arrived: close every chat quiet OLD_AFTER seconds or more (its last
-        customer or agent step, else when it was made), with no notice and no result."""
+        customer or agent step, else when it was made), with no notice and no result, unless its
+        customer has a message pending."""
         now = self.clock()
         c.execute("UPDATE chats SET closed_at = ?, updated_at = ? WHERE parent_id IS NULL AND COALESCE("
                   "(SELECT MAX(at) FROM steps s WHERE s.chat_id = chats.id AND s.role IN ('user', 'assistant')), "
-                  "created_at) <= ?", (now, now, now - OLD_AFTER))
+                  "created_at) <= ? AND NOT "
+                  + PENDING_FOR.format(since=0, attempts=MAX_ATTEMPTS, customer="chats.customer_id"),
+                  (now, now, now - OLD_AFTER))
 
     # chats
 
@@ -181,28 +194,28 @@ class Chats:
                 "(SELECT MAX(at) FROM steps s WHERE s.chat_id = c.id AND s.role IN ('user', 'assistant')) AS last, "
                 "(SELECT MAX(n) FROM steps s WHERE s.chat_id = c.id AND s.role IN ('user', 'assistant')) AS last_n, "
                 "(SELECT MAX(at) FROM steps s WHERE s.chat_id = c.id AND s.role = 'user') AS last_customer, "
-                + PENDING_FOR.format(attempts=MAX_ATTEMPTS, customer="c.customer_id") + " AS waiting "
+                + PENDING_FOR.format(since="?", attempts=MAX_ATTEMPTS, customer="c.customer_id") + " AS waiting "
                 "FROM chats c WHERE c.channel = ? AND c.parent_id IS NULL AND c.closed_at IS NULL "
-                "ORDER BY c.created_at, c.rowid", (channel,)).fetchall()
+                "ORDER BY c.created_at, c.rowid", (self.clock() - PENDING_HOLD, channel)).fetchall()
         return [dict(r, waiting=bool(r["waiting"])) for r in rows]
 
     @staticmethod
-    def _still_quiet(last_n):
+    def _still_quiet(last_n, at):
         """The SQL that holds a tick's change to a chat (UPDATE chats ... WHERE) to the view it saw: no
-        customer or agent step after step last_n, and no customer message waiting to be saved; "" with
-        no view given."""
+        customer or agent step after step last_n, and no customer message waiting to be saved (accepted
+        less than PENDING_HOLD seconds before at); "" with no view given."""
         if last_n is None:
             return "", ()
         return (" AND NOT EXISTS (SELECT 1 FROM steps s WHERE s.chat_id = chats.id AND s.role IN ('user', 'assistant') "
-                "AND s.n > ?) AND NOT " + PENDING_FOR.format(attempts=MAX_ATTEMPTS, customer="chats.customer_id"),
-                (last_n,))
+                "AND s.n > ?) AND NOT " + PENDING_FOR.format(since="?", attempts=MAX_ATTEMPTS, customer="chats.customer_id"),
+                (last_n, at - PENDING_HOLD))
 
     def mark_notice(self, chat_id, at=None, last_n=None):
         """Record that the quiet notice went (or was tried) in this chat. False when it already had one,
         or (with last_n, the tick's view) when the customer or agent spoke after it or a customer
         message waits to be saved."""
         at = self.clock() if at is None else at
-        still, args = self._still_quiet(last_n)
+        still, args = self._still_quiet(last_n, at)
         with self.db.tx() as c:
             cur = c.execute("UPDATE chats SET notice_at = ?, updated_at = ? WHERE id = ? AND notice_at IS NULL "
                             "AND closed_at IS NULL" + still, (at, at, chat_id, *args))
@@ -212,7 +225,7 @@ class Chats:
         """Close the chat, recorded as an event step. False when it was closed already, or (with last_n,
         the tick's view) when the customer or agent spoke after it or a customer message waits to be saved."""
         at = self.clock() if at is None else at
-        still, args = self._still_quiet(last_n)
+        still, args = self._still_quiet(last_n, at)
         with self.db.tx() as c:
             cur = c.execute("UPDATE chats SET closed_at = ?, updated_at = ? WHERE id = ? AND closed_at IS NULL" + still,
                             (at, at, chat_id, *args))

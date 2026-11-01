@@ -16,9 +16,11 @@ thread (channels/whatsapp.py), with a clock tests can set.
   and that night's Reflection reads the chat as lost. A chat with an order closes with no row.
 - The customer's next message starts a new chat on the same customer_id (kit/chats.py).
 - A paused agent (kit/switch.py) sends no notice and closes no chat.
-- A notice is never late: a chat found quiet LATE seconds or more past NOTICE_AFTER with no notice
-  yet (after a restart, an upgrade or a stop of the sweep thread) closes then, silently, with its
-  result as above. No customer gets a message about a chat that went quiet long ago.
+- A chat whose notice was already due when this process started (it went quiet before a restart or
+  an upgrade) closes at the first tick, silently, with its result as above: no customer gets a
+  message about a chat that went quiet long ago. A notice that falls due while the process runs
+  always goes out, however late the tick comes (a slow fast reflection sweep shares its thread),
+  and the chat closes CLOSE_AFTER after it (DECISIONS item 54, 2026-11-01).
 - The tick works from one view of the open chats, and a notice send can take seconds. So the
   notice and the close each hold to that view inside their own write (kit/chats.py mark_notice,
   close): a chat whose customer wrote meanwhile, or has a message accepted from the webhook and
@@ -37,7 +39,6 @@ log = logging.getLogger("sales.quiet")
 
 NOTICE_AFTER = 30 * 60  # quiet seconds before the notice
 CLOSE_AFTER = 30 * 60   # quiet seconds after the notice before the chat closes
-LATE = 5 * 60           # a notice due this long ago (ten 30 second ticks) is not sent: the chat closes silently
 CLOSED = "chat_closed"
 NOTICE = {
     "arabic": "المحادثة دي هتتقفل كمان 30 دقيقة. ابعتلي في أي وقت ونكمل.",
@@ -50,8 +51,10 @@ def notice_line(customer_text):
     return NOTICE[send_check.detect_script(customer_text or "") or "arabic"]
 
 
-def tick(*, chats, results, send, channel, now=None, limits=None, agent=PLUG.agent):
-    """One pass over the open chats on a channel. send(to, text) is the channel's send.
+def tick(*, chats, results, send, channel, now=None, limits=None, agent=PLUG.agent, started=None):
+    """One pass over the open chats on a channel. send(to, text) is the channel's send. started is
+    when this process started (channels/whatsapp.py App): a notice due before then is not sent and
+    the chat closes silently; None means every due notice goes out.
     Returns [(chat_id, "notice" or "closed")] for what it did."""
     now = chats.clock() if now is None else now
     if switch.is_paused(agent, db=chats.db):
@@ -61,12 +64,15 @@ def tick(*, chats, results, send, channel, now=None, limits=None, agent=PLUG.age
     for ch in chats.open_chats(channel):
         if ch["last"] is None or ch.get("waiting"):  # a message from the customer is on its way in
             continue
-        quiet = now - max(ch["last"], ch["notice_at"] or 0, resumed)
+        since = max(ch["last"], ch["notice_at"] or 0, resumed)
+        quiet = now - since
         if ch["notice_at"] is None:
-            if quiet >= NOTICE_AFTER + LATE:
-                if _close(ch, chats, results, now):
+            if quiet < NOTICE_AFTER:
+                continue
+            if started is not None and since + NOTICE_AFTER < started:  # due before this process started
+                if _close(ch, chats, results, now, quiet):
                     done.append((ch["id"], "closed"))
-            elif quiet >= NOTICE_AFTER and _notice(ch, chats, send, channel, limits, now):
+            elif _notice(ch, chats, send, channel, limits, now):
                 done.append((ch["id"], "notice"))
             continue
         came_back = ch["last_customer"] is not None and ch["last_customer"] > ch["notice_at"]
@@ -93,13 +99,14 @@ def _notice(ch, chats, send, channel, limits, now):
     return True
 
 
-def _close(ch, chats, results, now):
+def _close(ch, chats, results, now, quiet=NOTICE_AFTER + CLOSE_AFTER):
     """Close the chat if it is as the tick saw it, and give it chat_closed unless it holds an order,
-    all under one hold of the database lock (kit/db.py is one connection behind one lock)."""
+    all under one hold of the database lock (kit/db.py is one connection behind one lock). quiet is
+    the quiet seconds recorded: the real ones on a silent close, the notice and the close after it otherwise."""
     with chats.db.tx():
         if not chats.close(ch["id"], now, last_n=ch.get("last_n")):
             return False
         if not results.query(case=ch["id"], result=PLUG.decides.good):
             results.result(ch["id"], CLOSED, stage=ch["stage"], at=now,
-                           detail={"quiet_minutes": (NOTICE_AFTER + CLOSE_AFTER) // 60})
+                           detail={"quiet_minutes": int(quiet // 60)})
     return True

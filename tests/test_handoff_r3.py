@@ -124,7 +124,9 @@ class CountShapes(Base):
              # is or are after the count word (review handoff2 round 1, finding 5)
              ("Only 3 pairs are in stock.", EN), ("Only 3 pairs are still in stock.", EN),
              ("Only 2 pieces are available.", EN), ("Hurry, 2 pairs are in stock.", EN),
-             ("Only 2 pairs are now available.", EN)], "stock")
+             ("Only 2 pairs are now available.", EN),
+             # is after a count word (review handoff2 round 2, test gap)
+             ("1 pair is in stock.", EN), ("Only 1 piece is left in 43.", EN)], "stock")
 
     def test_remains_as_a_verb_is_not_a_count(self):
         self.assert_sent([("The Superfly 11 remains in our range.", EN), ("The Superfly 11 remains at the same price.", EN),

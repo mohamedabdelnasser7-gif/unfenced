@@ -4,7 +4,7 @@ Finding 1 and red team item 1: the tick works from one view of the open chats an
 seconds, so a chat whose customer wrote meanwhile is never closed; the customer's step and the chat it goes
 in are found in one transaction, so a close never lands between them; no chat ends with chat_closed beside
 replied or order_created. Finding 2: a message accepted from the webhook and still queued keeps its chat
-as it is. Finding 3: no notice goes out late, after a restart or an upgrade; a database made before the
+as it is. Finding 3: no notice goes out that was due before a restart or an upgrade; a database made before the
 quiet columns has its old chats closed silently. The clock is a fake one the test moves; no model call,
 no network."""
 import json
@@ -241,25 +241,20 @@ class Queued(Base):
 
 
 class NeverLate(Base):
-    """Finding 3."""
+    """Finding 3, as review round 2 finding 1 left it: only a notice already due when the process started
+    is never sent."""
 
-    def test_a_chat_found_long_quiet_closes_silently(self):
-        for gap in (quiet.NOTICE_AFTER + quiet.LATE, quiet.NOTICE_AFTER + quiet.CLOSE_AFTER, 3 * 3600, 3 * 86400):
+    def test_a_chat_found_long_quiet_after_a_restart_closes_silently(self):
+        for gap in (quiet.NOTICE_AFTER + 1, quiet.NOTICE_AFTER + quiet.CLOSE_AFTER, 3 * 3600, 3 * 86400):
             with self.subTest(gap=gap):
                 who = f"2010{gap:08d}"
                 chat_id = self.turn(who=who).chat_id
                 sent = len(self.out.sent)
-                self.later(gap)  # the process was down, or the sweep thread stopped
-                self.assertEqual(self.tick(), [(chat_id, "closed")])
+                self.later(gap)  # the process was down; it starts now
+                self.assertEqual(self.tick(started=self.now), [(chat_id, "closed")])
                 self.assertEqual(len(self.out.sent), sent)
                 self.assertIsNone(self.chats.get(chat_id)["notice_at"])
                 self.assertEqual(len(self.rows(chat_id, quiet.CLOSED)), 1)
-
-    def test_a_notice_a_little_late_still_goes(self):
-        chat_id = self.turn().chat_id
-        self.later(quiet.NOTICE_AFTER + quiet.LATE - 1)
-        self.assertEqual(self.tick(), [(chat_id, "notice")])
-        self.assertEqual(quiet.LATE, 5 * 60)
 
     def test_the_migration_bound_is_the_quiet_hour(self):
         self.assertEqual(chats_mod.OLD_AFTER, quiet.NOTICE_AFTER + quiet.CLOSE_AFTER)
@@ -292,11 +287,12 @@ class OldDatabase(unittest.TestCase):
         self.assertEqual(results.query(result=quiet.CLOSED), [])
         sent = []
         did = quiet.tick(chats=chats, results=results, send=lambda to, text: sent.append((to, text)),
-                         channel="whatsapp")
-        self.assertEqual(sorted((names[c], w) for c, w in did), [("31 minutes", "notice"), ("40 minutes", "closed")])
-        self.assertEqual([to for to, _ in sent], ["201000000005"])  # quiet 31 minutes: on time, one notice
+                         channel="whatsapp", started=T0)
+        # both were due their notice before the process started: closed silently, with their result
+        self.assertEqual(sorted((names[c], w) for c, w in did), [("31 minutes", "closed"), ("40 minutes", "closed")])
+        self.assertEqual(sent, [])
         Chats(self.db, clock=lambda: self.now)  # a restart: the columns are there, nothing more closes
-        self.assertEqual(self.db.conn.execute("SELECT COUNT(*) FROM chats WHERE closed_at IS NULL").fetchone()[0], 2)
+        self.assertEqual(self.db.conn.execute("SELECT COUNT(*) FROM chats WHERE closed_at IS NULL").fetchone()[0], 1)
 
 
 if __name__ == "__main__":

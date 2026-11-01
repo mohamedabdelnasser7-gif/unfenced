@@ -2538,7 +2538,8 @@ def _handler(morning, token, pages=None):
         def do_POST(self):
             if not self._allowed("Host") or not self._allowed("Origin", "http://"):
                 return self._send(403, "Refused: a change comes only from this page on 127.0.0.1 or localhost.\n")
-            act = (ACTIONS if pages is None else TWO_TAB_ACTIONS).get(urllib.parse.urlsplit(self.path).path)
+            table = ACTIONS if pages is None else {**TWO_TAB_ACTIONS, **getattr(pages, "actions", {})}  # + Quick start
+            act = table.get(urllib.parse.urlsplit(self.path).path)
             if act is None:
                 return self._send(404, "Not found.\n")
             try:
@@ -2661,8 +2662,10 @@ def _demo(folder, live=None):
     """Serve the sample days (sim/three_days.py): each day's folder copied to a throwaway folder,
     so an answer there never touches the sample files; no model call: a correction takes the sample's
     scripted exam (demo_pages).
-    live: the Morning on the real database, served on the Live tab with real answers."""
+    live: the Morning on the real database, served on the Live tab with real answers. The .env is read
+    so Quick start on New agent finds its model key; the sample days themselves call no model."""
     import tempfile
+    env.load()
     with tempfile.TemporaryDirectory(prefix="unfenced-demo-") as tmp:
         try:
             pages, dbs = demo_pages(folder, tmp, live=live)

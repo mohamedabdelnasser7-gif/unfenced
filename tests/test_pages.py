@@ -185,12 +185,11 @@ class TwoTabs(unittest.TestCase):
         self.assertIsNone(self.get("/agents/nobody"))
         self.assertIsNone(self.get("/elsewhere"))
 
-    def test_new_agent_routes_or_says_not_yet(self):
-        self.assertEqual(pages.route_ask("a sales agent for my boots store", self.m.plugs), "sales")
-        self.assertEqual(pages.route_ask("a personal assistant for my inbox", self.m.plugs), "assistant")
-        self.assertIsNone(pages.route_ask("a lawyer that drafts contracts", self.m.plugs))
-        self.assertIn("Not yet", self.get("/new", {"ask": ["a lawyer that drafts contracts"]}))
-        self.assertIn("/new/build?agent=sales", self.get("/new", {"ask": ["sell boots on WhatsApp"]}))
+    def test_new_agent_is_the_quick_start_box(self):
+        page = self.get("/new", {"ask": ["a lawyer that drafts contracts"]})  # any field; the chat is tests/test_quickstart.py
+        self.assertIn('action="/quickstart"', page)
+        self.assertNotIn("Not yet", page)
+        self.assertIn("Brainstorm", page)
         build = self.get("/new/build", {"agent": ["sales"]})
         self.assertIn("Practice matches", build)
         self.assertNotIn(">won", build.split("</style>")[1].lower())

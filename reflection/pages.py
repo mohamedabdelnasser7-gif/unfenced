@@ -12,7 +12,8 @@ Morning methods only, so no engine rule lives here.
                    back, the box for an idea or a correction (Morning.correct, a hotfix), then its
                    lessons and Reflection notes as rows.
     /agents/<name>/rollback  what Roll back would do, lesson by lesson, and its one button.
-    /new           New agent, Quick start B screen 1; ?ask= routes to a plug or says not yet.
+    /new           New agent, Quick start B screen 1: the Quick start chat (reflection/quickstart.py), its
+                   card, at most one question and the second message, the same box, Send and Build.
     /new/build     screen 2: the newest Arena run saved next to the database, as tiles and a path.
 
 A correction sent on an agent's page that is high risk waits for a yes on Today (Morning.correct); its
@@ -32,6 +33,7 @@ import urllib.parse
 
 from engine import lessons as lessons_mod
 from reflection import morning as mo
+from reflection import quickstart as qs_mod
 from reflection import snapshots
 from reflection.page_css import CSS
 
@@ -40,8 +42,6 @@ CSP = ("default-src 'none'; style-src 'sha256-" + base64.b64encode(hashlib.sha25
 h = mo.h
 NAMES = {"sales": "Sales agent", "assistant": "Personal assistant", "marketing": "Marketing agent"}
 CORRECTED = lessons_mod.HOTFIX_SOURCE  # the source line of a correction (Morning.correct, Lessons.correct)
-ASKS = (("sales", ("sales", "sell", "store", "shop", "order", "customer", "boots")),
-        ("assistant", ("assistant", "personal", "calendar", "inbox", "email", "remind", "schedule")))
 _AGENT = re.compile(r"^[a-z][a-z_]{0,30}$")
 ROLLBACK = "/rollback"  # /agents/<name>/rollback: the plan a rollback would carry out, and its one button
 _BACK = re.compile(r"^/(?:agents(?:/[a-z][a-z_]{0,30})?|new(?:/build)?)?$")
@@ -92,30 +92,26 @@ def icon(n, cls="i"):
     return f'<svg class="{cls}" viewBox="0 0 24 24" aria-hidden="true">{ICON[n]}</svg>'
 
 
-def route_ask(ask, plugs):
-    """The plug a Quick start ask goes to, or None for a kind of agent not built yet."""
-    words = set(re.findall(r"[a-z]+", (ask or "").lower()))
-    for agent, keys in ASKS:
-        if agent in plugs and words & set(keys):
-            return agent
-    return None
-
-
 class Pages:
     """The page for one Morning, or for demo days {1: Morning, 2: ..., 3: ...} (sample copies), with
     live: the Morning on the real database, a Live tab after the days (no Sample data label there)."""
 
     LIVE = "live"
 
-    def __init__(self, morning=None, *, days=None, at=None, live=None):
+    def __init__(self, morning=None, *, days=None, at=None, live=None, model=None):
         """at: {day: the time that day's page shows}, a sample's own clock; the real clock otherwise
-        and always on Live."""
+        and always on Live. model: Quick start's model (a fake in tests); None uses kit.model."""
         self.days = dict(days or {})
         self.at = dict(at or {})
         self.live = live if self.days else None  # with no sample days the page has no switch
         self.demo = bool(self.days)
         self.morning = morning if morning is not None else (self.days[min(self.days)] if self.days else None)
         self.csp = CSP
+        self.quick = qs_mod.QuickStart(model)
+        # the page's own answers, taken by the server next to morning.TWO_TAB_ACTIONS
+        self.actions = {"/quickstart": lambda m, f, now=None: self._quick(self.quick.say, m, now, mo._field(f, "text")),
+                        "/quickstart/build": lambda m, f, now=None: self._quick(self.quick.build, m, now),
+                        "/quickstart/clear": lambda m, f, now=None: self._quick(self.quick.clear, m, now)}
 
     def back(self, value):
         """Where an answer returns to: one of the page's own paths, with the demo day; else /."""
@@ -135,6 +131,13 @@ class Pages:
         if not self.demo:
             return None
         return self.at.get(self._day(urllib.parse.parse_qs(urllib.parse.urlsplit(back).query)))
+
+    @staticmethod
+    def _quick(step, m, now, *args):
+        try:
+            return step(m, *args, now=now)
+        except qs_mod.Refused as e:
+            raise mo.Refused(str(e)) from None
 
     def _m(self, day):
         return self.live if day == self.LIVE else self.days[day]
@@ -169,7 +172,7 @@ class Pages:
             body = rollback_page(m, path[8:-len(ROLLBACK)], ctx)
             return None if body is None else self.shell(body, "agents", ctx, flash)
         if path == "/new":
-            return self.shell(new_agent(m, (query.get("ask") or [""])[0], ctx), "agents", ctx, flash)
+            return self.shell(new_agent(m, self.quick, ctx), "agents", ctx, flash)
         if path == "/new/build":
             agent = (query.get("agent") or [""])[0]
             return self.shell(build(m, agent if agent in m.plugs else None, ctx), "agents", ctx, flash)
@@ -559,34 +562,74 @@ def rollback_page(m, agent, ctx):
 
 # ---- New agent (Quick start B) -----------------------------------------------------------------
 
-def new_agent(m, ask, ctx):
-    agent = route_ask(ask, m.plugs) if ask else None
-    q = ctx["q"]
-    day = f'<input type="hidden" name="day" value="{h(ctx["day"])}">' if ctx["day"] else ""
-    if ask and agent is None:
-        verdict = ('<p class="no-yet">Not yet. Quick start builds a sales agent or a personal assistant today. '
-                   'For any other kind of agent, Brainstorm is coming soon.</p>')
-    elif agent:
-        verdict = f'<p class="no-yet">It heard: {h(name(agent))}.</p>'
-    else:
-        verdict = ""
-    go = (f'<a class="yes" href="/new/build?agent={h(agent)}{"&day=" + str(ctx["day"]) if ctx["day"] else ""}">'
-          f'Start the build{icon("arrow")}</a>' if agent else
-          f'<button class="yes" type="submit">Start the build{icon("arrow")}</button>')
+def new_agent(m, quick, ctx):
+    """Screen 1, Quick start B: the light sage ask card holds the chat. The card, its one question and
+    the second message are the model's words, shown as written (DECISIONS items 58 and 38); the labels,
+    chips and buttons are the page's frame. The box sends the first ask, an answer or an edit, and the
+    model writes the whole card again; Build writes the plug folder (reflection/quickstart.py)."""
+    d = quick.draft(m)
+    turns, built = d["turns"], d["built"]
+    last = turns[-1] if turns else None
+    out = ['<article class="ask sq" aria-label="Quick start"><span class="lab">What agent do you want?</span>']
+    if last:
+        out.append('<div class="thread">' + "".join(f'<p class="said" dir="auto">{h(t["said"])}</p>' for t in turns)
+                   + "</div>")
+        out.append(plan_card(last["card"]))
+        if last["question"] and not built:
+            out.append(f'<p class="uq" dir="auto">{h(last["question"])}</p>')
+        if not built:
+            out.append(f'<p class="uf" dir="auto">{h(last["follow"])}</p>')
+    if built:
+        out.append(f'<p class="no-yet">Built. Its files are in agents/{h(built)}, ready for the Arena.</p>')
+    if not quick.ready():
+        out.append('<p class="no-yet">No model key is set, so Quick start cannot write the card yet. Put '
+                   'META_API_KEY or BASETEN_API_KEY in .env and start the page again.</p>')
+    elif quick.folder(m) is None:
+        out.append('<p class="no-yet">Quick start needs the database folder. Start the page with --db.</p>')
+    chat = bool(last) and not built
+    if ctx["token"]:
+        hint = "" if chat else ' placeholder="I want an agent that answers my store\'s customers on WhatsApp."'
+        label = "Your answer, or anything to add or change" if chat else "What agent do you want?"
+        out.append(f'<form id="qs-say" method="post" action="/quickstart">{_hidden(ctx)}<div class="field">'
+                   f'<textarea class="typed{" sm" if chat else ""}" name="text" rows="{2 if chat else 3}" '
+                   f'maxlength="{qs_mod.MAX_TEXT}" aria-label="{label}" dir="auto" required{hint}></textarea></div></form>')
+        if chat:
+            act = (f'<button class="mod" type="submit" form="qs-say">{icon("chat")}Send</button>'
+                   + _post(ctx, "quickstart/build", f'Build{icon("arrow")}', "yes")
+                   + _post(ctx, "quickstart/clear", "Start over", "over"))
+        else:
+            act = ('<p>It starts from zero and earns every lesson in the <b>Arena</b>.</p>'
+                   f'<button class="yes" type="submit" form="qs-say">Start the build{icon("arrow")}</button>')
+        out.append(f'<div class="act">{act}</div>')
+    out.append("</article>")
     return ('<div class="qs"><section class="top s1-top"><div><h1>New agent</h1><p>Say what you want it to do. It '
             'practises in the Arena before it meets a real customer.</p></div></section>'
             '<div class="mode" role="tablist" aria-label="How to build"><span class="on" role="tab" aria-selected="true">'
             'Quick start</span><span class="off" role="tab" aria-selected="false" aria-disabled="true">Brainstorm '
-            '<i>Soon</i></span></div><div class="s1"><article class="ask sq" aria-label="Quick start">'
-            f'<form method="get" action="/new">{day}<span class="lab">What agent do you want?</span><div class="field">'
-            f'<textarea class="typed" name="ask" rows="2" maxlength="300" aria-label="What agent do you want?" '
-            f'placeholder="I want a sales agent for my store on WhatsApp.">{h(ask)}</textarea></div>{verdict}'
-            '<div class="needs"><span class="lab">What it needs to know</span><div class="file"><span class="fi">'
-            f'{icon("note")}</span><div><b>Brand file</b><small>Voice, prices, sizes, delivery areas</small></div><span></span>'
-            '</div></div><div class="act"><p>It starts from zero and earns every lesson in the <b>Arena</b>.</p>'
-            f'{go}</div></form></article><aside class="side1"><section class="bs" aria-label="Brainstorm, coming soon">'
-            f'<div class="bs-h"><b>{icon("chat")}Brainstorm</b><span class="vchip">Coming soon</span></div><p>Talk the '
-            'idea through with the AI and agree on the plan first. Then the build starts.</p></section></aside></div></div>')
+            f'<i>Soon</i></span></div><div class="s1">{"".join(out)}<aside class="side1"><section class="bs" '
+            f'aria-label="Brainstorm, coming soon"><div class="bs-h"><b>{icon("chat")}Brainstorm</b><span class="vchip">'
+            'Coming soon</span></div><p>Talk the idea through with the AI and agree on the plan first. Then the build '
+            'starts.</p></section></aside></div></div>')
+
+
+def plan_card(card):
+    """The model's card as one plain white card, then what it needs, each marked connected or not yet."""
+    never = "".join(f'<li dir="auto">{h(x)}</li>' for x in card["never"])
+    rows = [("What it does", f'<p dir="auto">{h(card["does"])}</p>'), ("A good result", f'<p dir="auto">{h(card["good"])}</p>')]
+    if never:
+        rows.append(("It never", f"<ul>{never}</ul>"))
+    out = [f'<section class="plan" aria-label="The agent"><h3 dir="auto">{h(card["name"])}</h3><dl>'
+           + "".join(f"<div><dt>{t}</dt><dd>{v}</dd></div>" for t, v in rows) + "</dl></section>"]
+    if card["needs"]:
+        out.append('<div class="needs"><span class="lab">What it needs connected</span>')
+        for n in card["needs"]:
+            tool = qs_mod.TOOLS.get(n["tool"], "").split(":")[0]
+            said = f"Connected: {h(tool)}" if n["connected"] else "Not connected yet"
+            out.append(f'<div class="file{" on" if n["connected"] else ""}"><span class="fi">'
+                       f'{icon("check" if n["connected"] else "plus")}</span><div><b dir="auto">{h(n["what"])}</b>'
+                       f"<small>{said}</small></div><span></span></div>")
+        out.append("</div>")
+    return "".join(out)
 
 
 CLIMB = ('<svg class="climb" viewBox="0 0 400 130" role="img" aria-label="On its way to its trust level">'

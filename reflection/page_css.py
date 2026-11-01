@@ -451,4 +451,32 @@ textarea.typed{width:100%; border:0; background:transparent; resize:none; outlin
   .bar .days a{padding:4px 7px}
 }
 
+/* Quick start chat on screen 1 (reflection/quickstart.py): the user's lines, the model's card, its one
+   question and its second message, inside the light sage ask card */
+.qs .thread{display:flex; flex-direction:column; align-items:flex-end; gap:6px; margin-top:12px}
+.qs .said{max-width:86%; margin:0; padding:8px 12px; border-radius:16px; border-bottom-right-radius:6px; background:#e3e9e6; font:400 14px/20px var(--font); white-space:pre-line; overflow-wrap:anywhere}
+.qs .plan{margin-top:12px; padding:18px 20px 8px; border-radius:var(--r-inner); background:#fff; box-shadow:var(--shadow-soft)}
+.qs .plan h3{margin:0; font:500 21px/28px var(--font); letter-spacing:-.012em; overflow-wrap:anywhere}
+.qs .plan dl{margin:8px 0 0}
+.qs .plan dl>div{padding:10px 0; border-top:1px solid var(--line)}
+.qs .plan dt{font:500 12px/16px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--ink-2)}
+.qs .plan dd{margin:4px 0 0; font:400 15px/22px var(--font); overflow-wrap:anywhere}
+.qs .plan dd p{margin:0}
+.qs .plan ul{margin:0; padding-left:18px}
+.qs .file.on .fi{background:var(--sage); color:#fff}
+.qs .file b{white-space:normal}
+.qs .uq{margin:16px 2px 0; font:500 18px/25px var(--font); letter-spacing:-.01em; overflow-wrap:anywhere}
+.qs .uf{margin:8px 2px 0; font:400 15px/22px var(--font); color:#2f3433; overflow-wrap:anywhere}
+.qs textarea.typed.sm{font-size:18px; line-height:26px}
+.qs .act .mod{flex:none}
+.qs .over{height:44px; padding:0 14px; border-radius:22px; font:500 14px/44px var(--font); color:var(--ink-2)}
+.qs .over:hover{color:var(--ink); background:rgba(255,255,255,.5)}
+@media (min-width: 1024px){
+  .qs .plan{padding:22px 26px 10px}
+  .qs .plan h3{font-size:24px; line-height:30px}
+  .qs .plan dd{font-size:16px; line-height:24px}
+  .qs .uq{font-size:20px; line-height:28px}
+  .qs textarea.typed.sm{font-size:20px; line-height:28px}
+}
+
 """

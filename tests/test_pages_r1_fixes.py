@@ -312,3 +312,26 @@ class TwoTabServer(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LiveJudge(unittest.TestCase):
+    """The live page rates a correction with the live agent's judge, not the never-sure stub, so a low
+    risk correction that passes its exam starts at once (DECISIONS 56)."""
+
+    def test_the_live_page_uses_the_real_judge(self):
+        import tempfile
+        from pathlib import Path
+        from kit.db import Db
+        from reflection import morning as mo
+        from reflection.judge import Judge
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "live.db"
+            db = Db(str(path))
+            try:
+                live = mo.live_morning(db, str(path), mo.repo_plugs(), Path(d) / "assistant")
+                self.assertTrue(live.lessons)
+                for lessons in live.lessons.values():
+                    self.assertIsInstance(lessons.judge, Judge)
+            finally:
+                db.close()
+

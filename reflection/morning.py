@@ -2652,8 +2652,9 @@ def live_morning(db, db_path, plugs, modes_state):
         from reflection.lessons import Lessons as SalesLessons
         SalesLessons(db)
     other = Path(db_path).resolve() != DEFAULT_PATH.resolve()
+    from reflection.judge import Judge  # the live agent's judge (channels/whatsapp.py main); it reads no key until asked
     return Morning(db, plugs, reports=Path(db_path).resolve().parent, db_file=db_path if other else None,
-                   modes_state=modes_state)
+                   modes_state=modes_state, judge=Judge())
 
 
 def _demo(folder, live=None):

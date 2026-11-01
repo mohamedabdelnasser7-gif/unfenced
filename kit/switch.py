@@ -7,8 +7,9 @@ time it was paused.
 
 pause, resume and is_paused are plain functions a page can call (Pull and Resume on the agent page,
 reflection/pages.py); by names who flipped it. The switch lives in the agent_switch table, one row per
-agent; an agent with no row runs. HONOURED: the agents whose code reads the switch, so a page offers
-Pull only for them.
+agent; an agent with no row runs. HONOURED: the repo agents whose code reads the switch. Every agent
+Quick start builds reads it too (kit/turn.py turn), so honoured(agent, built) says yes for those as well,
+and a page offers Pull only for an agent it says yes to.
 """
 import time
 
@@ -23,7 +24,13 @@ CREATE TABLE IF NOT EXISTS agent_switch (
 );
 """
 AGENT = "sales"
-HONOURED = (AGENT,)  # sales/loop.py and sales/quiet.py read the switch; no other agent does yet
+HONOURED = (AGENT,)  # sales/loop.py and sales/quiet.py read the switch
+
+
+def honoured(agent, built=()):
+    """Does the agent's code read the switch? A repo agent in HONOURED, or an agent Quick start built
+    (built: their names), whose every turn goes through kit/turn.py."""
+    return agent in HONOURED or agent in built
 
 
 def _db(db):

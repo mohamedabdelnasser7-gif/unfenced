@@ -189,13 +189,22 @@ def _brought_back(rep, lessons):
     return out
 
 
-def other_plugs(plug, root=ROOT):
-    """Every other agent's plug in the repo: <folder>/plug.json, one per agent."""
-    out = []
+def other_plugs(plug, root=ROOT, db=None):
+    """Every other agent's plug: the repo's (<folder>/plug.json), then each agent Quick start built
+    next to the database (db, its path: <db folder>/agents/<name>/, kit/turn.py built), one per agent;
+    a built agent named like one already read is left out."""
+    out, seen = [], {plug.agent}
     for path in sorted(Path(root).glob("*/plug.json")):
         other = plug_mod.load(path)
-        if other.agent != plug.agent:
+        if other.agent not in seen:
             out.append(other)
+            seen.add(other.agent)
+    if db is not None and str(db) != ":memory:":
+        from kit import turn as turn_mod
+        for agent in turn_mod.built(Path(db).resolve().parent):
+            if agent.name not in seen:
+                out.append(agent.plug)
+                seen.add(agent.name)
     return out
 
 
@@ -564,7 +573,7 @@ def main(argv=None, *, until=None):
     db = Db(args.db)
     try:
         rep = night(db, plug, days=args.days, until=until, ideas=parts.Ideas(), exam=sales_exam(plug, args.db),
-                    spotter=parts.Spotter(), note_writer=parts.NoteWriter())
+                    spotter=parts.Spotter(), note_writer=parts.NoteWriter(), others=other_plugs(plug, db=args.db))
     except Refused as e:
         print(f"Not run: {e}.", file=sys.stderr)
         return 2

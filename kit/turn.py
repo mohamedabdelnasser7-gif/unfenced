@@ -30,6 +30,12 @@ what any agent has:
    nothing goes out and the turn ends "no_safe_reply", as sales/loop.py does. No chat goes to a
    person (DECISIONS items 53 and 57): there is no hand off to fall back on.
 5. A model that does not answer ends the turn "model_error" with nothing sent.
+6. The pause switch (kit/switch.py, DECISIONS item 54): while the agent is paused the message is still
+   saved, so the chat is whole when it resumes, and the turn ends "paused" with nothing sent and no
+   model call, as sales/loop.py does for the Sales agent.
+
+built(db_folder) reads every agent folder under <db folder>/agents/ that loads; the night and the
+Morning page take these agents beside the repo's own (reflection/night.py other_plugs).
 
 send(to, text) is the only way out. The Arena passes a list's append, so a practice turn never
 messages anyone; the tools run on the demo store with no Shopify keys (arena/match.py demo_store)
@@ -42,7 +48,7 @@ from pathlib import Path
 
 from engine import plug as plug_mod
 from engine.lessons import slot
-from kit import send_check, tools
+from kit import send_check, switch, tools
 from kit.model import ModelError
 from kit.tools import draft_order, store
 from sales import loop
@@ -51,6 +57,9 @@ from sales.stages import Stage
 log = logging.getLogger("kit.turn")
 
 FILES = ("plug.json", "instructions.md", "card.json")
+AGENTS = "agents"  # <db folder>/agents/<name>/: where Quick start's Build writes an agent (reflection/quickstart.py)
+PAUSED = "paused"
+MAX_AGENTS = 50  # agent folders built() reads at most
 CARD_KEYS = ("name", "does", "good", "never", "needs")
 BUILT_KEYS = ("agent", "tools", "level", "at")  # what Quick start's Build adds to the card (reflection/quickstart.py)
 MAX_FILE_BYTES = {"plug.json": 200_000, "instructions.md": 40_000, "card.json": 20_000}
@@ -193,9 +202,30 @@ def load(folder):
                  missing=missing, stage=stage, full_check=talks)
 
 
+def built(db_folder, most=MAX_AGENTS):
+    """Every agent under <db_folder>/agents/ that loads, sorted by name: [Agent]. A folder that is a
+    link, hidden (a Build still writing) or does not load is left out. None of them when agents/ is
+    missing or a link."""
+    base = Path(db_folder) / AGENTS
+    if base.is_symlink() or not base.is_dir():
+        return []
+    out = []
+    for folder in sorted(base.iterdir()):
+        if len(out) >= most:
+            break
+        if folder.name.startswith(".") or folder.is_symlink() or not folder.is_dir() \
+                or not plug_mod.AGENT_NAME.fullmatch(folder.name):
+            continue
+        try:
+            out.append(load(folder))
+        except Refused as e:
+            log.warning("agent folder %s left out: %s", folder.name, e)
+    return out
+
+
 @dataclass
 class TurnResult:
-    outcome: str                  # replied, no_safe_reply or model_error
+    outcome: str                  # replied, no_safe_reply, model_error or paused
     reply: str | None = None
     failed: list = field(default_factory=list)  # [{check, why}] when the turn ended on failed checks
 
@@ -224,6 +254,8 @@ def turn(agent, text, *, chats, chat_id, model, send, customer_id, lessons=(), m
     msg = message or Message(channel="whatsapp", customer_id=customer_id, text=text)
     history = chats.messages(chat_id)
     chats.add_step(chat_id, "user", content=text or None)
+    if switch.is_paused(agent.name, db=chats.db):  # saved above; nothing goes out while paused
+        return TurnResult(PAUSED)
     ctx = tools.Context(chat_id=chat_id, stage=agent.stage, chats=chats, model=model, message=msg, send=send,
                         stages={agent.stage.name: agent.stage})
     amounts, vocab, sizes, names = set(), frozenset(), frozenset(), frozenset()

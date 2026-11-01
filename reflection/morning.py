@@ -564,11 +564,14 @@ class Morning:
     answer is one transaction: an answer that fails part way leaves nothing changed."""
 
     def __init__(self, db, plugs, *, reports=None, by=BY, judge=risk_mod.no_judge, db_file=None, exams=None,
-                 modes_state=None):
+                 modes_state=None, built=()):
         """exams: {agent: examiner(text, stages) -> engine.exam.Result}, the exam a person's idea takes
         (idea_exam); kept off the page's Lessons, so no exam ever runs inside an answer's transaction.
-        modes_state: the assistant's folder a mode card's answer goes to (assistant/newmode.py)."""
+        modes_state: the assistant's folder a mode card's answer goes to (assistant/newmode.py).
+        built: the names of the plugs that are agents Quick start built (kit/turn.py built), whose
+        turns read the pause switch."""
         self.db = db
+        self.built = frozenset(built or ())
         self.modes_state = None if modes_state is None else Path(modes_state)
         self.exams = dict(exams or {})
         self.page = _OneTx(db)
@@ -669,8 +672,9 @@ class Morning:
         return switch_mod.is_paused(agent, db=self.db)
 
     def pausable(self, agent):
-        """Does Pull stop this agent? It has a plug here and its code reads the switch (switch.HONOURED)."""
-        return agent in self.lessons and agent in switch_mod.HONOURED
+        """Does Pull stop this agent? It has a plug here and its code reads the switch (switch.honoured:
+        a repo agent in HONOURED, or an agent Quick start built, which runs through kit/turn.py)."""
+        return agent in self.lessons and switch_mod.honoured(agent, self.built)
 
     def pause(self, agent, now=None):
         """Pull on an agent's page: the real pause switch (DECISIONS 54, kit/switch.py), signed by the
@@ -2637,7 +2641,7 @@ def main(argv=None):
             print(f"written: {write_html(morning, args.html)}")
             return 0
         env.load()
-        morning.exams = page_exams(plugs, morning, db_path)  # after env.load(): the model reads its key
+        morning.exams = page_exams(list(morning.plugs.values()), morning, db_path)  # after env.load(): the model reads its key
         if args.demo_days:
             return _demo(args.demo_days, live=morning)
         try:
@@ -2666,8 +2670,20 @@ def live_morning(db, db_path, plugs, modes_state):
         SalesLessons(db)
     other = Path(db_path).resolve() != DEFAULT_PATH.resolve()
     from reflection.judge import Judge  # the live agent's judge (channels/whatsapp.py main); it reads no key until asked
+    plugs, built = with_built(plugs, db_path)
     return Morning(db, plugs, reports=Path(db_path).resolve().parent, db_file=db_path if other else None,
-                   modes_state=modes_state, judge=Judge())
+                   modes_state=modes_state, judge=Judge(), built=built)
+
+
+def with_built(plugs, db_path):
+    """(plugs, built names): the repo's plugs, then the plug of each agent Quick start built next to
+    the database (kit/turn.py built, <db folder>/agents/<name>/), so its lessons, its corrections and
+    its pause switch are on the page like a repo agent's. A built agent named like a repo agent is left out."""
+    from kit import turn as turn_mod
+    plugs = list(plugs)
+    have = {p.agent for p in plugs}
+    built = [a for a in turn_mod.built(Path(db_path).resolve().parent) if a.name not in have]
+    return plugs + [a.plug for a in built], [a.name for a in built]
 
 
 def _demo(folder, live=None):

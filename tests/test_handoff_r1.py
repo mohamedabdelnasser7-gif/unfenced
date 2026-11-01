@@ -210,7 +210,8 @@ class EnglishRepliesReadLeniently(Base):
                 self.assertNotIn("script", problems(reply, names=names))
                 self.assertIn("not Franco", problems(reply).get("script", ""))
 
-    def test_a_common_word_counts_once_when_lenient(self):
+    def test_w_slash_reads_as_with_when_lenient(self):
+        """A common word now counts each time (round 2, red team item 4); "w/" is the English "with"."""
         self.assertTrue(send_check.looks_franco("Boots w/ a box, bags w/ a tag."))
         self.assertFalse(send_check.looks_franco("Boots w/ a box, bags w/ a tag.", lenient=True))
 

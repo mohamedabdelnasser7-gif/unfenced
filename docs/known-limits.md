@@ -10,6 +10,17 @@ The fact check and the hotfix note check read text our own agent writes. They ca
 
 Next: every amount in a sentence that names a boot must be that boot's price, an add-on's price or a sum of them. No word lists.
 
+## Send check numbers and script (kit/send_check.py)
+The send check is the last gate before a reply reaches the customer. Shapes it still lets through, found in the round 2 review and red team:
+- A price in k with no store word right before it: "The Elite runs 17k." and "It comes to 17k." The k rule refuses k next to a currency or a price word, and "1.5k" alone passes ("Hoodie 1.5k"); a k right after a product or tier word ("Elite 17.5k") is refused.
+- A model number then a comma and a full blank, or a line break, reads as a list: "Vapor 17, 400 EGP" reads 17 and 400, so a store amount after it passes.
+- "Only Superfly 11 in stock." and "Only Vapor 17 available." pass, because "available" and "in stock" after a model number name the boot.
+- حبات (pieces) is not read as a count word.
+- Franco built only on shop words (tawsil, fel, youm), a doubled digit word ("ba22a") or "el" beside a title word reads as English.
+- A few true lines are refused, for example "The Superfly 11 is left-footed friendly." reads as a count.
+
+Next: read every number the customer sees as one number, whatever sits between the digits, and every count as a count, with no word lists.
+
 ## Hotfix note names (engine/fast.py)
 - A customer who gives a full name ("Ahmed Hassan") can still have the first name open a note.
 - A name the note writes in small letters, in mixed case or in Arabic is not checked against the customer's words.

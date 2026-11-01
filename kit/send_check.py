@@ -37,16 +37,19 @@ Rules (from the store rules, the 27 Oct morning review and Mohamed's calls on 28
    word ("Phantom 6", "Vapor 17") is a model, not an amount or a stock count, so "Here is the Nike
    Phantom 6" passes (names, the store's product titles). A title word that is a price, cue, tier,
    place, size, address, unit, year, count or number word ("Total 90", "Pack of 3") is never a
-   title word here. A price, currency or count after it still counts: "Vapor 17,500", "Vapor 17 ,400"
-   (blanks, or blanks then a separator, between digit groups are joined, so it reads 17400), "Vapor
-   17 EGP", "Vapor 17k" and "Only Vapor 17 pairs left" are refused; "Phantom 6 available" and
-   "Superfly 11 in stock" stay a model.
+   title word here. The number is dropped only where the reply plainly moves on (a blank then a
+   word, an end mark then a blank, the line end). A price, currency or count after it still counts:
+   "Vapor 17,500" and "Vapor 17 ,400" (blanks, a separator, a sign that looks like one, such as a low 9
+   quote, or a narrow blank between digit groups are joined, so it reads 17400), "Vapor 17 EGP", "Vapor 17k",
+   "Elite 17.5k" and "Only Vapor 17 are left" are refused; "Phantom 6 available" and "Superfly 11 in
+   stock" stay a model.
    Moved here from arena/factcheck.py, its one home now.
 8. Franco in an English reply (2026-11-01): an English reply is read leniently. Words that look like
    Franco but are not passed over: a title word with a digit ("F50"), title words in a run of two or
-   more as the title has them ("El Ultimo Tango"), digits glued to a unit ("9am", "24h") or a size
-   code ("EU42"), and one run of digits inside a word ("VAP17"); a common Franco word counts once
-   however often it comes. The customer's line is read as written; when only those words make it
+   more as the title has them ("El Ultimo Tango"), digits glued to a unit ("24h"), a clock time next
+   to a time word ("at 9am"), a size code ("EU42"), and one run of digits inside a word ("VAP17"). A
+   common Franco word counts each time it comes, and the Franco currency and mawgood words are common
+   Franco words. The customer's line is read as written; when only those words make it
    read as Franco ("Do you have the F50?"), the reply may be English or Franco, Arabic letters refused.
 """
 import functools
@@ -80,6 +83,22 @@ LOOKALIKES = str.maketrans(
     | {chr(c): " " for c in (0x115F, 0x1160, 0x3164, 0xFFA0, 0x2800)}
     | {chr(c): None for c in (0x034F, 0x17B4, 0x17B5, 0x180B, 0x180C, 0x180D, 0x180F,
                               *range(0xFE00, 0xFE10), *range(0xE0100, 0xE01F0))})
+# Signs that show as a comma, a dot or an apostrophe read as them in a number (low 9 quote, fullwidth,
+# small and ideographic commas, one dot leader, middle dot, quote marks, primes and modifier letters), so
+# "17" then one of them then "400" reads 17,400 like the plain sign (red team handoff round 2, item 1).
+# Kept apart from LOOKALIKES, which arena/clean.py also reads for names.
+NUMBER_LOOKALIKES = {
+    **LOOKALIKES,
+    **{c: "," for c in (0x201A, 0xFF0C, 0xFE50, 0xFE51, 0x3001, 0x060D)},
+    **{c: "." for c in (0x2024, 0xFF0E, 0xFE52, 0x00B7, 0x2027)},
+    **{c: "'" for c in (0x2018, 0x201B, 0x2032, 0x2035, 0x02B9, 0x02BB, 0x02BC, 0x02BD, 0x00B4, 0xFF07,
+                        0x275B, 0x275C)}}
+# A modifier letter (Unicode Lm: the modifier vertical line U+02C8, the half rings, the Arabic tatweel and the
+# rest) between a digit and a group of 3 shows as a mark inside one number, so it reads as an apostrophe
+# there and the groups join: "6", U+02C8, "400" reads 6400.
+MODIFIER_IN_NUMBER = re.compile(
+    r"(?<=\d)[" + "".join(chr(c) for c in range(0x80, 0x10000) if unicodedata.category(chr(c)) == "Lm")
+    + r"](?=\d{3}(?!\d))")
 # WhatsApp emphasis marks (_italic_, *bold*, ~strike~, `mono`). WhatsApp shows _500_ as 500.
 EMPHASIS = re.compile(r"[_*~`]")
 
@@ -91,12 +110,23 @@ FRANCO_WORDS = {
     "msh", "mesh", "mish", "ya", "el", "w", "wala", "aywa", "la2", "lw", "leh",
     "tamam", "khalas", "awi", "awy", "ba2a", "kman", "kaman", "delwa2ty", "dlw2ty", "bta3", "beta3",
     "3ayez", "3ayz", "3andena", "3ndena", "fein", "fen", "emta", "amta", "eih", "agib", "yom",
+    # The Franco currency spellings (CURRENCY) and mawgood forms, so a Franco reply never reads as English
+    # (review handoff round 2, minor 3).
+    "geneh", "genih", "gneh", "gnih", "ginih", "gnyh", "gineh", "gineeh", "geneeh", "ginee",
+    "mawgood", "mawgooda", "mawgoda", "mawgod", "mawgoud", "mawgouda", "mawgodin", "mawgodeen", "mawgoodin",
+    "mawgoodeen", "mwgood", "mwgod",
 }
 # Shapes that look like a Franco digit word but are not, passed over when a reply is read leniently
 # (looks_franco): one run of 2 or more digits inside a word (VAP17, EU42, 500egp, 48h), digits then a
-# unit (9am, 2x, 3kg), a size or version code then a digit (uk8, x2).
+# unit (2x, 3kg), a size or version code then a digit (uk8, x2). A clock time (9am, 3pm) is passed over
+# only next to a time word ("at 9am", "9am to 5pm"): "ya 3am" is Franco (red team handoff round 2, item 4).
 NOT_FRANCO_SHAPE = re.compile(
-    r"[a-z]*\d{2,}[a-z]*|\d{1,2}(?:am|pm|h|hrs?|x|k|g|kg|cm|mm|ml|km|mins?|days?|egp)|(?:uk|us|eu|x|v|gen|size)\d")
+    r"[a-z]*\d{2,}[a-z]*|\d{1,2}(?:h|hrs?|x|k|g|kg|cm|mm|ml|km|mins?|days?|egp)|(?:uk|us|eu|x|v|gen|size)\d")
+CLOCK_TIME = re.compile(r"\d{1,2}(?:am|pm)")
+TIME_WORDS = frozenset({"at", "by", "before", "after", "from", "to", "until", "till", "around", "between", "and",
+                        "or", "open", "opens", "close", "closes", "start", "starts", "daily", "today", "tomorrow"})
+# "w/" is the English short form of "with" ("Boots w/ a box"), not the Franco "w" (and).
+WITH_SHORT = re.compile(r"(?<![\w/])w/(?=\s)")
 
 BANNED = [
     (re.compile(r"(?:ال|لل|بال)جوز"), "Never write الجوز. Say the price plainly, the number then جنيه."),
@@ -138,6 +168,12 @@ DECIMAL_COMMA = re.compile(r"\d+,\d{1,2}")
 # after the blanks, or an apostrophe alone, joins too: "17 ,400", "6" then a blank, an Arabic comma and "400", and "17'400" read as one number, the
 # number the customer sees (red team handoff round 1, item 1). A separator then a blank ("60, 400") is a list.
 THOUSANDS_GAP = r"(?:[^\S\n]+[.,\u060c'\u2019]?|['\u2019])"
+# A narrow blank (thin, hair, six per em, narrow no break) next to a separator shows as nothing, so
+# "17," then a hair space then "400" reads 17,400; it is taken out before the groups are joined (red
+# team handoff round 2, item 1). A full width blank after the separator stays a list ("60, 400").
+NARROW_BLANKS = "[\u2009\u200a\u2006\u202f]+"
+NARROW_BLANK = re.compile(r"(?<=[.,\u060c'\u2019])" + NARROW_BLANKS + r"(?=\d{3}(?!\d))"
+                          r"|(?<=\d)" + NARROW_BLANKS + r"(?=[.,\u060c'\u2019]" + NARROW_BLANKS + r"?\d{3}(?!\d))")
 SPACED_THOUSANDS = re.compile(r"(?<![\d.,])[1-9]\d{0,2}(?:" + THOUSANDS_GAP + r"\d{3})+(?!\d)")
 MAX_INT_DIGITS = 20
 NUMBER = rf"({DIGITS})"
@@ -301,8 +337,8 @@ PHONE_GROUPS = ([7], [8], [4, 4], [3, 4])
 HUNDREDS = (r"(?:تلت|تلات|ثلاث|ربع|اربع|أربع|خمس|ست|سبع|تمن|تمان|ثمان|تسع)(?:مية|ميه|مائة|مئة)|ميتين|متين|مائتين|مئتين"
             r"|(?:tolt|tult|talat|rob3|rub3|arba3|khoms|khams|5oms|5ams|sot|set|sett|sob3|sab3|tomn|tamn|tos3|tes3"
             r"|tis3)(?:o|u|e|a)?\s?(?:meyya|meya|mya|miya|mia)")
-MAGNITUDE_WORDS = (rf"(?:{HUNDREDS}|hundreds?|thousands?|alfein|alfeen|alf|meyya|meya|mya|miya|meteen|metein|mitein"
-                   r"|miteen|mit|ميتين|مية|ميه|مائة|مئة|ميت|ألفين|الفين|ألف|الف|آلاف|الاف|تلاف)")
+MAGNITUDE_WORDS = (rf"(?:{HUNDREDS}|hundreds?|thousands?|alfein|alfeen|alf|talaf|tlaf|meyya|meya|mya|miya|meteen|metein|mitein"
+                   r"|miteen|mit|ميتين|مية|ميه|مائة|مئة|ميت|ألفين|الفين|ألف|الف|آلاف|الاف|ألاف|تلاف)")
 NUMBER_WORDS = (rf"(?:{MAGNITUDE_WORDS}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen"
                 r"|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|nos|tolt|rob3|واحد|اتنين|اثنين|تلاتة|ثلاثة"
                 r"|اربعة|أربعة|خمسة|ستة|سبعة|تمانية|ثمانية|تسعة|عشرة|عشرين|تلاتين|ثلاثين|اربعين|أربعين|خمسين"
@@ -322,8 +358,10 @@ NOT_AN_AMOUNT_AFTER = re.compile(
     r"|salama|shokr|mabrou?k|marr?a)" + NO_LETTER_AFTER, re.IGNORECASE)
 ONE = re.compile(r"one|واحد", re.IGNORECASE)
 # Digits with k or thousand after them (1k, 1.5 ألف) next to a currency or price word cannot be
-# checked either. With the Arabic or Franco word for thousand they are refused anywhere.
-THOUSANDS_WORDS = r"(?:alf|ألف|الف|آلاف|الاف)"
+# checked either. With the Arabic or Franco word for thousand they are refused anywhere: ألاف is a common
+# spelling of آلاف, and تلاف and talaf are thousands after 3 to 10 ("6 تلاف" is 6,000), red team handoff
+# round 2, item 2.
+THOUSANDS_WORDS = r"(?:alf|ألف|الف|آلاف|الاف|ألاف|تلاف|talaf|tlaf)"
 THOUSANDS = rf"(?:k|thousands?|{THOUSANDS_WORDS})"
 SHORT_AMOUNT = re.compile(
     rf"{NUMBER}\s*{THOUSANDS}{NO_LETTER_AFTER}\s*{CURRENCY}(?![\w])"
@@ -335,15 +373,28 @@ SHORT_AMOUNT = re.compile(
 
 # A count word after a model number keeps it a count: "Only Vapor 17 pairs left", "Phantom 6 فاضلين".
 # "available" and "in stock" are left out: "Phantom 6 available in 42" names the boot (red team handoff
-# round 1, item 2).
-COUNT_AFTER = (r"[^\S\n]*(?:(?:بس|bs)[^\S\n]*)?(?:pairs?|pieces?|pcs|items?|units?|more|left|remaining|قطعة|قطعه"
-               r"|قطع|حتة|حته|حتت|7etta|7etat|فاضلين|فاضلة|فاضله|فاضل|باقيين|باقي|باقى|متبقيين|متبقي|متبقى|متاحين"
-               r"|موجودين|fadlin|fadleen|fadel|fadl|ba2yin|ba2y|ba2i|mawgodin|mwgodin)" + NO_LETTER_AFTER)
-# A model number ends where no digit follows, glued, after a separator or after blanks ("Vapor 17 ,400"
-# and "Vapor 17  400" are amounts), and no currency, thousands word or count word: "Vapor 17 EGP" and
-# "Vapor 17k" are amounts (red team round 2, R2-7; handoff round 1, items 1 and 2)
-MODEL_NUMBER_END = (rf"(?!\d|[.,\u060c'\u2019]\d|[^\S\n]+[.,\u060c'\u2019]?\d|\s*(?:{CURRENCY}|{THOUSANDS}){NO_LETTER_AFTER}"
-                    rf"|{COUNT_AFTER})")
+# round 1, item 2). The words are stems, so every ending counts (fadla, ba2yeen, باقيه, متبقية, remains),
+# and up to two bridge words may come first ("Vapor 17 are left", "Phantom 6 لسه فاضلين"), red team
+# handoff round 2, item 3. "more" stays a whole word: "the Phantom 6 is more than" names the boot.
+COUNT_BRIDGE = r"(?:بس|bs|لسه|لسة|lesa|lessa|still|now|only|are|is)"
+# "remain" and "remains" count at a clause end or before in, at, for, now, today or only ("Only 3 remain in
+# 43"); before any other word they are the verb: "The Vapor 17 remains our best seller".
+REMAIN = (r"(?:remaining|remains?(?![^\S\n]+(?!(?:in|at|for|now|today|only)" + NO_LETTER_AFTER
+          + r")[^\W\d_]))")
+COUNT_STEMS = (rf"(?:pairs?|pieces?|pcs|pc|items?|units?|left|{REMAIN}|قطعة|قطعه|قطع|حتة|حته|حتت|7etta|7etat|جوز|goz"
+               r"|فاضل|باقي|باقى|متبقي|متبقى|متاحين|موجودين|fadl|fadel|ba2y|ba2i|mawgod|mwgod)")
+COUNT_AFTER = rf"[^\S\n]*(?:{COUNT_BRIDGE}[^\S\n]+){{0,2}}{COUNT_STEMS}|[^\S\n]*more{NO_LETTER_AFTER}"
+# A model number ends only where the reply plainly moves on (an allow list, review handoff round 2,
+# finding 1; red team handoff round 2, item 1): blanks then a letter, an opening bracket or a quote not
+# followed by a digit, or blanks then one of - / & + and a blank; one or more end marks (. , ، ; : ! ? ؟
+# closing brackets and quotes) then a blank, a line end or the end; an apostrophe then a letter ("Vapor
+# 17's"); the line end or the end. Anything else after it keeps the number (a digit, a separator then a
+# digit, a sign that looks like one, "Phantom 6 (400"), and so do a currency, a thousands word and a count
+# word: "Vapor 17 ,400", "Vapor 17" then a middle dot then "400", "Vapor 17 EGP", "Vapor 17k" and "Vapor
+# 17 pairs left" all keep it. "Phantom 6. 16,500" and "Phantom 6, 400 EGP" still strip.
+MODEL_NUMBER_MOVES_ON = (r"(?=[^\S\n]+(?:[^\W\d_](?!\d)|[(\[{\"\u201c\u2018\u00ab'\u2019](?!\d)|[-/&+][^\S\n])"
+                         r"|[.,\u060c;:!?\u061f)\]}\"\u201d\u2019'\u00bb]+(?:\s|$)|['\u2019][^\W\d_]|[^\S\n]*(?:\n|$))")
+MODEL_NUMBER_END = rf"(?!\s*(?:{CURRENCY}|{THOUSANDS}){NO_LETTER_AFTER}|{COUNT_AFTER}){MODEL_NUMBER_MOVES_ON}"
 MODEL_DIGITS = 2   # "Pro 500" in a title is a tier and a measure, never a model number
 TIER_WORDS = r"(?:elite|pro|academy|league|club|match|competition|premium|standard|basic|plus|max)"
 # Small words a pack or a count title puts before a number ("Grip Tape Pack of 3").
@@ -411,6 +462,27 @@ def model_thousands(text, titles):
     return any(lead in low and rx.search(text) for lead, rx in _model_thousands_res(_titles_key(titles)))
 
 
+# Tier words a reply puts before a price ("Elite 17.5k, Academy 7.5k"); they are kept out of the title words.
+STORE_TIERS = ("elite", "academy", "pro", "league", "club")
+
+
+def store_word_thousands(text, vocabulary):
+    """True when a number with k or thousand after it comes right after a store word: a product name word
+    of 3 or more letters that is not a cue, tier or count word, or a tier ("Elite 17.5k", "Phantom 6
+    Academy 8.5k"). The customer reads 17,500, so it is refused like "1k EGP" (review handoff round 2,
+    finding 2). "The Elite runs 17k" and "It comes to 17k" stay open under the k rule (docs/known-limits.md)."""
+    rx = _store_word_thousands_re(tuple(sorted({w for w in vocabulary or () if isinstance(w, str)})))
+    return bool(rx and rx.search(_plain(text)))
+
+
+@functools.lru_cache(maxsize=8)
+def _store_word_thousands_re(key):
+    words = sorted({w for w in key if re.fullmatch(r"[a-z]{3,}", w) and not NOT_A_TITLE_WORD.fullmatch(w)}
+                   | set(STORE_TIERS))
+    return re.compile(r"(?<!\w)(?:" + "|".join(map(re.escape, words)) + r")[^\S\n]*[:,]?[^\S\n]*" + NUMBER
+                      + r"\s*(?:k|thousands?)" + NO_LETTER_AFTER, re.IGNORECASE)
+
+
 def without_model_numbers(text, titles):
     """text as the number rules read it (_plain), with each product's model number dropped where it
     follows its title word, so "is the Vapor 17" holds no amount 17; the word stays, and so does a
@@ -424,15 +496,25 @@ def without_model_numbers(text, titles):
     return text
 
 
-# An exact stock count, in English, Arabic or Franco.
+# An exact stock count, in English, Arabic or Franco. The bridge words and the count stems are the ones a
+# model number keeps (COUNT_AFTER), so "Vapor 17 pcs left" and "Phantom 6 lesa fadlin" are counts either
+# way. "N pairs" after have, has, got or there are ("We have Vapor 17 pairs in 43") and "N جوز" with بس
+# after it or عندنا before it are counts too (red team handoff round 2, item 3); an order ("your order is 2
+# pairs"), an offer ("Buy 2 pairs") and a description ("2 pairs of laces") are not. A code is not a count:
+# "BO-2936845 is in stock".
 STOCK_COUNT = re.compile(
-    r"\d+\s+(?:(?:pairs?|pieces?|items?|units?|more)\s+)?(?:left|remaining|in\s+stock|available)" + NO_LETTER_AFTER
+    rf"(?<![\w-])\d+\s+(?:(?:pairs?|pieces?|pcs|pc|items?|units?|more)\s+)?(?:{COUNT_BRIDGE}\s+){{0,2}}"
+    rf"(?:left|{REMAIN}|in\s+stock|available)" + NO_LETTER_AFTER
+    + r"|" + LETTER_BEFORE + r"(?:have|has|got|there\s+are)\s+(?:[^\W\d_]+\s+){0,3}?\d+\s*pairs" + NO_LETTER_AFTER
+    + r"(?!\s+of" + NO_LETTER_AFTER + ")"
+    + r"|\d+\s*(?:جوز|goz)\s*(?:بس|bs)" + NO_LETTER_AFTER
+    + r"|(?:عندنا|عندي|3andena|3ndena|3andi)\s+(?:\S+\s+){0,3}?\d+\s*(?:جوز|goz)" + NO_LETTER_AFTER
     + r"|" + LETTER_BEFORE + r"stock\s*(?:of|is|:|=)?\s*\d+"
     + r"|(?:فاضل|فاضلين|فاضله|فاضلة|باقي|باقى|باقيين|متبقي|متبقى|المتبقي|المتاح|المخزون|الكمية|الكميه|ستوك"
       r"|fadel|fadl|fadlin|fadleen|ba2y|ba2i|ba2yin|motba2y)\s*(?:منه|منها|منهم|بس|meno|menha|menhom|bs)?\s*\d+"
-    + r"|\d+\s*(?:(?:قطعة|قطعه|قطع|حتة|حتت|بس|7etta|7etat|bs)\s*)?"
-      r"(?:فاضلين|فاضلة|فاضله|فاضل|باقيين|باقي|متبقيين|متبقي|في المخزن|في الستوك|متاحين|موجودين"
-      r"|fadlin|fadleen|fadel|fadl|ba2yin|ba2y|mawgodin|mwgodin|fel stock)",
+    + rf"|\d+\s*(?:(?:قطعة|قطعه|قطع|حتة|حتت|7etta|7etat|جوز|goz|{COUNT_BRIDGE})\s*){{0,2}}"
+      r"(?:فاضل|باقي|باقى|متبقي|متبقى|في المخزن|في الستوك|متاحين|موجودين"
+      r"|fadel|fadl|ba2y|ba2i|mawgod|mwgod|fel stock)",
     re.IGNORECASE)
 
 URL_CHARS = r"[^\s<>\"'()\[\]{}]"
@@ -490,19 +572,28 @@ def looks_franco(text, skip=frozenset(), lenient=False, pairs=frozenset()):
     words. skip: lowercase words passed over, the store's model words with a digit ("f50" from
     "adidas F50"), so a product name never makes English read as Franco. pairs: two title words
     side by side as a title has them (title_pairs); a word in such a run is passed over too
-    ("El Ultimo Tango"). lenient: digit words of NOT_FRANCO_SHAPE (9am, EU42, VAP17) are passed
-    over and a common Franco word counts once however often it comes (rule 8)."""
-    all_words = WORD.findall(text.lower())
+    ("El Ultimo Tango"). lenient: digit words of NOT_FRANCO_SHAPE (EU42, VAP17) and a clock time next
+    to a time word ("at 9am") are passed over, and "w/" reads as "with" (rule 8). A common Franco word
+    counts each time it comes: "el" twice is Franco, and a title said twice is passed over by pairs (red
+    team handoff round 2, item 4)."""
+    text = text.lower()
+    if lenient:
+        text = WITH_SHORT.sub("with", text)
+    all_words = WORD.findall(text)
     words = [w for k, w in enumerate(all_words)
              if not ARABIC.search(w) and w not in skip
              and not (k + 1 < len(all_words) and (w, all_words[k + 1]) in pairs)
              and not (k and (all_words[k - 1], w) in pairs)]
-    digit_words = [w for w in words if FRANCO_DIGIT_WORD.fullmatch(w) and not ORDINAL.match(w)
-                   and not (lenient and NOT_FRANCO_SHAPE.fullmatch(w))]
+    digit_words = [w for k, w in enumerate(words) if FRANCO_DIGIT_WORD.fullmatch(w) and not ORDINAL.match(w)
+                   and not (lenient and (NOT_FRANCO_SHAPE.fullmatch(w) or _clock_time(words, k)))]
     common = [w for w in words if w in FRANCO_WORDS]
-    if lenient:
-        common = list(dict.fromkeys(common))
     return len(digit_words) >= 1 or len(common) >= 2
+
+
+def _clock_time(words, k):
+    """True when words[k] is a clock time (9am) with a time word right before or after it."""
+    return bool(CLOCK_TIME.fullmatch(words[k])) and any(
+        0 <= j < len(words) and words[j] in TIME_WORDS for j in (k - 1, k + 1))
 
 
 def model_words(titles):
@@ -570,23 +661,29 @@ def _arabic_found(reply, most=3):
 
 def _plain(text):
     """The reply as the number rules read it: Western digits, no invisible format characters
-    (a zero width space splits 500 into 5 and 00), look-alike signs and blanks as ":", "=" and
-    spaces (LOOKALIKES), combining marks on no letter taken out, emphasis marks as spaces (_500_ is
-    500), and digit groups split by blanks, blanks then a separator, or an apostrophe joined (1 949 is
-    1949, 17 ,400 is 17400: SPACED_THOUSANDS)."""
+    (a zero width space splits 500 into 5 and 00), look-alike signs and blanks as ":", "=", ",", ".",
+    "'" and spaces (NUMBER_LOOKALIKES), combining marks on no letter taken out, a narrow blank next to a
+    separator taken out (NARROW_BLANK), a modifier letter inside a number read as an apostrophe
+    (MODIFIER_IN_NUMBER), emphasis marks as spaces (_500_ is 500), and digit groups split
+    by blanks, blanks then a separator, or an apostrophe joined (1 949 is 1949, 17 ,400 is 17400:
+    SPACED_THOUSANDS)."""
     text = "".join(ch for ch in (text or "") if unicodedata.category(ch) != "Cf")
-    return _join_thousands(EMPHASIS.sub(" ", western_digits(_loose_marks_out(text.translate(LOOKALIKES)))))
+    text = MODIFIER_IN_NUMBER.sub("'", NARROW_BLANK.sub("", _loose_marks_out(text.translate(NUMBER_LOOKALIKES))))
+    return _join_thousands(EMPHASIS.sub(" ", western_digits(text)))
+
+
+LOOSE_MARKS = ("Mn", "Me", "Mc")
 
 
 def _loose_marks_out(text):
     """text with each combining mark that sits on no letter taken out: "17" then a combining low line
-    then ",400" shows as 17,400, so it reads 17,400 (red team handoff round 1, item 1). Marks on a
-    letter (Arabic vowel marks) stay."""
-    if not any(unicodedata.category(ch) in ("Mn", "Me") for ch in text):
+    then ",400" shows as 17,400, so it reads 17,400 (red team handoff round 1, item 1); spacing marks
+    too (red team handoff round 2, item 1). Marks on a letter (Arabic vowel marks) stay."""
+    if not any(unicodedata.category(ch) in LOOSE_MARKS for ch in text):
         return text
     out, base = [], ""
     for ch in text:
-        if unicodedata.category(ch) in ("Mn", "Me"):
+        if unicodedata.category(ch) in LOOSE_MARKS:
             if not base.isalpha():
                 continue
         else:
@@ -998,7 +1095,7 @@ def named_problems(reply, customer_text="", amounts=(), vocabulary=frozenset(), 
                          "If a number is not a price, say what it is: size 43, 2 days, order #1234, model 2026."))
     digits = _plain(reply)
     if (SPELLED_AMOUNT.search(digits) or SHORT_AMOUNT.search(digits) or amount_in_words(digits)
-            or model_thousands(digits, names)):
+            or model_thousands(digits, names) or store_word_thousands(digits, vocabulary)):
         problems.append(("digits", "Write every amount in digits, the number then the currency in the customer's "
                          "script (جنيه in Arabic, EGP in English, geneh in Franco), so it can be checked."))
     if stock_counts(reply, sizes, orders, names):

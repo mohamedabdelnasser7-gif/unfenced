@@ -3,8 +3,11 @@ page: A"), served by reflection/morning.py. It draws from Morning.view() and ans
 Morning methods only, so no engine rule lives here.
 
     /              Today: only what needs the user's yes, one light sage card each, then one line
-                   per agent about last night; an empty state when nothing waits (DECISIONS 35).
+                   per agent about last night (the same agents the Agents tab lists); an empty state
+                   when nothing waits (DECISIONS 35).
     /agents        the agents (the plugs in the repo and the agents in the database) and New agent.
+                   An agent shows Live when it works on real chats or cases (Morning._live), else
+                   Training: only Arena practice.
     /agents/<name> one agent: its status with Pull and Roll back, the box for an idea or a
                    correction (Morning.correct), then its lessons and Reflection notes as rows.
     /new           New agent, Quick start B screen 1; ?ask= routes to a plug or says not yet.
@@ -18,7 +21,7 @@ serves the real database with real answers and the real clock, never marked Samp
 No count of what is left anywhere (item 35), no trust level and no won and lost total (item 17,
 LOCKS Quick start B). No script: Modify is a details element inside its card. Every field is
 escaped. With demo days (--demo-days) a Day 1, Day 2, Day 3 switch sits on top, marked Sample
-data; each day is its own throwaway copy, so answers there never touch the sample files.
+data (Sample on the phone bar, so every label stays on one line at 390); each day is its own throwaway copy, so answers there never touch the sample files.
 """
 import base64
 import hashlib
@@ -164,7 +167,9 @@ class Pages:
                       f'{" aria-current=page" if t == on else ""}>{icon(i)}{w}</a>' for t, u, i, w in tabs)
         bar = "".join(f'<a class="tab{" on" if t == on else ""}" href="{u}{q}"'
                       f'{" aria-current=page" if t == on else ""}>{icon(i)}{w}</a>' for t, u, i, w in tabs)
-        right = '<span class="sample">Sample data</span>' if self.demo and ctx["day"] != self.LIVE else ""
+        sample = self.demo and ctx["day"] != self.LIVE  # the phone bar says Sample, so the switch fits on one line
+        right = '<span class="sample">Sample data</span>' if sample else ""
+        short = '<span class="sample" title="Sample data">Sample</span>' if sample else ""
         days = ""
         if self.demo:
             tabs = [(d, f"Day {d}") for d in sorted(self.days)] + ([(self.LIVE, "Live")] if self.live is not None else [])
@@ -178,7 +183,7 @@ class Pages:
             f'<title>Unfenced</title><style>{CSS}</style></head><body><div class="page">',
             f'<nav class="tisl sq" aria-label="Main"><div class="left">{logo}</div><div class="tnav">{top}</div>'
             f'<div class="right">{days}{right}</div></nav>',
-            f'<header class="bar"><div class="brand">{logo}</div><div class="bar-r">{days}{right}</div></header>',
+            f'<header class="bar"><div class="brand">{logo}</div><div class="bar-r">{days}{short}</div></header>',
             f'<p class="flash" role="status">{h(flash)}</p>' if flash else "",
             body, "</div>", f'<nav class="isl" aria-label="Main">{bar}</nav></body></html>'])
 
@@ -295,10 +300,14 @@ def _corrected(i):
     return CORRECTED in (i.get("source") or "")
 
 
-def night_lines(a, now):
+ANSWERED = "Answered chats today. Reflection reads them tonight."
+
+
+def night_lines(a, now, answered=0):
     """Plain lines about an agent's last night: the chats Reflection read, a lesson it wrote, an
-    exam, the trials it checked, the hotfix notes, the Arena and a new mode. Never a count of what
-    is left; a quiet night only when the night did nothing at all."""
+    exam, the trials it checked, the hotfix notes, the Arena and a new mode. answered: the real
+    chats it answered since the night (Morning.answered_since), said in one line with no count.
+    Never a count of what is left; a quiet night only when a night ran and did nothing at all."""
     day = mo.DAY
     rep = a.get("night") or {}
     fresh = (rep.get("until") or 0) >= now - day
@@ -338,25 +347,38 @@ def night_lines(a, now):
         lines.append("It practised with made-up customers in the Arena.")
     if a.get("mode_card") and (a["mode_card"].get("at") or 0) >= now - day:
         lines.append("It found a new mode for you and tried it on your past days in the Arena.")
-    return lines or ["A quiet night. Nothing changed."]
+    if answered:
+        lines.append(ANSWERED)
+    if lines:
+        return lines
+    return ["A quiet night. Nothing changed."] if rep else ["No night yet."]
 
 
-def night_line(a, now):
+def night_line(a, now, answered=0):
     """The night's lines as one string (tests and the old callers)."""
-    return " ".join(night_lines(a, now))
+    return " ".join(night_lines(a, now, answered))
 
 
 def status_of(m, agent):
     return "Live" if agent in m._live() else "Training"
 
 
+def agent_names(m, view):
+    """The agents both tabs list: every plug here and every agent the database knows."""
+    return sorted(set(m.plugs) | {a["agent"] for a in view["agents"]})
+
+
 def night_html(m, view):
-    rows = []
-    for a in view["agents"]:
-        st = status_of(m, a["agent"])
-        rows.append(f'<div class="nl"><span class="av">{mo._agent_icon(a["agent"])}</span><div><b>{h(name(a["agent"]))} '
+    rows, now = [], view["at"]
+    known = {a["agent"]: a for a in view["agents"]}
+    for agent in agent_names(m, view):
+        a = known.get(agent) or {"agent": agent, "live": [], "waiting": [], "pulled": [], "new": [], "night": None}
+        st = status_of(m, agent)
+        since = max(now - mo.DAY, (a.get("night") or {}).get("until") or 0)
+        rows.append(f'<div class="nl"><span class="av">{mo._agent_icon(agent)}</span><div><b>{h(name(agent))} '
                     f'<span class="st{" live" if st == "Live" else ""}">{st}</span></b>'
-                    + "".join(f"<p>{h(x)}</p>" for x in night_lines(a, view["at"])) + "</div></div>")
+                    + "".join(f"<p>{h(x)}</p>" for x in night_lines(a, now, m.answered_since(agent, since)))
+                    + "</div></div>")
     if not rows:
         rows.append('<div class="nl"><span class="av">' + icon("spark") + '</span><div><b>No agents yet</b>'
                     '<p>Make one under Agents.</p></div></div>')
@@ -383,7 +405,7 @@ def today(view, ctx):
 # ---- Agents ------------------------------------------------------------------------------------
 
 def agents(m, view, ctx):
-    names = sorted(set(m.plugs) | {a["agent"] for a in view["agents"]})
+    names = agent_names(m, view)
     rows = "".join(f'<a class="agl" href="/agents/{h(a)}{ctx["q"]}"><span class="av">{mo._agent_icon(a)}</span>'
                    f'<b>{h(name(a))}</b><span class="st{" live" if status_of(m, a) == "Live" else ""}">'
                    f'{status_of(m, a)}</span></a>' for a in names)

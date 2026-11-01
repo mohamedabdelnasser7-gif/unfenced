@@ -185,6 +185,13 @@ EDITED = "edited by "
 _EDITED_FROM = re.compile(r"^edited by .+? from lesson (\d+)")
 _EDITED_INTO = re.compile(r"^edited by .+? into lesson (\d+)")
 _REPLACED_BY = re.compile(r"^replaced by lesson (\d+)$")
+# reflection/importer.py saves past chats on "history:whatsapp" or "history:instagram"; no agent answered them
+_REAL_CHANNEL = "substr(chats.channel, 1, 8) != 'history:'"
+
+
+def _has_table(c, name):
+    return c.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)).fetchone() is not None
+
 
 CSS = """
 :root{--bone:#F4F3EF;--ink:#0B0F12;--ink-2:#4b514f;--ink-3:#5d6360;--mist-ink:#2f3433;
@@ -940,11 +947,31 @@ class Morning:
         return lessons
 
     def _live(self):
-        """The agents with a plug here that have answered chats in this database (a log row)."""
+        """The agents with a plug here that work on real chats or cases in this database: a chat on a
+        real channel in the chats store (the Sales agent's, kit/chats.py), or a log row that is not an
+        imported history row (reflection/importer.py). The Arena plays on a copy of the database, so an
+        agent with only Arena practice is not live. There is no live switch in the code yet."""
+        out = set()
         with self.db.tx() as c:
-            if not c.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'trace'").fetchone():
-                return set()
-            return {r["agent"] for r in c.execute("SELECT DISTINCT agent FROM trace")} & set(self.plugs)
+            if _has_table(c, "trace"):
+                out |= {r["agent"] for r in c.execute(
+                    "SELECT DISTINCT agent FROM trace WHERE (CASE WHEN json_valid(detail) THEN "
+                    "json_extract(detail, '$.history') END) IS NOT 1")}
+            if _has_table(c, "chats") and c.execute(
+                    f"SELECT 1 FROM chats WHERE {_REAL_CHANNEL} LIMIT 1").fetchone():
+                out.add(SALES.agent)
+        return out & set(self.plugs)
+
+    def answered_since(self, agent, since):
+        """How many real chats (never an imported history chat) the agent answered at or after since,
+        from the chats store; 0 for an agent the chats store is not for, or with no chats store."""
+        if agent != SALES.agent:
+            return 0
+        with self.db.tx() as c:
+            if not (_has_table(c, "chats") and _has_table(c, "steps")):
+                return 0
+            return c.execute(f"SELECT COUNT(DISTINCT s.chat_id) FROM steps s JOIN chats ON chats.id = s.chat_id "
+                             f"WHERE s.role = 'assistant' AND s.at >= ? AND {_REAL_CHANNEL}", (float(since),)).fetchone()[0]
 
     def _working(self, c):
         """The agents with a plug here that have worked in this database (a log row, a switch

@@ -42,7 +42,7 @@ svg.i{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.6;
 .logo svg{width:24px; height:24px}
 .word{font:600 17px/1 var(--font); letter-spacing:-.035em}
 .bar-r{display:flex; align-items:center; gap:12px}
-.sample{font:500 12px/16px var(--font); letter-spacing:.04em; color:var(--ink-2); padding:4px 12px; border-radius:999px; background:var(--chip)}
+.sample{font:500 12px/16px var(--font); letter-spacing:.04em; color:var(--ink-2); padding:4px 12px; border-radius:999px; background:var(--chip); white-space:nowrap}
 .bubble{width:44px; height:44px; border-radius:50%; display:grid; place-items:center; background:var(--bubble); box-shadow:var(--bubble-shadow); font:500 14px/1 var(--font); color:var(--ink)}
 .lab{display:flex; align-items:center; gap:8px; font:500 12px/16px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--ink-2)}
 .sec-h{display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin:0 4px 12px}
@@ -422,7 +422,7 @@ form{margin:0; display:contents}
 .yc .why{overflow-wrap:anywhere}
 .peek-note{margin:0 4px; font:400 13px/18px var(--font); color:var(--ink-2)}
 .days{display:inline-flex; gap:4px; padding:3px; border-radius:999px; background:var(--chip)}
-.days a{padding:4px 12px; border-radius:999px; font:500 12px/16px var(--font); color:var(--ink-2)}
+.days a{padding:4px 12px; border-radius:999px; font:500 12px/16px var(--font); color:var(--ink-2); white-space:nowrap}
 .days a.on{background:#fff; color:var(--ink); box-shadow:var(--shadow-soft)}
 .agl{display:grid; grid-template-columns:40px minmax(0,1fr) auto; gap:12px; align-items:center; padding:14px 0; border-top:1px solid var(--line)}
 .agl:first-child{border-top:0}
@@ -444,8 +444,11 @@ textarea.typed{width:100%; border:0; background:transparent; resize:none; outlin
   .stat b{font-size:24px; line-height:30px}
   .act{margin-top:14px}
   .bar:has(.days) .word{display:none}
-  .bar .sample{padding:4px 8px}
-  .bar .days a{padding:4px 9px}
+  .bar{gap:8px}
+  .bar-r{gap:6px; min-width:0}
+  .bar .sample{padding:4px 8px; letter-spacing:0}
+  .bar .days{gap:2px}
+  .bar .days a{padding:4px 7px}
 }
 
 """

@@ -21,7 +21,7 @@ from reflection.lessons import Lessons
 from reflection.results import Results
 from sales import loop, quiet
 from tests.fake_model import FakeModel, Outbox, clean_env, say
-from tests.test_whatsapp import SendingGraph, payload, text_msg
+from tests.test_whatsapp import SendingGraph, TypingGraph, payload, text_msg
 
 T0 = 1_800_000_000.0
 NOTE = "Ask what they need it for before naming any item."
@@ -321,13 +321,17 @@ class TheRunningAgent(Base):
         self.assertEqual(order, ["tick", "sweep"])
 
     def test_the_app_ticks_on_its_clock_and_sends_through_graph(self):
-        graph = SendingGraph(b"", "audio/ogg")
+        graph = TypingGraph(b"", "audio/ogg")
         app = wa.App(self.chats, FakeModel(say(ANSWER)), self.lessons, self.results, graph)
-        app.accept(wa.parse(payload(text_msg("m1", "التوصيل بكام؟", frm=WHO))))
+        app.accept(wa.parse(payload(text_msg("wamid.m1", "التوصيل بكام؟", frm=WHO))))
         chat_id = app.work_one(app.q.get_nowait()).chat_id
         self.later(quiet.NOTICE_AFTER)
         self.assertEqual(app.quiet_once(), [(chat_id, "notice")])
         self.assertEqual(graph.sent[-1], (WHO, quiet.NOTICE["arabic"]))
+        self.later(quiet.CLOSE_AFTER)
+        self.assertEqual(app.quiet_once(), [(chat_id, "closed")])
+        # the turn's reply had the dots; the tick's notice and close get none
+        self.assertEqual([e[0] for e in graph.events], ["typing", "send", "send"])
 
     def test_a_tick_that_fails_never_stops_the_running_agent(self):
         class Broken:

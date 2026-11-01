@@ -18,6 +18,7 @@ from channels import whatsapp as wa
 from sales import loop
 from kit import limits as limits_mod
 from kit import media
+from kit import switch
 from kit.chats import Chats
 from kit.db import Db
 from kit.limits import Limits
@@ -430,10 +431,11 @@ class Photos(unittest.TestCase):
 
 
     def test_typing_shape(self):
-        seen = []
+        seen, waits = [], []
 
         def opener(req, timeout):
             seen.append(req)
+            waits.append(timeout)
             return FakeResp(b'{"success":true}')
 
         self.assertTrue(wa.Graph(BEARER, "111", opener=opener).typing("wamid.HBgM_abc="))
@@ -441,6 +443,9 @@ class Photos(unittest.TestCase):
         self.assertEqual(seen[0].full_url, "https://graph.facebook.com/v26.0/111/messages")
         self.assertEqual(body, {"messaging_product": "whatsapp", "status": "read", "message_id": "wamid.HBgM_abc=",
                                 "typing_indicator": {"type": "text"}})
+        # the dots wait at most TYPING_TIMEOUT, never the 20 s a reply may take (review typing r1 finding 1)
+        self.assertTrue(wa.Graph(BEARER, "111", opener=opener, timeout=1).typing("wamid.x"))
+        self.assertEqual((wa.TYPING_TIMEOUT, waits), (3, [3, 1]))
 
     def test_typing_never_raises_and_skips_odd_ids(self):
         calls = []
@@ -450,8 +455,9 @@ class Photos(unittest.TestCase):
             raise urllib.error.HTTPError(req.full_url, 400, "bad", {}, io.BytesIO(b"{}"))
 
         g = wa.Graph(BEARER, "111", opener=refused)
-        self.assertFalse(g.typing("wamid.ok"))
-        for odd in ("", "abc", "wamid.", "wamid.a b", "wamid.a\n", None):
+        with self.assertLogs("channels.whatsapp", "WARNING"):
+            self.assertFalse(g.typing("wamid.ok"))
+        for odd in ("", "abc", "wamid.", "wamid.a b", "wamid.a\n", None, 12345, b"wamid.ok", ["wamid.ok"]):
             self.assertFalse(g.typing(odd))
         self.assertEqual(len(calls), 1)
 
@@ -677,6 +683,124 @@ class WorkerTurns(unittest.TestCase):
         r = self.run_one(audio_msg("v1"), limits=self.over_limit())
         self.assertEqual((r.outcome, self.graph.calls), ("limited", 0))
         self.assertEqual(self.chats.pending(), [])
+
+
+class TypingGraph(SendingGraph):
+    """Keeps the typing dots and the sends in one ordered list, events, which the model shares."""
+
+    def __init__(self, *a, events=None, answer=True, **kw):
+        super().__init__(*a, **kw)
+        self.events = events if events is not None else []
+        self.answer = answer  # what typing returns; False is a refusal
+
+    def typing(self, message_id):
+        self.events.append(("typing", message_id))
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return self.answer
+
+    def send(self, to, text):
+        self.events.append(("send", text))
+        return super().send(to, text)
+
+
+class InOrderModel(FakeModel):
+    """FakeModel that adds ("model",) to the shared events at each call."""
+
+    def __init__(self, events, *script):
+        super().__init__(*script)
+        self.events = events
+
+    def chat(self, messages, **kw):
+        self.events.append(("model",))
+        return super().chat(messages, **kw)
+
+
+class TypingDots(unittest.TestCase):
+    """The typing dots through work_one: once, with the message's wamid, right before the first model
+    call, and only for a turn that will answer (review typing r1 findings 2 and 3)."""
+    WHO = WorkerTurns.WHO
+    WAMID = "wamid.HBgMMjAxMTExMTExMTExFQIAEhgg"
+    ANSWER = "Ask me anything."
+
+    def setUp(self):
+        clean_env(self)
+        self.db = Db(":memory:")
+        self.addCleanup(self.db.close)
+        self.chats = Chats(self.db)
+        self.events = []
+        self.graph = TypingGraph(OGG, "audio/ogg; codecs=opus", events=self.events)
+
+    def app(self, *script, limits=None):
+        return wa.App(self.chats, InOrderModel(self.events, *script), Lessons(self.db), Results(self.db), self.graph,
+                      limits=limits)
+
+    def run_one(self, message, *script, limits=None):
+        app = self.app(*script, limits=limits)
+        app.accept(wa.parse(payload(message)))
+        return app.work_one(app.q.get_nowait())
+
+    def limits(self, taken):
+        limits = Limits(self.db, per_customer=1, window=600, daily=100)
+        if taken:
+            limits.take(limits_mod.key("whatsapp", self.WHO))
+        return limits
+
+    def test_dots_once_with_the_wamid_right_before_the_model_call(self):
+        r = self.run_one(text_msg(self.WAMID, "hello there, a question"), say(self.ANSWER), limits=self.limits(False))
+        self.assertEqual(r.outcome, "replied")
+        self.assertEqual(self.events, [("typing", self.WAMID), ("model",), ("send", self.ANSWER)])
+
+    def test_dots_once_for_a_turn_of_many_model_calls(self):
+        r = self.run_one(text_msg(self.WAMID, "hello there, a question"), say(""), say(self.ANSWER))
+        self.assertEqual(r.outcome, "replied")
+        self.assertEqual(self.events, [("typing", self.WAMID), ("model",), ("model",), ("send", self.ANSWER)])
+
+    def test_the_reply_goes_out_when_the_dots_are_refused(self):
+        for answer in (False, RuntimeError("down")):
+            with self.subTest(answer=answer):
+                self.events.clear()
+                self.graph.answer = answer
+                with self.assertLogs("sales.loop", "WARNING") if isinstance(answer, Exception) else contextlib.nullcontext():
+                    r = self.run_one(text_msg(f"{self.WAMID}{len(self.graph.sent)}", "hello there, a question"),
+                                     say(self.ANSWER))
+                self.assertEqual(r.outcome, "replied")
+                self.assertEqual([e[0] for e in self.events], ["typing", "model", "send"])
+                self.assertEqual(self.graph.sent[-1], (self.WHO, self.ANSWER))
+
+    def test_no_dots_over_a_limit_found_at_the_webhook(self):
+        r = self.run_one(text_msg(self.WAMID, "hello there, a question"), limits=self.limits(True))
+        self.assertEqual(r.outcome, "limited")
+        self.assertEqual([e[0] for e in self.events], ["send"])  # the limit line only
+
+    def test_no_dots_over_a_limit_reached_after_the_webhook(self):
+        limits = self.limits(False)
+        app = self.app(limits=limits)
+        app.accept(wa.parse(payload(text_msg(self.WAMID, "hello there, a question"))))
+        limits.take(limits_mod.key("whatsapp", self.WHO))  # another message's turn used the last call
+        item = app.q.get_nowait()
+        self.assertIsNone(item[0])
+        self.assertEqual(app.work_one(item).outcome, "limited")
+        self.assertEqual([e[0] for e in self.events], ["send"])
+
+    def test_no_dots_when_the_agent_is_paused(self):
+        switch.pause(db=self.db)
+        r = self.run_one(text_msg(self.WAMID, "hello there, a question"), say(self.ANSWER))
+        self.assertEqual(r.outcome, loop.PAUSED)
+        self.assertEqual(self.events, [])
+
+    def test_no_dots_for_a_turn_of_fixed_lines_only(self):
+        self.graph.error = OSError("down")
+        with self.assertLogs("channels.whatsapp", "ERROR"):
+            r = self.run_one(image_msg(self.WAMID))
+        self.assertEqual(r.outcome, "replied")
+        self.assertEqual([e[0] for e in self.events], ["send"])  # the photo line, no model call
+
+    def test_no_safe_reply_sends_nothing_after_the_dots(self):
+        r = self.run_one(text_msg(self.WAMID, "hello there, a question"), say(""), say(""), say(""))
+        self.assertEqual(r.outcome, "no_safe_reply")
+        self.assertEqual(self.events, [("typing", self.WAMID), ("model",), ("model",), ("model",)])
+        self.assertEqual(self.graph.sent, [])
 
 
 class CrashedTurns(unittest.TestCase):

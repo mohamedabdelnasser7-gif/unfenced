@@ -81,6 +81,7 @@ MODEL_KEYS = "META_API_KEY or BASETEN_API_KEY"
 SIGNATURE = re.compile(r"sha256=([0-9a-f]{64})")
 CHALLENGE = re.compile(r"[0-9A-Za-z_-]{1,128}")
 MAX_ERROR_BODY = 64 * 1024
+TYPING_TIMEOUT = 3  # seconds at most for the typing dots: a slow Graph never holds the worker long
 FAST_EVERY = 30  # seconds between quiet ticks and fast reflection sweeps, so a note is written within seconds of a chat ending
 OLD_FIELDS = ("context_id", "error_code")  # Incoming fields before DECISIONS item 53
 
@@ -232,17 +233,20 @@ class Graph(Channel):
     def typing(self, message_id):
         """Marks the customer's message read and shows the typing dots until the reply is sent or
         25 seconds pass (Meta's typing indicator). Only for a message we answer. Never raises: the
-        dots are a courtesy, so a refusal is logged and the reply goes out as usual."""
-        if not re.fullmatch(r"wamid\.[0-9A-Za-z_=+/-]{1,256}", message_id or ""):
+        dots are a courtesy, so a refusal is logged and the reply goes out as usual. Waits at most
+        TYPING_TIMEOUT seconds."""
+        if not isinstance(message_id, str) or not re.fullmatch(r"wamid\.[0-9A-Za-z_=+/-]{1,256}", message_id):
             return False
         url = f"{GRAPH}/{self.version}/{self.phone_number_id}/messages"
         body = {"messaging_product": "whatsapp", "status": "read", "message_id": message_id,
                 "typing_indicator": {"type": "text"}}
         try:
-            with self._open(self._req(url, body), timeout=self.timeout) as r:
+            with self._open(self._req(url, body), timeout=min(self.timeout, TYPING_TIMEOUT)) as r:
                 r.read(MAX_ERROR_BODY)
             return True
         except Exception as e:
+            if isinstance(e, urllib.error.HTTPError):
+                e.close()  # the refusal's body is not read; its connection is let go, as send does
             log.warning("the typing dots were refused: %s", type(e).__name__)
             return False
 
@@ -487,12 +491,11 @@ class App:
                           message_id=inc.message_id, timestamp=inc.timestamp,
                           rejected_images=1 if inc.kind == "image" else 0, audio_failed=inc.kind == "audio")
         else:
-            typing = getattr(self.graph, "typing", None)  # a test channel may have no dots
-            if typing:
-                typing(inc.message_id)  # before the media download and the model call
             msg = to_message(inc, self.graph)
-        return loop.turn(msg, chats=self.chats, model=self.model, lessons=self.lessons,
-                         results=self.results, send=self.graph.send, limits=self.limits, over=over, fast=self.fast)
+        dots = getattr(self.graph, "typing", None)  # a test channel may have no dots
+        typing = (lambda: dots(inc.message_id)) if dots else None  # the turn calls it once, only when it will answer
+        return loop.turn(msg, chats=self.chats, model=self.model, lessons=self.lessons, results=self.results,
+                         send=self.graph.send, limits=self.limits, over=over, fast=self.fast, typing=typing)
 
     def sweep_fast(self, stop=None, every=FAST_EVERY):
         """The quiet tick, then fast reflection's sweep, every `every` seconds until stop (a

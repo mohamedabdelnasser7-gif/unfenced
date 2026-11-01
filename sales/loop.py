@@ -7,6 +7,10 @@
    When the customer's last chat ended without an order, fast reflection's note for this
    chat (reflection/fast.py) goes last in the prompt, read once a turn before the first
    model call; it is not a lesson and its id never joins the lesson ids a row keeps.
+   Right before the first model call, and only then, the channel's typing dots are asked for
+   once (typing). A paused agent, a customer over a limit and a turn of fixed lines only make
+   no model call, so they get no dots. A turn that ends with no safe reply still had them,
+   since a reply was meant; it sends nothing else.
 3. At most MAX_TOOL_STEPS tool steps, then the model must answer in words. At most
    MAX_CALLS_PER_STEP tool calls run in one step; the voice note is heard once per turn.
 4. The send check runs on the reply. A failed reply is never sent: the model retries
@@ -177,12 +181,14 @@ def warn_size_prices():
     return found
 
 
-def turn(msg, *, chats, model, lessons, results, send, limits=None, over=None, fast=None):
+def turn(msg, *, chats, model, lessons, results, send, limits=None, over=None, fast=None, typing=None):
     """Handle one customer message. send(to, text) sends on the customer's channel.
 
     limits: a kit.limits.Limits; every model call in the turn is counted against it.
     over: the limit the webhook already found reached; the turn then makes no model call.
     fast: fast reflection's notes (reflection.fast.FastNotes); left out, no note is read.
+    typing: called with no arguments right before the first model call (the channel's typing
+    dots); left out, none are shown. A failure there is logged and the turn goes on.
     """
     chat_id = chats.open(msg.channel, msg.customer_id)
     stage = stages.get(chats.stage(chat_id))
@@ -235,6 +241,7 @@ def turn(msg, *, chats, model, lessons, results, send, limits=None, over=None, f
 
     convo = history + [user_message(msg, stage)]
     t.note = fast_note(fast, chat_id)  # read just before the first model call, once a turn
+    _typing(typing)
     try:
         return _answer(t, convo, msg, vocab, sizes, names, results=results, send=send)
     except limits_mod.OverLimit as e:
@@ -242,6 +249,16 @@ def turn(msg, *, chats, model, lessons, results, send, limits=None, over=None, f
                         limits=limits)
     except ModelError as e:
         return _model_error(t, msg, e, results=results, send=send)
+
+
+def _typing(typing):
+    """The typing dots, once, right before the first model call. A courtesy: never stops the turn."""
+    if typing is None:
+        return
+    try:
+        typing()
+    except Exception:
+        log.warning("the typing dots failed", exc_info=True)
 
 
 def _answer(t, convo, msg, vocab, sizes, names=frozenset(), *, results, send):

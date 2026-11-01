@@ -340,7 +340,74 @@ class QuickStartPage(unittest.TestCase):
                 "سلم الشات لصاحب المحل.", "الموظف هيكمل معاك.", "تحويل العميل لخدمة العملاء."]
     NOT_HAND_OFF = ["Tell the owner which items run low.", "Send the owner a short note each morning.",
                     "Pay by bank transfer to the owner's account.", "It passes the check before it sends.",
-                    "أسئلة حول المنتج والمقاسات.", "أسئلة حول البيانات الشخصية."]
+                    "أسئلة حول المنتج والمقاسات.", "أسئلة حول البيانات الشخصية.",
+                    # review round 2 finding 1: store lines, the review's realistic cards, and negated lines
+                    "يجاوب على الأسئلة حول المنتجات، وينبه صاحب المحل لما المخزون يقل",
+                    "بيقول للعميل يدفع تحويل فودافون كاش على رقم صاحب المحل",
+                    "بيطمن العميل إن فريقنا بيتابع شحنته لحد ما توصله", "فريقنا بيتابع شحنتك لحد ما توصلك.",
+                    "Tells customers to pay by Instapay transfer to the owner",
+                    "Confirms orders; our team takes over packing after payment",
+                    "بيوصل الطلب في يومين", "توصيل مجاني لكل مصر", "مساعد سلمى", "سلمى بتسأل عن موظف المبيعات.",
+                    "بترد على عملاء سلمى عن المقاسات والموظفين",
+                    "بيرد على أسئلة الأسعار والتوصيل، وبيبعت ملخص لصاحب المحل كل يوم",
+                    "Never hand off a chat to a person.", "Never pass a chat to the team.", "ما تحولش الشات لحد",
+                    "متحولش الشات لأي موظف أبدا.", "mat7awelsh el chat le 7ad abadan.",
+                    "Customers pay by Instapay transfer to the owner, then we ship.",
+                    "Transfers go to the owner on 0100 123 4567.", "The team will take over shipping after you confirm.",
+                    "We hand over the parcel to the courier the same day.",
+                    "Tell customers our staff pack every order by hand.",
+                    "Pass the order number to the team so they can pack it.",
+                    "Escalate price questions to the store page, never guess.", "Hands-off care: machine wash cold.",
+                    "Pass on the discount to returning customers.", "You answer every chat yourself; no one takes over.",
+                    "Transfer the payment to the shop owner's wallet.", "Write a summary and send it to the owner.",
+                    "The owner handles refunds.", "The owner will follow up on payments.",
+                    "Forward the chat log to the owner each night.", "Hand the customer the receipt with the parcel.",
+                    "الدفع تحويل على رقم صاحب المحل.", "تحويل فودافون كاش على رقم المالك.",
+                    "توصيل هدية لصاحبك في أي مكان في مصر.", "خدمة التوصيل لحد باب البيت، والموظف بيكلمك قبلها.",
+                    "نقل الطلب لشركة الشحن بيتم في نفس اليوم مع فريق المخزن.",
+                    "لو عايز تبدل المقاس، صاحب المحل بيرد على الإيميل.", "وصلنا شحنة جديدة من الموظفين.",
+                    "الطلب بيوصلك لحد البيت.",
+                    # Franco
+                    "el delivery 3and el team bya5od yomen.", "e7na bnwasal el order le saheb el 7aga.",
+                    "law 3ayez t7awel flos, 7awel 3la rakam el owner."]
+    # review round 2 finding 2 and red team round 2: hand-offs with other verbs, promises that a person
+    # replies, Franco, letters spaced out, look alike letters and a hidden character
+    HAND_OFF_TOO = ["Hand the chat to the owner", "Forward the chat to the owner", "hand the chat over",
+                    "Someone from our team will get back to you", "The owner will answer you shortly",
+                    "هبعت الشات للمسؤول", "ابعت المحادثة لصاحب المحل", "الموظف هيرد عليك",
+                    "هخلي حد من الادارة يكلمك.", "هوصلك بخدمة العملاء.",
+                    "A teammate will reply to you shortly.", "A human will get back to you.",
+                    "A colleague will continue.", "The owner will follow up.", "A colleague will continue the chat.",
+                    "A real person responds when it is hard.", "Let a colleague pick up the chat.",
+                    "Connect the customer with a real person.", "Route the conversation to our staff.",
+                    "Send the customer to the team on WhatsApp.", "Get a human to reply.",
+                    "A team member will reply soon.", "The chat goes to a person.",
+                    "When unsure, hand-off the chat to the owner.",
+                    "Please h a n d o f f to the team.", "Use the handоff tool.", "Let a pеrson take over.",
+                    "Use the hand​off tool.",
+                    # Franco
+                    "ha7awlak le wa7ed mn el team", "7awel el chat le mowazzaf lama el 3amel yez3al.",
+                    "7awel el chat lel owner law el 3amil za3lan.", "sallem el customer le wa7ed mn el team.",
+                    "hand over el chat le wa7ed mn el support.", "el owner yerod 3aleek.",
+                    "el mowazzaf hayrod 3aleek"]
+
+    def test_names_a_person_refuses_a_hand_off_and_nothing_else(self):
+        """Review round 2 items 1 and 2 and red team round 2: every hand-off line is caught; every store line
+        and every negated line passes; a card made of a store line builds."""
+        for words in self.HAND_OFF + self.HAND_OFF_TOO:
+            with self.subTest(words=words):
+                self.assertIsNotNone(qs.names_a_person(words))
+        base = json.loads(card_reply(needs=[])["content"])
+        for words in self.NOT_HAND_OFF:
+            with self.subTest(words=words):
+                self.assertIsNone(qs.names_a_person(words))
+                d = json.loads(json.dumps(base))
+                d["card"]["does"] = words
+                self.assertEqual(qs.clean_card(d)["card"]["does"], qs.line(words, qs.CAPS["does"]))
+        d = json.loads(json.dumps(base))
+        d["card"].update(name="hand the chat over", needs=[{"what": "to a real human agent", "tool": ""}])
+        with self.assertRaises(qs.Refused):
+            qs.clean_card(d)  # split across two fields, the first half is a hand-off of its own
 
     def test_instructions_that_hand_a_chat_to_a_person_are_refused(self):
         """Review item 3 (DECISIONS 53): each phrase, English and Arabic, refuses the build twice over and writes
@@ -390,11 +457,47 @@ class QuickStartPage(unittest.TestCase):
         with self.assertRaises(mo.Refused) as e:
             self.build()
         self.assertIn(f"tried {qs.MAX_BUILDS} times", str(e.exception))
+        self.assertIn("Start over to try again", str(e.exception))  # review round 2 item 3: what resets it
+        self.assertNotIn("Change the card", str(e.exception))
         self.assertEqual(len(self.model.calls), 1 + 2 * qs.MAX_BUILDS)
         self.assertEqual(qs.QuickStart().draft(self.m)["builds"], qs.MAX_BUILDS)
         d = json.loads((self.folder / qs.DRAFT_FILE).read_text(encoding="utf-8"))
         (self.folder / qs.DRAFT_FILE).write_text(json.dumps(dict(d, builds="0")), encoding="utf-8")
         self.assertEqual(qs.QuickStart().draft(self.m)["builds"], qs.MAX_BUILDS)  # an odd count is used up
+
+    def test_a_card_change_keeps_the_build_cap_and_start_over_resets_it(self):
+        """Review round 2 item 3: the refusal says Start over, and that is true: a changed card is still refused
+        with no model call, and Start over gives a fresh chat that builds."""
+        bad = plug_reply(plug_dict(fields="x"))
+        self.page(card_reply(needs=[]), *([bad] * (2 * qs.MAX_BUILDS)), card_reply(name="Stock watcher two",
+                  key="stock_watcher_two", needs=[]), card_reply(needs=[]), plug_reply())
+        tick = iter(range(0, 100_000, 61))
+        self.p.quick._clock = lambda: next(tick)  # past the per minute cap: this test is about presses
+        self.send("an agent for my stock")
+        for _ in range(qs.MAX_BUILDS):
+            with self.assertRaises(mo.Refused):
+                self.build()
+        self.send("change the name to Stock watcher two")
+        calls = len(self.model.calls)
+        with self.assertRaises(mo.Refused) as e:
+            self.build()
+        self.assertIn("Start over", str(e.exception))
+        self.assertEqual(len(self.model.calls), calls)
+        self.p.actions["/quickstart/clear"](self.m, {})
+        self.send("an agent for my stock")
+        self.build()
+        self.assertTrue((self.folder / "agents" / "stock_watcher" / "plug.json").exists())
+
+    def test_the_build_prompt_leaves_people_taking_chats_out(self):
+        """Review round 2 item 4: the plug prompt, like the card prompt, says to leave the subject out entirely,
+        so the model writes no never line that the person check would refuse."""
+        self.assertIn("Leave that subject out of the card entirely", qs.CARD_PROMPT)
+        self.page(card_reply(needs=[]), plug_reply())
+        self.send("an agent for my stock")
+        self.build()
+        sent = self.model.calls[1]["messages"][0]["content"]
+        self.assertIn("Leave the subject of people taking chats out of the plug and the instructions entirely, "
+                      "never lines too.", sent)
 
     def test_the_plug_and_instructions_size_caps(self):
         """Review item 6: each cap refuses with its own reason, twice over, and writes nothing."""

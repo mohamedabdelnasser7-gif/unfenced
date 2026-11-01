@@ -40,6 +40,7 @@ import unicodedata
 from pathlib import Path
 
 from engine import plug as plug_mod
+from engine import risk as risk_mod
 from kit import model as model_mod
 
 DRAFT_FILE = "quickstart.json"
@@ -81,41 +82,116 @@ _OUTSIDE = re.compile(r"(?<![A-Za-z0-9_&])(?:" + "|".join(re.escape(w) for w in 
 # starts on careful for a new agent, the stricter of the two.
 STRICT_TRIAL = {"fast": {"share": 0.5, "days": 7}, "careful": {"share": 0.2, "days": 14}}
 LEFT_OUT = ("exam", "kind", "owner", "hands_over")  # need files or other agents a new plug does not have
-# No chat goes to a person (DECISIONS 53): a card, plug or instructions that hand a chat to anyone are
-# refused, in English and plain Arabic. hand off in any spelling and the old stage stand alone; hand over,
-# take over, transfer, pass and escalate count when a person, the team or the owner is
-# named with them. Arabic is read with its marks taken off (_ar_plain).
-_WHO = (r"(?:humans?|persons?|people|someone|somebody|team[\s_-]*members?|staff|teams?|owners?|employees?|"
-        r"colleagues?|managers?|operators?|support)")
-_EN_PERSON = re.compile(
-    r"\bhand(?:s|ed|ing)?[\s_-]*offs?\b|\bhandoffs?\b|with_person"
-    r"|\b(?:hand(?:s|ed|ing)?[\s_-]*over|handover|transfer(?:s|red|ring)?|pass(?:es|ed|ing)?"
-    r"|escalat(?:e|es|ed|ing)|tak(?:e|es|en|ing)[\s_-]*over"
-    r"|took[\s_-]*over)\b(?:\W+\w+){0,4}?\W+(?:to|over to|on to|onto)\W+(?:(?:a|an|the|your|our|their|my|one|of|"
-    r"some|real|live|human|actual)\W+){0,3}" + _WHO + r"\b(?!['’]s\b)"
-    r"|\b" + _WHO + r"\b(?:\W+\w+){0,3}?\W+(?:will\W+|can\W+|should\W+|to\W+|then\W+)?"
-    r"(?:tak(?:e|es|ing)|took)[\s_-]*over\b"
-    r"|\b(?:human|person|team|live|owner)[\s_-]*takeover\b",
-    re.IGNORECASE)
-_AR_WHO = r"(?:موظف|فريق|شخص(?!ي)|انسان|بشري|مالك|صاحب|زميل|خدمه العملاء|خدمة العملاء|مدير)"
-_AR_PERSON = re.compile(
-    r"(?:حول|تحويل|سلم|تسليم|نقل|وصل)[^.!?؟\n]{0,40}?" + _AR_WHO
-    + r"|(?:حد|واحد|حدا) من (?:ال)?(?:فريق|موظف|زملا|خدمه|خدمة)"
-    + r"|" + _AR_WHO + r"[^.!?؟\n]{0,20}?(?:يكمل|هيكمل|حيكمل|يستلم|هيستلم|يتولي|يتولى|يتابع|هيتابع|يرد|هيرد|حيرد)")
-_AR_MARKS = re.compile("[\u064b-\u0652\u0670\u0640]")
-
-
-def _ar_plain(text):
-    return _AR_MARKS.sub("", text).replace("أ", "ا").replace("إ", "ا").replace("آ", "ا").replace("ى", "ي")
+# No chat goes to a person (DECISIONS 53). names_a_person refuses a hand-off of a chat and nothing else:
+# a hand-over verb with the chat, the customer or the conversation as its object or its subject (hand,
+# pass, forward, transfer, حول, ابعت, سلم, 7awel, sallem), or a person (a human, a teammate, the owner,
+# موظف, حد من الفريق, wa7ed mn el team) taking over, answering, getting back to or going on with the
+# customer. The handoff tool and the with_person stage stand alone. Each clause is read on its own (a
+# card field, a sentence, a part between commas), and a negated clause passes ("never hand off a chat",
+# "ما تحولش الشات لحد"). The text is read in engine/risk.py's normal form first (look alike letters
+# folded, marks and hidden characters gone, lowercase, ة as ه), with letters spaced one by one read
+# joined ("h a n d o f f"). Arabic verbs are whole words with their usual prefixes, never inside another
+# word (بيوصل, توصيل and سلمى are not hand-offs).
+_DET = (r"(?:(?:the|a|an|this|that|these|those|their|your|his|her|its|our|any|every|each|all|some|whole|"
+        r"current|live|angry|upset|same|el)\s+){0,2}")
+_CHAT = (r"(?:chats?|conversations?|convos?|threads?|tickets?|calls?|mo7ad[st]a|mohadsa)\b(?!['’])"
+         r"(?!\s+(?:history|logs?|summar(?:y|ies)|transcripts?|exports?|links?|screenshots?|notes?|records?)\b)")
+_CUST = r"(?:customers?|clients?|buyers?|callers?|shoppers?|3am[ei]e?l|zbon|zeboon)\b(?!['’])"
+_WHO = (r"(?:humans?|persons?|people|someone|somebody|team[\s_-]*mates?|team[\s_-]*members?|staff(?:ers?)?|"
+        r"teams?|owners?|employees?|colleagues?|managers?|operators?|support|admins?|representatives?|reps?|"
+        r"boss|(?:wa7ed|wahed|7ad|had|7ada)\s+(?:mn|men|min)|mowaz+af\w*|mwaz+af\w*|mas2o+l\w*|masool|"
+        r"modeer|modir|edara)")
+_WHO_SURE = (r"(?:humans?|persons?|people|someone|somebody|team[\s_-]*mates?|team[\s_-]*members?|staff|"
+             r"support|operators?|representatives?|reps?|colleagues?)")  # never a thing's owner or a page
+_TO_WHO = (r"\s+(?:(?:over|on|back|along|straight|directly|right)\s+)?(?:to|onto|with|through\s+to|le|lel|li|l|la|"
+           r"3and|ma3)\s+(?:(?:a|an|the|your|our|their|my|one|of|some|real|live|actual|human|store|shop|support|"
+           r"sales|el)\s+){0,3}%s\b(?!['’])(?!\s+(?:page|site|website|link|account|wallet|number|email|inbox|"
+           r"portal|address)\b)")
+_HAND = (r"(?:hand(?:s|ed|ing)?(?:[\s_-]*(?:off|over|on))?|handover|pass(?:es|ed|ing)?(?:\s+(?:on|over|along))?"
+         r"|forward(?:s|ed|ing)?|transfer(?:s|red|ring)?|rout(?:e|es|ed|ing)|escalat(?:e|es|ed|ing)"
+         r"|redirect(?:s|ed|ing)?|refer(?:s|red|ring)?|7aw[ae]?l\w*|\w{0,3}7wl\w*|sal+[ae]m\w*|\w{0,3}b3at\w*)")
+_SEND = (r"(?:send(?:s|ing)?|sent|connect(?:s|ed|ing)?|put(?:s|ting)?\s+through|mov(?:e|es|ed|ing)"
+         r"|giv(?:e|es|en|ing)|gave|bring(?:s|ing)?|brought|\w{0,3}was+al\w*)")
+_GAP = (r"(?:\s+(?:from|of|in|at|on|our|the|your|their|a|an|will|would|can|could|should|may|might|must|shall|"
+        r"is|are|to|then|soon|also|always|personally|directly|team|store|shop|support|sales|real|live|human|"
+        r"agents?|be|going|gonna|usually|just|quickly|later|members?|who|that|here|please|now|instead|el))")
+_ON_IT = (r"(?=\s*$|\s*[^\w\s]|\s+(?:(?:to|with|on|for|from)\s+)?(?:you|ya|u|your|yours|them|him|her|"
+          r"(?:the\s+|this\s+|every\s+|each\s+)?(?:customers?|clients?|buyers?|chats?|conversations?|calls?|"
+          r"threads?)|here|soon|shortly|right\s+away|asap|quickly|personally|directly|later|instead|now|when|"
+          r"whenever|if|once|within|in\s+(?:a|an|\d)|immediately|after\s+that|then|from\s+(?:here|there|you|"
+          r"me|us|it|the\s+agent)|as\s+soon)\b)")
+_TAKES = (r"(?:answer(?:s|ed|ing)?|repl(?:y|ies|ied|ying)|respond(?:s|ed|ing)?|get(?:s|ting)?\s+back|got\s+back"
+          r"|call(?:s|ed|ing)?\s+(?:you|them|the\s+customer)\s+back|talk(?:s|ed|ing)?\s+(?:to|with)"
+          r"|speak(?:s|ing)?\s+(?:to|with)|spoke\s+(?:to|with)|chat(?:s|ted|ting)?\s+with|contact(?:s|ed|ing)?"
+          r"|reach(?:es|ed|ing)?\s+out|follow(?:s|ed|ing)?[\s-]+up|continu(?:e|es|ed|ing)|carr(?:y|ies|ied)\s+on"
+          r"|tak(?:e|es|en|ing)\s+over|took\s+over|step(?:s|ped|ping)?\s+in|jump(?:s|ed|ing)?\s+in"
+          r"|join(?:s|ed|ing)?|pick(?:s|ed|ing)?\s+up|handl(?:e|es|ed|ing)|deal(?:s|t|ing)?\s+with)")
+_EN_HAND_OFF = [
+    r"(?<![a-z])hand[_-]?offs?(?![a-z])|with_person|\b(?:human|person|team|live|owner)[\s_-]*takeover\b",
+    r"\b" + _HAND + r"\s+" + _DET + _CHAT,  # hand off the chat, pass the conversation
+    r"\b(?:" + _HAND + r"\s+" + _DET + r"(?:" + _CHAT + r"|" + _CUST + r")(?:\s+[\w'’]+){0,3}?|" + _SEND + r"\s+"
+    + _DET + r"(?:" + _CHAT + r"|" + _CUST + r"))" + _TO_WHO % _WHO,  # transfer the customer to a human
+    r"\b" + _HAND + r"\s+(?:it|them|this|that|me|him|her|you)" + _TO_WHO % _WHO_SURE,  # pass it on to someone
+    r"\bescalat(?:e|es|ed|ing)(?:\s+(?:it|this|that|them|things|the\s+issue|the\s+case))?(?:\s+up)?"
+    + _TO_WHO % _WHO,
+    r"\b" + _DET + r"(?:" + _CHAT + r"|" + _CUST + r")\s+(?:(?:is|are|gets?|got|will|should|can|must|may|be|being|"
+    r"been|was|were|then|always|automatically)\s+){0,3}(?:handed|passed|forwarded|transferred|routed|escalated|"
+    r"sent|moved|referred|redirected|connected|given|goes|go|went)" + _TO_WHO % _WHO,  # the chat goes to the team
+    r"\b" + _WHO + r"\b(?!['’])" + _GAP + r"{0,5}\s+" + _TAKES + _ON_IT,  # the owner will answer you shortly
+]
+_EN_HAND_OFF = [re.compile(p, re.IGNORECASE) for p in _EN_HAND_OFF]
+# Arabic, in the normal form (ة as ه, ى as ي, ؤ as و, no marks).
+_AR_PRE = r"(?<!\w)[وف]?(?:ه|ح|ب|م)?[يتنا]?"  # و, ف, the future and present marks, the person mark
+_AR_WHO = (r"(?<!\w)[وف]?(?:لل|بال|[لب]ال|ال|[لب])?(?:(?:موظف|فريق|شخص(?!ي)|انسان|بني\s?ادم|بشر|مالك|صاحب|زميل|"
+           r"مدير|اداره|مسوول|مسيول|دعم|ادمن|سيلز)\w*|خدمه\s+العملاء|(?:حد|واحد|حدا)\s+من)")
+_AR_CHAT = r"\s+ال(?:شات|تشات|محادثه|محادثات|عميل|عملاء|زبون|زباين|مكالمه|كول)(?!\w)"
+_AR_ON_IT = (r"(?=\s*$|\s*[^\w\s]|\s+(?:عليك|عليكي|عليكم|علي\s+العميل|علي\s+الشات|علي\s+المحادثه|معاك|معاكي|"
+             r"معاكم|مع\s+العميل|الشات|المحادثه|العميل|حالا|بسرعه|قريب|علطول|علي\s+طول|بعدين|فورا|في\s+اقرب|"
+             r"خلال|لما|لو|بنفسه)(?!\w))")
+_AR_HAND_OFF = [re.compile(p) for p in (
+    _AR_PRE + r"(?:حول|تحويل|بعت|رسل|ارسال|سلم|تسليم|نقل|وصل|توصيل|ودي)(?:ه|ها|هم|ي|و|وا|ين|ني)?(?!\w)"
+    + _AR_CHAT + r"(?:\s+\S+){0,3}?\s+" + _AR_WHO,  # حول الشات لموظف
+    _AR_PRE + r"(?:حول|بعت|سلم|نقل|وصل|ودي)(?:ك|كي|كم)(?!\w)(?:\s+\S+)??\s+" + _AR_WHO,  # هحولك لحد من الفريق
+    _AR_WHO + r"(?:\s+\S+){0,2}?\s+" + _AR_PRE + r"(?:رد|جاوب|كمل|ستلم|استلم|تولي)(?:(?:ك|كي|كم)(?!\w)|(?!\w)"
+    + _AR_ON_IT + r")",  # الموظف هيرد عليك
+    r"(?<!\w)[وف]?(?:ل|ب)?(?:حد|واحد|حدا)\s+من(?:\s+\S+){0,2}?\s+" + _AR_PRE
+    + r"(?:رد|جاوب|كمل|ستلم|استلم|تولي|كلم|تواصل|شوف)(?:(?:ك|كي|كم)(?!\w)|(?!\w)" + _AR_ON_IT + r")",
+)]
+# Franco (Arabic in Latin letters and digits).
+_F_WHO = (r"(?:el\s+)?(?:(?:wa7ed|wahed|7ad|had|7ada)\s+(?:mn|men|min)\b|mowaz+af\w*|mwaz+af\w*|mas2o+l\w*|masool|"
+          r"modeer|modir|owner|team|support|admin|edara|human|customer\s+service)")
+_F_HAND_OFF = [re.compile(p, re.IGNORECASE) for p in (
+    r"(?<!\w)\w{0,4}(?:7aw[ae]?l|7wl|b3at|ba3at|sal+[ae]m|was+al|wad+[iy])(?:ak|ik|ko|kom|lak|lik)?(?!\w)"
+    r"\s+(?:el\s+)?(?:chat|mo7ad[st]a|mohadsa|3am[ei]e?l|customer|client|zbon|zeboon|conversation)(?!\w)"
+    r"(?:\s+\S+){0,3}?\s+(?:le|lel|li|l|la|lal|3and|ma3|b|bel|to)\s+" + _F_WHO,  # 7awel el chat lel owner
+    r"(?<!\w)\w{0,4}(?:7aw[ae]?l|b3at|was+al|sal+[ae]m)(?:ak|ik|ko|kom)(?!\w)\s+(?:le|lel|li|l|la|b|bel|ma3)\s+"
+    + _F_WHO,  # ha7awlak le wa7ed mn el team
+    r"(?<!\w)" + _F_WHO + r"(?:\s+\S+){0,3}?\s+(?:ha|h|b|bi|be|bey|bay|hay|hey|y|ye|yi|t|te|hy|by)?"
+    r"(?:rod|red|rd|rud|gawb|gaweb|kamel|kammel|kaml|stalam|stlem|estalam)(?:(?:ak|ik|ko)(?!\w)|(?!\w)"
+    r"(?=\s*$|\s*[^\w\s]|\s+(?:3alee?k|3alee?ki|3alekom|3leek|3lek|ma3ak|ma3aki|ma3ako|m3ak|3ala\s+el\s+3am[ei]e?l|"
+    r"ma3\s+el\s+3am[ei]e?l|el\s+chat|bsor3a|7alan|delwa2ty|3ala\s+tool)(?!\w)))",  # el mowazaf hayrod 3aleek
+)]
+_NEGATED = re.compile(
+    r"(?<!\w)(?:never|not|no|nobody|none|nothing|without|nor|cannot|(?:do|does|did|is|are|was|were|wo|ca|could|"
+    r"should|would|must|have|has|had|need)n['’]?t|(?<!قبل )(?<!بعد )(?<!لحد )(?<!زي )(?<!كل )ما|مش|لا|لن|لم|ابدا|ممنوع|"
+    r"بلاش|مفيش|محدش|ma|mesh|msh|mosh|mish|abadan|la2|balash|mamno3|ma\w+sh)(?!\w)"
+    r"|(?<!\w)[وف]?ما?[تيبنه]\w+ش(?!\w)", re.IGNORECASE)
+_CLAUSES = re.compile(r'[.!?؟;؛:\n"،,()\[\]{}]|\\n')
+_SPACED = re.compile(r"(?<![^\W\d_])(?:[^\W\d_][ ._-]){2,}[^\W\d_](?![^\W\d_])")
 
 
 def names_a_person(text):
     """The words that hand a chat to a person (a human, the team, the owner), or None (DECISIONS 53)."""
     if not isinstance(text, str):
         return None
-    plain = unicodedata.normalize("NFKC", text)
-    m = _EN_PERSON.search(plain) or _AR_PERSON.search(_ar_plain(plain))
-    return m.group(0) if m else None
+    plain = risk_mod.normalize(text, hidden="", letters=True)
+    plain = _SPACED.sub(lambda m: re.sub(r"[ ._-]", "", m.group(0)), plain)
+    for clause in _CLAUSES.split(plain):
+        for rx in (*_EN_HAND_OFF, *_AR_HAND_OFF, *_F_HAND_OFF):
+            for m in rx.finditer(clause):
+                if not _NEGATED.search(clause[:m.end()]):
+                    return m.group(0).strip()
+    return None
 
 
 NO_PERSON_SAID = "no chat goes to a person, so nothing may hand a chat to a person, the team or the owner"
@@ -161,7 +237,7 @@ Rules for this plug:
 - agent is "{agent}". Leave out exam, kind, owner and hands_over.
 - Connected tools: {tools}. Its actions use only these, or plain writing the model does itself. Anything else the card needs is not connected yet: leave it out.
 - decides.good is the result that matches the card's good result.
-- No chat goes to a person: no handoff tool, no with_person stage, no action that passes a chat to a team.
+- No chat goes to a person: no handoff tool, no with_person stage, no action that passes a chat to a team. Leave the subject of people taking chats out of the plug and the instructions entirely, never lines too.
 - risk high covers anything that goes out in the user's name, money, promises, dates and personal data. It starts strict.
 - instructions: the agent's own prompt in plain words, from the card: what it does and for whom, what a good result is, what it never does, and how it uses its connected tools. No dashes.
 Answer with one JSON object only: {{"plug": {{...}}, "instructions": "..."}}"""
@@ -377,7 +453,8 @@ class QuickStart:
         if (agents / agent).exists() or (agents / agent).is_symlink():
             raise Refused(f"There is an agent called {agent} already. Give this one another name in the box.")
         if d["builds"] >= MAX_BUILDS:
-            raise Refused(f"Build was tried {MAX_BUILDS} times in this chat. Change the card in the box or start over.")
+            raise Refused(f"Build was tried {MAX_BUILDS} times in this chat, the most one chat may. Start over to try "
+                          "again; a change to the card does not reset it.")
         d["builds"] += 1  # counted before the model is called, so a failed press counts too
         self._save(folder, d)
         tools = connected(card)

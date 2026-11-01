@@ -58,9 +58,12 @@ class SalesFields(unittest.TestCase):
         self.assertIn("complaint", PLUG.harm.about.lower())
         self.assertIn("no result", PLUG.harm.about.lower())
 
-    def test_an_order_is_good_and_going_quiet_is_not(self):
-        # no bad result: a chat with no order a day after the agent last acted settles not good
-        self.assertEqual((PLUG.decides.good, PLUG.decides.bad), ("order_created", ()))
+    def test_an_order_is_good_and_a_chat_closed_after_quiet_is_not(self):
+        # a chat closes after an hour of quiet; closed with no order it settles not good at once
+        # (DECISIONS item 54); order_created's day stays the engine's window for a chat never closed
+        self.assertEqual((PLUG.decides.good, PLUG.decides.bad), ("order_created", ("chat_closed",)))
+        self.assertEqual(PLUG.results["chat_closed"].shows_in_days, (0.0, 0.0))
+        self.assertIsNone(PLUG.results["chat_closed"].after)
         self.assertEqual(PLUG.results["order_created"].shows_in_days, (0.0, 1.0))
 
     def test_bosta_results_are_recorded_but_never_decide(self):

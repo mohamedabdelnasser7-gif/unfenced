@@ -32,7 +32,7 @@ In Deployment the agent saves no lesson while a chat is running. Reflection read
 
 The reason is poisoning. A customer could try to teach the agent something inside a chat. MemForm (arXiv 2610.14431) tested six models and found that what agents save to memory can be poisoned in all of them. So a lesson needs at least three different people behind it, and a lesson that copies a customer's words always waits for a yes.
 
-There is one fast path, the hotfix. After a chat that did not close, fast reflection can write one "try this instead" note for that customer's next chat only. The note expires after that chat and is never saved as a lesson.
+There is one fast path, the hotfix. After a chat that did not close, fast reflection can write one "try this instead" note for that customer's next chat only. The note expires after that chat and is never saved as a lesson. A chat ends after quiet: 30 minutes with no customer message, the agent says the chat closes in 30 minutes, and 30 minutes later it closes. A chat closed with no order gets its note at once and counts as lost that night; the customer's next message starts a new chat.
 
 ## Reflection is not Reflexion
 

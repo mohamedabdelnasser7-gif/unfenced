@@ -8,13 +8,15 @@ again) and turn_failed (the code crashed during the turn; the same line went out
 in a row is no safe reply). person_replied comes only from imported past chats (a team
 member's reply; its step is the example the reflection reads). Orders: order_drafted (draft_order
 made a summary, with its total) and order_created (the customer said yes and the store took
-the order, with its number, total and COD risk). delivered and refused come from Bosta's
-delivery webhook (channels/bosta.py), matched to the chat through the order number its
-order_created row names (chat_for_order). The night study reads this log.
+the order, with its number, total and COD risk). chat_closed comes from sales/quiet.py when a
+chat closes after quiet with no order (DECISIONS item 54): the case is lost at once. delivered
+and refused come from Bosta's delivery webhook (channels/bosta.py), matched to the chat through
+the order number its order_created row names (chat_for_order). The night study reads this log.
 
 Rows live in the engine's log (engine/log.py) under the Sales agent plug
 (sales/plug.json); a case is one chat and an outcome is a result. A row's source is
-the person writing in, and one chat is one person, so the log keeps the chat id as it. The engine keeps no
+the person writing in, in that chat, so the log keeps the chat id as it; their next chat after
+one closes is a new case (the fast note follows them there, reflection/fast.py). The engine keeps no
 list of its own and refuses an outcome the plug did not declare. An outcome the plug says
 ends an action (replied ends a reply, order_created an order) is saved with that action and
 the ids of the lessons it was given; the rest (a team member's reply in an imported chat,

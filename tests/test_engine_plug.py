@@ -13,8 +13,8 @@ from reflection.results import Results
 from tests import plugs
 
 ROOT = Path(__file__).resolve().parent.parent
-TODAYS_11 = {"replied", "check_failed", "no_safe_reply", "limited", "model_error", "turn_failed",
-             "person_replied", "order_drafted", "order_created", "delivered", "refused"}
+TODAYS_12 = {"replied", "check_failed", "no_safe_reply", "limited", "model_error", "turn_failed",
+             "person_replied", "order_drafted", "order_created", "chat_closed", "delivered", "refused"}
 GONE = ("handed_off", "handoff_failed", "handed_back", "relay_failed")  # the hand-off left (DECISIONS item 53)
 BUSINESS = re.compile(r"chat|customer|order|sales|store|whatsapp|price|waterer|ledger", re.IGNORECASE)
 
@@ -37,8 +37,8 @@ class EngineHasNoBusinessWords(unittest.TestCase):
 
 
 class SalesPlug(unittest.TestCase):
-    def test_declares_todays_11_results(self):
-        self.assertEqual(set(PLUG.results), TODAYS_11)
+    def test_declares_todays_12_results(self):
+        self.assertEqual(set(PLUG.results), TODAYS_12)
         self.assertEqual(PLUG.agent, "sales")
 
     def test_fast_and_slow(self):
@@ -78,7 +78,7 @@ class SalesPlug(unittest.TestCase):
     def test_the_log_refuses_an_outcome_the_plug_did_not_declare(self):
         r = Results(Db(":memory:"))
         self.addCleanup(r.db.close)
-        for outcome in TODAYS_11:
+        for outcome in TODAYS_12:
             r.record("c1", outcome)
         for bad in ("made_up", "grew", "soaked", "") + GONE:
             with self.assertRaises(ValueError):

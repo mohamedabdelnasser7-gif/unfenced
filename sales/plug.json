@@ -1,7 +1,7 @@
 {
   "agent": "sales",
   "about": "Answers a store's customers on WhatsApp and takes orders after a plain yes.",
-  "case": "One WhatsApp chat with one customer; the case id is the chat id.",
+  "case": "One WhatsApp chat with one customer; the case id is the chat id. A chat closes after an hour of quiet; the customer's next message starts a new chat.",
   "fields": ["retail"],
   "stages": ["asking", "ordering", "my_order"],
   "actions": {
@@ -24,7 +24,9 @@
     "order_drafted": {"speed": "fast", "shows_in_days": [0, 0], "after": "order",
                       "about": "draft_order made a summary, with its total."},
     "order_created": {"speed": "fast", "shows_in_days": [0, 1], "after": "order",
-                      "about": "The customer said yes and the store took the order, with its number, total and COD risk. It settles a case as good; a chat with no order a day after the agent last acted went quiet, which counts as not good."},
+                      "about": "The customer said yes and the store took the order, with its number, total and COD risk. It settles a case as good. A chat closes after an hour with no customer message (a notice at 30 minutes, then 30 more); closed with no order, it is chat_closed, which counts as not good."},
+    "chat_closed": {"speed": "fast", "shows_in_days": [0, 0],
+                    "about": "The chat closed after quiet with no order: 30 minutes with no customer message, the notice, then 30 more. It settles the case as not good at once, so the fast note is written and that night's Reflection counts the chat as lost."},
     "person_replied": {"speed": "fast", "shows_in_days": [0, 1],
                        "about": "A team member's reply in a chat imported from the store's past; its step is the example the reflection reads."},
     "delivered": {"speed": "slow", "shows_in_days": [2, 7],
@@ -38,14 +40,14 @@
     "area": "The customer's area."
   },
   "source": {
-    "about": "The person writing in. One chat is one person, so the chat id names them.",
+    "about": "The person writing in, in one chat, so the chat id names them in the log. Their next chat after one closes is a new case; the fast note follows them there (reflection/fast.py).",
     "known_by": "case"
   },
   "harm": {
     "results": ["no_safe_reply"],
     "about": "A turn with no safe reply counts as harm. Complaints count too, but they have no result yet; they join this list once one is declared."
   },
-  "decides": {"good": "order_created", "bad": []},
+  "decides": {"good": "order_created", "bad": ["chat_closed"]},
   "risk": {
     "high": {
       "about": "High risk in this store: any number (a price, a total, a fee, delivery days), any promise (a refund, an exchange, a delivery date), store policy, and a customer's personal data.",

@@ -336,7 +336,7 @@ class Links(unittest.TestCase):
 
 class TheWindow(unittest.TestCase):
     def test_default_days_come_from_the_plug(self):
-        self.assertEqual(night.default_days(SALES), 2.0)  # an order shows within a day; a day later the chat went quiet
+        self.assertEqual(night.default_days(SALES), 2.0)  # an order shows within a day, the window for a chat never closed
         self.assertEqual(night.default_days(plug_mod.load(ROOT / "marketing" / "plug.json")), 8.0)
 
     def test_the_sales_night_runs_on_its_own_bindings(self):

@@ -1,11 +1,13 @@
 """Fast reflection for the Sales agent: the engine's fast notes (engine/fast.py) under the Sales
 agent plug, with the chat read as data and the note written by a Meta model.
 
-A chat that ends without an order (the customer went quiet: no order a day after the agent last
-acted) gets one short "try this instead" within seconds of the sweep that finds it; the running
-agent sweeps every few seconds (channels/whatsapp.py). The note goes into that same customer's
-next chat only, under HEADING at the end of the prompt, and is gone when that chat ends or, never
-used, a week after it was written. A won chat gets nothing, and nothing is written while a chat is
+A chat that ends without an order gets one short "try this instead" within seconds of the sweep
+that finds it. A chat ends after quiet (DECISIONS item 54, sales/quiet.py): 30 minutes with no
+customer message, a notice, then 30 more, and it closes; closed with no order it gets chat_closed,
+the plug's bad deciding result, so the same sweep of the running agent (channels/whatsapp.py, every
+few seconds) writes its note at once. The note goes into that same customer's next chat only (a
+new chat, since the closed one never reopens), under HEADING at the end of the prompt, and is gone
+when that chat ends or, never used, a week after it was written. A won chat gets nothing, and nothing is written while a chat is
 still going. The note is never a lesson: it never enters the lessons table and never skips the
 gate; the night study reads the same chat by the same id and may make a lesson from it the normal
 way.
@@ -49,6 +51,7 @@ import json
 import re
 
 from engine import fast as engine_fast
+from engine.log import case_key, source_key
 from engine.plug import Risk
 from engine.study import PartError
 from kit import limits as limits_mod
@@ -310,9 +313,11 @@ class Metered:
 
 
 class FastNotes(engine_fast.FastNotes):
-    """The Sales agent's fast notes: a case is one chat, and the chat id names the customer.
-    limits: the kit.limits.Limits every writer call is counted in (the running agent's own);
-    left out, one on the same database."""
+    """The Sales agent's fast notes: a case is one chat. A customer has a new chat after one closes,
+    so a note is kept under the customer, named by the id of their first chat on the channel
+    (kit.chats first_chat), and goes into their next chat, whatever its id. A chat id the chats
+    store does not hold names itself. limits: the kit.limits.Limits every writer call is counted
+    in (the running agent's own); left out, one on the same database."""
 
     def __init__(self, db=None, chats=None, writer=None, keep_days=engine_fast.KEEP_DAYS, limits=None):
         db = db if db is not None else Db()
@@ -323,8 +328,30 @@ class FastNotes(engine_fast.FastNotes):
                          never=NEVER, known=known)
 
     def for_prompt(self, chat_id, now=None):
-        """This chat's note under HEADING, for the end of its prompt; "" when it has none."""
+        """This chat's note under HEADING, for the end of its prompt; "" when it has none: the note
+        written for this customer's last chat that ended without an order."""
         return engine_fast.slot(self.hand(chat_id, now=now), HEADING)
+
+    def _source(self, key, source):
+        """The customer behind a chat: the case id names the chat, the note follows the customer."""
+        if source is not None and source_key(source) != key:
+            raise ValueError(f"for {self.agent} the case id names the source; leave source out")
+        return source_key(self.chats.first_chat(key))
+
+    def _save(self, case_id, source, ended_at, text, why, now):
+        return super()._save(case_id, self.chats.first_chat(case_key(case_id)), ended_at, text, why, now)
+
+    def _acted_since(self, c, note):
+        """Has any chat of the note's customer had an action since the chat it was written for ended?"""
+        if self.chats.db is self.db:  # read on the same connection, inside the caller's transaction
+            cases = [r["id"] for r in c.execute(
+                "SELECT f.id FROM chats ch JOIN chats f ON f.channel = ch.channel AND f.customer_id = ch.customer_id "
+                "AND f.parent_id IS NULL WHERE ch.id = ?", (note["source"],))] or [note["source"]]
+        else:
+            cases = self.chats.customer_chats(note["source"])
+        marks = ", ".join("?" for _ in cases)
+        return c.execute(f"SELECT 1 FROM trace WHERE agent = ? AND case_id IN ({marks}) AND action IS NOT NULL "
+                         "AND at > ? LIMIT 1", (self.agent, *cases, note["ended_at"])).fetchone() is not None
 
     def sweep(self, now=None, limit=engine_fast.MAX_PER_SWEEP):
         """The engine's sweep, one row at a time, stopping before a row once the writer is over its

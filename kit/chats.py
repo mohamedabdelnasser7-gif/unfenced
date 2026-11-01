@@ -16,8 +16,15 @@ is lost.
 A team member's message in a chat imported from the store's past (reflection/importer.py) is
 saved as an assistant step whose name is PERSON, so the reflection can tell a person's reply
 from the agent's. The live agent never hands a chat to a person (DECISIONS item 53). A fixed
-line the agent sends (model down, limit, order placed) is saved with the name FIXED, so it
-never counts as a reply the model wrote (an order summary).
+line the agent sends (model down, limit, order placed, the quiet notice) is saved with the name
+FIXED, so it never counts as a reply the model wrote (an order summary).
+
+A chat ends after quiet (DECISIONS item 54, sales/quiet.py): notice_at is when the agent told
+the customer the chat closes soon, closed_at is when it closed. open() never returns a closed
+chat: the customer's next message starts a new chat on the same channel and customer_id.
+first_chat() names the customer across their chats: the id of their first chat on that channel.
+
+Every time here comes from clock (time.time unless a test gives its own).
 """
 import json
 import time
@@ -36,7 +43,9 @@ CREATE TABLE IF NOT EXISTS chats (
   branched_at INTEGER,
   created_at REAL NOT NULL,
   updated_at REAL NOT NULL,
-  model_errors INTEGER NOT NULL DEFAULT 0
+  model_errors INTEGER NOT NULL DEFAULT 0,
+  notice_at REAL,
+  closed_at REAL
 );
 CREATE INDEX IF NOT EXISTS chats_customer ON chats (channel, customer_id, parent_id);
 CREATE TABLE IF NOT EXISTS steps (
@@ -62,6 +71,8 @@ CREATE TABLE IF NOT EXISTS seen_messages (
 # Columns added after the first live tests, for databases made before them.
 CHAT_COLUMNS = (
     ("model_errors", "INTEGER NOT NULL DEFAULT 0"),
+    ("notice_at", "REAL"),
+    ("closed_at", "REAL"),
 )
 SEEN_COLUMNS = (
     ("status", "TEXT NOT NULL DEFAULT 'done'"),
@@ -72,12 +83,13 @@ SEEN_COLUMNS = (
 FIRST_STAGE = "asking"
 MAX_ATTEMPTS = 3
 PERSON = "person"   # the name on an assistant step a team member wrote, in an imported chat
-FIXED = "fixed"     # the name on a fixed line the agent sent (model down, limit, order placed, photo or voice line)
+FIXED = "fixed"     # the name on a fixed line the agent sent (model down, limit, order placed, photo or voice line, quiet notice)
 
 
 class Chats:
-    def __init__(self, db=None):
+    def __init__(self, db=None, clock=None):
         self.db = db if db is not None else Db()
+        self.clock = clock if clock is not None else _now
         self.db.script(SCHEMA)
         with self.db.tx() as c:
             for table, columns in (("chats", CHAT_COLUMNS), ("seen_messages", SEEN_COLUMNS)):
@@ -89,19 +101,73 @@ class Chats:
     # chats
 
     def open(self, channel, customer_id):
-        """The customer's current chat on this channel, or a new one. Branches are never reopened."""
+        """The customer's current chat on this channel, or a new one on the same channel and
+        customer_id once the last one closed. Branches and closed chats are never reopened."""
         with self.db.tx() as c:
             row = c.execute(
-                "SELECT id FROM chats WHERE channel = ? AND customer_id = ? AND parent_id IS NULL "
-                "ORDER BY created_at DESC LIMIT 1", (channel, customer_id)).fetchone()
-            if row:
+                "SELECT id, closed_at FROM chats WHERE channel = ? AND customer_id = ? AND parent_id IS NULL "
+                "ORDER BY created_at DESC, rowid DESC LIMIT 1", (channel, customer_id)).fetchone()
+            if row and row["closed_at"] is None:
                 return row["id"]
             return self._new(c, channel, customer_id)
+
+    def first_chat(self, chat_id):
+        """The id of the customer's first chat on this chat's channel (never a branch): it names the
+        customer across their chats. The chat id itself when it is not saved here."""
+        with self.db.tx() as c:
+            row = c.execute(
+                "SELECT f.id FROM chats ch JOIN chats f ON f.channel = ch.channel AND f.customer_id = ch.customer_id "
+                "AND f.parent_id IS NULL WHERE ch.id = ? ORDER BY f.created_at, f.rowid LIMIT 1",
+                (chat_id,)).fetchone()
+        return row["id"] if row else chat_id
+
+    def customer_chats(self, chat_id):
+        """Every chat of this chat's customer on its channel (never a branch), oldest first; [chat_id]
+        when it is not saved here."""
+        with self.db.tx() as c:
+            rows = c.execute(
+                "SELECT f.id FROM chats ch JOIN chats f ON f.channel = ch.channel AND f.customer_id = ch.customer_id "
+                "AND f.parent_id IS NULL WHERE ch.id = ? ORDER BY f.created_at, f.rowid", (chat_id,)).fetchall()
+        return [r["id"] for r in rows] or [chat_id]
+
+    # quiet and closing (sales/quiet.py)
+
+    def open_chats(self, channel):
+        """The open chats on a channel (never a branch), oldest first, each {id, customer_id, stage,
+        notice_at, last, last_customer}: last is the time of the last customer or agent step,
+        last_customer of the last customer step (None with none)."""
+        with self.db.tx() as c:
+            rows = c.execute(
+                "SELECT c.id, c.customer_id, c.stage, c.notice_at, "
+                "(SELECT MAX(at) FROM steps s WHERE s.chat_id = c.id AND s.role IN ('user', 'assistant')) AS last, "
+                "(SELECT MAX(at) FROM steps s WHERE s.chat_id = c.id AND s.role = 'user') AS last_customer "
+                "FROM chats c WHERE c.channel = ? AND c.parent_id IS NULL AND c.closed_at IS NULL "
+                "ORDER BY c.created_at, c.rowid", (channel,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_notice(self, chat_id, at=None):
+        """Record that the quiet notice went (or was tried) in this chat. False when it already had one."""
+        at = self.clock() if at is None else at
+        with self.db.tx() as c:
+            cur = c.execute("UPDATE chats SET notice_at = ?, updated_at = ? WHERE id = ? AND notice_at IS NULL",
+                            (at, at, chat_id))
+            return cur.rowcount == 1
+
+    def close(self, chat_id, at=None):
+        """Close the chat, recorded as an event step. False when it was closed already."""
+        at = self.clock() if at is None else at
+        with self.db.tx() as c:
+            cur = c.execute("UPDATE chats SET closed_at = ?, updated_at = ? WHERE id = ? AND closed_at IS NULL",
+                            (at, at, chat_id))
+            if cur.rowcount != 1:
+                return False
+            self._add(c, chat_id, "event", content=json.dumps({"closed": "quiet"}))
+            return True
 
     def _new(self, c, channel, customer_id, stage=FIRST_STAGE, failed=0, parent=None, at_step=None,
              model_errors=0):
         chat_id = uuid.uuid4().hex
-        now = time.time()
+        now = self.clock()
         c.execute("INSERT INTO chats (id, channel, customer_id, stage, failed_checks, model_errors, parent_id, "
                   "branched_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                   (chat_id, channel, customer_id, stage, failed, model_errors, parent, at_step, now, now))
@@ -122,7 +188,7 @@ class Chats:
         if self.stage(chat_id) == stage:
             return
         with self.db.tx() as c:
-            c.execute("UPDATE chats SET stage = ?, updated_at = ? WHERE id = ?", (stage, time.time(), chat_id))
+            c.execute("UPDATE chats SET stage = ?, updated_at = ? WHERE id = ?", (stage, self.clock(), chat_id))
             self._add(c, chat_id, "event", content=json.dumps({"stage": stage}))
 
     def failed_checks(self, chat_id):
@@ -132,7 +198,7 @@ class Chats:
         """Count one failed send check in this chat. Returns the new count."""
         with self.db.tx() as c:
             c.execute("UPDATE chats SET failed_checks = failed_checks + 1, updated_at = ? WHERE id = ?",
-                      (time.time(), chat_id))
+                      (self.clock(), chat_id))
             self._add(c, chat_id, "event", content=json.dumps({"check_failed": feedback}, ensure_ascii=False))
             return c.execute("SELECT failed_checks FROM chats WHERE id = ?", (chat_id,)).fetchone()[0]
 
@@ -140,7 +206,7 @@ class Chats:
         """After a reply passes the check, the count starts again. Recorded as an event when it was not 0."""
         with self.db.tx() as c:
             cur = c.execute("UPDATE chats SET failed_checks = 0, updated_at = ? WHERE id = ? AND failed_checks > 0",
-                            (time.time(), chat_id))
+                            (self.clock(), chat_id))
             if cur.rowcount:
                 self._add(c, chat_id, "event", content=json.dumps({"checks_reset": True}))
 
@@ -151,7 +217,7 @@ class Chats:
         """Count one model error in a row in this chat. Returns the new count."""
         with self.db.tx() as c:
             c.execute("UPDATE chats SET model_errors = model_errors + 1, updated_at = ? WHERE id = ?",
-                      (time.time(), chat_id))
+                      (self.clock(), chat_id))
             self._add(c, chat_id, "event", content=json.dumps({"model_error": reason}, ensure_ascii=False))
             return c.execute("SELECT model_errors FROM chats WHERE id = ?", (chat_id,)).fetchone()[0]
 
@@ -159,7 +225,7 @@ class Chats:
         """After a reply passes, the count starts again. Recorded as an event when it was not 0."""
         with self.db.tx() as c:
             cur = c.execute("UPDATE chats SET model_errors = 0, updated_at = ? WHERE id = ? AND model_errors > 0",
-                            (time.time(), chat_id))
+                            (self.clock(), chat_id))
             if cur.rowcount:
                 self._add(c, chat_id, "event", content=json.dumps({"model_errors_reset": True}))
 
@@ -170,7 +236,7 @@ class Chats:
         """Save one step. Returns its number. message_id: the webhook id this step saves, marked done here."""
         with self.db.tx() as c:
             n = self._add(c, chat_id, role, content, tool_calls, tool_call_id, name, media)
-            c.execute("UPDATE chats SET updated_at = ? WHERE id = ?", (time.time(), chat_id))
+            c.execute("UPDATE chats SET updated_at = ? WHERE id = ?", (self.clock(), chat_id))
             self._done(c, message_id)
             return n
 
@@ -181,7 +247,7 @@ class Chats:
             json.dumps(tool_calls) if tool_calls else None,
             tool_call_id, name,
             json.dumps(media) if media else None,
-            time.time()))
+            self.clock()))
         return n
 
     def steps(self, chat_id, upto=None):
@@ -270,7 +336,7 @@ class Chats:
         with self.db.tx() as c:
             cur = c.execute(
                 "INSERT OR IGNORE INTO seen_messages (message_id, at, status, payload) VALUES (?, ?, 'pending', ?)",
-                (message_id, time.time(), json.dumps(payload, ensure_ascii=False) if payload is not None else None))
+                (message_id, self.clock(), json.dumps(payload, ensure_ascii=False) if payload is not None else None))
             return cur.rowcount == 1
 
     def saved(self, message_id):
@@ -306,6 +372,10 @@ class Chats:
             c.executemany("UPDATE seen_messages SET attempts = attempts + 1 WHERE message_id = ?",
                           [(r["message_id"],) for r in rows])
         return [json.loads(r["payload"]) for r in rows]
+
+def _now():
+    return time.time()  # looked up at each call, so a test that patches time.time moves it
+
 
 MEDIA_NOTE = {
     "image": "(The customer sent a photo earlier. It is not kept.)",

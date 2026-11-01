@@ -12,7 +12,8 @@ through a public tunnel or a host, like the WhatsApp webhook.
   Mohamed's call 14A, 29 Oct). Both are slow results of the Sales agent plug, saved through
   reflection/results.py. This webhook is an optional result source: the results are recorded on
   the case and read by the delivery cards (reflection/facts.py), but they never decide a case;
-  the order placed does, against a chat that went quiet (sales/plug.json decides).
+  the order placed does, against a chat that closed after quiet with no order (chat_closed,
+  sales/plug.json decides).
 - A returned send most likely reaches the webhook as a delivery of its own: type RTO (the
   return leg), its own _id, state 46, and the send's businessReference. So a 46 is found
   through the same order lookup as the send and is taken once per order, not per delivery:

@@ -390,8 +390,7 @@ class FastNotes:
         if note["used_at"] is None:
             if now >= note["expires_at"]:
                 state = EXPIRED
-            elif c.execute("SELECT 1 FROM trace WHERE agent = ? AND source = ? AND action IS NOT NULL AND at > ? "
-                           "LIMIT 1", (self.agent, note["source"], note["ended_at"])).fetchone():
+            elif self._acted_since(c, note):
                 state = MISSED
             else:
                 return WAITING
@@ -402,6 +401,11 @@ class FastNotes:
         if close:
             _close(c, note["id"], state, now)
         return state
+
+    def _acted_since(self, c, note):
+        """Has the note's source had an action since the case it was written for ended?"""
+        return c.execute("SELECT 1 FROM trace WHERE agent = ? AND source = ? AND action IS NOT NULL AND at > ? "
+                         "LIMIT 1", (self.agent, note["source"], note["ended_at"])).fetchone() is not None
 
     def _over(self, c, note, now):
         """Has the note's one next case ended: a deciding result since it was first given, or the

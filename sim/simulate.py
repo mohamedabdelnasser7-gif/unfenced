@@ -44,9 +44,9 @@ Scenario keys (unknown keys are refused):
            names the source: there one case is one source.
   stamp    {weekday: {step, key}}: the case's weekday, mon to sun, in that step's detail.
   bad      optional: which not good deciding result a case that ends not good gets; the
-           first of the plug's by default. With none declared, it gets no deciding result:
-           it is pending until the longest deciding window has passed since its last step,
-           then not good, as the night study settles it.
+           first of the plug's by default. With none declared, or null, it gets no deciding
+           result: it is pending until the longest deciding window has passed since its last
+           step, then not good, as the night study settles it.
   lift     optional [{lesson, trait, value, follows}]: how a case reacts to a lesson it was
            given, the true effect a run with lessons plants (sim/score.py). A case handed the
            lesson line, at the trait's step or before it, takes that value of the trait with
@@ -132,7 +132,7 @@ def simulate(db, plug, scenario, *, seed=None, lessons=None, hand_from=None, nig
             member[i] = (g, rank)
     deciders = (plug.decides.good, *plug.decides.bad)
     longest = max(plug.results[r].shows_in_days[1] for r in deciders)
-    bad = sc.get("bad") or (plug.decides.bad[0] if plug.decides.bad else None)
+    bad = sc["bad"] if "bad" in sc else (plug.decides.bad[0] if plug.decides.bad else None)
     plans = []
     for i, at in enumerate(starts):
         traits, picks = {}, {}

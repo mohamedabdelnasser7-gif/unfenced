@@ -90,7 +90,7 @@ class OneChain(unittest.TestCase):
         proposer = fk.Proposer({"pattern": HIGH, "helps": False, "lesson": LESSON,
                                 "situation": "An order the risk check marks high.", "stages": ["ordering"]})
         plug = delivery_plug()
-        self.assertEqual((SALES.decides.good, SALES.decides.bad), ("order_created", ()))  # it would settle all 12 good
+        self.assertEqual((SALES.decides.good, SALES.decides.bad), ("order_created", ("chat_closed",)))  # it would settle all 12 good
         self.assertEqual((plug.agent, plug.decides.good, plug.decides.bad), ("sales", "delivered", ("refused",)))
         rep = night.night(self.db, plug, until=time.time() + 60, days=14, judge=Judge(FakeModel(say("low"))),
                           proposer=proposer, tagger=by_risk, fit=fk.Fit(), adapter=fk.Adapter())

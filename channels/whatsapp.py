@@ -28,9 +28,13 @@ It listens on 127.0.0.1:PORT (default 8080). Meta must reach it through a public
   and the second failure in a row, model errors included, is no safe reply (sales/loop.py).
 - The lessons get the Meta risk judge (reflection/judge.py), not the engine's stub. It fails
   closed: with no key, an error or an odd answer the lesson counts as high and waits for a yes.
-- Fast reflection (reflection/fast.py): a second thread sweeps every FAST_EVERY seconds for chats
-  that ended without an order and writes each one note for that customer's next chat only; the
-  turn reads it into the prompt. A sweep that fails is logged and the next one tries again.
+- A chat ends after quiet (DECISIONS item 54, sales/quiet.py): a second thread ticks every
+  FAST_EVERY seconds, with no model call. After 30 quiet minutes the customer gets one notice
+  that the chat closes in 30 minutes, through Graph.send like any reply; after 30 more the chat
+  closes, and the next message starts a new chat.
+- Fast reflection (reflection/fast.py): the same thread then sweeps for chats that ended without
+  an order and writes each one note for that customer's next chat only; the turn reads it into
+  the prompt. A tick or sweep that fails is logged and the next one tries again.
 
 Graph API version: GRAPH_API_VERSION, default v26.0, the latest in Meta's changelog
 (https://developers.facebook.com/docs/graph-api/changelog, checked 28 Oct 2026; v26.0
@@ -77,7 +81,7 @@ MODEL_KEYS = "META_API_KEY or BASETEN_API_KEY"
 SIGNATURE = re.compile(r"sha256=([0-9a-f]{64})")
 CHALLENGE = re.compile(r"[0-9A-Za-z_-]{1,128}")
 MAX_ERROR_BODY = 64 * 1024
-FAST_EVERY = 30  # seconds between fast reflection sweeps, so a note is written within seconds of a chat ending
+FAST_EVERY = 30  # seconds between quiet ticks and fast reflection sweeps, so a note is written within seconds of a chat ending
 OLD_FIELDS = ("context_id", "error_code")  # Incoming fields before DECISIONS item 53
 
 
@@ -420,9 +424,10 @@ class App:
     limit the customer was already at when the message came in.
     """
 
-    def __init__(self, chats, model, lessons, results, graph, limits=None, maxsize=MAX_QUEUE, fast=None):
+    def __init__(self, chats, model, lessons, results, graph, limits=None, maxsize=MAX_QUEUE, fast=None, clock=None):
         self.chats, self.model, self.lessons, self.results, self.graph = chats, model, lessons, results, graph
         self.limits = limits
+        self.clock = clock or getattr(chats, "clock", time.time)  # the quiet tick's clock; tests set it
         self.fast = fast  # fast reflection's notes (reflection.fast.FastNotes), or None for none
         self.q = queue.Queue(maxsize=maxsize)
 
@@ -470,10 +475,23 @@ class App:
                          results=self.results, send=self.graph.send, limits=self.limits, over=over, fast=self.fast)
 
     def sweep_fast(self, stop=None, every=FAST_EVERY):
-        """Fast reflection's sweep every `every` seconds until stop (a threading.Event) is set."""
+        """The quiet tick, then fast reflection's sweep, every `every` seconds until stop (a
+        threading.Event) is set. The tick goes first, so a chat it closes gets its note in the same pass."""
         stop = stop if stop is not None else threading.Event()
         while not stop.wait(every):
+            self.quiet_once()
             self.sweep_once()
+
+    def quiet_once(self):
+        """One quiet tick (sales/quiet.py): the notice and the close, no model call. Returns what
+        it did; never raises."""
+        from sales import quiet
+        try:
+            return quiet.tick(chats=self.chats, results=self.results, send=self.graph.send, channel="whatsapp",
+                              now=self.clock(), limits=self.limits)
+        except Exception:
+            log.exception("the quiet tick failed")
+            return []
 
     def sweep_once(self):
         """One fast reflection sweep. Returns what it wrote; never raises."""

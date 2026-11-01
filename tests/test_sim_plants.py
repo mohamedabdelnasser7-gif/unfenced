@@ -7,8 +7,10 @@ the manifest, the simulator's own record of what it planted and how each case st
 - a bad source never goes on trial. On marketing the sources rule refuses spam from one
   account, and the copied words mark holds it when it is spread over 4 accounts. On the
   Sales agent one case is one source, so the copied words mark alone holds a ring of cases.
-On the Sales agent a placed order decides: a chat ends good when the store takes the order,
-and one with no order a day after the agent last acted went quiet, which counts as not good.
+On the Sales agent a placed order decides: a chat ends good when the store takes the order.
+A live chat that goes quiet closes after an hour with chat_closed, not good (DECISIONS item 54);
+the Sales scenario sets bad to null, so its quiet chats carry no deciding row and settle not
+good past the order's one day window, the engine's way for a chat that never closed.
 The study tags a seeded sample of study.TAGGED settled cases when there are more, so every
 count is checked on the cases the tagger read.
 Reflection across agents is checked with spies: the fit check, Lessons.adapt and a judge that
@@ -42,6 +44,9 @@ ROOT = Path(__file__).resolve().parent.parent
 SALES = plug_mod.load(ROOT / "sales/plug.json")
 MARKETING = plug_mod.load(ROOT / "marketing/plug.json")
 SALES_SCENARIO = simulate.load(ROOT / "sim/scenarios/sales.json")
+_NO_BAD = json.loads((ROOT / "sales/plug.json").read_text(encoding="utf-8"))
+_NO_BAD["decides"]["bad"] = []
+SALES_NO_BAD = plug_mod.from_dict(_NO_BAD, ROOT / "sales")  # the Sales plug as it was before chat_closed
 MK_SCENARIO = simulate.load(ROOT / "sim/scenarios/marketing.json")
 BOTH = ((SALES, SALES_SCENARIO), (MARKETING, MK_SCENARIO))
 CHOSEN = {"sales": 182, "marketing": 29}  # each scenario's own seed, the one its single night tests read
@@ -366,8 +371,10 @@ class Simulator(Plants):
              lambda sc: sc["rates"][0]["when"].update(size_check="maybe"), "has no value 'maybe'"),
             ("a when on no trait", SALES, SALES_SCENARIO, lambda sc: sc["rates"][0]["when"].update(colour="red"),
              "is not a trait, day or weekday"),
-            ("a bad result where none is declared bad", SALES, SALES_SCENARIO, lambda sc: sc.update(bad="delivered"),
-             "sales declares no not good deciding results"),
+            ("a bad result where none is declared bad", SALES_NO_BAD, SALES_SCENARIO,
+             lambda sc: sc.update(bad="delivered"), "sales declares no not good deciding results"),
+            ("a bad result the sales plug did not declare bad", SALES, SALES_SCENARIO,
+             lambda sc: sc.update(bad="delivered"), "is not one of sales's not good deciding results"),
             ("a bad result not declared bad", MARKETING, MK_SCENARIO, lambda sc: sc.update(bad="published"),
              "is not one of marketing's not good deciding results"),
             ("more group cases than cases", SALES, SALES_SCENARIO, lambda sc: sc.update(cases=10),
@@ -395,10 +402,11 @@ class Simulator(Plants):
 
 class HowASalesChatEnds(Plants):
     """The Sales plug decides a chat by its order: order_created, saved on the order action with
-    no stage, step or lessons, as how the chat ended and not a step a lesson can reach. It
-    declares no not good result, so a chat with no order a day after the agent last acted went
-    quiet and counts as not good. A quiet chat for a boot that ran out carries its cause on its
-    last step, so it is pending for that day and left out after it."""
+    no stage, step or lessons, as how the chat ended and not a step a lesson can reach. Its not
+    good result is chat_closed, but the scenario sets bad to null, so a simulated quiet chat has
+    no deciding row and counts as not good once the order's window has passed. A quiet chat for
+    a boot that ran out carries its cause on its last step, so it is pending for that day and
+    left out after it."""
 
     def rows(self, **kw):
         db = Db(":memory:")
@@ -410,9 +418,11 @@ class HowASalesChatEnds(Plants):
         return man, by_case
 
     def test_an_order_is_saved_on_the_order_action_as_how_the_chat_ended(self):
-        self.assertEqual((SALES.decides.good, tuple(SALES.decides.bad)), ("order_created", ()))
+        self.assertEqual((SALES.decides.good, tuple(SALES.decides.bad)), ("order_created", ("chat_closed",)))
+        self.assertIsNone(SALES_SCENARIO["bad"])  # no chat_closed rows: quiet chats settle past the window
         self.assertEqual(SALES.results["order_created"].after, "order")
         man, by_case = self.rows()
+        self.assertFalse([r for rs in by_case.values() for r in rs if r["result"] == "chat_closed"])
         boots = {c["id"]: c["traits"]["boots"] for c in man["cases"]}
         ends = [r for rs in by_case.values() for r in rs if r["result"] == "order_created"]
         self.assertEqual(len(ends), sum(c["deciding"] == "order_created" for c in man["cases"]))

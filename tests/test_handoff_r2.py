@@ -102,25 +102,37 @@ class SeparatorLookAlikes(Base):
 
 
 class SeparatorSweep(Base):
-    """Review finding 1 (c): every BMP punctuation, symbol, modifier letter, spacing mark and blank between
-    "Phantom 6" and a store amount tail, glued and after a blank, in English, Arabic and Franco. The PR base
-    9c415df (no model numbers) let 235 glued characters through (237 in Arabic) and none after a blank; head
-    fcfa213 let 3,990 through. Now only the percent signs pass glued ("6%400" is not one number)."""
+    """Review finding 1 (c): every BMP punctuation, symbol, modifier letter, spacing mark, blank, control, line
+    and paragraph separator and letter or other number sign (Nl, No) from U+0000 between "Phantom 6" and a store
+    amount tail, glued, after a blank and after a separator, in English, Arabic and Franco (red team handoff
+    round 3, item 2). The PR base 9c415df (no model numbers) let 235 glued characters through (237 in Arabic)
+    and none after a blank; head fcfa213 let 3,990 through. Now glued only the percent signs pass ("6%400" is
+    not one number); anywhere a line end passes (a line break is a list); after a separator a blank as wide as
+    a plain space passes ("6, 400" is a list)."""
 
-    CATEGORIES = ("Pc", "Pd", "Ps", "Pe", "Pi", "Pf", "Po", "Sm", "Sc", "Sk", "So", "Lm", "Mc", "Zs")
+    CATEGORIES = ("Pc", "Pd", "Ps", "Pe", "Pi", "Pf", "Po", "Sm", "Sc", "Sk", "So", "Lm", "Mc", "Zs", "Cc", "Zl",
+                  "Zp", "Nl", "No")
     TEMPLATES = (("The price is Phantom 6{c}400 EGP.", EN), ("The price is Phantom 6 {c}400 EGP.", EN),
-                 ("سعر Phantom 6{c}400 جنيه", AR), ("سعر Phantom 6 {c}400 جنيه", AR),
-                 ("el se3r Phantom 6{c}400 geneh", FR), ("el se3r Phantom 6 {c}400 geneh", FR))
+                 ("The price is Phantom 6,{c}400 EGP.", EN),
+                 ("سعر Phantom 6{c}400 جنيه", AR), ("سعر Phantom 6 {c}400 جنيه", AR), ("سعر Phantom 6،{c}400 جنيه", AR),
+                 ("el se3r Phantom 6{c}400 geneh", FR), ("el se3r Phantom 6 {c}400 geneh", FR),
+                 ("el se3r Phantom 6,{c}400 geneh", FR))
+    LINE_ENDS = {"0xa", "0xd", "0x2028", "0x2029"}
+    WIDE_BLANKS = {"0x9", "0x20", "0xa0", "0x3000", "0x2800"}
 
     def test_no_separator_lets_the_tail_through(self):
-        chars = [chr(cp) for cp in range(0x20, 0x10000) if unicodedata.category(chr(cp)) in self.CATEGORIES]
+        chars = [chr(cp) for cp in range(0x00, 0x10000) if unicodedata.category(chr(cp)) in self.CATEGORIES]
         args = (store.price_points(), store.vocabulary(), store.size_strings())
         names = store.titles()
         for template, customer in self.TEMPLATES:
             passed = {hex(ord(c)) for c in chars
                       if not send_check.named_problems(template.replace("{c}", c), customer, *args, names=names)}
             with self.subTest(template=template):
-                allowed = {"0x25", "0x66a"} if "6{c}" in template else set()
+                allowed = set(self.LINE_ENDS)
+                if "6{c}" in template:
+                    allowed |= {"0x25", "0x66a"}
+                if ",{c}" in template or "،{c}" in template:
+                    allowed |= self.WIDE_BLANKS
                 self.assertLessEqual(passed, allowed)
 
 

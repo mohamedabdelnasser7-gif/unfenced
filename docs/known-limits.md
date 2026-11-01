@@ -11,13 +11,14 @@ The fact check and the hotfix note check read text our own agent writes. They ca
 Next: every amount in a sentence that names a boot must be that boot's price, an add-on's price or a sum of them. No word lists.
 
 ## Send check numbers and script (kit/send_check.py)
-The send check is the last gate before a reply reaches the customer. Shapes it still lets through, found in the round 2 review and red team:
-- A price in k with no store word right before it: "The Elite runs 17k." and "It comes to 17k." The k rule refuses k next to a currency or a price word, and "1.5k" alone passes ("Hoodie 1.5k"); a k right after a product or tier word ("Elite 17.5k") is refused.
-- A model number then a comma and a full blank, or a line break, reads as a list: "Vapor 17, 400 EGP" reads 17 and 400, so a store amount after it passes.
+The send check is the last gate before a reply reaches the customer. Shapes it still lets through, found in the round 2 and round 3 reviews and red teams:
+- A price in k with no store word right before it: "The Elite runs 17k.", "Elite around 17.5k" and "It comes to 17k." The k rule refuses k next to a currency or a price word, and "1.5k" alone passes ("Hoodie 1.5k"); a k right after a product, tier or model number, with or without a sign ("Elite 17.5k", "Phantom 6: 8.5k", "Elite (17.5k)"), is refused.
+- A model number then a comma and a blank as wide as a space (plain, no break, ideographic, tab), or a line break, reads as a list: "Vapor 17, 400 EGP" reads 17 and 400, so a store amount after it passes. A carriage return is a line break.
 - "Only Superfly 11 in stock." and "Only Vapor 17 available." pass, because "available" and "in stock" after a model number name the boot.
+- Counts said without a count shape: "N pieces in 43" alone, "عندنا 3 بس", "3 mawgood bs" (the singular mawgod is "available"), "There are 3 pieces in 43" (there are and has name an order as often as stock), and the plural "remain" before a word outside its short list ("3 remain at the store").
 - حبات (pieces) is not read as a count word.
-- Franco built only on shop words (tawsil, fel, youm), a doubled digit word ("ba22a") or "el" beside a title word reads as English.
-- A few true lines are refused, for example "The Superfly 11 is left-footed friendly." reads as a count.
+- Franco built only on shop words (tawsil, fel, youm), a doubled digit word ("ba22a") or "el" beside a title word reads as English; so do "w/" and a clock time beside a time word inside Franco ("aywa w/ 16,500 EGP.", "3am and el price is 16,500 EGP."). This touches the script only, never money.
+- A few true lines are refused, for example "The Superfly 11 is left-footed friendly." reads as a count, "Nike 2k reviews" reads as a k price.
 
 Next: read every number the customer sees as one number, whatever sits between the digits, and every count as a count, with no word lists.
 

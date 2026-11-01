@@ -112,7 +112,8 @@ class ModelWordsAreNotFranco(unittest.TestCase):
                          (True, ""))
 
     def test_a_franco_reply_to_an_english_customer_still_fails(self):
-        passed, fb = checked("aywa 3andena el F50 b 16,500 EGP", "Do you have the F50?")
+        # "Do you have the F50?" reads as Franco as written, so it takes English or Franco (test_handoff_r1)
+        passed, fb = checked("aywa 3andena el F50 b 16,500 EGP", "Do you have the adidas boots in 43?")
         self.assertFalse(passed)
         self.assertIn("not Franco", fb)
 

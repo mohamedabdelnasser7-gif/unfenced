@@ -253,7 +253,7 @@ def check_tools(s, did):
 
 def check_amount_from_tool(s, did):
     """A reply with an amount needs a tool call this turn that gives amounts (the photo rule)."""
-    if send_check.prices_in(did["reply"], store.size_strings(), did["orders"]) and \
+    if send_check.prices_in(did["reply"], store.size_strings(), did["orders"], store.titles()) and \
             not set(_tool_names(did)) & set(tools.AMOUNT_TOOLS):
         return "names an amount with no store, delivery or order tool call this turn"
     return ""
@@ -264,7 +264,7 @@ def check_late_order(s, did):
     if not s["expect"].get("late"):
         return ""
     fees = {z["fee"] for z in store.delivery().get("zones", [])}
-    if set(send_check.prices_in(did["reply"], store.size_strings(), did["orders"])) & fees:
+    if set(send_check.prices_in(did["reply"], store.size_strings(), did["orders"], store.titles())) & fees:
         return "a late order: gives the delivery fee; give the delivery times"
     return "" if DAY_WORD.search(did["reply"]) else "a late order: no delivery times"
 

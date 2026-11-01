@@ -312,7 +312,7 @@ class Lessons:
         return self._new(text, stages, source=source, sources=sources, source_lesson_id=source_lesson_id,
                          trial=trial, now=now)
 
-    def add(self, text, stages, source="", score=0.0, *, yes_by, exam=None, skip_exam=False, now=None):
+    def add(self, text, stages, source="", score=0.0, *, yes_by, exam=None, skip_exam=False, hold_high=False, now=None):
         """A person's own line. It needs no yes, a person wrote it, so it starts a trial like any
         other lesson, at whatever risk, at the level that applies when its trial starts (see the
         top); or it waits its turn when its stage has a trial. With a person's yes it never needs
@@ -320,9 +320,12 @@ class Lessons:
         checked and saved, its origin is "person" and its kind is "idea": no past cases stand behind it.
         It takes the exam first when takes_exam(PERSON) says so: a fail waits for Yes on its card.
         exam: a Result already run on this text (a page that runs it outside its own transaction);
-        skip_exam: True for an edited line (Edit runs no exam). Returns its id."""
+        skip_exam: True for an edited line (Edit runs no exam). hold_high: True for a correction sent on an
+        agent's page (LOCKS "Product shape: two tabs": high risk waits for a yes on Today): when the code
+        check marks the line high, or the judge says high outright (marked_high), it is saved with no yes and
+        waits for one like an agent's high risk lesson; a judge that is only unsure holds nothing. Returns its id."""
         return self._new(text, stages, source=source, score=score, yes_by=_line(yes_by, "yes_by"), origin=PERSON,
-                         kind=IDEA, exam_given=exam, skip_exam=skip_exam, now=now)
+                         kind=IDEA, exam_given=exam, skip_exam=skip_exam, hold_high=hold_high, now=now)
 
     def correct(self, text, stages, *, yes_by, exam=None, now=None):
         """A correction a person sends from the agent page: a person's own line (add) that is a hotfix
@@ -756,7 +759,7 @@ class Lessons:
         return picked
 
     def _new(self, text, stages, *, source, sources=(), score=0.0, yes_by=None, source_lesson_id=None, trial=True,
-             origin=AGENT, kind=PATTERN, exam_given=None, skip_exam=False, hotfix=False, now=None):
+             origin=AGENT, kind=PATTERN, exam_given=None, skip_exam=False, hold_high=False, hotfix=False, now=None):
         text = (text or "").strip()
         if not text or "\n" in text or "\r" in text:
             raise ValueError("a lesson is one line of text")
@@ -764,6 +767,9 @@ class Lessons:
             raise ValueError(f"a lesson is {MAX_LEN} characters at most")
         tags = self.plug.stage_tags(stages)
         level, why = risk_mod.classify(text, self.plug.risk, self.judge, sources=sources)
+        held = origin == PERSON and hold_high and level == risk_mod.HIGH and marked_high(why)
+        if held:
+            yes_by = None  # a person's line held for a yes: the yes comes on its card (approve)
         now = _now(now)
         wants = (self.examiner is not None or exam_given is not None) and (takes_exam(origin) or hotfix) and not skip_exam
         exam = exam_given if exam_given is not None or not wants else self._exam(text, tags, level, why, yes_by, origin, now)
@@ -774,7 +780,7 @@ class Lessons:
                 if switches_mod.accept_on(row, now):
                     accept = row  # its marked yes is written only as its trial starts (_try, start_turns)
             # a person's own line needs no yes; the agent's starts when low risk, or high under Accept high risk
-            start = (origin == PERSON and not (hotfix and level == risk_mod.HIGH)  # a high risk correction waits for a yes
+            start = (origin == PERSON and not held and not (hotfix and level == risk_mod.HIGH)  # a high risk correction waits for a yes
                      or trial and (accept is not None or (yes_by is None and level == risk_mod.LOW)))
             cur = c.execute(  # written as waiting, then its trial starts or it waits its turn
                 "INSERT INTO lessons (agent, text, stages, fields, risk, risk_why, state, share, ends_at, score, source, "
@@ -814,6 +820,12 @@ class Lessons:
             cur = c.execute(f"UPDATE lessons SET {sets} WHERE id = ? AND agent = ? AND {when}",
                             (*args, lesson_id, self.agent))
             return cur.rowcount == 1
+
+
+def marked_high(why):
+    """Is a high risk reason list more than a judge that was not sure? The code check found a mark,
+    or the judge said high outright."""
+    return any(not w.startswith("judge") or w == "judge: high" for w in why)
 
 
 def slot(plug, picked):

@@ -10,6 +10,10 @@ Morning methods only, so no engine rule lives here.
     /new           New agent, Quick start B screen 1; ?ask= routes to a plug or says not yet.
     /new/build     screen 2: the newest Arena run saved next to the database, as tiles and a path.
 
+A correction sent on an agent's page that is high risk waits for a yes on Today (Morning.correct); its
+card says why in one plain sentence (plain_risk), never the engine's word lists, and the Hotfix chip
+marks a correction that runs in the chats. With demo days each day shows its own morning (day.json).
+
 No count of what is left anywhere (item 35), no trust level and no won and lost total (item 17,
 LOCKS Quick start B). No script: Modify is a details element inside its card. Every field is
 escaped. With demo days (--demo-days) a Day 1, Day 2, Day 3 switch sits on top, marked Sample
@@ -40,6 +44,37 @@ ICON = dict(mo.ICONS, pen='<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5
             plus='<path d="M12 6v12M6 12h12"/>')
 
 
+# The high risk reasons in plain words, by the risk list group the code check saved (engine/risk.py):
+# a person reads why the card waits, never the engine's word lists.
+PLAIN_RISK = {"number": "it talks about a number, like a price, a size or a delivery time",
+              "money": "it talks about money", "spend": "it talks about spending money",
+              "promise": "it makes a promise to the customer", "policy": "it touches store policy",
+              "personal_data": "it touches someone's personal data", "other_brands": "it names other brands",
+              "goes_out": "it sends something out in your name", "calendar": "it changes your calendar",
+              "tool": "it tells the agent how to use one of its tools", "link": "it has a link in it",
+              "phone number": "it has a phone number in it", "handle": "it has an account handle in it",
+              "copied": "it copies words from the chats it came from", "judge": "the risk check marked it high"}
+
+
+def plain_risk(risk_why):
+    """Why a high risk card waits, as one plain sentence; at most two reasons, the first ones found."""
+    keys = []
+    for part in str(risk_why or "").split("; "):
+        group, sep, mark = part.partition(": ")
+        if group == "core" and mark.startswith("copied"):
+            key = "copied"
+        elif group == "core":
+            key = mark
+        elif group.startswith("judge"):
+            key = "judge"
+        else:
+            key = group if sep else ""
+        if key in PLAIN_RISK and key not in keys:
+            keys.append(key)
+    said = [PLAIN_RISK[k] for k in keys[:2]] or [PLAIN_RISK["judge"]]
+    return f"It waits for your yes because {' and '.join(said)}."
+
+
 def name(agent):
     return NAMES.get(agent, agent.replace("_", " ").capitalize())
 
@@ -60,8 +95,10 @@ def route_ask(ask, plugs):
 class Pages:
     """The page for one Morning, or for demo days {1: Morning, 2: ..., 3: ...} (sample copies)."""
 
-    def __init__(self, morning=None, *, days=None):
+    def __init__(self, morning=None, *, days=None, at=None):
+        """at: {day: the time that day's page shows}, a sample's own clock; the real clock otherwise."""
         self.days = dict(days or {})
+        self.at = dict(at or {})
         self.demo = bool(self.days)
         self.morning = morning if morning is not None else (self.days[min(self.days)] if self.days else None)
         self.csp = CSP
@@ -93,12 +130,13 @@ class Pages:
         m = self.days[day] if self.demo else self.morning
         q = f"?day={day}" if self.demo else ""
         ctx = {"token": token, "q": q, "day": day, "path": path, "m": m}
+        now = self.at.get(day) if self.demo else None
         if path == "/":
-            return self.shell(today(m.view(), ctx), "today", ctx, flash)
+            return self.shell(today(m.view(now=now), ctx), "today", ctx, flash)
         if path == "/agents":
-            return self.shell(agents(m, m.view(), ctx), "agents", ctx, flash)
+            return self.shell(agents(m, m.view(now=now), ctx), "agents", ctx, flash)
         if path.startswith("/agents/") and _AGENT.match(path[8:]):
-            body = agent_page(m, m.view(), path[8:], ctx)
+            body = agent_page(m, m.view(now=now), path[8:], ctx)
             return None if body is None else self.shell(body, "agents", ctx, flash)
         if path == "/new":
             return self.shell(new_agent(m, (query.get("ask") or [""])[0], ctx), "agents", ctx, flash)
@@ -153,12 +191,17 @@ def _yc_head(agent, small, risk=""):
 def lesson_card(item, ctx):
     """A lesson waiting for the user's yes: its line, why, the exam's counts, No, Modify, Yes."""
     risk = "High risk" if item.get("risk") == "high" else ""
-    small = "Your line, held by the exam" if item.get("exam") else "New lesson from Reflection"
+    mine = CORRECTED in (item.get("source") or "")
+    small = ("Your line, held by the exam" if item.get("exam") else "Your correction" if mine
+             else "New lesson from Reflection")
+    why = item["why"]
+    if item.get("risk") == "high" and why.startswith("High risk:"):  # the engine's words, said plainly
+        why = plain_risk(item.get("risk_why"))
     out = [f'<article class="yc sq" id="c{h(item["id"])}">', _yc_head(item["agent"], small, risk)]
     out.append(f'<p class="lesson" dir="auto">{h(item["text"])}</p>')
     for r in item["replaces"]:
         out.append(f'<p class="why" dir="auto">A yes takes the place of: {h(r["text"])}</p>')
-    out.append(f'<p class="why">{h(item["why"])}</p>')
+    out.append(f'<p class="why">{h(why)}</p>')
     g = item.get("gate")
     if g:
         out.append('<div class="exam"><span class="lab">In the exam</span>'
@@ -248,6 +291,8 @@ def night_line(a, now):
         bits.append("Your correction runs in its chats now.")
     if a.get("arena"):
         bits.append("It practised in the Arena.")
+    if a.get("mode_card") and (a["mode_card"].get("at") or 0) >= now - day:
+        bits.append("It found a new mode for you.")
     return " ".join(bits) or "A quiet night. Nothing changed."
 
 
@@ -350,7 +395,8 @@ def agent_page(m, view, agent, ctx):
                      f'<p dir="auto">{h(n["text"])}</p></div>')
     for i in a["live"] + a["waiting"]:
         if i.get("kind") == "idea" and i.get("origin") == "person":
-            notes.append(f'<div class="nr"><span class="to">{icon("bulb")}Your idea, {h(mo._date(i["added_at"]))}</span>'
+            whose = "Your correction" if CORRECTED in (i.get("source") or "") else "Your idea"
+            notes.append(f'<div class="nr"><span class="to">{icon("bulb")}{whose}, {h(mo._date(i["added_at"]))}</span>'
                          f'<p dir="auto">{h(i["text"])}</p></div>')
     if a.get("arena"):
         notes.append(f'<div class="nr"><span class="to">{icon("note")}From the Arena</span>'
@@ -383,7 +429,6 @@ def new_agent(m, ask, ctx):
             '<i>Soon</i></span></div><div class="s1"><article class="ask sq" aria-label="Quick start">'
             f'<form method="get" action="/new">{day}<span class="lab">What agent do you want?</span><div class="field">'
             f'<textarea class="typed" name="ask" rows="2" maxlength="300" aria-label="What agent do you want?" '
-            f'style="width:100%;border:0;background:transparent;resize:none;outline:0" '
             f'placeholder="I want a sales agent for my store on WhatsApp.">{h(ask)}</textarea></div>{verdict}'
             '<div class="needs"><span class="lab">What it needs to know</span><div class="file"><span class="fi">'
             f'{icon("note")}</span><div><b>Brand file</b><small>Voice, prices, sizes, delivery areas</small></div><span></span>'

@@ -597,8 +597,10 @@ class Morning:
         """A correction or an idea the user sends on an agent's page. It goes the way of a person's
         own line (Morning.idea, kind idea): the exam first where the page has one, then it starts in
         the next chats at once at the level that applies, or waits its turn; a line the exam holds
-        waits for a yes on Today. The night's Reflection studies it like any idea."""
-        return self.idea(agent, line, plug_mod.ALL, now=now, source=f"a correction {self.by} sent on the agent page")
+        waits for a yes on Today. A high risk line waits for a yes on Today too (LOCKS "Product shape: two
+        tabs"; engine Lessons.add hold_high). The night's Reflection studies it like any idea."""
+        return self.idea(agent, line, plug_mod.ALL, now=now, source=f"a correction {self.by} sent on the agent page",
+                         hold_high=True)
 
     def rollback_plan(self, agent, now=None):
         """The latest night snapshot of an agent with a plug and what a rollback to it would do now:
@@ -743,7 +745,7 @@ class Morning:
         where = "It is on trial." if state == TRYING else "It waits its turn."
         return f"Lesson {les['id']} is back as lesson {new_id}; lesson {les['id']} stays pulled. {where}"
 
-    def idea(self, agent, line, stage, now=None, source=None):
+    def idea(self, agent, line, stage, now=None, source=None, hold_high=False):
         """A person's idea, typed on the page: a lesson with no past cases behind it, for one
         agent with a plug, on one of its stages or "all". It goes the way of any person's own
         line (Lessons.add): kind idea, origin person, signed by the page's person, no yes
@@ -751,23 +753,27 @@ class Morning:
         as an agent's idea, or waits its turn. Refused for an agent with no plug, a line that
         is empty, too long or more than one line, a stage the plug does not have, a line with
         the same words as a live or waiting lesson, and a pulled line (Bring back brings that
-        one back). It takes the exam first when the page has one for the agent (idea_exam)."""
+        one back). It takes the exam first when the page has one for the agent (idea_exam). hold_high: a
+        high risk line waits for a yes (correct)."""
         lessons, text, stage = self._idea_checked(agent, line, stage)  # a refused idea takes no exam
         result = self.idea_exam(lessons, text, stage)  # before the transaction: no write lock held
         with self.page.one():
             lessons, text, stage = self._idea_checked(agent, line, stage)  # again: the lessons may have moved
             try:
                 new_id = lessons.add(text, [stage], source or f"an idea {self.by} typed on the morning page", yes_by=self.by,
-                                     exam=result, now=now)
+                                     exam=result, hold_high=hold_high, now=now)
             except ValueError as e:
                 raise Refused(f"The idea was refused: {e}.") from None
-            state = lessons.get(new_id)["state"]
+            row = lessons.get(new_id)
+            state = row["state"]
         from arena import gate  # the past wins the Arena rerun skipped, said in one line
         note = "" if result is None else gate.skipped_note(result)
         note = f" {note}" if note else ""
         if result is not None and not result.passed and state == WAITING:
             return (f"Your idea is lesson {new_id}. It waits for a yes: it {result.line()}. Yes on its card starts it "
                     f"anyway.{note}")
+        if state == WAITING and row["yes_at"] is None and lessons.waits_for(new_id, now) is None:
+            return f"Your line is lesson {new_id}. It is high risk, so it waits for your yes on Today.{note}"
         where = "It is on trial." if state == TRYING else "It waits its turn."
         return f"Your idea is lesson {new_id}. {where}{note}"
 
@@ -1082,6 +1088,8 @@ class Morning:
                     replaces=[_short(k.by_id.get(i), i) for i in k.replaces.get(les["id"], [])],
                     cases=list((k.links.get(les["id"]) or {}).get("cases") or []))
         item["status"], item["why"] = _status(les, item, k, report)
+        verdict = next((m for m in k.marks.get(les["id"], []) if m["kind"] == "verdict"), None)
+        item["decided_at"] = None if verdict is None else verdict["at"]  # when its trial's verdict came
         item["links"] = _links(les, k)
         item["back_as"] = (lessons_mod.back_copy(k.back_from, k.states, les["id"]) if les["state"] == PULLED
                            else None)  # its line is back already as this lesson, so it has no Bring back
@@ -2477,30 +2485,20 @@ def main(argv=None):
 def _demo(folder):
     """Serve the sample days (sim/three_days.py): each day's folder copied to a throwaway folder,
     so an answer there never touches the sample files; no model, no exam (the sample has none)."""
-    import shutil
     import tempfile
-    from reflection import pages as pages_mod
-    src = Path(folder)
-    found = sorted(int(p.name[3:]) for p in src.glob("day[0-9]") if (p / "ascent.db").is_file())
-    if not found:
-        print(f"Not run: no day1/ascent.db in {folder}. Build them with python3 -I sim/three_days.py {folder}.",
-              file=sys.stderr)
-        return 2
-    plugs = repo_plugs()
     with tempfile.TemporaryDirectory(prefix="unfenced-demo-") as tmp:
-        dbs, days = [], {}
-        for d in found:
-            shutil.copytree(src / f"day{d}", Path(tmp) / f"day{d}")
-            db = Db(str(Path(tmp) / f"day{d}" / "ascent.db"))
-            dbs.append(db)
-            days[d] = Morning(db, plugs, reports=Path(tmp) / f"day{d}", db_file=None,
-                              modes_state=Path(tmp) / f"day{d}" / "assistant")
+        try:
+            pages, dbs = demo_pages(folder, tmp)
+        except Refused as e:
+            print(f"Not run: {e}", file=sys.stderr)
+            return 2
         try:
             port = int(env.get("MORNING_PORT", PORT_DEFAULT))
         except ValueError:
             port = int(PORT_DEFAULT)
-        server = make_server(days[found[0]], port=port, pages=pages_mod.Pages(days=days))
-        print(f"Sample days: http://127.0.0.1:{server.server_address[1]}/?day={found[0]} (Ctrl+C stops it)")
+        server = make_server(pages.morning, port=port, pages=pages)
+        first = min(pages.days)
+        print(f"Sample days: http://127.0.0.1:{server.server_address[1]}/?day={first} (Ctrl+C stops it)")
         try:
             server.serve_forever()
         except KeyboardInterrupt:
@@ -2510,6 +2508,40 @@ def _demo(folder):
             for db in dbs:
                 db.close()
     return 0
+
+
+def demo_pages(folder, tmp):
+    """The two tab page over the sample days in folder (day1, day2, ... from sim/three_days.py), each
+    copied into tmp first. Each day shows the morning its day.json names (a sample has its own clock).
+    Returns (Pages, the open databases, for the caller to close); Refused when folder has no day."""
+    import shutil
+    from reflection import pages as pages_mod
+    src = Path(folder)
+    found = sorted(int(p.name[3:]) for p in src.glob("day[0-9]") if (p / "ascent.db").is_file())
+    if not found:
+        raise Refused(f"no day1/ascent.db in {folder}. Build them with python3 -I sim/three_days.py {folder}.")
+    plugs = repo_plugs()
+    dbs, days, at = [], {}, {}
+    for d in found:
+        dest = Path(tmp) / f"day{d}"
+        shutil.copytree(src / f"day{d}", dest)
+        db = Db(str(dest / "ascent.db"))
+        dbs.append(db)
+        days[d] = Morning(db, plugs, reports=dest, db_file=None, modes_state=dest / "assistant")
+        at[d] = _sample_clock(dest / "day.json")
+    return pages_mod.Pages(days=days, at=at), dbs
+
+
+def _sample_clock(path):
+    """The morning a sample day shows (day.json "at", marked simulated), or None for the real clock."""
+    try:
+        meta = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return None
+    if isinstance(meta, dict) and meta.get("simulated") is True and isinstance(meta.get("at"), (int, float)) \
+            and not isinstance(meta.get("at"), bool):
+        return float(meta["at"])
+    return None
 
 
 # ---- small helpers -----------------------------------------------------------------------------

@@ -77,6 +77,8 @@ class TwoTabs(unittest.TestCase):
 
     def test_correction_starts_now_and_is_an_idea_line(self):
         calls = []
+        self.m = mo.Morning(self.db, self.plugs)  # the page's own judge, never sure: a plain line is no high risk mark
+        self.p = pages.Pages(self.m)
         self.m.exams = {"sales": examiner(True, calls)}
         self.m.correct("sales", "When someone asks for a photo, send the product link first.")
         les = self.m.lessons["sales"].mine()[-1]
@@ -86,6 +88,47 @@ class TwoTabs(unittest.TestCase):
         page = self.get("/agents/sales")
         self.assertIn("Hotfix", page)
         self.assertIn('action="/correct"', page)
+
+    def test_high_risk_correction_waits_for_a_yes_on_today(self):
+        self.m = mo.Morning(self.db, self.plugs)
+        self.p = pages.Pages(self.m)
+        line = "When someone asks about the price, send the total with delivery first."
+        said = self.m.correct("sales", line, now=NOW)
+        self.assertIn("waits for your yes on Today", said)
+        les = self.m.lessons["sales"].mine()[-1]
+        self.assertEqual((les["origin"], les["state"], les["risk"], les["yes_at"]), ("person", WAITING, "high", None))
+        page = self.get("/")
+        self.assertIn(line, page)
+        self.assertIn("Your correction", page)
+        self.assertIn("It waits for your yes because it talks about a number", page)
+        for engine_words in ("on the number list", "names the tool", "code check"):
+            self.assertNotIn(engine_words, page)
+        self.assertIn("Waits for your yes on Today", self.get("/agents/sales"))
+        self.assertNotIn("Hotfix", self.get("/agents/sales"))
+        self.m.yes(les["id"], "", now=NOW + 60)
+        self.assertEqual(self.m.lessons["sales"].get(les["id"])["state"], TRYING)
+        self.assertIn("Hotfix", self.get("/agents/sales"))
+
+    def test_judge_that_says_high_holds_a_correction_too(self):
+        self.m.correct("sales", "When someone asks for a photo, send the side view.", now=NOW)
+        les = self.m.lessons["sales"].mine()[-1]
+        self.assertEqual(les["state"], WAITING)
+        self.assertIn("the risk check marked it high", self.get("/"))
+
+    def test_held_correction_follows_accept_high_risk(self):
+        self.m = mo.Morning(self.db, self.plugs)
+        self.m.lessons["sales"].switches.set_accept_high(True, "the user", now=NOW)
+        self.m.correct("sales", "When someone asks about the price, send the total first.", now=NOW + 1)
+        les = self.m.lessons["sales"].mine()[-1]
+        self.assertEqual((les["origin"], les["state"]), ("person", TRYING))
+
+    def test_plain_risk_reads_plainly(self):
+        self.assertEqual(pages.plain_risk("tool: delivery"),
+                         "It waits for your yes because it tells the agent how to use one of its tools.")
+        self.assertEqual(pages.plain_risk("core: copied from source 3; core: copied from source 4"),
+                         "It waits for your yes because it copies words from the chats it came from.")
+        self.assertIn("the risk check marked it high", pages.plain_risk(""))
+        self.assertNotIn("/", pages.plain_risk("number: /\\d+/; promise: refund; policy: rule"))
 
     def test_agents_list_and_unknown_agent(self):
         page = self.get("/agents")

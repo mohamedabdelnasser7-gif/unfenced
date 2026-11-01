@@ -429,5 +429,21 @@ form{margin:0; display:contents}
 .gb[disabled]{opacity:.55; cursor:not-allowed}
 .no-yet{margin-top:16px; padding:14px 16px; border-radius:var(--r-inner); background:rgba(255,255,255,.7); font:400 15px/22px var(--font)}
 @media (min-width: 1024px){ .page{max-width:1376px} }
+textarea.typed{width:100%; border:0; background:transparent; resize:none; outline:0}  /* no style attribute: the CSP allows only this sheet */
+/* phone first screen: the second waiting card peeks above the tab bar (LOCKS "Today and agent page: A",
+   known weakness); the sample day switch fits beside the logo */
+@media (max-width: 600px){
+  .top{margin:12px 0 16px}
+  .top h1{font-size:34px; line-height:38px}
+  .today{gap:24px}
+  .yc{padding:18px}
+  .yc .lesson{margin-top:14px; font-size:21px; line-height:28px}
+  .exam{margin-top:14px; padding:10px 14px; gap:12px}
+  .stat b{font-size:24px; line-height:30px}
+  .act{margin-top:14px}
+  .bar:has(.days) .word{display:none}
+  .bar .sample{padding:4px 8px}
+  .bar .days a{padding:4px 9px}
+}
 
 """

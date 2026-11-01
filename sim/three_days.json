@@ -1,0 +1,16 @@
+{
+ "about": "Made-up lines for the three sample days (sim/three_days.py). Not real data.",
+ "agent": "sales",
+ "correction": "When a buyer asks about delivery, say the team confirms the exact day on WhatsApp.",
+ "moments": [
+  {"said": "At the gym, only urgent calls please", "day": 5},
+  {"said": "Gym now, hold my messages", "day": 6},
+  {"said": "Going to the gym after work, remind me after", "day": 6}
+ ],
+ "past_days": [
+  {"day": 1, "needs": "gym"},
+  {"day": 2, "needs": null},
+  {"day": 3, "needs": "gym"},
+  {"day": 4, "needs": null}
+ ]
+}

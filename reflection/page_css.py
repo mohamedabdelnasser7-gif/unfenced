@@ -418,6 +418,7 @@ body{background:var(--bone); background-image:radial-gradient(90% 60% at 20% -10
 a{color:inherit; text-decoration:none}
 .page{max-width:560px; margin:0 auto}
 .flash{margin:0 0 16px; padding:12px 16px; border-radius:18px; background:#fff; box-shadow:var(--shadow-soft); font:400 14px/20px var(--font)}
+.flash a{color:inherit; font-weight:600; text-decoration:underline; text-underline-offset:3px}
 form{margin:0; display:contents}
 .yc details.mx>summary{list-style:none}
 .yc details.mx>summary::-webkit-details-marker{display:none}

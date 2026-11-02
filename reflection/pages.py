@@ -288,8 +288,25 @@ class Pages:
             f'<nav class="tisl sq" aria-label="Main"><div class="left">{logo}</div><div class="tnav">{top}</div>'
             f'<div class="right">{days}{right}</div></nav>',
             f'<header class="bar"><div class="brand">{logo}</div><div class="bar-r">{days}{short}</div></header>',
-            f'<p class="flash" role="status">{h(flash)}</p>' if flash else "",
+            flash_html(flash, ctx),
             body, "</div>", f'<nav class="isl" aria-label="Main">{bar}</nav></body></html>'])
+
+
+_TAKEN = re.compile(r"^There is an agent called ([a-z][a-z0-9_]*) already\.")
+
+
+def flash_html(flash, ctx):
+    """The one-time message, escaped. Quick start's "There is an agent called X already" refusal gets
+    a link to X's page when X is an agent on this page, so the user can see the one that has the name."""
+    if not flash:
+        return ""
+    link = ""
+    taken = _TAKEN.match(str(flash))
+    m = ctx.get("m")
+    if taken and _AGENT.match(taken.group(1)) and m is not None and taken.group(1) in getattr(m, "plugs", {}):
+        agent = taken.group(1)
+        link = f' <a href="/agents/{h(agent)}{ctx["q"]}">Open {h(name(agent))}</a>'
+    return f'<p class="flash" role="status">{h(flash)}{link}</p>'
 
 
 # ---- Today -------------------------------------------------------------------------------------
@@ -882,7 +899,7 @@ def build(m, agent, ctx):
             '<div class="s2"><section class="a-climb" aria-label="How close it is"><article class="glow sq">'
             '<div class="glow-h"><span class="gchip">In the Arena</span><span class="gsub">practising on made-up '
             f'cases</span></div>{CLIMB}<div class="climb-l"><span>Started</span><span>Ready to go live</span></div>'
-            '<p class="calm">Nothing to do here. You get one note when it is ready to go live.</p></article></section>'
+            '<p class="calm">Nothing to do here while it practises.</p></article></section>'
             '<section class="a-matches" aria-labelledby="m-h"><div class="sec-h"><h2 id="m-h">Practice matches</h2>'
             f'<small>Where it slipped</small></div><div class="tiles">{"".join(tiles)}</div>{retry}</section></div></div>')
 

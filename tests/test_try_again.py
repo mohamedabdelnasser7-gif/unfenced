@@ -314,5 +314,21 @@ class OverTheServer(Base):
         self.assertEqual(len(list(self.dir.glob("arena-sales-retry-*.json"))), 1)
 
 
+
+class RoundsItemKeepsLost(unittest.TestCase):
+    """A finished run saves the held-out matches it lost, as a stuck run does, so Correct this and Try
+    again show after any run, not only a stuck one."""
+
+    def test_rounds_item_carries_the_last_gate_losses(self):
+        import types
+        from arena import run as run_mod
+        lost = [{"card": f"persona-0{n}", "why": "left", "quote": {"turn": 1, "who": "agent", "text": "Hi"}}
+                for n in range(1, 6)]
+        me = types.SimpleNamespace(agent="sales", now=lambda: 1.0, run_id="r9", trust={"wins": 7}, quick=False,
+                                   facts=None, reflection_rows=run_mod.Arena.reflection_rows,
+                                   _write_item=lambda item: item)
+        rounds = [{"round": 1, "gate": {"played": 10, "won": 5, "lost": lost}}]
+        item = run_mod.Arena.rounds_item(me, rounds, run_mod.ROUNDS)
+        self.assertEqual([x["card"] for x in item["lost"]], ["persona-01", "persona-02", "persona-03"])
 if __name__ == "__main__":
     unittest.main()

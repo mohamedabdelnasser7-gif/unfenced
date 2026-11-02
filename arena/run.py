@@ -546,7 +546,7 @@ class Arena:
         last = rounds[-1]["gate"]
         item = {"agent": self.agent, "kind": "arena_rounds", "at": self.now(), "run": self.run_id, "stopped": stopped,
                 "rounds": len(rounds), "gate_won": last["won"], "gate_played": last["played"],
-                "needs": self.trust["wins"], "quick": self.quick, "fact_checks": self.facts, "lost": [],
+                "needs": self.trust["wins"], "quick": self.quick, "fact_checks": self.facts, "lost": last["lost"][:3],
                 "reflection": self.reflection_rows(rounds),
                 "line": f"The Arena ran {len(rounds)} round{'' if len(rounds) == 1 else 's'} and stopped, {stopped}: "
                         f"{last['won']} of {last['played']} held-out matches won in the last, {self.trust['wins']} needed."}

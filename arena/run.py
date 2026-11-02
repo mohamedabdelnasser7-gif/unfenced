@@ -40,7 +40,10 @@ new lesson through the eval gate, and only the lessons that pass and may go ahea
 yes handed to the next round; its model calls take from the same cap, and a cap reached there stops
 the run. The report gives each round's lessons proposed, passed, refused and handed on beside its
 gate wins, and the same rows go to the Morning page in the run's item (arena_rounds, or the stuck
-item when it got stuck). With no --db there is no step between rounds.
+item when it got stuck). With no --db there is no step between rounds. With that step, each lost
+training match also gets a quick note from the fast half of Reflection (arena/notes.py), held in
+memory and handed in the run's next matches until the step between rounds has run; it is never a
+lesson and never written to any database.
 
 --replay names the persona build's replay.jsonl: once the gate passes, the Sales agent replays up
 to --replay-max real lost chats, each from the customer's real opening against the persona card
@@ -86,6 +89,7 @@ pointing to the recorded replay (recorded/play.py) and exits 2 before reading an
 import argparse
 import datetime
 import fcntl
+import inspect
 import json
 import os
 import random
@@ -365,11 +369,13 @@ class Arena:
     def __init__(self, cards, *, agent_model, customer_model, calls, trust=None, prompt=match_mod.GENERIC_PROMPT,
                  prompt_file=None, held_out=None, matches=10, rounds=DEFAULT_ROUNDS, fact_checks=None, seed=0,
                  learn=None, between=None, lessons=None, state, reports=None, now=time.time, pool=None,
-                 before_match=None):
+                 before_match=None, notes=None):
         """prompt_file: where the customer prompt was read from (None for the generic one), saved
         with each match beside the prompt's fingerprint, so the eval gate can read it again.
         pool: the owner's practice pool (arena/grow.py), which counts each training match's result.
-        before_match: called before every match (arena/rounds.py Pool.refresh: the live corrections)."""
+        before_match: called before every match (arena/rounds.py Pool.refresh: the live corrections).
+        notes: the run's quick notes (arena/notes.py RunNotes): one written after each lost training
+        match, handed in the next matches, dropped once the step between rounds has run."""
         if pool is None:
             self.train, self.held = split(cards, held_out, seed=seed)
             self.gate_cards = [c for c in self.held if can_buy(c)]  # a card that will not buy is no test of the agent
@@ -385,7 +391,7 @@ class Arena:
         self.prompt_sha = match_mod.prompt_sha(prompt)
         self.prompt_file = None if prompt_file is None else str(prompt_file)
         self.learn, self.between, self.lessons = learn, between, lessons
-        self.pool, self.before_match = pool, before_match
+        self.pool, self.before_match, self.notes = pool, before_match, notes
         self.halt, self.error = CAP, ""  # why the last match was dropped: the cap, or a model error
         self.state = Path(state)
         self.reports = Path(reports) if reports is not None else self.state
@@ -403,7 +409,7 @@ class Arena:
         try:
             m = match_mod.play(card, agent_model=self.agent_model, customer_model=self.customer_model,
                                prompt=self.prompt, lessons=lessons or self.lessons, seed=match_id,
-                               opening=opening, checker=factcheck.check, stop=verdict.closed)
+                               opening=opening, checker=factcheck.check, stop=verdict.closed, **self._fast())
         except CapReached:
             self.halt = CAP
             return None
@@ -423,6 +429,12 @@ class Arena:
             f.write(json.dumps(m, ensure_ascii=False) + "\n")
         return m, judged
 
+    def _fast(self):
+        """The quick notes for match_mod.play, once play takes them (fast=, which it hands to loop.turn)."""
+        if self.notes is None or "fast" not in inspect.signature(match_mod.play).parameters:
+            return {}
+        return {"fast": self.notes}
+
     def run(self):
         rounds, best, flat, stopped = [], None, 0, ROUNDS
         for r in range(1, self.rounds + 1):
@@ -430,6 +442,10 @@ class Arena:
                 got = self.between(r - 1)
                 if isinstance(got, dict):  # arena/rounds.py: the night study and the gate on the round before
                     rounds[-1]["reflection"] = got
+                if self.notes is not None:  # the study has read the lost matches its notes came from
+                    dropped = self.notes.clear(r - 1)
+                    if dropped is not None:
+                        rounds[-1]["training"].setdefault("notes", []).append(dropped)
                 if self.calls.reached:  # the cap came during the night study: stop here, nothing unchecked goes on
                     self.halt = CAP
                     return self._report(rounds, CAP)
@@ -448,6 +464,8 @@ class Arena:
                     self.pool.record(card, judged["won"])
                 if not judged["won"] and self.learn is not None:
                     one["training"]["cases"].append(self.learn(m, judged, m["id"]))
+                if not judged["won"] and self.notes is not None:  # the quick note, for the next matches
+                    one["training"].setdefault("notes", []).append(self.notes.after_loss(m, judged, m["id"]))
             for k in range(1, self.trust["matches"] + 1):
                 card = draw(self.gate_cards, self.rng)
                 out = self.play(card, f"{self.run_id}-r{r}-g{k:02d}")
@@ -822,9 +840,10 @@ def text(rep):
 def reflection_models():
     """The night study's Meta models between rounds, as reflection/night.py has them: the proposer,
     the tagger and the idea part on the study route, the fit check, the adapter and the risk judge on
-    Muse Spark Open, the exam on Muse Spark Open. Refused, naming the variable, when a key is missing."""
+    Muse Spark Open, the exam on Muse Spark Open, and the quick note's writer (arena/notes.py) on Muse
+    Spark Open as fast reflection has it. Refused, naming the variable, when a key is missing."""
     from kit import model as model_mod
-    from reflection import judge as judge_mod, night, study as parts
+    from reflection import fast as fast_mod, judge as judge_mod, night, study as parts
     try:
         missing = night.missing_keys()
     except night.Refused as e:
@@ -832,7 +851,20 @@ def reflection_models():
     if missing:
         raise Refused("the night study between rounds needs " + ", ".join(missing) + " in env or .env")
     return {"study": model_mod.Model(timeout=parts.TIMEOUT, route=parts.study_route()),
-            "open": model_mod.Model(timeout=judge_mod.TIMEOUT), "exam": model_mod.Model()}
+            "open": model_mod.Model(timeout=judge_mod.TIMEOUT), "exam": model_mod.Model(),
+            "notes": model_mod.Model(timeout=fast_mod.TIMEOUT, route=model_mod.OPEN)}
+
+
+def quick_notes(plug, calls, model):
+    """The run's quick notes (arena/notes.py) for the Sales agent: fast reflection's writer on model,
+    each call taken from calls, with fast reflection's never marks and the demo store's own words."""
+    from arena import notes as notes_mod
+    from reflection import fast as fast_mod
+
+    def known():  # the demo store's catalogue and places, read with no store keys, as the matches see it
+        with match_mod.demo_store():
+            return fast_mod.known()
+    return notes_mod.RunNotes(plug, fast_mod.Writer(model=calls.model(model)), never=fast_mod.NEVER, known=known)
 
 
 def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
@@ -899,7 +931,7 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
         if made:
             agent_model = agent_model or model_mod.Model()
             customer_model = customer_model or model_mod.Model()
-        learn, lessons, between, before_match = None, None, None, None
+        learn, lessons, between, before_match, notes = None, None, None, None, None
         if args.db:
             from kit.db import Db
             from arena import learn as learn_mod, rounds as rounds_mod
@@ -924,6 +956,7 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
             lessons = _Lessons(pool, None)
             if between_models is not None:
                 examiner = between_models.pop("examiner", rounds_mod.real_examiner)
+                notes_model = between_models.pop("notes", None)  # the quick note's writer; none, no notes
                 def live_lessons():  # opened at the first lesson that passes the gate, not before
                     live.append(Db(args.db))
                     return SalesLessons(live[0])
@@ -931,13 +964,15 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
                                              agent_model=agent_model, customer_model=customer_model,
                                              models=between_models, examiner=examiner, live=live_lessons)
                 learn = between.learn
+                if notes_model is not None:
+                    notes = quick_notes(SALES_PLUG, calls, notes_model)
         arena = Arena(cards, agent_model=agent_model, customer_model=customer_model, calls=calls, trust=trust,
                       prompt=prompt, held_out=[x for x in args.held_out.split(",") if x.strip()],
                       prompt_file=Path(args.customer_prompt).expanduser().resolve() if args.customer_prompt else None,
                       matches=args.matches, rounds=args.rounds,
                       fact_checks=None if args.fact_checks is None else args.fact_checks == "on", seed=args.seed,
                       learn=learn, between=between, lessons=lessons, state=state, pool=practice,
-                      before_match=before_match)
+                      before_match=before_match, notes=notes)
         rep = arena.run()
         if planned is not None:
             rep["replay"] = (arena.replay(*planned) if rep["stopped"] == PASSED

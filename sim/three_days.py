@@ -31,10 +31,12 @@ Every row is simulated: the cases are sim-, the answers and the switch are signe
 and each night report, mode card and Arena item says simulated.
 
 The level switch is set to fast by the simulated user before the first night (sim/score.py
---level does the same in its own log).
+--level does the same in its own log). The key behind made case references (reflection/late.py
+ref_key) is a fixed made-up one from the seed, so those references are the same each build.
 """
 import argparse
 import calendar
+import hashlib
 import json
 import shutil
 import sys
@@ -56,6 +58,7 @@ from engine import risk  # noqa: E402
 from engine.fast import FastNotes  # noqa: E402
 from engine.lessons import Lessons  # noqa: E402
 from kit.db import Db  # noqa: E402
+from reflection import late  # noqa: E402
 from reflection import morning as mo  # noqa: E402
 from reflection import night as night_runner  # noqa: E402
 from sim import score, scripted, simulate  # noqa: E402
@@ -130,6 +133,7 @@ def build(folder, *, seed=None):
         state = stage / "assistant"
         db = Db(":memory:")
         try:
+            late.ref_key(db, make=lambda: hashlib.sha256(f"three days {seed}".encode()).hexdigest())  # made up
             hand = Lessons(db, plug, judge=judge_says_high)
             hand.switches.set_level(plug_mod.FAST_LEVEL, BY, now=start)
             page = mo.Morning(db, plugs, reports=stage, by=BY, judge=judge_says_high, exams={plug.agent: examiner},

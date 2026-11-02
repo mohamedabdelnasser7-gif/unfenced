@@ -25,10 +25,11 @@ with the old way over the same days, then keeps it, pulls it, pauses it, or ends
    check() returns leaves the ping for the next night. Reported means returned by check():
    a runner that fails after that loses the ping. Nothing is sent from here.
 4. The verdict, on the deciding results, once the end date has passed. A case is settled by its
-   last deciding result, or past its window (study.settle); pending is never a loss and a
-   settled case with a cause outside the agent is left out. While a counted case is still
-   pending the verdict waits, at most the longest deciding window after the end date; then
-   it decides on the settled cases. Kept when each side has at least MIN_CASES settled
+   last deciding result only (study.settle); pending is never a loss and a settled case with a
+   cause outside the agent is left out. While a counted case is still pending the verdict
+   waits, with no day limit: no timer settles a case or a trial (DECISIONS item 66), and the
+   morning page asks a person for the result a tool did not bring. The trial's own days are
+   the user's trial length and still end the giving. Kept when each side has at least MIN_CASES settled
    cases from MIN_SOURCES sources (the study's bar), the chance it is better
    (study.chance_better) is at least CHANCE, 75%, and its worst likely cost is at most the
    limit: the lesson's own when a person moved it before the start (set_limit), else the
@@ -69,7 +70,7 @@ from engine.lessons import (ALL, FROM_STUDY, IDEA, PERSON, TRYING, WAITING, Less
                             person_whose)
 from engine.log import Log, is_history
 from engine.plug import SLOW, Decides, Harm, Result
-from engine.study import (BAD, CHANCE, GOOD, LEFT_OUT, MIN_CASES, MIN_SOURCES, PENDING, chance_better, longest,
+from engine.study import (BAD, CHANCE, GOOD, LEFT_OUT, MIN_CASES, MIN_SOURCES, PENDING, chance_better,
                           settle)
 
 DAY = 86400
@@ -196,15 +197,18 @@ class Trials:
 
     def _judged_by(self, trial):
         """The plug as the trial was fixed when it started: its limit, the results that settle a
-        case and the days each takes to show, its harm and serious results; the plug as it is
-        when nothing was copied, and the plug's windows for a trial from before they were."""
+        case and the days each takes to show (shown only, never settling), its harm and serious
+        results; the plug as it is when nothing was copied."""
         if trial is None or trial["good"] is None:
             return self.plug
         results = dict(self.plug.results)
         for name, days in (trial["windows"] or {}).items():  # a result the plug no longer declares
+            days = None if days is None else tuple(days)
             was = results.get(name)
-            results[name] = (replace(was, shows_in_days=tuple(days)) if was is not None
-                             else Result(name, SLOW, tuple(days), None, ""))
+            results[name] = (replace(was, shows_in_days=days) if was is not None
+                             else Result(name, SLOW, days, None, ""))
+        for name in (trial["good"], *trial["bad"]):  # a renamed deciding result from before windows were copied
+            results.setdefault(name, Result(name, SLOW, None, None, ""))
         return replace(self.plug, trial_worst_cost=trial["worst_cost"], results=MappingProxyType(results),
                        decides=Decides(trial["good"], tuple(trial["bad"])),
                        harm=Harm(tuple(trial["harm"]), self.plug.harm.about, tuple(trial["serious"])))
@@ -340,7 +344,7 @@ class Trials:
         """At the end: wait for pending results, then kept or pulled by the numbers alone, or
         unclear when a side has too few settled cases or sources to tell."""
         w, wo = entry["with"], entry["without"]
-        if (w["pending"] or wo["pending"]) and now < les["ends_at"] + longest(p) * DAY:
+        if w["pending"] or wo["pending"]:  # no day limit (DECISIONS item 66)
             entry["status"] = WAITS
             entry["why"] = (f'Its trial ended; {w["pending"] + wo["pending"]} cases still wait for their result, '
                             "and a result that has not come is never a loss.")

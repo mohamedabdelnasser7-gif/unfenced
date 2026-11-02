@@ -44,9 +44,10 @@ FAN = dict(copy.deepcopy(WATERER), agent="fan", about="Runs a greenhouse fan.", 
            actions={"spin": "Turn the fan on."},
            results={"spun": {"speed": "fast", "shows_in_days": [0, 0], "after": "spin"},
                     "stalled": {"speed": "fast", "shows_in_days": [0, 0], "after": "spin"},
-                    "cooled": {"speed": "slow", "shows_in_days": [1.5, 3]}},
+                    "cooled": {"speed": "slow", "shows_in_days": [1.5, 3]},
+                    "warmed": {"speed": "slow", "shows_in_days": [1.5, 3]}},
            source={"about": "The greenhouse itself.", "known_by": "case"},
-           harm={"results": ["stalled"]}, decides={"good": "cooled", "bad": []},
+           harm={"results": ["stalled"]}, decides={"good": "cooled", "bad": ["warmed"]},
            slot="Fan notes:")
 
 LEDGER = dict(copy.deepcopy(WATERER), agent="ledger", about="Keeps the books.", case="One month of books.",
@@ -54,10 +55,24 @@ LEDGER = dict(copy.deepcopy(WATERER), agent="ledger", about="Keeps the books.", 
               actions={"post": "Post an entry."},
               results={"posted": {"speed": "fast", "shows_in_days": [0, 0], "after": "post"},
                        "rejected": {"speed": "fast", "shows_in_days": [0, 0], "after": "post"},
-                       "balanced": {"speed": "slow", "shows_in_days": [2, 30]}},
+                       "balanced": {"speed": "slow", "shows_in_days": [2, 30]},
+                       "unbalanced": {"speed": "slow", "shows_in_days": [2, 30]}},
               source={"about": "The month of books itself.", "known_by": "case"},
-              harm={"results": ["rejected"]}, decides={"good": "balanced", "bad": []},
+              harm={"results": ["rejected"]}, decides={"good": "balanced", "bad": ["unbalanced"]},
               slot="Ledger notes:")
+
+# A made-up agent whose case is settled by the courier (DECISIONS item 66): delivered decides good,
+# refused bad, both slow, and no day count. Its ship action names the order in its detail, so the
+# delivery webhook and the API check find its case (channels/bosta.py, reflection/late.py).
+SHIPPER = dict(copy.deepcopy(WATERER), agent="shipper", about="Ships parcels for a small seller.",
+               case="One parcel sent.", fields=["delivery"], stages=["sending"],
+               actions={"ship": "Hand the parcel to the courier."},
+               results={"shipped": {"speed": "fast", "after": "ship"},
+                        "delivered": {"speed": "slow", "about": "The courier delivered it."},
+                        "refused": {"speed": "slow", "about": "The buyer refused it at the door."}},
+               causes={}, source={"about": "The parcel itself.", "known_by": "case"},
+               harm={"results": ["shipped"]}, decides={"good": "delivered", "bad": ["refused"]},
+               slot="Shipping notes:")
 
 
 def load(data, test):

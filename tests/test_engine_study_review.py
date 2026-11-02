@@ -104,25 +104,25 @@ class ReadingRules(base.Night):
         cand = self.run_night(fk.EARLY)["candidates"][0]
         self.assertEqual((cand["with"]["cases"], cand["without"]["cases"], cand["unknown"]), (10, 10, 4))
 
-    def test_pending_is_timed_from_the_last_action(self):
+    def test_an_old_case_with_no_deciding_result_is_pending(self):
         fk.beds(self.log)
-        for at in (fk.UNTIL - 20 * DAY, fk.UNTIL - 2 * DAY):  # old, then recent: still pending
+        for at in (fk.UNTIL - 20 * DAY, fk.UNTIL - 2 * DAY):  # old and recent: pending either way (item 66)
             self.log.act("late1", "water", result="soaked", stage="seedling", detail={"early": False}, at=at)
         rep = self.run_night(fk.EARLY)
-        self.assertEqual((rep["pending"], rep["decided"]["past_window"]), (1, 0))
+        self.assertEqual((rep["pending"], rep["decided"]["bad"]), (1, 10))
 
-    def test_the_longest_deciding_window_decides_pending(self):
-        fk.beds(self.log)  # grew shows within 10 days, wilted within 5: 7 days on, still pending
+    def test_no_window_decides_pending(self):
+        fk.beds(self.log)
         fk.case(self.log, "late2", "water", "soaked", at=fk.UNTIL - 7 * DAY, stage="seedling", early=False)
         rep = self.run_night(fk.EARLY)
-        self.assertEqual((rep["pending"], rep["decided"]["past_window"]), (1, 0))
+        self.assertEqual((rep["pending"], rep["decided"]["bad"]), (1, 10))
 
     def test_the_last_deciding_result_wins(self):
         fk.beds(self.log)
         fk.case(self.log, "turned", "water", "soaked", "grew", stage="seedling", early=True, note="turned")
         self.log.result("turned", "wilted", at=fk.T0 + 6 * DAY)
         rep = self.run_night(fk.EARLY)
-        self.assertEqual(rep["decided"], {"good": 10, "bad": 11, "past_window": 0})
+        self.assertEqual(rep["decided"], {"good": 10, "bad": 11})
 
     def test_helps_as_the_text_false_is_dropped(self):
         fk.beds(self.log)

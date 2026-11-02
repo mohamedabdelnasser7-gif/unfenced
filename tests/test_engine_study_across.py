@@ -14,7 +14,7 @@ from tests import plugs
 from tests import study_fakes as fk
 from tests.kept import kept_lesson
 
-UNTIL = fk.T0 + 60 * DAY  # long enough for a month of books to pass its window
+UNTIL = fk.T0 + 60 * DAY  # long enough for a month of books to settle
 NOW = UNTIL
 FAN_EARLY = "Turn the fan on early in the morning."
 FAN_TWICE = "Check the fan twice before turning it on."
@@ -139,7 +139,7 @@ class ReadsEveryField(Across):
 
     def test_words_copied_from_the_other_agents_cases_are_caught(self):
         for n in range(20):
-            fk.case(self.logs["ledger"], f"m{n}", "post", "posted", "balanced" if (n < 8 or n >= 18) else None,
+            fk.case(self.logs["ledger"], f"m{n}", "post", "posted", "balanced" if (n < 8 or n >= 18) else "unbalanced",
                     stage="open", twice=n < 10, note="the auditor wrote balance every page before the close")
         line = "Balance every page before the fan starts."
         self.run_night(adapter=fk.Adapter({fk.TWICE["lesson"]: line}))
@@ -237,7 +237,7 @@ class NoCap(Across):
     def test_own_lessons_start_first_then_adapted_ones_wait_their_turn(self):
         self.both()
         for n in range(20):
-            fk.case(self.logs["fan"], f"house{n}", "spin", "spun", "cooled" if (n < 8 or n >= 18) else None,
+            fk.case(self.logs["fan"], f"house{n}", "spin", "spun", "cooled" if (n < 8 or n >= 18) else "warmed",
                     stage="grown", early=n < 10)
         rep = self.run_night()
         first = rep["cards"][0]["lesson_id"]

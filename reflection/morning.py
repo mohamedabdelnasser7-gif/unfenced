@@ -128,9 +128,24 @@ The fact cards (call 10, reflection/facts.py). Facts worked out from an agent's 
 each with the numbers behind it, Keep and Dismiss. An answer is saved with who and when; a
 kept fact is shown under Kept facts. Nothing acts on a fact by itself.
 
+Late results (DECISIONS items 66 and 67). A case whose result comes later (delivered or refused,
+say) and no webhook or API brought it waits for a person: no timer closes it. Under "Waiting for
+a result" each such case of an agent with a plug (a pending case, or a good case with no second
+signal result yet; reflection/late.py open_cases, with a row in the last LATE_DAYS) shows by its
+order number, or a made reference (late.case_ref) when it has none, never its raw case id, with
+a button per result it takes (/late_mark). At most LATE_SHOWN an agent, the longest waiting
+first, and no count of the rest (item 35). Each agent with a waiting case also takes a sheet
+(/late_sheet): a CSV of case, result rows, uploaded as multipart and read with the standard
+library's email parser under its own cap (MAX_SHEET bytes, MAX_SHEET_ROWS rows). A row that names
+no waiting case of that agent, or a result that case does not take, is skipped and named by its
+row number; it is never saved. Every write goes through reflection/results.py late(), once a case
+for its group, with who and when, so the webhook, the API or a person that came first wins.
+
 Safety. The server listens on 127.0.0.1 only. Every request needs a Host of 127.0.0.1 or
 localhost on the page's port. Every POST also needs an Origin of the same, and the token made
-when the page starts and put in its forms; anything else is refused and changes nothing.
+when the page starts and put in its forms; anything else is refused and changes nothing. The
+sheet upload is the one POST that is multipart: the same Host, Origin and token checks, its own
+size cap, only its four fields once each.
 Every field is escaped, since lessons, notes and case ids come from models and customers. The
 page loads no outside font, script or image, and its Content-Security-Policy allows only its
 own inline style.
@@ -139,6 +154,8 @@ Not built yet (Mohamed's open calls): cards for a person's fixes.
 """
 import argparse
 import base64
+import csv
+import io
 import hashlib
 import hmac
 import html
@@ -182,6 +199,11 @@ CARDS = 5                       # cards on the page at a time, across agents; an
 BY = "the user"                 # who answers on this page (DECISIONS item 34)
 MAX_BODY = 16384                # bytes in one POST
 MAX_REPORT = 50 * 1024 * 1024   # bytes; a bigger saved report is skipped
+LATE_DAYS = 90                  # a case waiting on a late result shows when it has a row this recent
+LATE_SHOWN = 6                  # cases waiting on a late result shown per agent, the longest waiting first
+MAX_SHEET = 64 * 1024           # bytes in one uploaded sheet of late results, the whole request
+MAX_SHEET_ROWS = 200            # rows in one sheet; a bigger sheet is refused whole
+SHEET_SKIPS_SHOWN = 10          # skipped rows named in the answer
 EDITED = "edited by "
 _EDITED_FROM = re.compile(r"^edited by .+? from lesson (\d+)")
 _EDITED_INTO = re.compile(r"^edited by .+? into lesson (\d+)")
@@ -1073,6 +1095,141 @@ class Morning:
             return "Dropped. That mode is not proposed again."
         return f'Added the mode "{now_modes["added"][-1]["name"]}" to the assistant\'s modes.'
 
+    # ---- late results a person brings (DECISIONS items 66 and 67) -------------------------
+
+    def _late_log(self, plug):
+        """The agent's log for late results, made on first use outside any answer (making it commits)."""
+        logs = self.__dict__.setdefault("_late_logs", {})
+        if plug.agent not in logs:
+            from engine.log import Log
+            logs[plug.agent] = Log(self.db, plug)
+        return logs[plug.agent]
+
+    def _late_open(self, plug, now):
+        """{case reference: [(case id, names, last row's time)]} this agent's cases that wait on a
+        late result (reflection/late.py open_cases) with a row in the last LATE_DAYS."""
+        from reflection import late as late_mod
+        out, key = {}, late_mod.ref_key(self.db)
+        for case_id, rows, names in late_mod.open_cases(self.db, plug, since=now - LATE_DAYS * DAY, now=now,
+                                                        log=self._late_log(plug)):
+            out.setdefault(late_mod.case_ref(plug, case_id, rows, key), []).append((case_id, names, rows[-1]["at"]))
+        return out
+
+    def _late_plug(self, agent):
+        from reflection import late as late_mod
+        self._plugged(agent)
+        plug = self.plugs[agent]
+        if not any(late_mod.takes(plug)):
+            raise Refused("That agent takes no late result, so there is nothing to mark.")
+        return plug
+
+    def late_view(self, now=None):
+        """What the page asks a person for: {"cases": [{agent, ref, at, names, second}], at most
+        LATE_SHOWN an agent, the longest waiting first; "agents": the agents with any case waiting,
+        each with a sheet upload}. A reference two cases share is not shown (a sheet cannot name it
+        either). No count of what is left (item 35)."""
+        from reflection import late as late_mod
+        now = time.time() if now is None else float(now)
+        cases, agents = [], []
+        for agent, plug in sorted(self.plugs.items()):
+            if agent not in self.lessons or not any(late_mod.takes(plug)):
+                continue
+            found = self._late_open(plug, now)
+            if not found:
+                continue
+            agents.append(agent)
+            second = set(late_mod.takes(plug)[1])
+            one = sorted(((ref, got[0]) for ref, got in found.items() if len(got) == 1), key=lambda x: (x[1][2], x[0]))
+            cases += [{"agent": agent, "ref": ref, "at": at, "names": list(names), "second": set(names) <= second}
+                      for ref, (_, names, at) in one[:LATE_SHOWN]]
+        return {"cases": cases, "agents": agents}
+
+    def late_mark(self, agent, ref, result, now=None):
+        """A person's late result for one waiting case, from its button: saved once a case for its
+        group (reflection/results.py late), with who, when and "from": "page"."""
+        plug = self._late_plug(agent)
+        now_ = time.time() if now is None else float(now)
+        from reflection import late as late_mod
+        ref = late_mod.norm_ref(ref)  # only the checked reference is ever said back
+        got = self._late_open(plug, now_).get(ref) or [] if ref else []
+        if len(got) != 1:
+            raise Refused("That case does not wait for a result now: it has one already, or it is not there. "
+                          "Look at the page again.")
+        case_id, names, _ = got[0]
+        if result not in names:
+            raise Refused("That case does not take that result. Look at the page again.")
+        return self._late_save(plug, case_id, ref, result, "page", now_)
+
+    def _late_save(self, plug, case_id, ref, result, how, now):
+        from reflection.results import late
+        row = late(self.db, plug, case_id, result, by=self.by, now=now, detail={"from": how})
+        if row is None:
+            return f"{_ref_words(ref)} had a result already, so nothing changed."
+        return f"Saved: {result.replace('_', ' ')} for {_ref_words(ref)}, with your name and the time."
+
+    def late_sheet(self, agent, data, now=None):
+        """A sheet of late results (CSV, two columns: case, result; a first row "case,result" is
+        read as names). Each row must name a case of this agent that waits on a late result now and
+        a result that case takes (its plug's deciding results, or its second signal's); every other
+        row is skipped, never saved, and named in the answer by its row number. The sheet is checked
+        whole before anything is saved: too big, not UTF-8 text or more than MAX_SHEET_ROWS rows,
+        and nothing is saved. Each saved row goes through results.late, once a case for its group,
+        with who, when and "from": "sheet"."""
+        from reflection import late as late_mod
+        plug = self._late_plug(agent)
+        now_ = time.time() if now is None else float(now)
+        if not isinstance(data, bytes) or not data.strip():
+            raise Refused("No sheet came. Pick a CSV file with two columns: case, result.")
+        if len(data) > MAX_SHEET:
+            raise Refused(f"The sheet is too big: at most {MAX_SHEET // 1024} KB. Nothing was saved.")
+        try:
+            text = data.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            raise Refused("The sheet is not UTF-8 text. Save it as CSV (UTF-8) and try again. Nothing was saved.") from None
+        if "\x00" in text:
+            raise Refused("The sheet is not text. Save it as CSV and try again. Nothing was saved.")
+        try:
+            rows = [(n, [c.strip() for c in row]) for n, row in enumerate(csv.reader(io.StringIO(text)), 1)]
+        except csv.Error:
+            raise Refused("The sheet could not be read as CSV. Nothing was saved.") from None
+        rows = [(n, cells) for n, cells in rows if any(cells)]
+        if rows and [c.lower() for c in rows[0][1][:2]] == ["case", "result"]:
+            rows = rows[1:]
+        if not rows:
+            raise Refused("The sheet has no rows. Nothing was saved.")
+        if len(rows) > MAX_SHEET_ROWS:
+            raise Refused(f"At most {MAX_SHEET_ROWS} rows a sheet. Nothing was saved.")
+        found = self._late_open(plug, now_)
+        keep, skipped = [], []
+        for n, cells in rows:
+            while len(cells) > 2 and not cells[-1]:
+                cells = cells[:-1]
+            if len(cells) != 2:
+                skipped.append((n, "it needs two columns, case and result"))
+                continue
+            ref, result = late_mod.norm_ref(cells[0]), cells[1].lower().replace(" ", "_")
+            got = found.get(ref) or []
+            if not ref:
+                skipped.append((n, "the case is not one the page names"))
+            elif len(got) > 1:
+                skipped.append((n, f"{_ref_words(ref)} names more than one case"))
+            elif not got:
+                skipped.append((n, f"{_ref_words(ref)} does not wait for a result now"))
+            elif result not in got[0][1]:
+                skipped.append((n, f"{_ref_words(ref)} takes {' or '.join(got[0][1])}"))
+            else:
+                keep.append((got[0][0], ref, result))
+        saved = already = 0
+        for case_id, ref, result in keep:
+            said = self._late_save(plug, case_id, ref, result, "sheet", now_)
+            saved, already = (saved + 1, already) if said.startswith("Saved") else (saved, already + 1)
+        out = f"Sheet, {name_of(agent)}: {saved} saved, {already} had a result already"
+        if skipped:
+            named = "; ".join(f"row {n}: {why}" for n, why in skipped[:SHEET_SKIPS_SHOWN])
+            more = " and more" if len(skipped) > SHEET_SKIPS_SHOWN else ""
+            out += f", {len(skipped)} skipped and not saved ({named}{more})"
+        return out + "."
+
     def _plugged(self, agent):
         lessons = self.lessons.get(agent) if isinstance(agent, str) else None
         if lessons is None:
@@ -1195,7 +1352,7 @@ class Morning:
             a["switches"] = self.switch_view(a["agent"], now) if a["buttons"] else None
         view = {"at": now, "agents": agents, "cards": pool[:CARDS], "more": max(0, len(pool) - CARDS),
                 "unclear": [u for u in unclear if u is not None], "problems": k.problems,
-                "ideas": self._ideas(rows, items)}
+                "ideas": self._ideas(rows, items), "late": self.late_view(now)}
         view.update(self.fact_view(now))
         return view
 
@@ -1622,6 +1779,19 @@ def _side(side):
             "pending": side.get("pending"), "list": cases}
 
 
+def _ref_words(ref):
+    """A case reference in an answer: an order number as "order 1001", a made one as "case c-..."."""
+    return f"case {ref}" if ref.startswith("c-") else f"order {ref}"
+
+
+AGENT_NAMES = {"sales": "Sales agent", "assistant": "Personal assistant", "marketing": "Marketing agent"}
+
+
+def name_of(agent):
+    """An agent's name in words, as both pages say it."""
+    return AGENT_NAMES.get(agent, agent.replace("_", " ").capitalize())
+
+
 def _numbers(card):
     """The study's numbers on a card, and what it could gain; None when the card has none."""
     sure, cases = card.get("sure"), card.get("cases")
@@ -1768,6 +1938,8 @@ def render(view, *, token=None, flash=None):
     if view["unclear"]:
         out.append('<section class="unclear" aria-labelledby="u-h"><div class="sec-h"><h2 id="u-h">Unclear: too few '
                    'results to tell</h2></div>' + "".join(_unclear_html(u, token) for u in view["unclear"]) + "</section>")
+    if (view.get("late") or {}).get("agents"):  # a result only a person can bring (DECISIONS item 66)
+        out.append(_late_html(view["late"], token))
     modes = [a for a in view["agents"] if a.get("mode_card") is not None]
     if modes:  # a new mode needs the user's yes, so it is open on the page, never in the fold
         out.append('<section class="modes" aria-labelledby="m-h"><div class="sec-h"><h2 id="m-h">A new mode?</h2></div>'
@@ -1786,6 +1958,47 @@ def render(view, *, token=None, flash=None):
     out.append("</div>")
     out.append(f'<nav class="isl" aria-label="Main">{_tabs("tab")}</nav>')
     out.append("</body></html>")
+    return "\n".join(out)
+
+
+def late_label(name):
+    """A late result's name on its button: delivered is Delivered."""
+    return name.replace("_", " ").capitalize()
+
+
+def late_case_words(c):
+    """What a waiting case's card says under its reference."""
+    kind = "Its later result" if c["second"] else "Its result"
+    return f"{kind} has not come since {_when(c['at'])}. Did it come?"
+
+
+def sheet_form(token, agent, extra=""):
+    """The sheet upload for one agent: a CSV file of case, result rows, to /late_sheet."""
+    return (f'<form method="post" action="{SHEET_PATH}" enctype="multipart/form-data">'
+            f'<input type="hidden" name="token" value="{h(token)}"><input type="hidden" name="agent" value="{h(agent)}">'
+            f'{extra}<label class="lab">A sheet for the {h(name_of(agent))}: CSV, two columns, case and result'
+            f'<input type="file" name="sheet" accept=".csv,text/csv" required></label>'
+            '<button type="submit" class="quiet">Upload the sheet</button></form>')
+
+
+def _late_html(late, token):
+    """The A3 page's part for results only a person can bring: each waiting case with a button per
+    result it takes, then a sheet upload per agent. No count of what is left (item 35)."""
+    out = ['<section class="late" aria-labelledby="late-h"><div class="sec-h"><h2 id="late-h">Waiting for a result</h2>'
+           '</div>']
+    for c in late["cases"]:
+        out.append(f'<article class="wcard sq"><div class="pass-h"><div class="agent"><span class="av">'
+                   f'{_agent_icon(c["agent"])}</span><div><strong>{h(name_of(c["agent"]))}</strong>'
+                   f'<small>{h(_ref_words(c["ref"]).capitalize())}</small></div></div></div>'
+                   f'<p class="why">{h(late_case_words(c))}</p>')
+        if token is not None:
+            out.append("".join(_agent_form(token, "late_mark", c["agent"], late_label(r), quiet=n > 0,
+                                           hidden=(("case", c["ref"]), ("result", r)))
+                               for n, r in enumerate(c["names"])))
+        out.append("</article>")
+    if token is not None:
+        out.extend(sheet_form(token, a) for a in late["agents"])
+    out.append("</section>")
     return "\n".join(out)
 
 
@@ -2068,11 +2281,11 @@ def _idea_lines(card):
     """An idea's card in plain lines: what it must move and when we know, what must not get
     worse, how sure today, and its trial level."""
     mv, lv, harm = card["moves"], card["level"], card["must_not_worsen"]
-    lo, hi = mv["shows_in_days"]
+    shows = mv.get("shows_in_days")  # None for a plug that names no days (DECISIONS item 66)
+    when = f', which shows {h(_n(shows[0]))} to {h(_n(shows[1]))} days after a case' if shows else ""
     worse = (", ".join(harm["results"]) + (f' ({harm["about"]})' if harm["about"] else "") if harm["results"]
              else harm["about"] or "nothing named")
-    return (f'<p class="meta">{h(_cap(card["whose"]))} idea. It must move {h(mv["result"])}, which shows {h(_n(lo))} to '
-            f'{h(_n(hi))} days after a case; we know about {h(_n(card["know_in_days"]))} days after its trial '
+    return (f'<p class="meta">{h(_cap(card["whose"]))} idea. It must move {h(mv["result"])}{when}; we know about {h(_n(card["know_in_days"]))} days after its trial '
             f'starts.</p>'
             f'<p class="meta">Must not get worse: {h(worse)}.</p>'
             f'<p class="meta">How sure today: {h(card["sure"])}.</p>'
@@ -2509,8 +2722,49 @@ ACTIONS = {"/stop": lambda m, f, now=None: m.stop(_field(f, "lesson"), _field(f,
            "/pause": lambda m, f, now=None: m.pause(_field(f, "agent"), now=now),
            "/resume": lambda m, f, now=None: m.resume(_field(f, "agent"), now=now),
            "/rollback": lambda m, f, now=None: m.roll_back(_field(f, "agent"), _field(f, "code"), now=now),
+           "/late_mark": lambda m, f, now=None: m.late_mark(_field(f, "agent"), _field(f, "case"), _field(f, "result"),
+                                                            now=now),
            "/mode": lambda m, f, now=None: m.answer_mode(_field(f, "agent"), _field(f, "card"), _field(f, "choice"),
                                                          _field(f, "name") if "name" in f else "", now=now)}
+SHEET_PATH = "/late_sheet"  # the one POST that takes a file: multipart, its own size cap (MAX_SHEET)
+SHEET_FIELDS = ("token", "back", "agent", "sheet")
+
+
+def sheet_fields(content_type, body):
+    """{name: [value]} from the sheet upload's multipart/form-data body: the file (sheet) as bytes,
+    every other field as text. Read with the standard library's email parser, at most one part per
+    field it takes and only those fields; ValueError for anything else, so nothing is saved."""
+    from email import policy
+    from email.parser import BytesParser
+    ct = content_type or ""
+    if "\r" in ct or "\n" in ct or not ct.lower().startswith("multipart/form-data") or "boundary=" not in ct.lower():
+        raise ValueError("not a sheet upload")
+    try:
+        msg = BytesParser(policy=policy.HTTP).parsebytes(
+            b"MIME-Version: 1.0\r\nContent-Type: " + ct.encode("latin-1") + b"\r\n\r\n" + body)
+        parts = msg.get_payload() if msg.is_multipart() else None
+        if not isinstance(parts, list) or not 0 < len(parts) <= len(SHEET_FIELDS):
+            raise ValueError("not a sheet upload")
+        out = {}
+        for part in parts:
+            name = part.get_param("name", header="content-disposition")
+            if part.get_content_disposition() != "form-data" or name not in SHEET_FIELDS or name in out \
+                    or part.is_multipart():
+                raise ValueError("not a sheet upload")
+            data = part.get_payload(decode=True) or b""
+            out[name] = [data if name == "sheet" else data.decode("utf-8")]
+    except ValueError:
+        raise
+    except Exception:  # the email parser's own errors: still not a sheet upload
+        raise ValueError("not a sheet upload") from None
+    return out
+
+
+def _sheet(form):
+    got = form.get("sheet") or [b""]
+    return got[0] if isinstance(got[0], bytes) else b""
+
+
 # The A3 page's own answers the two tab page never sends: they run no hold and no exam of the two tab kind
 # (Modify and the correction box do), so its server does not take them.
 A3_ONLY = ("/idea", "/edit")
@@ -2581,20 +2835,27 @@ def _handler(morning, token, pages=None):
             if not self._allowed("Host") or not self._allowed("Origin", "http://"):
                 return self._send(403, "Refused: a change comes only from this page on 127.0.0.1 or localhost.\n")
             table = ACTIONS if pages is None else {**TWO_TAB_ACTIONS, **getattr(pages, "actions", {})}  # + Quick start
-            act = table.get(urllib.parse.urlsplit(self.path).path)
+            path = urllib.parse.urlsplit(self.path).path
+            sheet = path == SHEET_PATH  # the sheet upload: a file, so multipart and its own size cap
+            act = (lambda m, f, now=None: m.late_sheet(_field(f, "agent"), _sheet(f), now=now)) if sheet else \
+                table.get(path)
             if act is None:
                 return self._send(404, "Not found.\n")
             try:
                 length = int(self.headers.get("Content-Length") or "")
             except ValueError:
                 return self._send(411, "A length is needed.\n")
-            if not 0 <= length <= MAX_BODY:
+            if not 0 <= length <= (MAX_SHEET if sheet else MAX_BODY):
                 return self._send(413, "Too long.\n")
-            if not (self.headers.get("Content-Type") or "").lower().startswith("application/x-www-form-urlencoded"):
+            kind = (self.headers.get("Content-Type") or "").lower()
+            if not kind.startswith("multipart/form-data" if sheet else "application/x-www-form-urlencoded"):
                 return self._send(415, "A form is needed.\n")
             try:
-                form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"), keep_blank_values=True,
-                                             max_num_fields=8)
+                if sheet:
+                    form = sheet_fields(self.headers.get("Content-Type"), self.rfile.read(length))
+                else:
+                    form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"), keep_blank_values=True,
+                                                 max_num_fields=8)
             except (UnicodeDecodeError, ValueError):
                 return self._send(400, "Not a form.\n")
             given = form.get("token") or [""]

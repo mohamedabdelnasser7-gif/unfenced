@@ -34,7 +34,7 @@ from tests.kept import kept_lesson
 
 ROOT = Path(night.__file__).resolve().parent.parent
 BASETEN, META = kit_model.OPEN.key_env, kit_model.WONDER.key_env
-ACROSS_UNTIL = fk.T0 + 60 * 86400  # long enough for a month of books to pass its window
+ACROSS_UNTIL = fk.T0 + 60 * 86400  # long enough for a month of books to settle
 FAN_EARLY = "Turn the fan on early in the morning."
 FAN_TWICE = "Check the fan twice before turning it on."
 KEPT_LINE = "Post entries in date sequence."
@@ -166,6 +166,16 @@ class OneNight(Setup):
         self.assertEqual(rep["window"], {"since": fk.UNTIL - 30 * 86400, "until": fk.UNTIL})
         self.assertEqual([c["state"] for c in rep["cards"]], ["trying"])
 
+    def test_until_on_the_command_line_is_the_windows_end(self):
+        """The night scheduler runs this command in a child process and gives its until this way."""
+        self.env()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            code = night.main(["--plug", str(self.plug_path), "--db", str(self.db_path), "--days", "30", "--json",
+                               "--until", repr(float(fk.UNTIL))])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out.getvalue())["window"], {"since": fk.UNTIL - 30 * 86400, "until": fk.UNTIL})
+
     def test_json_prints_the_same_report(self):
         self.env()
         code, out, _ = self.run_main("--json")
@@ -194,6 +204,35 @@ class OneNight(Setup):
         self.assertIn("the proposer failed", out)
         for value in self.stand_in.values():
             self.assertNotIn(value, out + err)
+
+    def test_the_courier_check_runs_before_the_study_and_has_its_line(self):
+        self.env()
+        order = []
+        real_check, real_night = night.courier_check, night.night
+
+        def check(db, plug, now):
+            order.append(("courier", plug.agent, now))
+            return real_check(db, plug, now)
+
+        def study(*a, **k):
+            order.append(("study",))
+            return real_night(*a, **k)
+
+        with mock.patch.object(night, "courier_check", check), mock.patch.object(night, "night", study):
+            code, out, err = self.run_main()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(order, [("courier", "waterer", fk.UNTIL), ("study",)])
+        self.assertIn("courier API check: not run, no BOSTA_API_KEY", out)
+        rep = json.loads(next(self.dir.glob("night-waterer-*.json")).read_text(encoding="utf-8"))
+        self.assertIsNone(rep["courier"])
+
+    def test_a_courier_check_that_breaks_never_stops_the_night(self):
+        self.env(BOSTA_API_KEY="made-up-key")
+        with mock.patch("reflection.late.run", side_effect=RuntimeError("x")):
+            code, out, err = self.run_main()
+        self.assertEqual(code, 0, err)
+        self.assertIn("courier API check: stopped (RuntimeError); the night went on", out)
+        self.assertNotIn("made-up-key", out + err)
 
     def test_the_other_plugs_in_the_repo_are_given(self):
         self.env()

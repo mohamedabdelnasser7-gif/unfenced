@@ -696,7 +696,8 @@ class Lessons:
         result, bad results, harm results, serious results, the days each deciding result takes
         to show as JSON {result: [least, most]})."""
         p = self.plug
-        windows = {r: list(p.results[r].shows_in_days) for r in (p.decides.good, *p.decides.bad)}
+        windows = {r: None if p.results[r].shows_in_days is None else list(p.results[r].shows_in_days)
+                   for r in (p.decides.good, *p.decides.bad)}  # shown only, never settling (item 66)
         return (p.trial_worst_cost, p.decides.good, tag_text(p.decides.bad), tag_text(p.harm.results),
                 tag_text(p.harm.serious), json.dumps(windows))
 

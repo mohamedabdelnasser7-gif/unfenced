@@ -128,12 +128,12 @@ def beds(log, *, early_good=8, early_bad=2, late_good=2, late_bad=8, prefix="bed
 
 
 def entries(log, *, twice_good=8, twice_none=2, once_good=2, once_none=8, prefix="month", at=T0 + DAY):
-    """Months of books for the ledger: checked twice or once, then balanced or no result in its window."""
+    """Months of books for the ledger: checked twice or once, then balanced or unbalanced."""
     n = 0
     for twice, good, count in ((True, True, twice_good), (True, False, twice_none),
                                (False, True, once_good), (False, False, once_none)):
         for _ in range(count):
             n += 1
-            case(log, f"{prefix}{n}", "post", "posted", "balanced" if good else None, at=at, stage="open",
+            case(log, f"{prefix}{n}", "post", "posted", "balanced" if good else "unbalanced", at=at, stage="open",
                  twice=twice, note=f"entry {n}")
     return n

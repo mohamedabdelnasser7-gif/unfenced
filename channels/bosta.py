@@ -9,11 +9,13 @@ through a public tunnel or a host, like the WhatsApp webhook.
   nothing; it sends one custom header the business sets beside the webhook URL.
 - Delivered (state 45) records "delivered" on the chat; a refusal (state 47 with exception
   code 8) records "refused", and so does a send returned to the business (state 46,
-  Mohamed's call 14A, 29 Oct). Both are slow results of the Sales agent plug, saved through
-  reflection/results.py. This webhook is an optional result source: the results are recorded on
-  the case and read by the delivery cards (reflection/facts.py), but they never decide a case;
-  the order placed does, against a chat that closed after quiet with no order (chat_closed,
-  sales/plug.json decides).
+  Mohamed's call 14A, 29 Oct). For the Sales agent both are its second signal (sales/plug.json
+  second_signal, DECISIONS item 66): recorded on a good chat and read by the delivery cards
+  (reflection/facts.py), never deciding it; the order placed does, against a chat that closed
+  after quiet with no order. For any other agent whose plug names delivered or refused among
+  its late results (engine/plug.py Plug.late: decides with a slow result, or second_signal) the
+  result goes to that agent's case, and there it may decide the case. Every result is saved
+  through reflection/results.py late(), once a case for its group.
 - A returned send most likely reaches the webhook as a delivery of its own: type RTO (the
   return leg), its own _id, state 46, and the send's businessReference. So a 46 is found
   through the same order lookup as the send and is taken once per order, not per delivery:
@@ -24,10 +26,14 @@ through a public tunnel or a host, like the WhatsApp webhook.
   not list 46 for a send: it costs nothing, since the order still gets one refused whichever
   delivery reports the return. A refusal takes its order first, so a 47 with code 8 after any
   46 for its order, on the send or on the return leg, is a replay (409).
-- The chat is found through the order number the Sales agent already logs on its
-  order_created row: Bosta echoes the businessReference the delivery was created with, which
-  must be that order number (#1001, or 1001; both are one order). No chat, or more than one,
-  is an unknown order and is refused (404); nothing is saved.
+- The case is found through the order number: Bosta echoes the businessReference the
+  delivery was created with, which must be that order number (#1001, or 1001; both are one
+  order). For the Sales agent it is the order its order_created row names (a Shopify order);
+  for another agent, any action row of its own whose detail names that order. Only agents whose
+  plug takes that result are searched. No case, or more than one across all those agents, is an
+  unknown order and is refused (404); nothing is saved. A case that already has a result of that
+  group (from the API check or a person on the morning page) saves nothing: 200 "already
+  recorded".
 - Each delivery gets each result once. A message already taken is refused (409): a replay
   or a retry saves nothing twice. A 46 already taken for its order is the one exception
   above: 200, and still nothing saved. A result whose write fails is forgotten, so Bosta
@@ -67,9 +73,11 @@ import logging
 import threading
 import time
 import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from reflection.results import late
 from channels.whatsapp import DeadlineReader, FIRST_LINE_DEADLINE, MAX_OPEN, MIN_SECRET, REQUEST_DEADLINE, \
     SOCKET_TIMEOUT
 
@@ -147,7 +155,7 @@ def read_event(payload):
     return Event(delivery=delivery, tracking=_text(payload.get("trackingNumber"))[:64], state=state,
                  kind=_text(payload.get("type")), order=order, code=_number(payload.get("exceptionCode")) or 0,
                  attempts=_number(payload.get("numberOfAttempts")) or 0,
-                 stamp=_number(payload.get("timeStamp")), why=_text(payload.get("exceptionReason"))[:MAX_TEXT])
+                 stamp=_number(payload.get("timeStamp")), why=" ".join(_text(payload.get("exceptionReason")).split())[:MAX_TEXT])  # one line: it reaches the team
 
 
 def outcome(ev):
@@ -166,8 +174,8 @@ def outcome(ev):
 
 
 def order_names(order):
-    """The order numbers a businessReference can stand for: as given, and with a # when it has none."""
-    return (order,) if order.startswith("#") else (order, "#" + order)
+    """The order numbers a businessReference can stand for: as given, and with its # added or taken off."""
+    return (order, order[1:]) if order.startswith("#") else (order, "#" + order)
 
 
 def order_ref(order):
@@ -185,11 +193,39 @@ def secret_ok(header, secret):
 class Deliveries:
     """Takes one Bosta message: records its result on the chat, tells the team, or ignores it."""
 
-    def __init__(self, results, tell_team=None):
+    def __init__(self, results, tell_team=None, plugs=()):
+        """plugs: the other agents' plugs (reflection/night.py other_plugs); only those whose
+        late results name delivered or refused are searched for an order's case."""
         self.results = results
         self.db = results.db
         self.tell_team = tell_team
+        self.plugs = [p for p in plugs if p.agent != results.plug.agent and
+                      {"delivered", "refused"} & {r for group in p.late() for r in group}]
         self.db.script(SEEN)
+
+    def case_for_order(self, order, what):
+        """(plug, case id) of the one case this order belongs to, among the agents that take
+        this result, or None when there is none or more than one."""
+        names = order_names(order)
+        found = []
+        sales = self.results.plug
+        if what in {r for group in sales.late() for r in group}:
+            chat = self.results.chat_for_order(*names)
+            if chat is not None:
+                found.append((sales, chat))
+        marks = ", ".join("?" for _ in names)
+        for plug in self.plugs:
+            if what not in {r for group in plug.late() for r in group}:
+                continue
+            with self.db.tx() as c:
+                rows = c.execute(
+                    "SELECT DISTINCT case_id FROM trace WHERE agent = ? AND action IS NOT NULL "
+                    "AND json_valid(detail) AND json_extract(detail, '$.history') IS NULL "
+                    f"AND json_extract(detail, '$.order') IN ({marks})", (plug.agent, *names)).fetchall()
+            found += [(plug, r["case_id"]) for r in rows]
+            if len(found) > 1:
+                break
+        return found[0] if len(found) == 1 else None
 
     def accept(self, payload):
         """(HTTP status, short reply) for one parsed body."""
@@ -199,10 +235,13 @@ class Deliveries:
         what = outcome(ev)
         if what is None:
             return 200, "ignored"
-        chat = self.results.chat_for_order(*order_names(ev.order))
-        if chat is None:
-            log.warning("a Bosta message names an order no single chat placed; refused")
+        found = None if what == "attempt" else self.case_for_order(ev.order, what)
+        if what == "attempt":
+            found = self.case_for_order(ev.order, "delivered") or self.case_for_order(ev.order, "refused")
+        if found is None:
+            log.warning("a Bosta message names an order no single case placed; refused")
             return 404, "unknown order"
+        plug, case = found
         key = f"{ev.delivery}:{what}"
         if what == "attempt":
             key += f":{ev.code}:{ev.attempts}:{ev.stamp}"
@@ -214,11 +253,13 @@ class Deliveries:
             self._note(ev)
             return 200, "noted"
         try:
-            self.results.record(chat, what, detail={"order": ev.order, "bosta": ev.tracking or ev.delivery,
-                                                    "state": ev.state, "code": ev.code or None, "at": ev.stamp})
+            row = late(self.db, plug, case, what, detail={"order": ev.order, "bosta": ev.tracking or ev.delivery,
+                                                          "state": ev.state, "code": ev.code or None, "at": ev.stamp})
         except Exception:
             self._forget(*taken)
             raise
+        if row is None:  # the API check or a person brought this case's result first
+            return 200, "already recorded"
         log.info("%s recorded for an order", what)
         return 200, "recorded"
 
@@ -341,6 +382,54 @@ def make_handler(secret, accept, timeout=SOCKET_TIMEOUT, deadline=REQUEST_DEADLI
     return Handler
 
 
+# ---- the API status check (reflection/late.py runs it on the night run, DECISIONS item 66)
+# From Bosta's API spec (https://docs.bosta.co/api/api.yaml, read 2 Nov 2026): GET
+# /api/v2/deliveries/business/{trackingNumber} on app.bosta.co, the API key in the Authorization
+# header, answers {success, message, data: {state: {code, value}, type: {code, value}, ...}}.
+# The view carries no exceptionCode, so a refusal at the door (47 with code 8) cannot be told from
+# another failed attempt there: the API path records only delivered (45 on a send) and returned
+# to the business (46 on a send or its return leg), which this repo already counts as refused
+# (call 14A). A refusal still comes from the webhook or a person. No rate limit is documented, so
+# the night asks at most reflection/late.py MAX_ASKS a run, one at a time. Search by
+# businessReference (POST /deliveries/search) lists only a Bearer login in the spec, so the check
+# reads by tracking number alone.
+API_BASE = "https://app.bosta.co/api/v2/deliveries/business/"
+API_KEY = "BOSTA_API_KEY"
+MAX_API_BODY = 256 * 1024
+API_TIMEOUT = 15                    # seconds for the whole call: each read, and the answer in all
+API_CHUNK = 16 * 1024
+
+
+def api_outcome(tracking, key, *, opener=None, timeout=API_TIMEOUT):
+    """(delivered or refused or None, the state code) for one tracking number, from Bosta's API.
+    Raises on a failed call, so the caller counts it and moves on, and when the whole answer has not
+    come within timeout seconds of the call, so a body sent a byte at a time never holds the night.
+    The status line and headers are bounded only per read; a server that drips them is stopped by the
+    night's own limit (reflection/scheduler.py LIMIT). The key is sent only to app.bosta.co, with no redirect followed, and never logged."""
+    from kit import net
+    tracking = _text(tracking)
+    if not tracking or len(tracking) > 64 or not tracking.isalnum():
+        raise ValueError("not a tracking number")
+    if not key:
+        raise ValueError(f"{API_KEY} is not set")
+    req = urllib.request.Request(API_BASE + urllib.parse.quote(tracking, safe=""),
+                                 headers={"Authorization": key, "Accept": "application/json"})
+    deadline = time.monotonic() + timeout
+    with (opener or net.open_once)(req, timeout) as r:
+        raw = _read_by(r, deadline)
+    data = json.loads(raw)
+    view = data.get("data") if isinstance(data, dict) else None
+    view = view if isinstance(view, dict) else {}
+    state = view.get("state") if isinstance(view.get("state"), dict) else {}
+    kind = view.get("type") if isinstance(view.get("type"), dict) else {}
+    code, kind = _number(state.get("code")), _text(kind.get("value")).upper()
+    if code == DELIVERED and kind in FORWARD:
+        return "delivered", code
+    if code == RETURNED and (kind in FORWARD or kind == RETURN_LEG):
+        return "refused", code
+    return None, code
+
+
 def team_sender():
     """send(text) to OPERATOR_WHATSAPP through the WhatsApp Cloud API, or None when its keys are not set."""
     from channels import whatsapp as wa
@@ -364,11 +453,14 @@ def main():
     secret = env.get("BOSTA_WEBHOOK_SECRET")
     if len(secret) < MIN_SECRET:
         raise SystemExit(f"BOSTA_WEBHOOK_SECRET in .env must be set, at least {MIN_SECRET} characters.")
+    from kit.db import DEFAULT_PATH
+    from reflection.night import other_plugs
+    from reflection import PLUG
     db = Db()
     tell = team_sender()
     if tell is None:
         log.info("no WhatsApp keys: failed delivery attempts go to this log only")
-    app = Deliveries(Results(db), tell_team=tell)
+    app = Deliveries(Results(db), tell_team=tell, plugs=other_plugs(PLUG, db=str(DEFAULT_PATH)))
     port = int(env.get("BOSTA_PORT", PORT_DEFAULT))
     server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(secret, app.accept))
     log.info("listening on 127.0.0.1:%d%s", port, PATH)
@@ -383,3 +475,20 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def _read_by(r, deadline):
+    """The answer's body, read a chunk at a time (read1 gives what has come, never waiting for a
+    full chunk), all of it by deadline (time.monotonic) and at most MAX_API_BODY bytes."""
+    read = getattr(r, "read1", None) or r.read
+    parts, size = [], 0
+    while True:
+        if time.monotonic() >= deadline:
+            raise TimeoutError("the answer did not come in time")
+        chunk = read(API_CHUNK)
+        if not chunk:
+            return b"".join(parts)
+        size += len(chunk)
+        if size > MAX_API_BODY:
+            raise ValueError("the answer was too large")
+        parts.append(chunk)

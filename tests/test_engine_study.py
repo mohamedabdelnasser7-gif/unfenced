@@ -44,7 +44,7 @@ class CountsFirst(Night):
     def test_every_result_kind_read_is_counted(self):
         fk.beds(self.log)
         fk.case(self.log, "dry1", "skip", "skipped", "wilted", stage="grown")
-        self.log.act("wet1", "water", result="ran_off", at=fk.UNTIL - 2 * DAY)  # still inside its window
+        self.log.act("wet1", "water", result="ran_off", at=fk.UNTIL - 2 * DAY)  # no deciding result yet: pending
         rep = self.run_night()
         self.assertEqual(rep["agent"], "waterer")
         self.assertEqual(rep["read"]["cases"], 22)
@@ -52,7 +52,7 @@ class CountsFirst(Night):
         self.assertEqual(rep["read"]["actions"], {"water": 21, "skip": 1})
         self.assertEqual(rep["read"]["results"],
                          {"soaked": 20, "ran_off": 1, "skipped": 1, "grew": 10, "wilted": 11})
-        self.assertEqual(rep["decided"], {"good": 10, "bad": 11, "past_window": 0})
+        self.assertEqual(rep["decided"], {"good": 10, "bad": 11})
         self.assertEqual(rep["pending"], 1)
 
     def test_a_declared_result_never_seen_is_counted_as_zero(self):
@@ -69,11 +69,11 @@ class CountsFirst(Night):
 
     def test_a_pending_case_is_not_a_loss(self):
         fk.beds(self.log)
-        for n in range(6):  # watered late, no slow result yet, still inside its window
+        for n in range(6):  # watered late, no slow result yet, so pending
             fk.case(self.log, f"new{n}", "water", "soaked", at=fk.UNTIL - 2 * DAY, stage="seedling", early=False)
         rep = self.run_night(fk.EARLY)
         self.assertEqual(rep["pending"], 6)
-        self.assertEqual(rep["decided"], {"good": 10, "bad": 10, "past_window": 0})
+        self.assertEqual(rep["decided"], {"good": 10, "bad": 10})
         cand = rep["candidates"][0]
         self.assertEqual((cand["without"]["cases"], cand["without"]["good"]), (10, 2))
         views = [v for call in self.tagger.calls for v in call["cases"]]
@@ -82,13 +82,13 @@ class CountsFirst(Night):
         self.assertEqual(len(notes), 20)  # the settled beds only, each with its own note
         self.assertNotIn(None, notes)     # no pending bed (they have no note) reached a model part
 
-    def test_a_case_past_its_window_with_no_deciding_result_counts_as_not_good(self):
-        fk.beds(self.log, late_bad=0)
-        for n in range(8):  # the longest deciding window is 10 days; these are 20 days old
+    def test_a_case_with_no_deciding_result_stays_pending_whatever_its_age(self):
+        fk.beds(self.log)
+        for n in range(8):  # 20 days old, twice the plug's 10 days: no timer settles them (item 66)
             fk.case(self.log, f"old{n}", "water", "soaked", at=fk.UNTIL - 20 * DAY, stage="seedling", early=False)
         rep = self.run_night(fk.EARLY)
-        self.assertEqual(rep["decided"], {"good": 10, "bad": 10, "past_window": 8})
-        self.assertEqual(rep["pending"], 0)
+        self.assertEqual(rep["decided"], {"good": 10, "bad": 10})
+        self.assertEqual(rep["pending"], 8)
         cand = rep["candidates"][0]
         self.assertEqual((cand["without"]["cases"], cand["without"]["good"]), (10, 2))
 
@@ -114,7 +114,7 @@ class CountsFirst(Night):
         self.assertEqual(rep["left_out"]["count"], 6)
         self.assertEqual(rep["left_out"]["by_cause"], {"frost": 5, "pests": 1})
         self.assertIn({"case": "pests1", "result": "wilted", "causes": ["pests"]}, rep["left_out"]["cases"])
-        self.assertEqual(rep["decided"], {"good": 10, "bad": 10, "past_window": 0})
+        self.assertEqual(rep["decided"], {"good": 10, "bad": 10})
         cand = rep["candidates"][0]
         self.assertEqual((cand["with"]["cases"], cand["with"]["good"]), (10, 8))
         self.assertEqual(len(self.tagger.calls[0]["cases"]), 20)

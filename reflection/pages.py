@@ -4,7 +4,9 @@ Morning methods only, so no engine rule lives here.
 
     /              Today: only what needs the user's yes, one light sage card each, then at most two
                    lines per agent about last night, the most important first (the same agents the
-                   Agents tab lists); an empty state when nothing waits (DECISIONS 35).
+                   Agents tab lists); an empty state when nothing waits (DECISIONS 35). Under the
+                   cards, the cases waiting on a result only a person can bring, with a button per
+                   result and a sheet upload (reflection/morning.py, Late results; DECISIONS 66).
     /agents        the agents (the plugs in the repo and the agents in the database) and New agent.
                    An agent shows Live when it works on real chats or cases (Morning._live), else
                    Training: only Arena practice.
@@ -40,7 +42,7 @@ from reflection.page_css import CSS
 CSP = ("default-src 'none'; style-src 'sha256-" + base64.b64encode(hashlib.sha256(CSS.encode("utf-8")).digest()).decode()
        + "'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 h = mo.h
-NAMES = {"sales": "Sales agent", "assistant": "Personal assistant", "marketing": "Marketing agent"}
+NAMES = mo.AGENT_NAMES
 CORRECTED = lessons_mod.HOTFIX_SOURCE  # the source line of a correction (Morning.correct, Lessons.correct)
 _AGENT = re.compile(r"^[a-z][a-z_]{0,30}$")
 ROLLBACK = "/rollback"  # /agents/<name>/rollback: the plan a rollback would carry out, and its one button
@@ -85,7 +87,7 @@ def plain_risk(risk_why):
 
 
 def name(agent):
-    return NAMES.get(agent, agent.replace("_", " ").capitalize())
+    return mo.name_of(agent)
 
 
 def icon(n, cls="i"):
@@ -435,14 +437,43 @@ def night_html(m, view):
             f'<small>{h(mo._date(view["at"] - mo.DAY))}</small></div><div class="night">' + "".join(rows) + "</div></section>")
 
 
+def late_card(c, ctx):
+    """A case waiting on a result only a person can bring (DECISIONS item 66): its reference (an
+    order number, never a raw case id), since when, and a button per result it takes."""
+    out = ['<article class="yc sq">', _yc_head(c["agent"], mo._ref_words(c["ref"]).capitalize()),
+           f'<p class="why">{h(mo.late_case_words(c))}</p>']
+    if ctx["token"]:
+        out.append('<div class="act">' + "".join(
+            _post(ctx, "late_mark", h(mo.late_label(r)), "yes" if n == 0 else "mod", agent=c["agent"], case=c["ref"],
+                  result=r) for n, r in enumerate(c["names"])) + "</div>")
+    return "".join(out) + "</article>"
+
+
+def late_html(late, ctx):
+    """Today's part for results only a person can bring: the waiting cases, then a sheet upload per
+    agent. Nothing counts what is left (item 35)."""
+    body = "".join(late_card(c, ctx) for c in late["cases"])
+    if ctx["token"]:
+        back = f'<input type="hidden" name="back" value="{h(ctx["path"] + ctx["q"])}">'
+        body += "".join(f'<div class="yc sq">{mo.sheet_form(ctx["token"], a, back)}</div>' for a in late["agents"])
+    return ('<section aria-labelledby="late-h"><div class="sec-h"><h2 id="late-h">Waiting for a result</h2></div>'
+            f'<div class="cards">{body}</div></section>')
+
+
 def today(view, ctx):
     items = waiting(view)
     cards = {"lesson": lesson_card, "unclear": unclear_card, "fact": fact_card}
     html = [f'<section class="top"><h1>Good morning</h1><p class="num">{h(mo._today(view["at"]))}</p></section>']
-    if items:
-        body = "".join(mode_card(i["agent"], i["mode_card"], ctx) if k == "mode" else cards[k](i, ctx) for k, i in items)
-        html.append('<div class="today"><section aria-labelledby="y-h"><div class="sec-h"><h2 id="y-h">Needs your yes'
-                    f'</h2></div><div class="cards">{body}</div></section>')
+    late = view.get("late") or {}
+    if items or late.get("agents"):
+        html.append('<div class="today">')
+        if items:
+            body = "".join(mode_card(i["agent"], i["mode_card"], ctx) if k == "mode" else cards[k](i, ctx)
+                           for k, i in items)
+            html.append('<section aria-labelledby="y-h"><div class="sec-h"><h2 id="y-h">Needs your yes'
+                        f'</h2></div><div class="cards">{body}</div></section>')
+        if late.get("agents"):
+            html.append(late_html(late, ctx))
     else:
         html.append('<div class="today empty"><section aria-label="Needs your yes"><div class="sec-h"><h2>Needs your yes'
                     f'</h2></div><div class="calm sq"><span class="ok">{icon("check")}</span><div><b>Nothing needs you '

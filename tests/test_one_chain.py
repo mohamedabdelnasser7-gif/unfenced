@@ -44,6 +44,7 @@ def delivery_plug():
     """The Sales plug with delivered deciding good and refused bad; everything else as it is."""
     d = json.loads((ROOT / "sales" / "plug.json").read_text(encoding="utf-8"))
     d["decides"] = {"good": "delivered", "bad": ["refused"]}
+    d.pop("second_signal", None)  # delivered decides here, so it is no second signal
     return plug_mod.from_dict(d, folder=ROOT / "sales")
 
 
@@ -95,7 +96,7 @@ class OneChain(unittest.TestCase):
         rep = night.night(self.db, plug, until=time.time() + 60, days=14, judge=Judge(FakeModel(say("low"))),
                           proposer=proposer, tagger=by_risk, fit=fk.Fit(), adapter=fk.Adapter())
 
-        self.assertEqual(rep["decided"], {"good": 6, "bad": 6, "past_window": 0})
+        self.assertEqual(rep["decided"], {"good": 6, "bad": 6})
         cand, = rep["candidates"]
         self.assertEqual((cand["verdict"], cand["with"]["cases"], cand["with"]["good"], cand["without"]["cases"],
                           cand["without"]["good"]), ("lesson", 6, 1, 6, 5))

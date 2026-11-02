@@ -19,7 +19,7 @@ from engine import risk
 from engine.fast import FastNotes as EngineFast
 from engine.lessons import Lessons as EngineLessons
 from engine.log import Log
-from engine.study import PAST, PartError
+from engine.study import PartError
 from kit import model as model_mod
 from kit.chats import Chats
 from kit.db import Db
@@ -75,8 +75,9 @@ class Engine(unittest.TestCase):
         return self.notes
 
     def ended(self, case="bed-1", at=T0):
-        """One watered bed, then nothing: it ends past its window, 10 days after."""
+        """One watered bed that wilted 10 days after: it ends not good then (no timer ends a case, item 66)."""
         self.log.act(case, "water", result="soaked", stage="seedling", at=at)
+        self.log.result(case, "wilted", at=at + 10 * DAY)
         return at + 10 * DAY
 
     # when a note is written
@@ -138,9 +139,9 @@ class Engine(unittest.TestCase):
         self.make(reader=lambda case: turns if case == "bed-1" else [])
         self.notes.sweep(now=self.ended())
         view, = self.writer.views
-        self.assertEqual(view["ended_with"], PAST)
+        self.assertEqual(view["ended_with"], "wilted")
         self.assertEqual(view["good_result"], "grew")
-        self.assertEqual(view["steps"], [{"action": "water", "stage": "seedling", "result": "soaked"}])
+        self.assertEqual(view["steps"], [{"action": "water", "stage": "seedling", "result": "soaked"}, {"result": "wilted"}])
         self.assertEqual(view["turns"], [{"from": "agent", "tools": ["water"]}, {"from": "other", "text": "the soil is dry"},
                                          {"from": "agent", "text": "Watered."}])
 
@@ -251,15 +252,16 @@ class Engine(unittest.TestCase):
         self.assertIsNone(self.notes.hand("bed-1", now=t1 + 4 * DAY + 1))
         self.assertEqual(self.notes.state(note_id), engine_fast.DONE)
 
-    def test_gone_when_the_next_case_ends_past_its_window(self):
+    def test_gone_when_the_next_case_ends_on_a_bad_result_and_never_on_a_timer(self):
         self.make()
         end = self.ended()
         note_id = self.notes.sweep(now=end)[0]["id"]
         t1 = end + 3600
         self.notes.hand("bed-1", now=t1)
         self.log.act("bed-1", "water", result="soaked", at=t1 + 60)
-        self.assertIsNotNone(self.notes.hand("bed-1", now=t1 + 60 + 10 * DAY - 1))
-        self.assertIsNone(self.notes.hand("bed-1", now=t1 + 60 + 10 * DAY))
+        self.assertIsNotNone(self.notes.hand("bed-1", now=t1 + 60 + 30 * DAY))  # no timer ends the case (item 66)
+        self.log.result("bed-1", "wilted", at=t1 + 60 + 30 * DAY + 1)
+        self.assertIsNone(self.notes.hand("bed-1", now=t1 + 60 + 30 * DAY + 2))
         self.assertEqual(self.notes.state(note_id), engine_fast.DONE)
 
     def test_a_note_never_given_expires_keep_days_after_it_was_written(self):
@@ -294,6 +296,7 @@ class Engine(unittest.TestCase):
         first = self.notes.sweep(now=end)[0]["id"]
         self.notes.hand("bed-1", now=end + 1)
         self.log.act("bed-1", "water", result="soaked", at=end + 2)
+        self.log.result("bed-1", "wilted", at=end + 2 + 10 * DAY)
         second = self.notes.sweep(now=end + 2 + 10 * DAY)
         self.assertEqual([w["text"] for w in second], [TONE])
         self.assertEqual(self.notes.state(first), engine_fast.DONE)
@@ -304,6 +307,7 @@ class Engine(unittest.TestCase):
         self.make(data=data, writer=Scripted(NOTE, TONE))
         self.log.act("a", "water", result="soaked", at=T0, source="ann")
         end = T0 + 10 * DAY
+        self.log.result("a", "wilted", at=end)
         first = self.notes.sweep(now=end)[0]["id"]
         self.assertIsNotNone(self.notes.hand("c", source="ann", now=end + 1))
         self.log.act("c", "water", result="soaked", at=end + 2, source="ann")
@@ -319,6 +323,7 @@ class Engine(unittest.TestCase):
         self.make(data=data)
         self.log.act("a", "water", result="soaked", at=T0, source="ann")
         end = T0 + 10 * DAY
+        self.log.result("a", "wilted", at=end)
         self.notes.sweep(now=end)
         self.assertIsNone(self.notes.hand("x", source="bob", now=end + 1))
         self.assertEqual(self.notes.hand("b", source="ann", now=end + 1)["case"], "a")
@@ -515,7 +520,7 @@ class Sales(unittest.TestCase):
         rep = night.night(self.db, SALES, until=self.now, days=3, proposer=fk.Proposer(), tagger=fk.Tagger(),
                           fit=fk.Fit(), adapter=fk.Adapter(), others=[], judge=lambda *a: "unsure")
         # lost by its chat_closed row at once, not by a day of quiet
-        self.assertEqual((rep["read"]["cases"], rep["decided"]["bad"], rep["decided"]["past_window"]), (1, 1, 0))
+        self.assertEqual((rep["read"]["cases"], rep["decided"]["bad"]), (1, 1))
         self.assertEqual([(n["case"], n["text"], n["state"]) for n in rep["fast_notes"]],
                          [(chat_id, TONE, engine_fast.WAITING)])
         self.assertIn(f'    - case {chat_id}: "{TONE}", waiting', night.text(rep, SALES))
@@ -665,7 +670,7 @@ class Sales(unittest.TestCase):
         self.assertEqual([w["text"] for w in fast.sweep()], [TONE])
         self.assertEqual(len(self.writer_model.calls), 1)
         self.turn(customer=self.OTHER)
-        self.later(DAY + 60)
+        self.close_quiet()  # the chat closes with no order: no timer ends it (item 66)
         with self.db.tx() as c:  # the first call made a minute ago, so the window still holds it
             c.execute("UPDATE model_calls SET at = ?", (self.now - 60,))
         # a second ending inside the window: the sweep stops, writes no row, never crashes (review round 2)
@@ -688,7 +693,7 @@ class Sales(unittest.TestCase):
                                     limits=limits)
         self.turn()
         self.turn(customer=self.OTHER)
-        self.later(DAY + 60)
+        self.close_quiet()
         self.assertEqual(len(fast.sweep()), 1)
         self.assertEqual(fast.sweep(), [])
         self.assertEqual(count(self.db, "fast_notes"), 1)
@@ -775,7 +780,7 @@ class Sales(unittest.TestCase):
                      fast=sales_fast.FastNotes(self.db, self.chats, writer=slow))
         app.accept(wa.parse(payload(text_msg("m1", self.ASK, frm=self.CUSTOMER))))
         app.work_one(app.q.get_nowait())
-        self.later(DAY + 60)
+        self.close_quiet()
         sweep = threading.Thread(target=app.sweep_once)
         sweep.start()
         self.addCleanup(sweep.join, 5)

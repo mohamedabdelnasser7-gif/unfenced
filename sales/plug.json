@@ -30,9 +30,9 @@
     "person_replied": {"speed": "fast", "shows_in_days": [0, 1],
                        "about": "A team member's reply in a chat imported from the store's past; its step is the example the reflection reads."},
     "delivered": {"speed": "slow", "shows_in_days": [2, 7],
-                  "about": "The courier delivered the order (Bosta, optional). Recorded for the team and the delivery cards; it never decides a case."},
+                  "about": "The courier delivered the order (Bosta, optional). The second signal of a good chat, recorded on that chat; it never decides a case."},
     "refused": {"speed": "slow", "shows_in_days": [2, 7],
-                "about": "The customer refused the order at delivery, or Bosta returned it to the store (Bosta, optional). Recorded; it never decides a case."}
+                "about": "The customer refused the order at delivery, or Bosta returned it to the store (Bosta, optional). The second signal of a good chat, recorded on that chat; it never decides a case."}
   },
   "causes": {
     "out_of_stock": "The item ran out.",
@@ -48,6 +48,7 @@
     "about": "A turn with no safe reply counts as harm. Complaints count too, but they have no result yet; they join this list once one is declared."
   },
   "decides": {"good": "order_created", "bad": ["chat_closed"]},
+  "second_signal": {"good": "delivered", "bad": ["refused"]},
   "risk": {
     "high": {
       "about": "High risk in this store: any number (a price, a total, a fee, delivery days), any promise (a refund, an exchange, a delivery date), store policy, and a customer's personal data.",

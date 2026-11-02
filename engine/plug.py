@@ -20,9 +20,11 @@ Keys (unknown keys are refused, so a typo never passes quietly):
   stages   the stages a case moves through. A lesson is tagged with some of them, or "all".
   actions  name: one plain line. What the agent does in a case. Each action is saved
            with the ids of the lessons it was given.
-  results  name: {speed, shows_in_days, after, about}.
+  results  name: {speed, after, about, shows_in_days}.
            speed fast: shows within a day. speed slow: the real result, days later.
-           shows_in_days: [least, most], how long the result takes to show.
+           shows_in_days: optional, [least, most], about how long the result takes to show. Only
+           shown and used by the simulator to time its made-up results; no day count ever settles
+           a case or a trial (DECISIONS item 66). Older plugs carry it, and it still loads.
            after: the action this fast result ends; it is saved in the same row. A result
            without after (every slow one) comes on its own and attaches by case.
   causes   name: one plain line. Causes of a bad result that are not the agent's fault.
@@ -38,8 +40,17 @@ Keys (unknown keys are refused, so a typo never passes quietly):
            lesson on trial and one of them pings the person on the trial's card.
   decides  {good, bad}: the results that settle a case for a trial. good: the one that
            is good. bad: a list of the others, maybe empty. Each a declared result, fast
-           or slow, none named twice. A case with none of them is settled not good once
-           the longest of their windows has passed since its last action (study.settle).
+           or slow, none named twice. A case with none of them is pending, whatever its age,
+           until one comes (study.settle, DECISIONS item 66): from a tool's webhook
+           (channels/), from a tool's API on the night run (reflection/late.py), or
+           from a person on the morning page or in an uploaded sheet. No timer closes a case.
+  second_signal  optional, {good, bad}: results that follow a good case and are kept on
+           it, never deciding it (DECISIONS item 66, Mohamed's call B): a fast result decides the
+           case, and a slow one that comes days later shows how it held. good: one declared result; bad: a
+           list, maybe empty; none of them named in decides, none named twice. A good case with
+           none of them yet is still settled good and counted; the tool's webhook, its API
+           and the morning page can add one, once a case, and it stays on that case. No
+           pattern is counted by it (DECISIONS item 73): a night reads 2 days and it lands later.
   risk     {high: {about, words, patterns, tools}, low: {about}}: what is high risk in
            this business. words and patterns are {group: [...]}, so a match names its
            group. The code check looks for the words, patterns and tool names first; the
@@ -75,7 +86,7 @@ ALL = "all"  # the stage tag of a lesson that fits every stage
 NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 AGENT_NAME = re.compile(r"[a-z][a-z0-9_]{0,40}")  # agent, kind and owner: a file name part in arena/grow.py
 KEYS = {"agent", "kind", "owner", "about", "case", "fields", "stages", "actions", "results", "causes", "source", "harm",
-        "decides", "risk", "trial", "slot", "exam", "hands_over"}
+        "decides", "risk", "trial", "slot", "exam", "hands_over", "second_signal"}
 REQUIRED = {"agent", "case", "actions", "results", "causes", "source", "harm", "decides", "risk", "trial", "slot"}
 LEVELS_WHY = "the owner sets both trial levels here, fast and careful, each {share, days}"
 WHY = {  # what a missing key is for, said in the refusal
@@ -101,7 +112,7 @@ GONE = {  # keys an older plug may still carry, refused with what replaced them,
 class Result:
     name: str
     speed: str
-    shows_in_days: tuple
+    shows_in_days: tuple | None  # (least, most), or None when the plug gives none
     after: str | None
     about: str
 
@@ -179,6 +190,16 @@ class Plug:
     kind: str = ""  # the kind of agent; the agent's name when the plug names none
     owner: str = ""  # the owner's name (arena/grow.py owner_of); empty when the plug names none
     hands_over: tuple = ()  # HandOver, one per receiving agent (engine/handover.py); () for none
+    second_signal: Decides | None = None  # results kept on a good case, never deciding it
+
+    def late(self):
+        """The results a webhook, a tool's API or a person may add to a case later, as
+        (deciding, second): the deciding results when one of them is slow (else ()), and the second
+        signal's results (else ())."""
+        deciding = (self.decides.good, *self.decides.bad)
+        slow = any(self.results[r].speed == SLOW for r in deciding)
+        second = () if self.second_signal is None else (self.second_signal.good, *self.second_signal.bad)
+        return (deciding if slow else ()), second
 
     def action(self, name):
         """The action's line; ValueError when this plug does not declare it."""
@@ -261,7 +282,8 @@ def from_dict(d, folder=None):
                 exam=_exam(d["exam"], folder) if "exam" in d else None,
                 kind=_name(d["kind"], "kind", AGENT_NAME) if "kind" in d else agent,
                 owner=_name(d["owner"], "owner", AGENT_NAME) if "owner" in d else "",
-                hands_over=_hands_over(d["hands_over"], agent) if "hands_over" in d else ())
+                hands_over=_hands_over(d["hands_over"], agent) if "hands_over" in d else (),
+                second_signal=_second(d["second_signal"], results, d["decides"]) if "second_signal" in d else None)
 
 
 def _hands_over(v, agent):
@@ -323,27 +345,30 @@ def _gone(d, where):
 def _result(name, r, actions):
     where = f"result {name!r}"
     r = _dict(r, where, empty=False)
-    _keys(r, RESULT_KEYS, {"speed", "shows_in_days"}, where)
+    _keys(r, RESULT_KEYS, {"speed"}, where)
     speed = r["speed"]
     if speed not in (FAST, SLOW):
         raise ValueError(f"{where}: speed is {FAST} or {SLOW}")
-    days = _list(r["shows_in_days"], f"{where} shows_in_days")
-    if len(days) != 2:
-        raise ValueError(f"{where}: shows_in_days is [least, most]")
-    least, most = (_number(x, f"{where} shows_in_days") for x in days)
-    if not 0 <= least <= most:
-        raise ValueError(f"{where}: shows_in_days needs 0 <= least <= most")
-    if speed == FAST and most > 1:
-        raise ValueError(f"{where}: a fast result shows within a day")
-    if speed == SLOW and most <= 1:
-        raise ValueError(f"{where}: a slow result takes more than a day")
+    shows = None
+    if "shows_in_days" in r:  # optional, shown only (DECISIONS item 66); checked when given
+        days = _list(r["shows_in_days"], f"{where} shows_in_days")
+        if len(days) != 2:
+            raise ValueError(f"{where}: shows_in_days is [least, most]")
+        least, most = (_number(x, f"{where} shows_in_days") for x in days)
+        if not 0 <= least <= most:
+            raise ValueError(f"{where}: shows_in_days needs 0 <= least <= most")
+        if speed == FAST and most > 1:
+            raise ValueError(f"{where}: a fast result shows within a day")
+        if speed == SLOW and most <= 1:
+            raise ValueError(f"{where}: a slow result takes more than a day")
+        shows = (float(least), float(most))
     after = r.get("after")
     if after is not None:
         if after not in actions:
             raise ValueError(f"{where}: after names no declared action")
         if speed == SLOW:
             raise ValueError(f"{where}: a slow result comes on its own and attaches by case")
-    return Result(name, speed, (float(least), float(most)), after,
+    return Result(name, speed, shows, after,
                   _line(r["about"], f"{where} about") if "about" in r else "")
 
 
@@ -380,6 +405,21 @@ def _decides(d, results):
     for name in names:
         _declared(name, results, "decides")
     _once(names, "decides")
+    return Decides(names[0], tuple(names[1:]))
+
+
+def _second(d, results, decides):
+    """The optional second_signal key: {good, bad}, declared results that decides does not name."""
+    d = _dict(d, "second_signal", empty=False)
+    _keys(d, {"good", "bad"}, {"good", "bad"}, "second_signal")
+    names = [d["good"], *_list(d["bad"], "second_signal bad")]
+    for name in names:
+        _declared(name, results, "second_signal")
+    _once(names, "second_signal")
+    deciding = {decides["good"], *decides["bad"]}
+    for name in names:
+        if name in deciding:
+            raise ValueError(f"second_signal: {name!r} decides a case already; a second signal never does")
     return Decides(names[0], tuple(names[1:]))
 
 

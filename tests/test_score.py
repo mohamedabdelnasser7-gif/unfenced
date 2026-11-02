@@ -70,7 +70,7 @@ def runs(sc, seed, *modes):
 
 FOUR = 4
 SEEDS4 = (2, 29)
-ONLY = 93  # over four weeks, the first run never writes the null line and the pulled run does, on night 24
+ONLY = 8  # over four weeks, the first run never writes the null line and the pulled run does, on night 24
 SIX = 6  # weeks 5 and 6 come after the 14 day careful trials and their verdicts
 KEPT = 4  # over six weeks, the size line's trial keeps it before week 5
 
@@ -228,7 +228,7 @@ class TheProof(unittest.TestCase):
         self.assertGreater(week2(s["runs"]["learned"])[0], week2(s["runs"]["pulled"])[0])
 
     def test_the_pulled_run_pulls_a_lift_line_only_it_wrote(self):
-        # seed 93 over four weeks: the first run never writes the null line, the pulled run
+        # seed 8 over four weeks: the first run never writes the null line, the pulled run
         # writes it on night 24. Here a lift names it, so the pulled run must pull it too.
         self.assertIn(NULL, [c["lesson"] for c in SC["script"]["candidates"]])
         sc = changed(SC, lift=SC["lift"] + [{"lesson": NULL, "trait": "size_check", "value": "asked"}])
@@ -243,19 +243,19 @@ class TheProof(unittest.TestCase):
 
     def test_a_line_the_pulled_run_gave_all_the_same_is_printed(self):
         # the same seed with the scenario as it is: no lift names the null line, so it is not
-        # pulled, and the 24 week 4 cases given it are said plainly
+        # pulled, and the 19 week 4 cases given it are said plainly
         self.assertNotIn(NULL, [r["lesson"] for r in SC["lift"]])
         s = score.score(SALES, SC, seed=ONLY, weeks=FOUR)
         pulled = s["runs"]["pulled"]
-        self.assertEqual([w["given"] for w in pulled["weeks"]], [0, 0, 0, 24])
+        self.assertEqual([w["given"] for w in pulled["weeks"]], [0, 0, 0, 19])
         les = [x for x in pulled["lessons"] if x["cases_given"]]
-        self.assertEqual([(x["line"], x["night"], x["given_by_week"]) for x in les], [(NULL, 24, [0, 0, 0, 24])])
+        self.assertEqual([(x["line"], x["night"], x["given_by_week"]) for x in les], [(NULL, 24, [0, 0, 0, 19])])
         self.assertEqual(pulled["lifted"], [])
         lines = score.text(s).splitlines()
-        self.assertIn("Given all the same in the second run, in 24 cases: a line the first run gave in no case and "
+        self.assertIn("Given all the same in the second run, in 19 cases: a line the first run gave in no case and "
                       "no lift names, so it was not pulled. A lesson changed 0 of the cases in that run.", lines)
-        self.assertIn(f'  - lesson {les[0]["lesson_id"]}, night 24: "{NULL}", given in 24 cases, week by '
-                      "week: 0, 0, 0, 24", lines)
+        self.assertIn(f'  - lesson {les[0]["lesson_id"]}, night 24: "{NULL}", given in 19 cases, week by '
+                      "week: 0, 0, 0, 19", lines)
 
 
 class TheNights(unittest.TestCase):

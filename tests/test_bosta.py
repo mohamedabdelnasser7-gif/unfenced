@@ -170,7 +170,7 @@ class ReturnedToBusiness(Setup):
         self.assertEqual(self.post(body(46)), (200, "recorded"))
 
     def test_a_failed_46_write_can_be_sent_again(self):
-        with mock.patch.object(self.results, "record", side_effect=RuntimeError("disk full")), \
+        with mock.patch.object(bosta, "late", side_effect=RuntimeError("disk full")), \
                 self.assertLogs("channels.bosta", "ERROR"):
             self.assertEqual(self.post(body(46))[0], 500)
         self.assertEqual(self.post(body(46)), (200, "recorded"))
@@ -257,7 +257,7 @@ class ReturnLeg(Setup):
         self.assertEqual(self.told, [])
 
     def test_a_failed_refusal_write_leaves_the_order_open(self):
-        with mock.patch.object(self.results, "record", side_effect=RuntimeError("disk full")), \
+        with mock.patch.object(bosta, "late", side_effect=RuntimeError("disk full")), \
                 self.assertLogs("channels.bosta", "ERROR"):
             self.assertEqual(self.post(body(47, exceptionCode=8))[0], 500)
         self.assertEqual(self.post(returned()), (200, "recorded"))
@@ -268,14 +268,14 @@ class ReturnLeg(Setup):
         marks the order, so the return leg adds nothing."""
         self.assertEqual(self.post(body(45)), (200, "recorded"))
         again = body(45, delivery="64f0c0ffee0000000000d003")
-        with mock.patch.object(self.results, "record", side_effect=RuntimeError("disk full")), \
+        with mock.patch.object(bosta, "late", side_effect=RuntimeError("disk full")), \
                 self.assertLogs("channels.bosta", "ERROR"):
             self.assertEqual(self.post(again)[0], 500)
         self.assertEqual(self.post(returned()), (200, "already recorded"))
         self.assertEqual(self.outcomes("chat-1"), ["order_created", "delivered"])
 
     def test_a_failed_return_leg_write_can_be_sent_again(self):
-        with mock.patch.object(self.results, "record", side_effect=RuntimeError("disk full")), \
+        with mock.patch.object(bosta, "late", side_effect=RuntimeError("disk full")), \
                 self.assertLogs("channels.bosta", "ERROR"):
             self.assertEqual(self.post(returned())[0], 500)
         self.assertEqual(self.post(returned()), (200, "recorded"))
@@ -355,7 +355,7 @@ class Refused(Setup):
         self.assertEqual(self.outcomes("chat-1"), ["order_created", "delivered"])
 
     def test_a_failed_write_can_be_sent_again(self):
-        with mock.patch.object(self.results, "record", side_effect=RuntimeError("disk full")), \
+        with mock.patch.object(bosta, "late", side_effect=RuntimeError("disk full")), \
                 self.assertLogs("channels.bosta", "ERROR"):
             self.assertEqual(self.post(body(45))[0], 500)
         self.assertEqual(self.post(body(45)), (200, "recorded"))
@@ -399,6 +399,11 @@ class Refused(Setup):
 
 
 class TheMapping(unittest.TestCase):
+    def test_the_reason_reaches_the_team_as_one_line(self):
+        """Red team late r1 finding 4: line breaks in the courier's reason never reach the team line."""
+        ev = bosta.read_event(body(47, exceptionCode=8, exceptionReason=" Customer\n\nrefused\r\n  at door "))
+        self.assertEqual(ev.why, "Customer refused at door")
+
     def test_bostas_fields_are_read_in_one_place(self):
         ev = bosta.read_event(body(47, exceptionCode=8, exceptionReason="x" * 500))
         self.assertEqual((ev.delivery, ev.tracking, ev.state, ev.kind, ev.order, ev.code, ev.attempts),

@@ -115,17 +115,29 @@ class Log:
         """Everything in one case, oldest first."""
         return self.query(case=case)
 
-    def window(self, since, until, *, agent=None):
+    def window(self, since, until, *, agent=None, plug=None):
         """Every case with a row in the window, as {case id: its rows, oldest first}, each case
         where it first showed. Rows go by their time, then by when they were saved, so a row
         timed after a case's deciding result never reads as before it. Each case is read up to
         until, rows from before since too; a row at or after until is not known yet. agent:
-        this plug's agent unless named."""
+        this plug's agent unless named.
+
+        A second signal result saved on its own (plug.second_signal, DECISIONS item 67) never
+        brings a case into the window: it shows how an older good case held, so one saved tonight
+        on a case from last month leaves that case out of tonight's study. A slow deciding result
+        still brings its case in. plug: the plug of the agent read, for its
+        second signal; this log's plug for its own agent."""
         agent = self.plug.agent if agent is None else agent
+        if plug is None and agent == self.plug.agent:
+            plug = self.plug
+        second = () if plug is None or plug.second_signal is None else \
+            (plug.second_signal.good, *plug.second_signal.bad)
+        skip = (" AND NOT (action IS NULL AND result IN (" + ", ".join("?" * len(second)) + "))") if second else ""
         with self.db.tx() as c:
             rows = c.execute("SELECT * FROM trace WHERE agent = ? AND at < ? AND case_id IN "
-                             "(SELECT case_id FROM trace WHERE agent = ? AND at >= ? AND at < ?) ORDER BY at, id",
-                             (agent, float(until), agent, float(since), float(until))).fetchall()
+                             "(SELECT case_id FROM trace WHERE agent = ? AND at >= ? AND at < ?" + skip + ") "
+                             "ORDER BY at, id",
+                             (agent, float(until), agent, float(since), float(until), *second)).fetchall()
         out = {}
         for r in rows:
             row = _row(r)

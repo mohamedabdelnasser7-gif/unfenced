@@ -45,8 +45,11 @@ Scenario keys (unknown keys are refused):
   stamp    {weekday: {step, key}}: the case's weekday, mon to sun, in that step's detail.
   bad      optional: which not good deciding result a case that ends not good gets; the
            first of the plug's by default. With none declared, or null, it gets no deciding
-           result: it is pending until the longest deciding window has passed since its last
-           step, then not good, as the night study settles it.
+           result: it stays pending, whatever its age, as the night study settles it (no timer
+           settles a case, DECISIONS item 66). A deciding result comes the plug's shows_in_days
+           after the last step, drawn between least and most; at once when the plug gives none.
+  bad_in_days  optional [least, most]: when the bad deciding result comes after the last step,
+           in place of the plug's shows_in_days for it.
   lift     optional [{lesson, trait, value, follows}]: how a case reacts to a lesson it was
            given, the true effect a run with lessons plants (sim/score.py). A case handed the
            lesson line, at the trait's step or before it, takes that value of the trait with
@@ -79,7 +82,7 @@ LABEL = "simulated"
 PREFIX = "sim-"
 NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 KEYS = {"name", "agent", "about", "seed", "start", "days", "cases", "steps", "traits", "rate", "rates", "outside",
-        "groups", "sources", "stamp", "bad", "lift", "script"}
+        "groups", "sources", "stamp", "bad", "bad_in_days", "lift", "script"}
 LIFT_KEYS = {"lesson", "trait", "value", "follows"}
 REQUIRED = {"name", "agent", "seed", "start", "days", "cases", "steps", "rate"}
 
@@ -130,9 +133,8 @@ def simulate(db, plug, scenario, *, seed=None, lessons=None, hand_from=None, nig
         free = [i for i in range(n) if i not in member]
         for rank, i in enumerate(sorted(rng.sample(free, g["cases"]))):
             member[i] = (g, rank)
-    deciders = (plug.decides.good, *plug.decides.bad)
-    longest = max(plug.results[r].shows_in_days[1] for r in deciders)
     bad = sc["bad"] if "bad" in sc else (plug.decides.bad[0] if plug.decides.bad else None)
+    bad_days = tuple(float(x) for x in sc["bad_in_days"]) if "bad_in_days" in sc else None
     plans = []
     for i, at in enumerate(starts):
         traits, picks = {}, {}
@@ -191,7 +193,8 @@ def simulate(db, plug, scenario, *, seed=None, lessons=None, hand_from=None, nig
         log.act(p["id"], s["action"], **kw)
         rows += 1
         if last and p["deciding"] is not None:
-            least, most = plug.results[p["deciding"]].shows_in_days
+            least, most = ((bad_days if p["deciding"] == bad and bad_days else None)
+                           or plug.results[p["deciding"]].shows_in_days or (0.0, 0.0))
             due = p["last"] + (least + p["u_delay"] * (most - least)) * DAY
             if due < until:
                 heapq.heappush(events, (due, i, len(steps)))
@@ -199,10 +202,8 @@ def simulate(db, plug, scenario, *, seed=None, lessons=None, hand_from=None, nig
     for p in plans:
         if p["written"]:
             status = LEFT_OUT if p["cause"] else (GOOD if p["deciding"] == plug.decides.good else BAD)
-        elif p["last"] + longest * DAY > until:  # no deciding row yet: pending until the window has passed
+        else:  # no deciding row yet: pending, whatever its age (item 66)
             status = PENDING
-        else:
-            status = LEFT_OUT if p["marked"] else BAD
         cases.append({"id": p["id"], "source": p["id"] if p["source"] is None else p["source"],
                       "group": None if p["group"] is None else p["group"]["name"], "traits": p["traits"],
                       "day": p["day"], "weekday": p["weekday"], "deciding": p["deciding"] if p["written"] else None,
@@ -336,6 +337,11 @@ def check(plug, sc):
         _step_index(where["step"], len(out["steps"]), f"stamp {what}")
         _name(where["key"], f"stamp {what} key")
     out["stamp"] = stamp
+    if "bad_in_days" in sc:
+        days = sc["bad_in_days"]
+        if (not isinstance(days, list) or len(days) != 2 or any(isinstance(x, bool) or not isinstance(x, (int, float))
+                                                                for x in days) or not 0 <= days[0] <= days[1]):
+            raise ValueError("bad_in_days is [least, most], 0 <= least <= most")
     if sc.get("bad") is not None and sc["bad"] not in plug.decides.bad:
         if not plug.decides.bad:
             raise ValueError(f"bad: {plug.agent} declares no not good deciding results, so a case that does not "

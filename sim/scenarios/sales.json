@@ -1,12 +1,13 @@
 {
   "name": "sales",
   "agent": "sales",
-  "about": "Simulated WhatsApp chats for the Sales agent demo at Beyond the Limits, a made-up football boot store: 300 chats over two weeks that end in an order or go quiet. Not real data. A quiet chat gets no chat_closed row (bad is null): it settles past the engine's window, as the demo's numbers were made.",
+  "about": "Simulated WhatsApp chats for the Sales agent demo at Beyond the Limits, a made-up football boot store: 300 chats over two weeks that end in an order or go quiet. Not real data. A chat with no order ends with chat_closed, as a live chat that closes after quiet does (no timer settles a case, DECISIONS item 66).",
   "seed": 182,
   "start": "2026-10-16",
   "days": 14,
   "cases": 300,
-  "bad": null,
+  "bad": "chat_closed",
+  "bad_in_days": [1, 1],
   "steps": [
     {"action": "reply", "result": "replied", "stage": "asking", "hours": 0,
      "detail": {"said": "Answered the question."}},

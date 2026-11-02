@@ -213,12 +213,12 @@ def _watch(fd):
 def _output(db_path):
     """Where a night's child prints: NIGHTS_LOG next to the database, added to, readable by this
     user only (it names cases); past NIGHTS_LOG_MAX it moves to nights.log.1 and starts again;
-    nowhere when that cannot be opened."""
+    nowhere when that cannot be opened or is a link."""
     path = Path(db_path).resolve().parent / NIGHTS_LOG
     try:
         if path.is_file() and path.stat().st_size > NIGHTS_LOG_MAX:
             os.replace(path, path.with_name(NIGHTS_LOG + ".1"))
-        return os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), "ab")
+        return os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600), "ab")
     except OSError:
         return open(os.devnull, "wb")
 

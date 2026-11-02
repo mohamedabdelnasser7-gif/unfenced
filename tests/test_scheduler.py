@@ -648,6 +648,15 @@ class NightsLog(unittest.TestCase):
             self.assertEqual(log.read_bytes(), b"new")
             self.assertEqual((Path(d) / (sc.NIGHTS_LOG + ".1")).read_bytes(), b"y" * 11)
 
+    def test_a_planted_link_is_not_followed(self):
+        with tempfile.TemporaryDirectory() as d:
+            elsewhere = Path(d) / "elsewhere.txt"
+            elsewhere.write_bytes(b"")
+            (Path(d) / sc.NIGHTS_LOG).symlink_to(elsewhere)
+            with sc._output(Path(d) / "ascent.db") as f:
+                f.write(b"case names")
+            self.assertEqual(elsewhere.read_bytes(), b"")
+
 
 if __name__ == "__main__":
     unittest.main()

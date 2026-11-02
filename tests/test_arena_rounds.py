@@ -681,6 +681,30 @@ class RealFullExam(Base):
         # the first lesson, handed on before the second's full exam, is never on its kept side
         self.assertEqual(made[0]["at"], [(GOOD, []), (WHOLESALE, [])])
 
+    def test_a_run_with_no_examiner_given_hands_between_the_real_full_exam(self):
+        """Review simplify round 2, finding 2: run.main's own wiring, with no "examiner" in reflection,
+        gives Between rounds.full_examiner as its full exam, and the scoped real exam as its exam."""
+        from unittest import mock
+        got = {}
+        real = rounds.Between
+
+        def between(*a, **kw):
+            got.update(kw)
+            return real(*a, **kw)
+        db = self.db()
+        agent = Agent()
+        night = Night([GOOD], agent, run.state_dir(db) / run.CALLS_FILE)
+        argv = ["--cards", str(self.cards), "--matches", "2", "--rounds", "2", "--held-out", "persona-02",
+                "--trust", str(self.trust), "--cap", "5000", "--json", "--db", str(db)]
+        with mock.patch.object(rounds, "Between", between), contextlib.redirect_stdout(io.StringIO()):
+            run.main(argv, agent_model=agent, customer_model=Customer(()),
+                     reflection={"study": night, "open": night, "exam": WholesaleExam()})
+        self.assertIs(got["full"], rounds.full_examiner)
+        self.assertIs(got["examiner"].func, rounds.real_examiner)
+        self.assertEqual(got["examiner"].keywords, {"cap": rounds.EXAM_CAP})
+        self.assertNotIn("full", got["models"])
+        self.assertNotIn("examiner", got["models"])
+
 
 class HandLive(unittest.TestCase):
     """arena/rounds.py hand_live on its own (review round 1, finding 2): the live risk and yes rules."""

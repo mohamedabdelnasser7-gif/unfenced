@@ -55,7 +55,7 @@ class LessonsOnlyFromCorrections(unittest.TestCase):
 
     def test_the_night_line_names_the_cause_and_never_calls_it_outside_the_agent(self):
         rep = {"agent": "assistant", "window": {"since": NOW - 86400, "until": NOW}, "days": 1, "parts": {},
-               "read": {"cases": 1}, "decided": {"good": 0, "bad": 0, "past_window": 0}, "pending": 0,
+               "read": {"cases": 1}, "decided": {"good": 0, "bad": 0}, "pending": 0,
                "left_out": {"count": 1, "by_cause": {"only_code": 1}, "cases": []}, "trials": [], "candidates": [],
                "cards": [], "across": [], "unread": [], "notes": [], "switches": {}, "snapshot": {},
                "links": {"lessons": [], "brought_back": [], "agents_read": ["assistant"], "agents_not_read": []}}

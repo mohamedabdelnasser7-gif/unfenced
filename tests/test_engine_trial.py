@@ -699,13 +699,16 @@ class Verdict(OnTrial):
         _, t = self.check(self.END + 2 * DAY)
         self.assertEqual((t["status"], t["with"]["good"], t["with"]["settled"]), ("kept", 21, 25))
 
-    def test_at_the_longest_window_it_decides_on_settled_cases_only(self):
+    def test_a_pending_case_holds_the_verdict_with_no_day_limit(self):
         self.beds(True, 16, 4)
         self.beds(False, 20, 20)
         cid = self.bed(given=True, at=self.END - 60, slow=False)
-        self.log.act(cid, "water", result="soaked", stage="seedling", at=self.END + 9 * DAY)  # still acting: pending
-        _, t = self.check(self.END + 10 * DAY)
-        self.assertEqual((t["status"], t["with"]["pending"], t["with"]["settled"]), ("kept", 1, 20))
+        _, t = self.check(self.END + 100 * DAY)  # no timer settles a case or a trial (item 66)
+        self.assertEqual((t["status"], t["with"]["pending"], t["with"]["settled"]), ("waiting for results", 1, 20))
+        self.assertEqual(self.lessons.get(self.lid)["state"], TRYING)
+        self.log.result(cid, "wilted", at=self.END + 100 * DAY + 1)
+        _, t = self.check(self.END + 100 * DAY + 2)
+        self.assertEqual((t["status"], t["with"]["pending"], t["with"]["settled"]), ("kept", 0, 21))
 
     def test_results_caused_outside_the_agent_are_left_out(self):
         self.beds(True, 16, 4)
@@ -731,13 +734,13 @@ class Verdict(OnTrial):
         _, t = self.check(self.END + 5 * DAY)
         self.assertEqual((t["status"], t["without"]["cases"], t["without"]["settled"]), ("kept", 40, 40))
 
-    def test_a_case_with_no_result_past_its_window_is_not_good(self):
+    def test_a_case_with_no_result_is_pending_whatever_its_age_never_not_good(self):
         self.beds(True, 16, 4)
         self.beds(False, 20, 20)
         cid = self.bed(given=True, at=self.END - 60, slow=False)
-        _, t = self.check(self.END + 10 * DAY)  # its window closed after the end date, before the check
+        _, t = self.check(self.END + 10 * DAY)  # past every days line the plug gives: still pending (item 66)
         case = [c for c in t["with"]["list"] if c["case"] == cid][0]
-        self.assertEqual((case["status"], t["with"]["settled"], t["with"]["pending"]), ("bad", 21, 0))
+        self.assertEqual((case["status"], t["with"]["settled"], t["with"]["pending"]), ("pending", 20, 1))
 
     def test_pending_on_the_old_way_side_waits_too(self):
         self.beds(True, 16, 4)
@@ -894,7 +897,7 @@ class FixedAtTheStart(OnTrial):
         data["results"]["dried"] = data["results"].pop("wilted")
         data["decides"] = {"good": "grew", "bad": ["dried"]}
         trials = self.later(data)
-        live = self.of(trials.check(NOW + 2 * DAY))  # no result yet: each case reads its window
+        live = self.of(trials.check(NOW + 2 * DAY))  # no result yet: each case is pending
         self.assertEqual((live["status"], live["with"]["pending"], live["without"]["pending"]), ("on trial", 20, 40))
         t = self.of(trials.check(NOW + 7 * DAY))
         self.assertEqual((t["status"], t["with"]["good"], t["with"]["settled"], t["without"]["settled"]),
@@ -904,7 +907,8 @@ class FixedAtTheStart(OnTrial):
         self.lessons.approve(self.lid, "mona", now=NOW)
         self.beds(True, 16, 4)
         self.beds(False, 20, 20)
-        self.bed(given=True, slow=False)  # no result: past grew's 10 days it is settled, not good
+        cid = self.bed(given=True, slow=False)
+        self.log.result(cid, "wilted", at=NOW + 5 * DAY)  # days are shown only: the result settles it (item 66)
         data = trial_plug()
         data["results"]["grew"]["shows_in_days"] = [3, 40]
         t = self.of(self.later(data).check(NOW + 18 * DAY))

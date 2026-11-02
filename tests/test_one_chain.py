@@ -95,7 +95,7 @@ class OneChain(unittest.TestCase):
         rep = night.night(self.db, plug, until=time.time() + 60, days=14, judge=Judge(FakeModel(say("low"))),
                           proposer=proposer, tagger=by_risk, fit=fk.Fit(), adapter=fk.Adapter())
 
-        self.assertEqual(rep["decided"], {"good": 6, "bad": 6, "past_window": 0})
+        self.assertEqual(rep["decided"], {"good": 6, "bad": 6})
         cand, = rep["candidates"]
         self.assertEqual((cand["verdict"], cand["with"]["cases"], cand["with"]["good"], cand["without"]["cases"],
                           cand["without"]["good"]), ("lesson", 6, 1, 6, 5))

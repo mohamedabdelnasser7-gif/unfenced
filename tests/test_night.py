@@ -34,7 +34,7 @@ from tests.kept import kept_lesson
 
 ROOT = Path(night.__file__).resolve().parent.parent
 BASETEN, META = kit_model.OPEN.key_env, kit_model.WONDER.key_env
-ACROSS_UNTIL = fk.T0 + 60 * 86400  # long enough for a month of books to pass its window
+ACROSS_UNTIL = fk.T0 + 60 * 86400  # long enough for a month of books to settle
 FAN_EARLY = "Turn the fan on early in the morning."
 FAN_TWICE = "Check the fan twice before turning it on."
 KEPT_LINE = "Post entries in date sequence."

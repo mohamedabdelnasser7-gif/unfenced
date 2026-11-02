@@ -161,8 +161,7 @@ class Plants(unittest.TestCase):
         self.assertEqual(rep["read"]["cases"], len(man["cases"]))
         self.assertEqual((rep["decided"]["good"], rep["decided"]["bad"], rep["pending"], rep["left_out"]["count"]),
                          (st[GOOD], st[BAD], st[PENDING], st[LEFT_OUT]))
-        self.assertEqual(rep["decided"]["past_window"],
-                         sum(c["status"] == BAD and c["deciding"] is None for c in man["cases"]))
+        self.assertFalse(any(c["status"] == BAD and c["deciding"] is None for c in man["cases"]))  # no timer (item 66)
         self.assertEqual(rep["left_out"]["by_cause"], dict(Counter(c["cause"] for c in left)))
         self.assertEqual({c["case"] for c in rep["left_out"]["cases"]}, {c["id"] for c in left})
 
@@ -252,7 +251,6 @@ class Simulator(Plants):
                 self.assertEqual(len(man["cases"]), sc["cases"])
                 self.assertEqual(set(by_case), {c["id"] for c in man["cases"]})
                 deciders = (plug.decides.good, *plug.decides.bad)
-                longest = max(plug.results[r].shows_in_days[1] for r in deciders)
                 groups = {g["name"]: g for g in sc.get("groups", [])}
                 self.assertEqual(Counter(c["group"] for c in man["cases"] if c["group"]),
                                  Counter({g: groups[g]["cases"] for g in groups}))
@@ -271,9 +269,8 @@ class Simulator(Plants):
                                      [None] * (len(steps) - 1) + [c["cause"] if marked else None])
                     self.assertEqual(c["day"], int((steps[0]["at"] - man["since"]) // DAY))
                     self.assertEqual(c["weekday"], time.strftime("%a", time.gmtime(steps[0]["at"])).lower())
-                    if not ends:
-                        past = steps[-1]["at"] + longest * DAY <= man["until"]
-                        self.assertEqual(c["status"], (LEFT_OUT if c["cause"] else BAD) if past else PENDING)
+                    if not ends:  # no deciding row: pending, whatever its age (item 66)
+                        self.assertEqual(c["status"], PENDING)
                     elif c["cause"]:
                         self.assertEqual(c["status"], LEFT_OUT)
                     else:
@@ -304,23 +301,23 @@ class Simulator(Plants):
                         self.assertFalse(hidden & set(json.dumps(r["detail"]).replace('"', " ").split()), r)
                 self.assertTrue(any(r["cause"] for r in rows if r["step"] is None))
 
-    def test_with_no_bad_result_declared_a_case_past_its_window_counts_bad(self):
+    def test_with_no_bad_result_declared_a_case_with_no_result_stays_pending(self):
         # the fan declares no bad result, so a case that ends not good gets no slow result at all
-        fan = plugs.load(plugs.FAN, self)
+        fan = plugs.load(dict(plugs.FAN, decides={"good": "cooled", "bad": []}), self)
         sc = {"name": "fan", "agent": "fan", "seed": 7, "start": "2026-10-01", "days": 10, "cases": 60, "rate": 0.5,
               "steps": [{"action": "spin", "result": "spun", "stage": "grown", "hours": 1}]}
         db = Db(":memory:")
         self.addCleanup(db.close)
         man = simulate.simulate(db, fan, sc)
         st = Counter((c["status"], c["deciding"]) for c in man["cases"])
-        self.assertTrue(st[(BAD, None)] and st[(PENDING, None)] and st[(GOOD, "cooled")], st)
-        self.assertEqual(set(st), {(BAD, None), (PENDING, None), (GOOD, "cooled")})
+        self.assertTrue(st[(PENDING, None)] and st[(GOOD, "cooled")], st)
+        self.assertEqual(set(st), {(PENDING, None), (GOOD, "cooled")})
         self.assertEqual({r["result"] for r in Log(db, fan).query() if r["action"] is None}, {"cooled"})
         proposer, tagger, _, _ = scripted.parts(sc)
         rep = Study(db, fan, proposer=proposer, tagger=tagger, lessons=Lessons(db, fan, judge=scripted.judge_says_low)
                     ).run(man["since"], man["until"], now=man["until"])
         self.assert_counts(man, rep)
-        self.assertEqual(rep["decided"]["past_window"], st[(BAD, None)])
+        self.assertEqual(rep["decided"]["bad"], 0)
 
     def test_a_plant_knob_keeps_the_same_cases(self):
         sc = copy.deepcopy(MK_SCENARIO)
@@ -419,10 +416,10 @@ class HowASalesChatEnds(Plants):
 
     def test_an_order_is_saved_on_the_order_action_as_how_the_chat_ended(self):
         self.assertEqual((SALES.decides.good, tuple(SALES.decides.bad)), ("order_created", ("chat_closed",)))
-        self.assertIsNone(SALES_SCENARIO["bad"])  # no chat_closed rows: quiet chats settle past the window
+        self.assertEqual(SALES_SCENARIO["bad"], "chat_closed")  # a quiet chat closes, a day after (item 66)
         self.assertEqual(SALES.results["order_created"].after, "order")
         man, by_case = self.rows()
-        self.assertFalse([r for rs in by_case.values() for r in rs if r["result"] == "chat_closed"])
+        self.assertTrue([r for rs in by_case.values() for r in rs if r["result"] == "chat_closed"])
         boots = {c["id"]: c["traits"]["boots"] for c in man["cases"]}
         ends = [r for rs in by_case.values() for r in rs if r["result"] == "order_created"]
         self.assertEqual(len(ends), sum(c["deciding"] == "order_created" for c in man["cases"]))
@@ -434,7 +431,7 @@ class HowASalesChatEnds(Plants):
             self.assertEqual(r["cause"] == "out_of_stock", boots[r["case_id"]] == "sold_out", r["case_id"])
 
     def test_the_study_settles_each_chat_as_the_manifest_says_inside_the_window_and_after_it(self):
-        window = study.longest(SALES) * DAY
+        window = study.read_days(SALES) * DAY
         self.assertEqual(window, DAY)
         man, by_case = self.rows()
         later, later_rows = self.rows(until=man["end"] + window)
@@ -448,18 +445,21 @@ class HowASalesChatEnds(Plants):
 
     def test_a_quiet_chat_for_a_boot_that_ran_out_is_left_out_once_its_day_has_passed(self):
         man, by_case = self.rows()
-        quiet = [c for c in man["cases"] if c["deciding"] is None and c["cause"]]
+        quiet = [c for c in man["cases"] if c["deciding"] in (None, "chat_closed") and c["cause"]]
         self.assertTrue([c for c in quiet if c["status"] == LEFT_OUT])
         for c in quiet:
             rows = by_case[c["id"]]
             self.assertEqual(c["traits"]["boots"], "sold_out")
-            self.assertFalse([r for r in rows if r["step"] is None])
+            ends = [r for r in rows if r["step"] is None]  # the chat_closed row, a day after, carries the cause
+            self.assertEqual([r["result"] for r in ends], ["chat_closed"] if c["deciding"] else [])
+            if not ends:  # not closed yet: pending, never timed out (item 66)
+                self.assertEqual(study.settle(SALES, rows, rows[-1]["at"] + 30 * DAY)[0], PENDING)
+                continue
             self.assertEqual([r["cause"] for r in rows], [None] * (len(rows) - 1) + ["out_of_stock"])
-            last = rows[-1]["at"]
-            self.assertEqual(study.settle(SALES, rows, last + DAY - 1)[0], PENDING)
-            self.assertEqual(study.settle(SALES, rows, last + DAY)[0], LEFT_OUT)
-        for c in man["cases"]:  # a quiet chat with no cause is not good once its day has passed
-            if c["deciding"] is None and not c["cause"] and c["status"] != PENDING:
+            self.assertEqual(study.settle(SALES, rows[:-1], ends[0]["at"])[0], PENDING)
+            self.assertEqual(study.settle(SALES, rows, ends[0]["at"] + 1)[0], LEFT_OUT)
+        for c in man["cases"]:  # a quiet chat with no cause is not good once it closed
+            if c["deciding"] == "chat_closed" and not c["cause"]:
                 self.assertEqual(c["status"], BAD)
 
 
@@ -506,7 +506,7 @@ class SalesNight(Plants):
         left = [c for c in self.man["cases"] if c["status"] == LEFT_OUT]
         self.assertTrue(left)
         self.assertTrue(all(c["traits"]["boots"] == "sold_out" and c["cause"] == "out_of_stock" for c in left))
-        self.assertEqual({c["deciding"] for c in left}, {None, "order_created"})  # went quiet, or ordered
+        self.assertEqual({c["deciding"] for c in left}, {"chat_closed", "order_created"})  # went quiet, or ordered
         self.assertTrue(all(c["status"] in (LEFT_OUT, PENDING) for c in self.man["cases"]
                             if c["traits"]["boots"] == "sold_out"))
         self.assertEqual(self.rep["left_out"]["by_cause"], {"out_of_stock": len(left)})

@@ -26,7 +26,7 @@ from engine import plug as plug_mod
 from engine import risk
 from engine.lessons import KEPT, TRYING, WAITING, Lessons
 from engine.log import Log
-from engine.study import BAD, GOOD, PENDING, Study, settle
+from engine.study import GOOD, PENDING, Study, settle
 from engine.trial import Trials
 from kit.db import Db
 from reflection import PLUG
@@ -49,10 +49,11 @@ def at(*args):
 
 def delivery_plug():
     """The Sales plug as a brand with a delivery source could run it: delivered decides good and
-    refused bad. The Sales plug itself decides on order_created; this one keeps the importer's
-    pending and settling guards checked."""
+    refused bad, and a chat closed with no order is bad too (no timer ends a case, item 66). The
+    Sales plug itself decides on order_created; this one keeps the importer's pending and
+    settling guards checked."""
     d = json.loads((ROOT / "sales" / "plug.json").read_text(encoding="utf-8"))
-    d["decides"] = {"good": "delivered", "bad": ["refused"]}
+    d["decides"] = {"good": "delivered", "bad": ["refused", "chat_closed"]}
     return plug_mod.from_dict(d, folder=ROOT / "sales")
 
 
@@ -269,10 +270,10 @@ class Import(Temp):
         rep = self.demo()
         c = Counter(rep["counts"])
         self.assertEqual((c["chats written"], c["steps written"], c["rows written"]), (0, 0, 0))
-        self.assertEqual(c["rows already there"], 205)
+        self.assertEqual(c["rows already there"], 210)  # 205 and a chat_closed for each of the 5 chats with no order
         self.assertEqual(rep["candidates"]["added"], 0)
         with contextlib.closing(sqlite3.connect(self.db)) as con:
-            self.assertEqual(con.execute("SELECT COUNT(*) FROM trace").fetchone()[0], 205)
+            self.assertEqual(con.execute("SELECT COUNT(*) FROM trace").fetchone()[0], 210)
             self.assertEqual(con.execute("SELECT COUNT(*) FROM steps").fetchone()[0], 320)
 
     def test_the_dry_run_writes_nothing(self):
@@ -758,7 +759,7 @@ class Round1Fixes(Temp):
 
 
 class Round2Fixes(Temp):
-    def test_3_an_order_missing_from_a_given_deliveries_file_is_not_good_not_pending(self):
+    def test_3_an_order_missing_from_a_given_deliveries_file_is_pending_never_a_guessed_loss(self):
         rows = (DEMO / "deliveries.csv").read_text(encoding="utf-8").splitlines()
         self.assertTrue(rows[1].startswith("#1001,"))
         (self.tmp / "d.csv").write_text("\n".join(rows[:1] + rows[2:]) + "\n", encoding="utf-8")
@@ -767,7 +768,7 @@ class Round2Fixes(Temp):
         cases = Log(self.open(), PLUG).window(0, late)
         [case] = [rows for rows in cases.values() if any((r["detail"] or {}).get("order") == "#1001" for r in rows)]
         self.assertFalse(any((r["detail"] or {}).get("result_unknown") for r in case))
-        self.assertEqual(settle(delivery_plug(), case, late)[0], BAD)
+        self.assertEqual(settle(delivery_plug(), case, late)[0], PENDING)  # no timer settles it (item 66)
         self.assertEqual(settle(PLUG, case, late)[0], GOOD)  # the Sales plug: the order settles it
 
     def test_4_a_name_typed_joined_to_ya_or_wa_is_masked(self):

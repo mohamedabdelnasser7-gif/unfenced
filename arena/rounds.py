@@ -48,7 +48,7 @@ from engine import switches as switches_mod
 from engine.lessons import KEPT, MAX_PICK, PULLED, TRYING, WAITING
 from engine.plug import ALL
 from engine.risk import LOW
-from engine.study import longest
+from engine.study import read_days
 
 DAY = 86400.0
 LIVE_BUSY = "not handed, live busy"  # a passed lesson the live database could not take this run
@@ -219,7 +219,7 @@ class Between:
                                   ideas=parts.Ideas(model=study_m))
         study.log = _Only(study.log, ids)
         until = float(self.now())
-        rep = study.run(until - (longest(self.plug) + 2) * DAY, until, now=until)
+        rep = study.run(until - (read_days(self.plug) + 2) * DAY, until, now=until)
         out["notes"] += rep["notes"]
         for card in rep["cards"]:
             out["lessons"].append(self._gate(lessons, examiner, card["lesson_id"], until))

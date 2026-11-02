@@ -16,8 +16,9 @@ One run, in a log held in memory and closed when it ends:
    and a kept one in all but its holdback, and is saved with their ids. A week 1 case still
    running then can be given a lesson at its later steps. The scenario's lift says how a case
    reacts to a lesson it was given; with no lift, a lesson changes nothing.
-4. The results go on coming after the last day, and so do the nights. The score is read the
-   longest deciding window after the last day, when no case is pending any more.
+4. The results go on coming after the last day, and so do the nights. The score is read
+   study.read_days after the last day, when the simulated results have come; a case with no
+   deciding result is still pending then and is not scored (no timer settles a case, item 66).
 
 The score is the share of settled cases that ended good, week by week, each week against
 week 1. Each case counts in the week of its first action; a case left out for a cause outside
@@ -67,7 +68,7 @@ from engine import trial as trial_mod  # noqa: E402
 from engine.lessons import WAITING, Lessons  # noqa: E402
 from engine.log import Log  # noqa: E402
 from engine.plug import ALL  # noqa: E402
-from engine.study import BAD, GOOD, LEFT_OUT, PENDING, Study, chance_better, longest, settle  # noqa: E402
+from engine.study import BAD, GOOD, LEFT_OUT, PENDING, Study, chance_better, read_days, settle  # noqa: E402
 from engine.trial import Trials  # noqa: E402
 from kit.db import Db  # noqa: E402
 from reflection import night as night_runner  # noqa: E402
@@ -145,7 +146,7 @@ def one_run(plug, scenario, *, seed=None, mode=LEARNED, pull=(), weeks=WEEKS, le
         pull |= {r["lesson"] for r in sc["lift"]}  # written first in this run too, it is pulled
     start = float(calendar.timegm(time.strptime(sc["start"], "%Y-%m-%d")))
     split = start + WEEK * DAY
-    read_at = start + sc["days"] * DAY + longest(plug) * DAY
+    read_at = start + sc["days"] * DAY + read_days(plug) * DAY
     window = night_runner.default_days(plug) * DAY  # the night runner's own window
     db = Db(":memory:")
     try:

@@ -9,15 +9,17 @@ failed fact checks and, on the last row, the verdict and its quote. arena/run.py
 Arena's own copy of the database (<db>.arena, DECISIONS item 46), so the case never reaches the
 live agent's log.
 
-An Arena match has no courier, so it gets no deciding result: it is written as a chat that went
-quiet, timed one day past the plug's longest deciding window before now, which engine/study.py
-settle reads as not good, past its window, the same as an imported chat with no order. Every row
+An Arena match has no courier: it is written as a chat that closed with no order, its last row
+followed by chat_closed, which engine/study.py settle reads as not good, the same as a live chat
+that closed after quiet and an imported chat with no order (no timer settles a case, DECISIONS
+item 66). Its rows are timed one day past study.read_days before now, so a live read of the last
+days never meets them. Every row
 says "arena": true and "history": true, so a trial never counts it (engine/trial.py: only live
 results judge a trial).
 """
 import time
 
-from engine.study import longest
+from engine.study import read_days
 from reflection import PLUG
 from reflection.results import Results
 
@@ -35,7 +37,7 @@ def to_case(db, match, judged, match_id, *, now=None):
         raise ValueError("only a lost match becomes a case")
     log = Results(db)
     now = time.time() if now is None else float(now)
-    start = now - (longest(PLUG) + 1) * DAY
+    start = now - (read_days(PLUG) + 1) * DAY
     case = case_id(match_id)
     turns = match.get("turns") or []
     for i, t in enumerate(turns):
@@ -52,4 +54,6 @@ def to_case(db, match, judged, match_id, *, now=None):
             detail["quote"] = judged.get("quote")
         log.act(case, PLUG.result(outcome).after, result=outcome, stage="asking", step=i + 1, detail=detail,
                 at=start + i * TURN_SECONDS)
+    log.result(case, "chat_closed", step=len(turns) + 1, at=start + len(turns) * TURN_SECONDS,
+               detail={"arena": True, "history": True, "match": match_id})
     return case

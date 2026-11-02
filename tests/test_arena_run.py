@@ -575,12 +575,12 @@ class ToReflection(Base):
         now = 1_790_000_000.0
         case = learn.to_case(db, m, judged, "x1", now=now)
         rows = Log(db, PLUG).window(now - 14 * 86400, now)[case]
-        self.assertEqual([r["result"] for r in rows], ["replied", "replied"])
+        self.assertEqual([r["result"] for r in rows], ["replied", "replied", "chat_closed"])  # no timer ends it (item 66)
         self.assertEqual(rows[1]["detail"]["quote"]["text"], "It is our price.")
         self.assertEqual(rows[0]["detail"]["customer"], "How much?")
         self.assertTrue(all(is_history(r) for r in rows))
         status, deciding, _, _ = settle(PLUG, rows, now)
-        self.assertEqual((status, deciding), (BAD, None))
+        self.assertEqual((status, deciding), (BAD, "chat_closed"))
         with self.assertRaises(ValueError):
             learn.to_case(db, m, {"won": True}, "x2", now=now)
 

@@ -25,7 +25,10 @@ name in it, joined or not; phones, emails, address numbers):
    With no deliveries file no result is written and each order row says "result_unknown": under
    a plug that decides on delivered or refused the night study keeps those cases pending
    (engine/study.py settle), and the report says so. The Sales plug decides on order_created,
-   so there the order row settles the case. Every row's detail has "history": true, its source
+   so there the order row settles the case. A chat joined to no order gets chat_closed at its
+   last message, since a past chat is over; an order with no result in a given deliveries file
+   stays pending under a delivery plug, never a guessed loss: no timer settles a case
+   (DECISIONS item 66). Every row's detail has "history": true, its source
    and a stable import key. Rows
    carry no lessons, and a trial never counts a history row (engine/trial.py).
 3. Reply candidates (engine/humanizer.py): the team's text replies in chats that ended
@@ -236,6 +239,10 @@ def plan(chats, orders, deliveries, *, days=hist.JOIN_DAYS, now, counts):
             rows.append({"key": detail["import_key"], "outcome": state, "at": at, "detail": detail, "order": name})
             counts[state] += 1
             counts["returned"] += returned
+        if not order_names and steps:  # a past chat with no order is over: closed at its last message (item 66)
+            k = key("closed", chat.source, chat.key)
+            rows.append({"key": k, "outcome": "chat_closed", "at": steps[-1]["message"].at,
+                         "detail": {"history": True, "source": chat.source, "import_key": k}})
         decided = sorted((r["at"], r["outcome"]) for r in rows if r["outcome"] in (hist.DELIVERED, hist.REFUSED))
         good = bool(decided) and decided[-1][1] == hist.DELIVERED
         counts["chats with an order" if placed else "chats with no order"] += 1

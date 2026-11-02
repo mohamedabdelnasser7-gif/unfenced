@@ -4,7 +4,7 @@ receiving agent and its kinds of pattern, engine/plug.py). The engine holds no k
 so a new kind, or a new receiving agent, needs only a plug change.
 
 Each night, with a spotter and a writer given (engine/study.py, Study(hand_over=...)):
-1. Spot. The night's lost cases, each settled not good (a bad deciding result, none in its window,
+1. Spot. The night's lost cases, each settled not good (a bad deciding result,
    or left out for a cause outside the agent with no good result), up to TAGGED of them, a seeded
    sample when there are more, go to the spotter in blind views (keys, never a case id or a
    source; nothing after the deciding row). It answers each key with one declared kind or none.

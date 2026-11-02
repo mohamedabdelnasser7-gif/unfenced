@@ -130,10 +130,11 @@ def missing_keys():
 
 
 def default_days(plug):
-    """Twice the longest time a deciding result of the plug takes to show; at least one day."""
-    deciding = (plug.decides.good, *plug.decides.bad)
-    longest = max(plug.results[name].shows_in_days[1] for name in deciding)
-    return max(1.0, 2.0 * float(longest))
+    """How many days a night reads: twice study.read_days (the longest shows_in_days a deciding
+    result gives, else study.READ_DAYS); at least one day. It only sets how far back the night
+    reads; no case is settled by days (DECISIONS item 66)."""
+    from engine.study import read_days
+    return max(1.0, 2.0 * float(read_days(plug)))
 
 
 class LinkedStudy(Study):
@@ -378,8 +379,8 @@ def text(rep, plug):
     d = rep["decided"]
     lines = [f'Night study of {rep["agent"]}, {_day(w["since"])} to {_day(w["until"])} ({_n(rep["days"])} days)',
              "  parts: " + "; ".join(f"{k} {v}" for k, v in rep["parts"].items()),
-             f'  read {rep["read"]["cases"]} cases: settled {d["good"] + d["bad"]} ({d["good"]} {good}, {d["bad"]} not, '
-             f'{d["past_window"]} of them past their window), pending {rep["pending"]}, '
+             f'  read {rep["read"]["cases"]} cases: settled {d["good"] + d["bad"]} ({d["good"]} {good}, {d["bad"]} not), '
+             f'pending {rep["pending"]} (waiting for their result), '
              f'left out {rep["left_out"]["count"]}, not counted' + _causes(rep["left_out"])]
     lines.extend(_trial_lines(rep["trials"]))
     if rep.get("exam"):

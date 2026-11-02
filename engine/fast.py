@@ -3,10 +3,11 @@ instead", for the next case from the same source only. The night study is the sl
 Reflection; this is the fast half. One case id links them.
 
 When a case ends. As the night study settles it (study.settle): a case with the plug's good
-result is good and gets nothing; a case still inside its window is pending and gets nothing, so
-nothing is ever written in the middle of a case; a case with a cause outside the agent is left
-out and gets nothing; a case that ended not good (a bad deciding result, or no deciding result
-once the longest deciding window has passed since its last action) gets one note. sweep() finds
+result is good and gets nothing; a case with no deciding result yet is pending, whatever its age,
+and gets nothing, so nothing is ever written in the middle of a case (no timer ends a case,
+DECISIONS item 66); a case with a cause outside the agent is left out and gets nothing; a case
+that ended not good (a bad deciding result) gets one note. An agent whose plug names no bad
+deciding result never gets a note. sweep() finds
 those cases and writes their notes, so a sweep every few seconds writes a note within seconds of
 the case ending. One note per ending: the case id and the time of its last action. A case whose
 next case keeps its id (a plug whose case id names its source) can end again later and gets a
@@ -54,8 +55,7 @@ exam and the Arena rerun before any trial) can turn the case into a lesson.
 
 Expiry: one next case. A note is first given at the start of the next case from its source and
 then in every action of that case, until that case ends the way any case ends: its good or a
-bad deciding result, or the longest deciding window after its last action with neither. Then it
-is gone. Why one next case and not a fixed number of hours: the note is about one case, and what
+bad deciding result, never a day count (DECISIONS item 66). Then it is gone. Why one next case and not a fixed number of hours: the note is about one case, and what
 the agent should try lasts as long as the work it is for, short or long. A note never given is
 gone KEEP_DAYS (7) days after it was written: a source that comes back after a week is starting
 something new, the case behind the note is a week old, and the night study has read that case
@@ -77,7 +77,7 @@ import unicodedata
 from engine import risk as risk_mod
 from engine.log import Log, case_key, is_history, source_key
 from engine.plug import CASE, Risk
-from engine.study import BAD, PAST, PartError, longest, settle
+from engine.study import BAD, PartError, read_days, settle
 
 DAY = 86400.0
 KEEP_DAYS = 7          # a note never given is gone this many days after it was written
@@ -202,17 +202,12 @@ class FastNotes:
         if self.writer is None:
             raise ValueError("a sweep needs a writer")
         now = _now(now)
-        window = longest(self.plug) * DAY
-        sql = "SELECT case_id, MAX(at) AS last FROM trace WHERE agent = ? AND action IS NOT NULL AND at <= ?"
-        args = [self.agent, now]
-        if not self.plug.decides.bad:  # with no bad deciding result, a case with the good one is good
-            sql += " AND case_id NOT IN (SELECT case_id FROM trace WHERE agent = ? AND result = ? AND at <= ?)"
-            args += [self.agent, self.plug.decides.good, now]
-        sql += " GROUP BY case_id HAVING last >= ?"
-        args.append(now - window - self.keep_days * DAY)
-        if not self.plug.decides.bad:  # and it ends only past its window
-            sql += " AND last <= ?"
-            args.append(now - window)
+        if not self.plug.decides.bad:  # with no bad deciding result no case ends not good (item 66)
+            return []
+        window = read_days(self.plug) * DAY  # how far back to look for a late bad result; never ends a case
+        sql = ("SELECT case_id, MAX(at) AS last FROM trace WHERE agent = ? AND action IS NOT NULL AND at <= ? "
+               "GROUP BY case_id HAVING last >= ?")
+        args = [self.agent, now, now - window - self.keep_days * DAY]
         with self.db.tx() as c:
             found = c.execute(sql + " ORDER BY last, case_id", args).fetchall()
             done = {(r["case_id"], r["ended_at"]) for r in c.execute(
@@ -240,7 +235,7 @@ class FastNotes:
         if not sources:
             return None
         turns = self._turns(case_id)
-        view = {"ended_with": deciding or PAST, "good_result": self.plug.decides.good,
+        view = {"ended_with": deciding, "good_result": self.plug.decides.good,
                 "steps": [_step(r) for r in rows[-STEPS:]], "turns": turns}
         theirs = [t["text"] for t in turns if t["from"] != AGENT and "text" in t]
         text, why = self._write(view, theirs)
@@ -408,17 +403,14 @@ class FastNotes:
                          "LIMIT 1", (self.agent, note["source"], note["ended_at"])).fetchone() is not None
 
     def _over(self, c, note, now):
-        """Has the note's one next case ended: a deciding result since it was first given, or the
-        longest deciding window passed since its last action (or since it was given, with none)?"""
+        """Has the note's one next case ended: a deciding result since it was first given? No day
+        count ends it (DECISIONS item 66)."""
         deciders = {self.plug.decides.good, *self.plug.decides.bad}
-        last = note["used_at"]
-        for r in c.execute("SELECT action, result, at FROM trace WHERE agent = ? AND case_id = ? AND at >= ? "
-                           "ORDER BY at, id", (self.agent, note["used_case"], note["used_at"])):
+        for r in c.execute("SELECT result FROM trace WHERE agent = ? AND case_id = ? AND at >= ? AND at <= ? "
+                           "ORDER BY at, id", (self.agent, note["used_case"], note["used_at"], now)):
             if r["result"] in deciders:
                 return True
-            if r["action"] is not None:
-                last = max(last, r["at"])
-        return now >= last + longest(self.plug) * DAY
+        return False
 
 
 def guard(text, plug, theirs=(), never=None, known=()):

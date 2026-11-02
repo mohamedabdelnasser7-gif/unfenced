@@ -8,8 +8,9 @@ a lesson card through the agent's own lessons and risk check.
 2. Count first. How many rows of each result kind, how many cases ended good or not, how
    many are pending and how many are left out. A case is settled by its deciding result
    (the plug's decides), the last one it has. A case with none is pending, never a loss,
-   until the longest deciding window has passed since its last action; then it counts as
-   not good, past its window. A settled case with a cause (the plug lists the causes that
+   whatever its age, and out of every count and lesson until its result comes (DECISIONS
+   item 66): no timer settles a case. A late result comes from the tool's webhook, the tool's
+   API on the night run or a person (reflection/late.py). A settled case with a cause (the plug lists the causes that
    are outside the agent) is left out of every pattern count and named with its cause.
 3. Find patterns. A proposer reads a small sample of settled cases, half good and half
    not, and proposes up to LIMIT candidates: a plain pattern (something an action did or
@@ -111,7 +112,6 @@ TAGGED = 200      # settled cases the tagger reads for each candidate
 SHOWN = 20        # case ids a source line names
 FULLY, PARTLY, NOT = "fully", "partly", "not"
 GOOD, BAD, PENDING, LEFT_OUT = "good", "bad", "pending", "left out"
-PAST = "none in its window"
 LESSON, KNOWN, FEW_CASES, FEW_SOURCES, NO_GAP = (
     "lesson", "already a lesson", "too few cases", "too few sources", "gap not clear")
 PULLED_BEFORE = "pulled before"
@@ -431,6 +431,9 @@ class Study:
                "with": {"cases": n1, "good": g1, "sources": s1}, "without": {"cases": n0, "good": g0, "sources": s0},
                "tagged": len(tagged), "unknown": len(tagged) - n1 - n0, "chance": chance, "verdict": verdict,
                "lesson_id": None}
+        second = second_counts(plug, with_)
+        if second is not None:  # shown only: how the pattern's good cases did at the second signal
+            rec["second"] = second
         return rec, with_
 
     def _pick(self, settled):
@@ -474,7 +477,7 @@ class Study:
         good = self.plug.decides.good
         card = {"lesson_id": lid, "state": les["state"], "risk": les["risk"], "risk_why": les["risk_why"],
                 "situation": cand["situation"], "change": les["text"], "stages": les["stages"],
-                "moves": {"result": good, "shows_in_days": list(self.plug.results[good].shows_in_days)},
+                "moves": {"result": good, "shows_in_days": _shows(self.plug, good)},
                 "must_not_worsen": {"results": list(self.plug.harm.results), "about": self.plug.harm.about},
                 "sure": rec["chance"] if rec else None,
                 "cases": None if rec is None else {
@@ -633,16 +636,48 @@ class _Texts:
         return self.seen[lesson_id]
 
 
-def longest(plug):
-    """The most days any deciding result takes to show."""
-    return max(plug.results[r].shows_in_days[1] for r in (plug.decides.good, *plug.decides.bad))
+READ_DAYS = 7.0  # how far back a read looks when the plug gives no days
+
+
+def read_days(plug):
+    """How many days back a read of an agent's cases looks: the longest shows_in_days a deciding
+    result of the plug gives, else READ_DAYS. Only how far back to read; it never settles a case
+    (settle reads no days, DECISIONS item 66)."""
+    days = [plug.results[r].shows_in_days for r in (plug.decides.good, *plug.decides.bad)]
+    given = [d[1] for d in days if d is not None]
+    return max(given) if given else READ_DAYS
+
+
+def _shows(plug, name):
+    """A result's shows_in_days as a list, or None when the plug gives none."""
+    days = plug.results[name].shows_in_days
+    return None if days is None else list(days)
+
+
+def second_counts(plug, cases):
+    """How the good cases among these did at the plug's second signal, shown only, never deciding:
+    {result name: count, ..., "none": cases with no second signal result yet}; None when the plug
+    names no second signal. A case's last second signal result counts."""
+    sig = plug.second_signal
+    if sig is None:
+        return None
+    names = (sig.good, *sig.bad)
+    out = {name: 0 for name in names}
+    out["none"] = 0
+    for c in cases:
+        if c.status != GOOD:
+            continue
+        got = [r["result"] for r in c.rows if r["result"] in names]
+        out[got[-1] if got else "none"] += 1
+    return out
 
 
 def idea_card(lessons, les):
     """The card of an idea, a lesson with no past cases behind it: the idea, whose it is ("the
-    agent's" or the person's), the result it must move and the days that result takes to show,
-    how many days until we know (its trial's days, then the longest deciding window for the
-    last cases' results), what must not get worse, how sure today (NO_CASES) and its trial
+    agent's" or the person's), the result it must move and the days that result takes to show
+    when the plug gives them (None when not), how many days until we know (its trial's days,
+    plus the longest deciding window when every deciding result gives one; a late result is
+    waited for, never timed out, DECISIONS item 66), what must not get worse, how sure today (NO_CASES) and its trial
     level. Once its trial starts these are the trial's, fixed at its start; before, the plug's
     and the level a trial would start with now."""
     plug = lessons.plug
@@ -653,11 +688,14 @@ def idea_card(lessons, les):
         share, days, level = lessons.level_now(les["id"])
     started = tr is not None and tr["good"] is not None
     good = tr["good"] if started else plug.decides.good
+    deciders = (good, *(tr["bad"] if started else plug.decides.bad))
     windows = (tr["windows"] if started else None) or {
-        r: list(plug.results[r].shows_in_days) for r in (plug.decides.good, *plug.decides.bad)}
+        r: _shows(plug, r) for r in deciders if r in plug.results}
+    shows = windows.get(good) or (_shows(plug, good) if good in plug.results else None)
+    given = [w for w in windows.values() if w is not None]
     return {"idea": les["text"], "whose": whose(les),
-            "moves": {"result": good, "shows_in_days": list(windows.get(good) or plug.results[good].shows_in_days)},
-            "know_in_days": days + max(float(w[1]) for w in windows.values()),
+            "moves": {"result": good, "shows_in_days": None if shows is None else list(shows)},
+            "know_in_days": days + (max(float(w[1]) for w in given) if given and len(given) == len(windows) else 0.0),
             "must_not_worsen": {"results": list(tr["harm"] if started else plug.harm.results),
                                 "about": plug.harm.about},
             "sure": NO_CASES, "level": {"name": level, "share": share, "days": days}}
@@ -666,22 +704,24 @@ def idea_card(lessons, les):
 def settle(plug, rows, until):
     """One case from its rows, oldest first, read up to until: (status, its deciding result,
     the causes on its rows, the place of its last deciding row). Settled by its last deciding
-    result; with none it is pending, never a loss, until the longest deciding window has
-    passed since its last action, then not good; a settled case with a cause is left out. A case
-    with no deciding result and a row whose detail says "result_unknown" (history imported with no
-    result file, reflection/importer.py) stays pending, whatever its age."""
+    result; with none it is pending, never a loss, whatever its age (DECISIONS item 66: no timer
+    closes a case; the webhook, the tool's API or a person brings its result, reflection/late.py),
+    as a case with a row whose detail says "result_unknown" (history imported with no result file,
+    reflection/importer.py) always was. A case with a cause outside the agent on any row is left
+    out, settled or not: a settled one always was, and with no timer a case whose closing row
+    names a cause and no deciding result would otherwise wait for ever and hold a trial's
+    verdict. until is kept for the callers: rows after it are not read here, they are cut
+    before."""
     deciders = (plug.decides.good, *plug.decides.bad)
     deciding = cut = None
     for i, r in enumerate(rows):
         if r["result"] in deciders:
             deciding, cut = r["result"], i
     causes = sorted({r["cause"] for r in rows if r["cause"]})
-    acted = [r["at"] for r in rows if r["action"] is not None] or [rows[0]["at"]]
-    unknown = any(isinstance(r.get("detail"), dict) and r["detail"].get("result_unknown") is True for r in rows)
-    if deciding is None and (unknown or max(acted) + longest(plug) * DAY > until):
-        status = PENDING
-    elif causes:
+    if causes:
         status = LEFT_OUT
+    elif deciding is None:
+        status = PENDING
     else:
         status = GOOD if deciding == plug.decides.good else BAD
     return status, deciding, causes, cut
@@ -712,8 +752,7 @@ def _counts(plug, cases):
     left = [c for c in cases if c.status == LEFT_OUT]
     return {"read": {"cases": len(cases), "rows": len(rows), "actions": dict(actions), "results": dict(results),
                      "lessons_given": dict(given)},
-            "decided": {"good": sum(c.status == GOOD for c in cases), "bad": sum(c.status == BAD for c in cases),
-                        "past_window": sum(c.status == BAD and c.deciding is None for c in cases)},
+            "decided": {"good": sum(c.status == GOOD for c in cases), "bad": sum(c.status == BAD for c in cases)},
             "pending": sum(c.status == PENDING for c in cases),
             "left_out": {"count": len(left), "by_cause": dict(Counter(x for c in left for x in c.causes)),
                          "cases": [{"case": c.id, "result": c.deciding, "causes": c.causes} for c in left]}}
@@ -741,7 +780,7 @@ def _view(plug, case, texts, *, blind):
         steps.append(step)
     view = {"id": case.key, "steps": steps}
     if not blind:
-        view["deciding"] = case.deciding or PAST
+        view["deciding"] = case.deciding
         view["good"] = case.status == GOOD
     return view
 

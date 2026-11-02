@@ -681,6 +681,13 @@ class RealFullExam(Base):
         # the first lesson, handed on before the second's full exam, is never on its kept side
         self.assertEqual(made[0]["at"], [(GOOD, []), (WHOLESALE, [])])
 
+    def test_full_cap_covers_a_whole_full_exam(self):
+        """Review simplify round 3, finding 3: the cap covers both runs of every situation at the exam's call
+        cap, so a normal full exam is never held for the cap and every lesson would be."""
+        from reflection import exam
+        plug = exam.plug_mod.load(Path(__file__).resolve().parent.parent / "sales" / "plug.json")
+        self.assertGreaterEqual(rounds.FULL_CAP, 2 * len(exam.situations(plug)) * exam.CALL_CAP)
+
     def test_a_full_exam_that_would_go_over_its_call_cap_is_held_and_hands_nothing(self):
         """Review simplify round 2, the cost note: at most FULL_CAP model calls a lesson's full exam; one
         that would take more is held as could not run, so nothing is handed, and the next lesson starts

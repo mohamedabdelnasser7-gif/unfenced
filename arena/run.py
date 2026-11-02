@@ -784,6 +784,24 @@ def past_wins(state):
     return out
 
 
+def next_step(rep):
+    """The next step of a run that stopped at the cap, in one line; "" otherwise. The quick run's own
+    limit says to run without --quick; the day's cap says when the count starts again (Cairo
+    midnight) and that --cap raises it. A count file that cannot be read has its own line."""
+    c = rep.get("calls") or {}
+    if rep.get("stopped") != CAP or c.get("problem"):
+        return ""
+    if c.get("run_limit") is not None and c.get("run_used", 0) >= c["run_limit"]:
+        return (f"the quick run stops at {c['run_limit']} model calls; run it again without --quick for a full run "
+                f"(the day's cap is {c['cap']})")
+    try:
+        reset = (datetime.date.fromisoformat(c["day"]) + datetime.timedelta(days=1)).isoformat()
+    except (KeyError, TypeError, ValueError):
+        reset = "the next Cairo day"
+    return (f"the day's count of {c.get('cap')} model calls starts again at 00:00 Cairo time on {reset}; to go on "
+            f"now, run again with a higher --cap (now {c.get('cap')})")
+
+
 def text(rep):
     lines = [f"Arena run {rep['run']} for {rep['agent']}: stopped, {rep['stopped']}.",
              f"  trust level: {rep['trust']['wins']} of {rep['trust']['matches']} held-out matches; "
@@ -815,6 +833,9 @@ def text(rep):
         lines.append(f"  quick run: {c['run_used']} of at most {c['run_limit']} model calls in this run")
     if c.get("problem"):
         lines.append(f"  {c['problem']}; it counts as the cap reached until it is fixed or removed")
+    step = next_step(rep)
+    if step:
+        lines.append(f"  next: {step}")
     rp = rep.get("replay")
     if rp is not None and rp.get("not_run"):
         lines.append(f"  replay not run: {rp['not_run']}")

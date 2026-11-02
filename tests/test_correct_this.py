@@ -1,5 +1,7 @@
 """Correct this: a correction sent from beside the reply the agent lost a practice match on
 (reflection/pages.py correct_this), the same hotfix as the box on the agent's page, through the full exam. No model call."""
+import html
+import re
 import unittest
 from pathlib import Path
 
@@ -50,6 +52,30 @@ class CorrectThis(unittest.TestCase):
 
     def test_the_answer_returns_to_the_agent_page(self):
         self.assertEqual(self.p.back("/agents/sales"), "/agents/sales")
+
+
+class CorrectThisOnDays(unittest.TestCase):
+    """Review simplify round 2, finding 4: with demo days and a Live tab, the form keeps the tab it was
+    on, so the server runs the correction on that tab's database, never Day 1's throwaway copy."""
+
+    def morning(self):
+        m = mo.Morning(Db(":memory:"), [plug_mod.load(ROOT / "sales" / "plug.json")], judge=lambda *a: risk.LOW)
+        self.addCleanup(m.db.close)
+        m.read_arena = lambda: run_with([{"card": "c1", "why": "it named a price", "turn": 1, "who": "agent",
+                                          "text": REPLY}])
+        return m
+
+    def test_the_form_keeps_the_day_or_live_tab(self):
+        days = {1: self.morning(), 2: self.morning()}
+        live = self.morning()
+        p = pages.Pages(days=days, at={1: 1_793_000_000.0, 2: 1_793_086_400.0}, live=live)
+        for tab, target in (("live", live), ("2", days[2])):
+            with self.subTest(tab=tab):
+                page = p.get("/new/build", {"agent": ["sales"], "day": [tab]}, "t")
+                form = page.split('class="fix"')[1].split("</details>")[0]
+                back = html.unescape(re.search(r'name="back" value="([^"]*)"', form).group(1))
+                self.assertEqual(back, f"/agents/sales?day={tab}")
+                self.assertIs(p.morning_for(p.back(back)), target)
 
 
 class PageExamFull(unittest.TestCase):

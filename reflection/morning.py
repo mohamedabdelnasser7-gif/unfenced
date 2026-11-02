@@ -2308,11 +2308,11 @@ def _idea_lines(card):
     """An idea's card in plain lines: what it must move and when we know, what must not get
     worse, how sure today, and its trial level."""
     mv, lv, harm = card["moves"], card["level"], card["must_not_worsen"]
-    lo, hi = mv["shows_in_days"]
+    shows = mv.get("shows_in_days")  # None for a plug that names no days (DECISIONS item 66)
+    when = f', which shows {h(_n(shows[0]))} to {h(_n(shows[1]))} days after a case' if shows else ""
     worse = (", ".join(harm["results"]) + (f' ({harm["about"]})' if harm["about"] else "") if harm["results"]
              else harm["about"] or "nothing named")
-    return (f'<p class="meta">{h(_cap(card["whose"]))} idea. It must move {h(mv["result"])}, which shows {h(_n(lo))} to '
-            f'{h(_n(hi))} days after a case; we know about {h(_n(card["know_in_days"]))} days after its trial '
+    return (f'<p class="meta">{h(_cap(card["whose"]))} idea. It must move {h(mv["result"])}{when}; we know about {h(_n(card["know_in_days"]))} days after its trial '
             f'starts.</p>'
             f'<p class="meta">Must not get worse: {h(worse)}.</p>'
             f'<p class="meta">How sure today: {h(card["sure"])}.</p>'

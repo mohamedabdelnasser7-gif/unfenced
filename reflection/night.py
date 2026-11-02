@@ -410,7 +410,7 @@ def text(rep, plug):
             lines.append("  " + gate.skipped_note(e["skipped"]))
     lines.append(f'  candidates {len(rep["candidates"])}')
     for c in rep["candidates"]:
-        lines.append(f'    - "{c["pattern"]}": {c["verdict"]}; ' + _numbers(c, good))
+        lines.extend(candidate_lines(c, good))
     lines.append(f'  lesson cards {len(rep["cards"])}')
     for card in rep["cards"]:
         came = f' (adapted from {card["from"]["agent"]})' if card["from"] else ""
@@ -494,6 +494,16 @@ def _link(link):
         more = f" and {len(ids) - SHOWN} more (all in the saved report)" if len(ids) > SHOWN else ""
         came = f'from {link["from_agent"]} cases {", ".join(ids[:SHOWN])}{more}'
     return f'lesson {link["lesson_id"]} ({state}): {came}'
+
+
+def candidate_lines(c, good):
+    """A candidate's line, and under it how its good cases did at the plug's second signal when the
+    plug names one (engine/study.py second_counts): shown only, it decides nothing (DECISIONS item 67)."""
+    out = [f'    - "{c["pattern"]}": {c["verdict"]}; ' + _numbers(c, good)]
+    if c.get("second"):
+        from reflection.morning import second_words
+        out.append("      " + second_words(c["second"]))
+    return out
 
 
 def _numbers(c, good):

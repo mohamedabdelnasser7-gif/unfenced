@@ -484,6 +484,7 @@ class Study:
                     "with": rec["with"]["cases"], "without": rec["without"]["cases"],
                     "total": rec["with"]["cases"] + rec["without"]["cases"],
                     "good_with": rec["with"]["good"], "good_without": rec["without"]["good"]},
+                "second": None if rec is None else rec.get("second"),  # shown only (DECISIONS item 67)
                 "source": les["source"], "from": origin, "close_to_pulled": None if failed_close else close,
                 "close_to_failed": close if failed_close else None,
                 "waits_for": turn, "replace": against,

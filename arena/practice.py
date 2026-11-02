@@ -109,9 +109,11 @@ class Customer(match_mod.Customer):
         return text
 
 
-def play(agent, card, *, agent_model, customer_model, seed=0, max_turns=MAX_TURNS, lessons=()):
+def play(agent, card, *, agent_model, customer_model, seed=0, max_turns=MAX_TURNS, lessons=(), opening=None):
     """One practice match of agent (kit/turn.py Agent) against card. Returns the match dict in
-    arena/match.py's shape, with the agent's name, the made-up mark and the customer's closing line."""
+    arena/match.py's shape, with the agent's name, the made-up mark and the customer's closing line.
+    opening: a customer first line to use as it is (the eval gate's rerun of a past win,
+    arena/gate.py TurnGate), else the customer model writes it."""
     customer = Customer(card, customer_model, agent.card["does"], seed)
     db = Db(":memory:")
     turns, ended, order, error = [], "turns", False, None
@@ -120,9 +122,11 @@ def play(agent, card, *, agent_model, customer_model, seed=0, max_turns=MAX_TURN
         chat_id = chats.open("whatsapp", match_mod.CUSTOMER)
         with match_mod.demo_store():
             try:
-                line = customer.next()
+                line = opening if opening is not None else customer.next()
             except ModelError as e:
                 line, ended, error = None, VOID, plain(str(e))
+            if opening is not None:
+                customer.lines.append(opening)
             for n in range(1, max_turns + 1 if error is None else 1):
                 if line is None:
                     ended = "done" if customer.done is not None else "left"

@@ -8,7 +8,11 @@ past wins and the call count as they are then. The exam runs first and stops at 
 as before. When it passes, each past win that can be rerun (pick: arena/run.py past_wins, newest
 first, at most MAX_RERUNS) is played again: the same persona, the customer's same first line, the
 same customer prompt (by its fingerprint saved with the match), the persona model going on from
-there and the Sales agent with the new lesson handed first. A past win that is now lost is a
+there and the Sales agent with the new lesson handed first. An agent Quick start built takes the same
+gate (TurnGate, wrap_turn; DECISIONS item 59): its past wins are the practice matches arena/practice.py
+saved in its own folder, each played again with arena/practice.py play (the practice customer prompt,
+by its fingerprint) and judged by arena/good.py against the agent's card, the call count the one
+beside the database its practice runs share. A past win that is now lost is a
 regression and holds the lesson (no regression on past wins), with an "arena" row naming the
 match, the verdict and the turn it quotes. The rerun stops at its first loss. A rerun the model
 call cap stops, or a model that does not answer (arena/match.py VOID), holds the lesson too (fail
@@ -25,8 +29,11 @@ one for each rerun the verdict judged, right before (it was a win) and right aft
 is won again. So a rerun can add to "broke", never to "fixed"; a rerun that never got judged (no
 persona card, the cap, a model error) is no pair, and it still holds the lesson as above.
 """
+from pathlib import Path
+
 from engine import exam as engine_exam
 from arena import factcheck, match as match_mod, run as run_mod, verdict
+from kit.model import ModelError
 
 PART = "arena"
 SKIPPED = "arena skipped"
@@ -37,11 +44,13 @@ NO_PROMPT = "it was saved with no customer prompt fingerprint"
 PROMPT_GONE = "the customer prompt it was played with is not available (moved, changed or refused)"
 
 
-def _prompt_of(win):
-    """The customer prompt a win was played with, or None when it cannot be had again."""
+def _prompt_of(win, prompts=None):
+    """The customer prompt a win was played with, or None when it cannot be had again. prompts: {sha:
+    prompt} known by fingerprint alone (the generic one when None)."""
     sha = win.get("prompt_sha")
-    if sha == match_mod.GENERIC_SHA:
-        return match_mod.GENERIC_PROMPT
+    known = {match_mod.GENERIC_SHA: match_mod.GENERIC_PROMPT} if prompts is None else prompts
+    if sha in known:
+        return known[sha]
     path = win.get("prompt_file")
     if not isinstance(path, str) or not path:
         return None
@@ -52,7 +61,7 @@ def _prompt_of(win):
     return text if match_mod.prompt_sha(text) == sha else None
 
 
-def pick(wins, most=MAX_RERUNS):
+def pick(wins, most=MAX_RERUNS, prompts=None):
     """The past wins to rerun, newest first, at most `most`: ([(win, prompt)], [(win, why skipped)])."""
     reruns, skipped = [], []
     for win in reversed(wins):
@@ -64,7 +73,7 @@ def pick(wins, most=MAX_RERUNS):
         elif not isinstance(win.get("prompt_sha"), str) or not win["prompt_sha"]:
             why = NO_PROMPT
         else:
-            prompt = _prompt_of(win)
+            prompt = _prompt_of(win, prompts)
             why = None if prompt is not None else PROMPT_GONE
         if why is None:
             reruns.append((win, prompt))
@@ -95,19 +104,31 @@ def skipped_note(got):
 
 
 class Gate:
+    prompts = None  # the customer prompts known by fingerprint alone: the generic one
+
     def __init__(self, examiner, *, wins, agent_model, customer_model, calls, kept=None, fact_checks=True,
                  max_reruns=MAX_RERUNS):
         self.examiner, self.kept, self.calls = examiner, kept, calls
-        self.reruns, self.skipped = pick(wins, max_reruns)
+        self.reruns, self.skipped = pick(wins, max_reruns, self.prompts)
         self.wins = [w for w, _ in self.reruns]
         self.agent_model, self.customer_model = calls.model(agent_model), calls.model(customer_model)
         self.facts = fact_checks
+
+    def _play(self, past, persona, prompt, text, tags):
+        """One past win played again with the new lesson handed first: the match, arena/match.py shape."""
+        from reflection.exam import _Lessons
+        return match_mod.play(persona, agent_model=self.agent_model, customer_model=self.customer_model,
+                              prompt=prompt, lessons=_Lessons(self.kept, (text, tuple(tags))),
+                              seed=past.get("id"), opening=match_mod.first_line(past), checker=factcheck.check,
+                              stop=verdict.closed)
+
+    def _judge(self, m):
+        return verdict.judge(m, facts=self.facts)
 
     def __call__(self, text, tags):
         result = self.examiner(text, tags)
         if not result.passed:
             return result
-        from reflection.exam import _Lessons
         rows, before = list(result.rows), self.calls.taken
         pairs = list(getattr(result, "pairs", None) or [])  # the exam's, then one a rerun judged
         rows += [engine_exam.Row(None, str(w.get("id")), SKIPPED, True, "", why) for w, why in self.skipped]
@@ -117,10 +138,7 @@ class Gate:
                 rows.append(engine_exam.Row(i, str(past.get("id")), PART, False, CHECK, "its persona card was not saved"))
                 break
             try:
-                m = match_mod.play(persona, agent_model=self.agent_model, customer_model=self.customer_model,
-                                   prompt=prompt, lessons=_Lessons(self.kept, (text, tuple(tags))),
-                                   seed=past.get("id"), opening=match_mod.first_line(past), checker=factcheck.check,
-                                   stop=verdict.closed)
+                m = self._play(past, persona, prompt, text, tags)
             except run_mod.CapReached:
                 m = None
             if m is None or self.calls.reached:
@@ -132,7 +150,15 @@ class Gate:
                 rows.append(engine_exam.Row(None, "", PART, False, engine_exam.NOT_RUN,
                                             f"a model error stopped the rerun: {m.get('error') or ''}"))
                 break
-            judged = verdict.judge(m, facts=self.facts)
+            try:
+                judged = self._judge(m)
+            except run_mod.CapReached:
+                rows.append(engine_exam.Row(None, "", PART, False, engine_exam.NOT_RUN, "the Arena call cap is reached"))
+                break
+            except ModelError as e:  # a model judge that did not answer: no verdict, so the lesson is held
+                rows.append(engine_exam.Row(None, "", PART, False, engine_exam.NOT_RUN,
+                                            f"a model error stopped the rerun: {match_mod.plain(str(e))}"))
+                break
             q = judged["quote"]
             why = "" if judged["won"] else f"was won, now lost: {judged['why']} (turn {q['turn']}, {q['who']}: {q['text']})"
             rows.append(engine_exam.Row(i, str(past.get("id")), PART, judged["won"], "" if judged["won"] else CHECK, why))
@@ -175,6 +201,60 @@ class Fresh:
     def __call__(self, text, tags):
         g = self.gate()
         return self.examiner(text, tags) if g is None else g(text, tags)
+
+
+class TurnGate(Gate):
+    """The gate for an agent Quick start built (kit/turn.py): its past practice wins played again with
+    arena/practice.py play and judged by arena/good.py against its card."""
+
+    def __init__(self, examiner, *, agent, judge_model, **kw):
+        from arena import practice
+        self.agent, self.prompts = agent, {practice.PROMPT_SHA: practice.PROMPT}
+        super().__init__(examiner, **kw)
+        self.judge_model = self.calls.model(judge_model)
+
+    def _play(self, past, persona, prompt, text, tags):
+        from arena import practice
+        from reflection import turn_exam
+        first = match_mod.first_line(past)
+        lessons = turn_exam.hand(self.kept, (text, tuple(tags)), self.agent.stage.name, first)
+        return practice.play(self.agent, persona, agent_model=self.agent_model, customer_model=self.customer_model,
+                             seed=past.get("id"), lessons=lessons, opening=first)
+
+    def _judge(self, m):
+        from arena import good
+        return good.judge(m, self.agent.card, self.judge_model, facts=self.facts)
+
+
+class FreshTurn(Fresh):
+    """Fresh for a built agent: the past wins are its own practice wins in its folder (state), the call
+    count the one beside the database (reports) that its practice runs share."""
+
+    def __init__(self, examiner, kept, *, agent, state, reports, judge_model=None, **kw):
+        super().__init__(examiner, kept, state=Path(state), **kw)
+        self.agent, self.reports, self.judge_model = agent, Path(reports), judge_model
+
+    def gate(self):
+        wins = [w for w in run_mod.past_wins(self.state) if w.get("agent") == self.agent.name]
+        if not wins:
+            return None
+        if self.agent_model is None or self.customer_model is None or self.judge_model is None:
+            from kit import model as model_mod
+            self.agent_model = self.agent_model or model_mod.Model()
+            self.customer_model = self.customer_model or model_mod.Model()
+            self.judge_model = self.judge_model or model_mod.Model()
+        calls = self.calls if self.calls is not None else run_mod.Calls(self.reports / run_mod.CALLS_FILE, self.cap)
+        return TurnGate(self.examiner, agent=self.agent, judge_model=self.judge_model, wins=wins,
+                        agent_model=self.agent_model, customer_model=self.customer_model, calls=calls, kept=self.kept)
+
+
+def wrap_turn(examiner, kept, *, agent, state, reports, agent_model=None, customer_model=None, judge_model=None,
+              cap=run_mod.DEFAULT_CAP):
+    """A built agent's examiner with the Arena rerun of its past practice wins after it (FreshTurn):
+    state, the agent's folder (arena-matches.jsonl, arena/practice.py); reports, the folder beside the
+    database (arena-calls.json)."""
+    return FreshTurn(examiner, kept, agent=agent, state=state, reports=reports, agent_model=agent_model,
+                     customer_model=customer_model, judge_model=judge_model, cap=cap)
 
 
 def wrap(examiner, kept, *, db, agent_model=None, customer_model=None, cap=run_mod.DEFAULT_CAP):

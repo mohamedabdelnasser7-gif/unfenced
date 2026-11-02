@@ -89,6 +89,7 @@ pointing to the recorded replay (recorded/play.py) and exits 2 before reading an
 import argparse
 import datetime
 import fcntl
+import functools
 import json
 import os
 import random
@@ -878,6 +879,7 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
     ap.add_argument("--trust", default=None, help="the trust levels file, outside the repo")
     ap.add_argument("--customer-prompt", default=None, help="the tuned customer prompt, outside the repo")
     ap.add_argument("--cap", type=int, default=DEFAULT_CAP, help="model calls a day")
+    ap.add_argument("--exam-cap", type=int, default=None, help="model calls one lesson's exam may take between rounds")
     ap.add_argument("--state", default=None, help="the folder for the call count and the matches, for a run with no --db")
     ap.add_argument("--db", default=None, help="the Sales agent's database: the Arena practises on its copy, <db>.arena beside it")
     ap.add_argument("--replay", default=None, help="the persona build's replay.jsonl: outside the repo, or the cleaned set arena/real/replay.jsonl")
@@ -903,6 +905,8 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
         cards = load_cards(args.cards)
         if args.replay_max < 1:
             raise Refused("--replay-max must be at least 1")
+        if args.exam_cap is not None and args.exam_cap < 1:
+            raise Refused("--exam-cap must be at least 1")
         planned = replay_mod.plan(replay_mod.load(args.replay), cards, args.replay_max) if args.replay else None
         trust = dict(QUICK_TRUST) if args.quick else load_trust(args.trust)
         prompt = match_mod.load_prompt(args.customer_prompt)
@@ -954,7 +958,8 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
             before_match = pool.refresh
             lessons = _Lessons(pool, None)
             if between_models is not None:
-                examiner = between_models.pop("examiner", rounds_mod.real_examiner)
+                exam_cap = rounds_mod.EXAM_CAP if args.exam_cap is None else args.exam_cap
+                examiner = between_models.pop("examiner", functools.partial(rounds_mod.real_examiner, cap=exam_cap))
                 notes_model = between_models.pop("notes", None)  # the quick note's writer; none, no notes
                 def live_lessons():  # opened at the first lesson that passes the gate, not before
                     live.append(Db(args.db))

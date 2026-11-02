@@ -14,7 +14,10 @@ calling it with a round's number then:
    A lesson the gate failed after an earlier round goes back into this study with what it broke
    (engine/study.py, step 5; DECISIONS item 50), so the idea part writes a different try.
 2. Puts every new lesson through the eval gate (arena/gate.py: the exam, then the rerun of past
-   wins, with the fixed and broken counts and McNemar's p-value). A lesson that would start its
+   wins, with the fixed and broken counts and McNemar's p-value). Here the exam is scoped
+   (DECISIONS item 75, reflection/exam.py Examiner scope): a lesson takes only the situations of its
+   own stages, plus, for a rewrite, the situations its earlier tries failed, under EXAM_CAP model
+   calls a lesson (arena/run.py --exam-cap); the night keeps the full exam. A lesson that would start its
    trial takes it as the night has it take it, before it starts. A lesson that does not take it
    there (high risk with no Accept high risk, a copy of a case's words, close to a pulled line or
    against a live one) takes it right after, and the result is saved on the lesson as its exam,
@@ -68,6 +71,7 @@ from engine.study import read_days
 
 DAY = 86400.0
 LIVE_BUSY = "not handed, live busy"  # a passed lesson the live database could not take this run
+EXAM_CAP = 60  # model calls one lesson's exam may take between rounds, the run on the kept lessons included (--exam-cap)
 REWRITES = 2  # new tries a lesson the gate refused may take in the same round (Mohamed 2026-11-02, "Yes now")
 CAP_NOTE = "the model call cap was reached during the night study; nothing it left unchecked is handed on"
 
@@ -230,10 +234,11 @@ def hand_live(arena_db, live, lesson_id, now=None):
     return new_id
 
 
-def real_examiner(plug, kept, model):
-    """The Sales agent's exam with the gate's counts (reflection/exam.py, as night.sales_exam has it)."""
+def real_examiner(plug, kept, model, cap=EXAM_CAP):
+    """The Sales agent's exam with the gate's counts (reflection/exam.py, as night.sales_exam has it),
+    scoped to the lesson's stages and source situations under cap model calls a lesson."""
     from reflection import exam as exam_mod_sales
-    return exam_mod_sales.Examiner(plug, kept=kept, model=model, count=True)
+    return exam_mod_sales.Examiner(plug, kept=kept, model=model, count=True, scope=True, cap=cap)
 
 
 class Between:
@@ -252,6 +257,7 @@ class Between:
         self.models, self.examiner, self.now = dict(models), examiner, now
         self.pending = []
         self.live, self._live = live, None
+        self.scoped = None  # the exam made for this round (its source names a rewrite's earlier fails)
 
     def learn(self, match, judged, match_id):
         """A lost training match as a case (arena/learn.py), kept for the study after its round."""
@@ -262,7 +268,7 @@ class Between:
 
     def _exam(self, lessons):
         from arena import gate
-        examiner = self.examiner(self.plug, self.pool, self.calls.model(self.models["exam"]))
+        examiner = self.scoped = self.examiner(self.plug, self.pool, self.calls.model(self.models["exam"]))
         return gate.Fresh(examiner, self.pool, state=self.state, agent_model=self.agent_model,
                           customer_model=self.customer_model, calls=self.calls)
 
@@ -339,7 +345,11 @@ class Between:
                 rewrites.append(one)
                 if got["lesson_id"] is None:
                     continue
-                gated = self._gate(lessons, examiner, got["lesson_id"], until)
+                self._source(lessons, chain)
+                try:
+                    gated = self._gate(lessons, examiner, got["lesson_id"], until)
+                finally:
+                    self._source(lessons, ())
                 gated["rewrite_of"] = first["lesson_id"]
                 out["lessons"].append(gated)
                 one["passed"], one["why"] = gated["passed"], gated["why"] or None
@@ -348,6 +358,19 @@ class Between:
                 chain.append(got["lesson_id"])
         if rewrites:
             out["rewrites"] = rewrites
+
+    def _source(self, lessons, chain):
+        """Point a scoped exam at the situations the earlier tries in chain failed (none for ())."""
+        if self.scoped is None or not hasattr(self.scoped, "source"):
+            return
+        ids = []
+        for lid in chain:
+            for f in exam_mod.fails_of(lessons.exam_of(lid)):
+                n = f.get("situation")
+                if isinstance(n, int) and not isinstance(n, bool) and n not in ids and \
+                        f.get("check") not in (exam_mod.NOT_RUN, exam_mod.RERUN, exam_mod.ROUND):
+                    ids.append(n)
+        self.scoped.source = tuple(ids)
 
     def _gate(self, lessons, examiner, lesson_id, now):
         """One new lesson through the gate, when the study's own write did not take it there, and

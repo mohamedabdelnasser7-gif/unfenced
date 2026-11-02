@@ -367,11 +367,23 @@ class Examiner:
     75): the exam runs every situation with the new line and pairs each with a run of the same
     situations with the kept lessons only; the lesson passes when no safety check newly fails and it
     fixed at least as many situations as it broke. That run is made once for each set of kept
-    lessons and reused for the next lessons it examines; its model calls count on the exam that made it."""
+    lessons and reused for the next lessons it examines; its model calls count on the exam that made it.
 
-    def __init__(self, plug, kept=None, model=None, *, count=False):
+    scope=True (the Arena between rounds, arena/rounds.py; DECISIONS item 75): with count=True, a
+    lesson takes only the situations of its own stages (every one for a lesson for all stages) and
+    its source situations first (source: situation ids the Arena sets, the ones its earlier tries
+    failed), under cap model calls a lesson: a situation is added while its worst case (CALL_CAP
+    calls with the line, and CALL_CAP more when its run on the kept lessons is not made yet) still
+    fits. The run on the kept lessons is made only for those situations, once each for each set of
+    kept lessons, and reused (one whose answer raised is not kept, so it is asked again). A lesson
+    with no situation in scope, or a cap with room for none, is held as could not run. The night
+    keeps the full exam (scope off)."""
+
+    def __init__(self, plug, kept=None, model=None, *, count=False, scope=False, cap=None):
         self.plug, self.kept, self.model, self.count = plug, kept, model, count
+        self.scope, self.cap, self.source = scope, cap, ()
         self._without = {}  # {the kept lesson ids: the exam run without a new line}
+        self._rows = {}  # scope: {the kept lesson ids: {situation id: its row without a new line}}
 
     def __call__(self, text, tags):
         if self.model is None:
@@ -382,6 +394,8 @@ class Examiner:
         if not self.count:
             return run(self.plug, self.model, kept=self.kept, lesson=lesson, stop_at_first=True, safety=safety)
         sits = situations(self.plug)
+        if self.scope:
+            return self._scoped(sits, lesson, safety)
         key = self._kept_ids()
         without, made = self._without.get(key), 0
         if without is None:
@@ -389,6 +403,42 @@ class Examiner:
             made = int(without.calls)
         got = run(self.plug, self.model, kept=self.kept, lesson=lesson, sits=sits)
         return engine_exam.judge(got.rows, without.rows, len(sits), safety, calls=int(got.calls) + made)
+
+    def pick(self, sits, tags, have=()):
+        """The situations a lesson with these stage tags takes under scope: its source situations, then
+        those of its stages, by id, while the cap holds. have: situation ids whose run on the kept
+        lessons is made already."""
+        source = {int(n) for n in self.source or () if isinstance(n, int) or str(n).isdigit()}
+        every = plug_mod.ALL in tags
+        order = [s for s in sits if s["id"] in source] + \
+            [s for s in sits if s["id"] not in source and (every or s["stage"] in tags)]
+        out, left = [], self.cap
+        for s in order:
+            cost = CALL_CAP + (0 if s["id"] in have else CALL_CAP)
+            if left is not None and cost > left:
+                continue
+            out.append(s)
+            left = None if left is None else left - cost
+        return out
+
+    def _scoped(self, sits, lesson, safety):
+        key = self._kept_ids()
+        cache = self._rows.setdefault(key, {})
+        picked = self.pick(sits, lesson[1], have=set(cache))
+        if not picked:
+            return engine_exam.could_not_run("no exam situation of its stages fits the exam cap")
+        need = [s for s in picked if s["id"] not in cache]
+        made, before = 0, {}
+        if need:
+            res = run(self.plug, self.model, kept=self.kept, lesson=None, sits=need)
+            made = int(res.calls)
+            for r in res.rows:
+                before[r.situation] = r
+                if r.check != engine_exam.ANSWER:
+                    cache[r.situation] = r
+        before = [before.get(s["id"]) or cache[s["id"]] for s in picked if s["id"] in before or s["id"] in cache]
+        got = run(self.plug, self.model, kept=self.kept, lesson=lesson, sits=picked)
+        return engine_exam.judge(got.rows, before, len(picked), safety, calls=int(got.calls) + made)
 
     def _kept_ids(self):
         """The ids of the kept lessons the exam hands now: the key of the run without a new line."""

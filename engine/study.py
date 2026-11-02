@@ -67,7 +67,11 @@ a lesson card through the agent's own lessons and risk check.
    it passes this agent's own risk check and starts like any lesson the study writes. A
    kept lesson already adapted, in any state, is not asked again, and a line the other
    agent pulled is not brought over ("pulled before"). A write the lessons refuse is
-   named on its candidate and the night goes on.
+   named on its candidate and the night goes on. Siblings come first (DECISIONS item 79):
+   agents of this agent's kind that name the same owner (engine/plug.py kind and owner),
+   so a new agent of a kind its owner already runs starts with what they kept. A
+   sibling's line goes on trial only through this agent's eval gate: with no examiner
+   on the lessons (Lessons.examiner) it waits for a yes and never starts a trial by itself.
 7. Ideas. With an idea part given, the study also asks for ideas: lessons with no past cases
    behind them, paths worth trying ("let's try this path"). The part reads the proposer's
    sample and the agent's lessons, and gives at most IDEAS (3) a night; any past the cap is
@@ -117,6 +121,7 @@ GOOD, BAD, PENDING, LEFT_OUT = "good", "bad", "pending", "left out"
 LESSON, KNOWN, FEW_CASES, FEW_SOURCES, NO_GAP = (
     "lesson", "already a lesson", "too few cases", "too few sources", "gap not clear")
 PULLED_BEFORE = "pulled before"
+NO_GATE = "a sibling's line waits for a yes: this agent has no eval gate to put it on trial through"
 HANDED = "handed over"  # a candidate that is another agent's matter (see 8)
 FAILED_BEFORE = "failed the eval gate before"
 FAILED_GIVEN = 10  # failed lines the proposer and the idea part are given a night, the newest
@@ -514,15 +519,20 @@ class Study:
         rng.shuffle(out)
         return out
 
-    def _write(self, cand, source, sources, rec, origin, rep, *, source_lesson_id=None, close=None, kind=PATTERN):
+    def _write(self, cand, source, sources, rec, origin, rep, *, source_lesson_id=None, close=None, kind=PATTERN,
+               gated=False):
         """Write one lesson and add its card. close: the pulled line it comes close to; it then
-        waits for a yes. A lesson that goes against a live one waits for a yes too, its card
+        waits for a yes. gated: a sibling's line (see 6); with no examiner it waits for a yes. A lesson that goes against a live one waits for a yes too, its card
         asking "replace it?". kind: IDEA for one with no past cases behind it; its card carries
         idea_card. A lesson its exam held (Lessons(exam=...)) waits for a yes, its card's "exam"
         naming the first fail ("" when it passed or took no exam). Returns the card."""
         held = self._sort(cand, rep)  # raises HandedOver for another agent's matter (see 8)
         against = self._against(cand, rep)
         trial = close is None and against is None and not held
+        if gated and trial and getattr(self.lessons, "examiner", None) is None:  # never live without the gate
+            trial = False
+            if NO_GATE not in rep["notes"]:
+                rep["notes"].append(NO_GATE)
         failed_close = close is not None and close in self._failed_lines
         if close is not None:  # the yes asker sees which pulled or failed line it comes close to
             what = "a line that failed the eval gate" if failed_close else "a pulled line"
@@ -603,12 +613,13 @@ class Study:
             return
         fields = set(self.plug.fields)
         linked = {les["source_lesson_id"] for les in self.lessons.mine() if les["source_lesson_id"] is not None}
-        for other in sorted(others, key=lambda o: (-len(fields & set(o.fields)), o.agent)):
+        for other in sorted(others, key=lambda o: (not sibling(self.plug, o), -len(fields & set(o.fields)), o.agent)):
+            gated = sibling(self.plug, other)
             theirs = Lessons(self.db, other)
             texts = _Texts(theirs)
             cases = _read(other, self.log.window(since, until, agent=other.agent, plug=other), until)
             counts = _counts(other, cases)
-            entry = {"agent": other.agent, "shared_fields": sorted(fields & set(other.fields)),
+            entry = {"agent": other.agent, "sibling": gated, "shared_fields": sorted(fields & set(other.fields)),
                      "read": {"cases": counts["read"]["cases"], "good": counts["decided"]["good"],
                               "bad": counts["decided"]["bad"], "pending": counts["pending"],
                               "left_out": counts["left_out"]["count"]},
@@ -632,7 +643,7 @@ class Study:
                          f'{rec["without"]["good"]} of {rec["without"]["cases"]}; chance it is better '
                          f'{round(rec["chance"] * 100)}%')
                 public = {k: cand[k] for k in ("pattern", "lesson", "situation", "stages")}
-                self._take(other, public, rec, rep, known, pulled + pulled_there,
+                self._take(other, public, rec, rep, known, pulled + pulled_there, gated=gated,
                            sources=[c.text for c in _unique(sample + with_)],
                            source=lambda fit: f"adapted {fit} from {other.agent} cases {shown}: {there}",
                            origin={"agent": other.agent, "cases": ids})
@@ -642,15 +653,17 @@ class Study:
                 entry["lessons"].append(rec)
                 public = {"lesson": les["text"], "situation": "", "stages": les["stages"]}
                 self._take(other, public, None, rep, known, pulled, sources=[], into=rec, source_lesson_id=les["id"],
+                           gated=gated,
                            source=lambda fit, les=les: f'adapted {fit} from {other.agent} lesson {les["id"]}: '
                                                        f'"{les["text"]}"',
                            origin={"agent": other.agent, "lesson": les["id"]})
 
     def _take(self, other, public, rec, rep, known, pulled, *, sources, source, origin, into=None,
-              source_lesson_id=None):
+              source_lesson_id=None, gated=False):
         """Ask the fit check and the adapter about one candidate or kept lesson of another agent,
         and write what fits. rec: the candidate's numbers there, or None for a kept lesson.
-        pulled: the pulled lines an adapted line must not come close to without a yes."""
+        pulled: the pulled lines an adapted line must not come close to without a yes. gated: a
+        sibling's line (see 6), which starts a trial only through this agent's eval gate."""
         into = rec if into is None else into
         try:
             answer = self.fit(self.plug, other, dict(public))
@@ -680,12 +693,19 @@ class Study:
         try:
             card = self._write(adapted, source(answer), sources, rec, dict(origin, fit=answer), rep,
                                source_lesson_id=source_lesson_id, close=_close(adapted["lesson"], pulled,
-                                                                                    self._failed_lines))
+                                                                                    self._failed_lines), gated=gated)
         except ValueError as e:  # refused by the lessons (a kept lesson pulled meanwhile, a bad line)
             into["why"] = f"not written: {e}"
             return
         into["lesson_id"] = card["lesson_id"]
         known[_norm(adapted["lesson"])] = KNOWN
+
+
+def sibling(plug, other):
+    """Is other a sibling of plug: another agent of the same kind naming the same owner (DECISIONS
+    items 51 and 79)? Agents that name no owner have no siblings."""
+    return (other.agent != plug.agent and bool(plug.owner) and other.owner == plug.owner
+            and (other.kind or other.agent) == (plug.kind or plug.agent))
 
 
 class _Texts:

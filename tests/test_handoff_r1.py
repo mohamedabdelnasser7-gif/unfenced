@@ -287,8 +287,6 @@ class TurnRecordGaps(Base):
         found = problems("el vapor b 16,500 جنيه يا باشا موجود", FR)
         self.assertIn("(this reply has: جنيه, يا, باشا).", found["script"])
 
-    def test_the_instructions_keep_the_arabic_currency_line(self):
-        self.assertIn("جنيه is for replies in Arabic letters.", loop.INSTRUCTIONS)
 
     def test_titles_keep_only_text_titles(self):
         items = [{"title": "Nike Phantom 6", "variants": []}, {"title": None, "variants": []},

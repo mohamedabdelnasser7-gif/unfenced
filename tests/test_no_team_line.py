@@ -20,7 +20,7 @@ TEAM = re.compile(r"check with the team|فريق|team", re.IGNORECASE)
 class NoTeamLine(unittest.TestCase):
     def test_instruction_line_keeps_never_guess_without_the_team(self):
         text = (ROOT / "sales" / "instructions.md").read_text(encoding="utf-8")
-        line = next(l for l in text.splitlines() if l.startswith("Use only facts from your tools"))
+        line = next(l for l in text.splitlines() if "Use only facts from your tools" in l)
         self.assertIn("Never guess.", line)
         self.assertNotRegex(line, TEAM)
         self.assertNotIn("check with the team", text)

@@ -14,7 +14,10 @@ at the start of the run the live database is copied to <db>.arena beside it (are
 the last run's copy, whose lessons that failed the eval gate and still wait come along with their
 exam rows, DECISIONS item 50), and every case, lesson, exam and trial the run writes goes into the copy.
 The live database changes only when a lesson passes the eval gate between rounds: that lesson
-alone is written to it, as the night study writes one there (arena/rounds.py hand_live). The
+alone is written to it, as the night study writes one there (arena/rounds.py hand_live). Before
+every match the Arena reads the live database, read only, for a correction the user typed there
+since the run started that passed its exam, and hands it from that match on (arena/rounds.py
+live_hotfixes and Pool.refresh). The
 Sales agent plays every match with the database's kept lessons handed, as the exam hands them,
 so the gate tests the agent with what it has learned, not the bare seed. A lost training match
 becomes a case in the copy, for the night study between rounds (arena/learn.py). Every agent
@@ -361,10 +364,12 @@ class Arena:
 
     def __init__(self, cards, *, agent_model, customer_model, calls, trust=None, prompt=match_mod.GENERIC_PROMPT,
                  prompt_file=None, held_out=None, matches=10, rounds=DEFAULT_ROUNDS, fact_checks=None, seed=0,
-                 learn=None, between=None, lessons=None, state, reports=None, now=time.time, pool=None):
+                 learn=None, between=None, lessons=None, state, reports=None, now=time.time, pool=None,
+                 before_match=None):
         """prompt_file: where the customer prompt was read from (None for the generic one), saved
         with each match beside the prompt's fingerprint, so the eval gate can read it again.
-        pool: the owner's practice pool (arena/grow.py), which counts each training match's result."""
+        pool: the owner's practice pool (arena/grow.py), which counts each training match's result.
+        before_match: called before every match (arena/rounds.py Pool.refresh: the live corrections)."""
         if pool is None:
             self.train, self.held = split(cards, held_out, seed=seed)
             self.gate_cards = [c for c in self.held if can_buy(c)]  # a card that will not buy is no test of the agent
@@ -380,7 +385,7 @@ class Arena:
         self.prompt_sha = match_mod.prompt_sha(prompt)
         self.prompt_file = None if prompt_file is None else str(prompt_file)
         self.learn, self.between, self.lessons = learn, between, lessons
-        self.pool = pool
+        self.pool, self.before_match = pool, before_match
         self.halt, self.error = CAP, ""  # why the last match was dropped: the cap, or a model error
         self.state = Path(state)
         self.reports = Path(reports) if reports is not None else self.state
@@ -393,6 +398,8 @@ class Arena:
     def play(self, card, match_id, *, opening=None, lessons=None, replay=None):
         """One match and its verdict, saved; None when the cap stopped it (the match is dropped).
         replay: the replay chat's id, saved on the match."""
+        if self.before_match is not None:
+            self.before_match()
         try:
             m = match_mod.play(card, agent_model=self.agent_model, customer_model=self.customer_model,
                                prompt=self.prompt, lessons=lessons or self.lessons, seed=match_id,
@@ -892,13 +899,14 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
         if made:
             agent_model = agent_model or model_mod.Model()
             customer_model = customer_model or model_mod.Model()
-        learn, lessons, between = None, None, None
+        learn, lessons, between, before_match = None, None, None, None
         if args.db:
             from kit.db import Db
             from arena import learn as learn_mod, rounds as rounds_mod
             from reflection import PLUG as SALES_PLUG
             from reflection.exam import _Lessons
             from reflection.lessons import Lessons as SalesLessons
+            started = time.time()  # a correction added live from here on is not in the copy: Pool.refresh hands it
             db = Db(str(arena_copy(args.db)))  # the Arena's own copy; the live database is only read
             mined = history_lessons(db)
             if mined:
@@ -909,7 +917,10 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
                               "mined from imported history")
             learn = lambda m, judged, mid: learn_mod.to_case(db, m, judged, mid)  # noqa: E731
             # the agent's kept lessons, handed as the exam hands them, then those passed between rounds
-            pool = rounds_mod.Pool(SalesLessons(db))
+            live_path = args.db
+            pool = rounds_mod.Pool(SalesLessons(db), hotfixes=lambda: rounds_mod.live_hotfixes(  # read only
+                live_path, SALES_PLUG.agent, started))
+            before_match = pool.refresh
             lessons = _Lessons(pool, None)
             if between_models is not None:
                 examiner = between_models.pop("examiner", rounds_mod.real_examiner)
@@ -925,7 +936,8 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
                       prompt_file=Path(args.customer_prompt).expanduser().resolve() if args.customer_prompt else None,
                       matches=args.matches, rounds=args.rounds,
                       fact_checks=None if args.fact_checks is None else args.fact_checks == "on", seed=args.seed,
-                      learn=learn, between=between, lessons=lessons, state=state, pool=practice)
+                      learn=learn, between=between, lessons=lessons, state=state, pool=practice,
+                      before_match=before_match)
         rep = arena.run()
         if planned is not None:
             rep["replay"] = (arena.replay(*planned) if rep["stopped"] == PASSED

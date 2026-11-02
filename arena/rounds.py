@@ -35,6 +35,15 @@ calling it with a round's number then:
    live database is busy or locked (sqlite3.Error), the lesson is not handed this run: the round
    notes "not handed, live busy" and the run and its report go on.
 
+5. Hands a correction the user typed on the live page while the run goes on (live_hotfixes; Mohamed
+   2026-11-02, "So hotfix should be in arena too then", and "It shouldn't make the same mistake in
+   the same run"): before every match, Pool.refresh reads the live database, read only, for the
+   agent's corrections that passed their exam, run there as a hotfix (on trial or kept) and were
+   added since the run started, and the Pool hands them first in every match after, and to the
+   gate of each new lesson. A correction pulled since is no longer handed. Nothing the run makes
+   (cases, lessons, exams, matches) is ever written to the live database by this step. A live
+   database that is busy, locked or gone keeps the corrections read last.
+
 Every model call of the study, the risk judge, the exam and the rerun is taken from the Arena's own
 call count (arena/run.py Calls, arena-calls.json), so one cap holds the whole run. At the cap each
 part fails closed: no candidates or ideas, the judge unsure (so high), the exam not run (so the
@@ -42,10 +51,11 @@ lesson is refused). Nothing from that study is handed on, and arena/run.py stops
 """
 import sqlite3
 import time
+from pathlib import Path
 
 from engine import exam as exam_mod
 from engine import switches as switches_mod
-from engine.lessons import KEPT, MAX_PICK, PULLED, TRYING, WAITING
+from engine.lessons import HOTFIX_SOURCE, KEPT, MAX_PICK, PERSON, PULLED, TRYING, WAITING
 from engine.plug import ALL
 from engine.risk import LOW
 from engine.study import longest
@@ -55,14 +65,64 @@ LIVE_BUSY = "not handed, live busy"  # a passed lesson the live database could n
 CAP_NOTE = "the model call cap was reached during the night study; nothing it left unchecked is handed on"
 
 
+def live_hotfixes(path, agent, since):
+    """The agent's corrections in the live database at path that passed their exam, run there as a
+    hotfix (on trial or kept) and were added at or after since, oldest first, each as the Pool hands
+    it: kept, its stages and fields as lists, and its id the live id made negative (live_id keeps the
+    live one), so it never reads as a lesson of the Arena's copy. The database is opened read only.
+    sqlite3.Error when it cannot be read (busy, locked, gone, or a database with no lessons yet)."""
+    con = sqlite3.connect(f"{Path(path).resolve().as_uri()}?mode=ro", uri=True, timeout=1)
+    try:
+        con.row_factory = sqlite3.Row
+        rows = con.execute(
+            "SELECT l.* FROM lessons l JOIN lesson_exams e ON e.lesson_id = l.id WHERE l.agent = ? AND l.source = ? "
+            "AND l.origin = ? AND e.passed = 1 AND l.state IN (?, ?) AND l.added_at >= ? ORDER BY l.id",
+            (agent, HOTFIX_SOURCE, PERSON, TRYING, KEPT, float(since))).fetchall()
+    finally:
+        con.close()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d.update(id=-int(d["id"]), live_id=int(d["id"]), state=KEPT,
+                 stages=[t for t in (d.get("stages") or "").split(",") if t],
+                 fields=[t for t in (d.get("fields") or "").split(",") if t])
+        out.append(d)
+    return out
+
+
 class Pool:
     """The lessons the Arena hands (the reflection/exam.py _Lessons kept shape: live() and pick()):
-    the agent's kept lessons, then the lessons this run passed between rounds and handed on, each
-    read again at every call, so one pulled since is not handed. A handed lesson reads as kept here
-    because the Arena hands it in every match, as the exam hands a kept one."""
+    the corrections read from the live database (hotfixes, refreshed before every match), then the
+    agent's kept lessons, then the lessons this run passed between rounds and handed on, each read
+    again at every call, so one pulled since is not handed. A handed lesson reads as kept here
+    because the Arena hands it in every match, as the exam hands a kept one. hotfixes: a callable
+    giving the live corrections (live_hotfixes), or None."""
 
-    def __init__(self, lessons):
+    def __init__(self, lessons, hotfixes=None):
         self.lessons, self.handed = lessons, []
+        self.hotfixes, self.fixes, self.busy, self.seen = hotfixes, [], None, []
+
+    def refresh(self):
+        """Read the live corrections again (before every match). A live database that cannot be read
+        keeps the ones read last and says why in busy."""
+        if self.hotfixes is None:
+            return self.fixes
+        try:
+            got = list(self.hotfixes())
+        except sqlite3.Error as e:
+            self.busy = f"{LIVE_BUSY} ({e})"
+            return self.fixes
+        self.busy = None
+        mine = {les["text"] for les in self.lessons.live() if les["state"] == KEPT}
+        mine |= {les["text"] for les in self._passed()}
+        self.fixes = [les for les in got if les["text"] not in mine]
+        for les in self.fixes:
+            if les["live_id"] not in self.seen:
+                self.seen.append(les["live_id"])
+        return self.fixes
+
+    def _fixes(self, stage=None):
+        return [dict(les) for les in self.fixes if not stage or stage in les["stages"] or ALL in les["stages"]]
 
     def hand_on(self, lesson_id):
         if lesson_id not in self.handed:
@@ -80,11 +140,12 @@ class Pool:
         return out
 
     def live(self, stage=None, now=None):
-        return [les for les in self.lessons.live(stage, now) if les["state"] == KEPT] + self._passed(stage)
+        return (self._fixes(stage) + [les for les in self.lessons.live(stage, now) if les["state"] == KEPT]
+                + self._passed(stage))
 
     def pick(self, stage, text, limit=MAX_PICK, *, case=None, now=None, every_share=False):
         kept = [p for p in self.lessons.pick(stage, text, limit, now=now, every_share=True) if p["state"] == KEPT]
-        return (kept + self._passed(stage))[:min(limit, MAX_PICK)]
+        return (self._fixes(stage) + kept + self._passed(stage))[:min(limit, MAX_PICK)]
 
 
 def goes_ahead(les, trial, passed):
@@ -206,6 +267,12 @@ class Between:
         ids, self.pending = self.pending, []
         out = {"after_round": round_no, "cases": len(ids), "proposed": 0, "passed": 0, "refused": 0,
                "waits_for_yes": 0, "handed": 0, "fixed": 0, "broke": 0, "calls": 0, "lessons": [], "notes": []}
+        if self.pool.seen:  # corrections from the live page this run hands (Pool.refresh)
+            out["hotfixes"] = list(self.pool.seen)
+            out["notes"].append("corrections from the live page handed in this run: live lesson "
+                                + ", ".join(map(str, self.pool.seen)))
+        if self.pool.busy:
+            out["notes"].append(f"corrections from the live page: {self.pool.busy}")
         if not ids:
             out["notes"].append("no lost training match this round, so nothing to study")
             return out

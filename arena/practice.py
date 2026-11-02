@@ -420,6 +420,7 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
     arena = Practice(agent, played, judge_model=judge_model, made_up=made_up, behaviour_from=behaviour_from,
                      agent_model=agent_model, customer_model=customer_model, calls=calls, trust=level,
                      matches=matches, rounds=rounds, seed=seed, state=folder, reports=reports, learn=learn)
+    arena.quick = bool(quick)  # its item says so, so a quick practice never unlocks Connect (Morning.gate)
     return arena.run()
 
 

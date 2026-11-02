@@ -786,10 +786,12 @@ class Morning:
         won, played, needs = item["gate_won"], item["gate_played"], item["needs"]
         if won is None or played is None or not needs:
             return {"passed": False, "said": "Its latest Arena run has no gate result.", "at": item["at"]}
-        if item.get("quick"):  # a gate of one match: a look for judges, never enough to go live
-            return {"passed": False, "said": f"Its latest Arena run, on {_when(item['at'])}, was the quick one; "
-                    "a full run has to pass the gate first.", "at": item["at"]}
         passed = item["kind"] == "arena_rounds" and won >= needs
+        quick = item.get("quick")
+        if quick is True or (passed and quick is not False):  # a gate of one match, or a pass that does not say
+            what = "was the quick one" if quick is True else "does not say it was a full run"  # it was a full run
+            return {"passed": False, "said": f"Its latest Arena run, on {_when(item['at'])}, {what}; "
+                    "a full run has to pass the gate first.", "at": item["at"]}
         run = "Its practice in the Arena" if item["practice"] else "Its latest Arena run"
         said = (f"{run} passed the gate on {_when(item['at'])}." if passed
                 else f"{run}, on {_when(item['at'])}, did not pass the gate.")
@@ -1575,7 +1577,7 @@ class Morning:
                                       "gate_won": _count(item.get("gate_won")),
                                       "gate_played": _count(item.get("gate_played")),
                                       "needs": _count(item.get("needs")), "practice": item.get("practice") is True,
-                                      "quick": item.get("quick") is True}
+                                      "quick": item["quick"] if isinstance(item.get("quick"), bool) else None}
         return out, problems
 
     def read_mode_cards(self):

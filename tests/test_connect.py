@@ -50,7 +50,8 @@ class Base(unittest.TestCase):
 
     def arena(self, kind="arena_rounds", won=4, played=4, needs=4, run="r1", at=NOW, **extra):
         item = dict({"agent": "sales", "kind": kind, "at": at, "run": run, "rounds": 2, "gate_won": won,
-                     "gate_played": played, "needs": needs, "lost": [], "line": "made up for the test"}, **extra)
+                     "gate_played": played, "needs": needs, "lost": [], "line": "made up for the test",
+                     "quick": False}, **extra)  # a full run says so, as arena/run.py writes it
         (self.folder / f"arena-sales-{run}.json").write_text(json.dumps(item), encoding="utf-8")
 
     def page(self, token="t"):
@@ -271,6 +272,25 @@ class OverTheServer(Base):
         self.assertIn("Not connected.", page)
         self.assertFalse(connections.live(self.db, "sales", "whatsapp"))
 
+    def test_a_pass_that_does_not_say_it_was_a_full_run_never_unlocks_connect(self):
+        """Review simplify round 2, finding 5: only an item that says quick is False unlocks Connect."""
+        for extra in ({"quick": None}, {"quick": "false"}, {"quick": 0}, {}):
+            with self.subTest(extra=extra):
+                self.arena(**extra)
+                if not extra:
+                    path = self.folder / "arena-sales-r1.json"
+                    item = json.loads(path.read_text(encoding="utf-8"))
+                    del item["quick"]
+                    path.write_text(json.dumps(item), encoding="utf-8")
+                gate = self.m.gate("sales")
+                self.assertFalse(gate["passed"])
+                self.assertIn("does not say it was a full run", gate["said"])
+                status, page = self.post("/connect", [("agent", "sales"), ("channel", "whatsapp")])
+                self.assertIn("Not connected.", page)
+                self.assertFalse(connections.live(self.db, "sales", "whatsapp"))
+        self.arena(quick=False)
+        self.assertTrue(self.m.gate("sales")["passed"])
+
     def test_connect_is_refused_before_the_gate_and_works_after_then_pull(self):
         status, page = self.post("/connect", [("agent", "sales"), ("channel", "whatsapp")])
         self.assertEqual(status, 200)  # the 303 back, followed: the flash says why
@@ -416,7 +436,7 @@ class AQuickStartAgent(unittest.TestCase):
         self.p = pages.Pages(self.m)
         (folder / "arena-stock_watch-r1.json").write_text(json.dumps(
             {"agent": "stock_watch", "kind": "arena_rounds", "at": NOW, "run": "r1", "gate_won": 4, "gate_played": 4,
-             "needs": 4, "lost": [], "line": "x", "practice": True}), encoding="utf-8")
+             "needs": 4, "lost": [], "line": "x", "practice": True, "quick": False}), encoding="utf-8")
 
     def test_whatsapp_is_next_and_other_channels_are_not_connected_yet(self):
         self.assertEqual(self.m.channels_of("stock_watch"), ["whatsapp", "email"])

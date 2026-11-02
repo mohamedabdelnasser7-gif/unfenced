@@ -334,6 +334,29 @@ class PractiseACase(Base):
         cards = sorted((folder / madeup.FOLDER).iterdir())
         self.assertTrue(all("input" in json.loads(p.read_text()) for p in cards))
 
+    def test_a_quick_practice_marks_its_item_quick_so_it_never_unlocks_connect(self):
+        """Review simplify round 2, finding 5: Build's practise(quick=True) writes an item that says it
+        was quick, and Morning.gate refuses it even when its gate of one match was won."""
+        from engine import plug as plug_mod
+        from reflection import morning as mo
+        folder = write_agent(self.root, "ticket_desk", case=TICKET_CASE, actions=TICKET_ACTIONS)
+        world = PractiseWorld([person("easy"), person("easy")], person=lambda m: say("Thanks " + practice.DONE),
+                              agent=lambda m, t: say("Your refund is on its way."))
+        self.practise(folder, world)
+        items = sorted(self.root.glob("arena-ticket_desk-*.json"))
+        self.assertEqual(len(items), 1)
+        item = json.loads(items[0].read_text(encoding="utf-8"))
+        self.assertEqual((item["kind"], item["quick"], item["practice"]), ("arena_rounds", True, True))
+        self.assertGreaterEqual(item["gate_won"], item["needs"])  # won, and still refused below
+        db_path = str(self.root / "ascent.db")
+        db = Db(db_path)
+        self.addCleanup(db.close)
+        plugs, built = mo.with_built([plug_mod.load(Path(__file__).resolve().parent.parent / "sales" / "plug.json")],
+                                     db_path)
+        gate = mo.Morning(db, plugs, reports=self.root, built=built, db_path=db_path).gate("ticket_desk")
+        self.assertFalse(gate["passed"])
+        self.assertIn("quick one", gate["said"])
+
     def test_the_made_up_cards_ask_for_the_case_and_a_chat_card_asks_as_before(self):
         world = PractiseWorld([person("easy"), person("never")])
         agent = turn.load(write_agent(self.root, "ticket_desk", case=TICKET_CASE, actions=TICKET_ACTIONS))

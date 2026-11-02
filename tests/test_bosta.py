@@ -399,6 +399,11 @@ class Refused(Setup):
 
 
 class TheMapping(unittest.TestCase):
+    def test_the_reason_reaches_the_team_as_one_line(self):
+        """Red team late r1 finding 4: line breaks in the courier's reason never reach the team line."""
+        ev = bosta.read_event(body(47, exceptionCode=8, exceptionReason=" Customer\n\nrefused\r\n  at door "))
+        self.assertEqual(ev.why, "Customer refused at door")
+
     def test_bostas_fields_are_read_in_one_place(self):
         ev = bosta.read_event(body(47, exceptionCode=8, exceptionReason="x" * 500))
         self.assertEqual((ev.delivery, ev.tracking, ev.state, ev.kind, ev.order, ev.code, ev.attempts),

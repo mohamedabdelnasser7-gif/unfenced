@@ -155,7 +155,7 @@ def read_event(payload):
     return Event(delivery=delivery, tracking=_text(payload.get("trackingNumber"))[:64], state=state,
                  kind=_text(payload.get("type")), order=order, code=_number(payload.get("exceptionCode")) or 0,
                  attempts=_number(payload.get("numberOfAttempts")) or 0,
-                 stamp=_number(payload.get("timeStamp")), why=_text(payload.get("exceptionReason"))[:MAX_TEXT])
+                 stamp=_number(payload.get("timeStamp")), why=" ".join(_text(payload.get("exceptionReason")).split())[:MAX_TEXT])  # one line: it reaches the team
 
 
 def outcome(ev):

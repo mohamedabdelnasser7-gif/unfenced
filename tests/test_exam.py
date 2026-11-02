@@ -200,6 +200,11 @@ class Checks(unittest.TestCase):
                   [say(f"hywsal khelal {days} yom")])
         self.both("days_from_tools", "franco-2", [say(f"تقدر تبدل خلال {days} يوم بس لازم يكون متلبسش و علبته موجودة")],
                   [say("momken tbadel khelal 30 yom")])
+        # red team merge r2 low 4: only the exchange sentence may name the exchange days
+        self.both("days_from_tools", "franco-2", [say(f"momken tbadel khelal {days} yom.")],
+                  [say(f"Delivery to Aswan takes {days} days. You can exchange within {days} days.")])
+        self.both("days_from_tools", "franco-2", [say(f"تقدر تبدل خلال {days} يوم")],
+                  [say(f"بدل ما تستنى، التوصيل {days} يوم بس")])
 
     def test_amount_from_tool_on_a_photo(self):
         self.both("amount_from_tool", "real-other-type-photo",

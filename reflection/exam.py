@@ -72,7 +72,8 @@ DAY_UNIT = re.compile(r"\d+\s*(?:(?:-|to|و|ل|او|أو|l|w)\s*\d+\s*)?(?:days?
 DAY_WORD = re.compile(r"days?|yom|youm|ayam|أيام|ايام|يوم|يومين|بكره|bokra|tomorrow|today|النهارده|النهاردة|"
                       r"ennaharda|elnaharda|el naharda|yesterday|امبارح|embare7|mbare7", re.IGNORECASE)
 EXCHANGE_DAYS = re.search(r"Exchanges: within (\d+) days", CHECKS_TEXT).group(1)
-EXCHANGE_TALK = re.compile(r"exchange|t?badel|abadel|ybadel|تبدل|تبديل|استبدال|بدل", re.IGNORECASE)
+EXCHANGE_TALK = re.compile(r"exchange|t?badel|abadel|ybadel|nbadel|[تينا]بدل|تبديل|استبدال", re.IGNORECASE)
+SENTENCE = re.compile(r"[.!?؟\n]+")
 
 
 class Graded(Exception):
@@ -233,16 +234,16 @@ def check_order(s, did):
 
 def check_days_from_tools(s, did):
     """A day count only when a tool this turn gave that number (delivery days, an order's dates), or
-    the exchange days of the instructions in a reply that talks about an exchange."""
+    the exchange days of the instructions in a sentence that talks about an exchange."""
     allowed = set()
-    if EXCHANGE_TALK.search(send_check._plain(did["reply"])):
-        allowed.add(int(EXCHANGE_DAYS))
     for _, res in did["tools"]:
         allowed |= {int(x) for x in re.findall(r"\d+", json.dumps(res))}
-    for m in DAY_UNIT.finditer(send_check._plain(did["reply"])):
-        for n in re.findall(r"\d+", m.group(0)):
-            if int(n) not in allowed:
-                return f"a day count ({n}) no tool gave this turn; call delivery or find_order"
+    for sentence in SENTENCE.split(send_check._plain(did["reply"])):
+        here = allowed | ({int(EXCHANGE_DAYS)} if EXCHANGE_TALK.search(sentence) else set())
+        for m in DAY_UNIT.finditer(sentence):
+            for n in re.findall(r"\d+", m.group(0)):
+                if int(n) not in here:
+                    return f"a day count ({n}) no tool gave this turn; call delivery or find_order"
     return ""
 
 

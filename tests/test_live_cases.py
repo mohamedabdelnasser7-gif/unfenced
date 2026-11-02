@@ -169,7 +169,12 @@ class ATagIsNotAHandOver(unittest.TestCase):
                      # review merge r1 finding 3: a person taking the chat, no customer named
                      "Tag the chat urgent and the owner will take over.", "Flag it and a team member will reply shortly.",
                      "Tag the ticket and someone from the team will respond.", "Tag it and the owner will answer.",
-                     "Flag the chat so the team takes over.", "Tag the conversation and a person will continue."):
+                     "Flag the chat so the team takes over.", "Tag the conversation and a person will continue.",
+                     # red team merge r2 low 3
+                     "Label it urgent so a human picks up from here", "Tag it as needs-review and the team joins right away",
+                     # review merge r2 low 3
+                     "Tag the chat urgent and the owner will step in", "Tag it and a team member will call them back",
+                     "Flag it and the team will follow up", "Tag it and someone will carry on"):
             with self.subTest(text=text):
                 self.assertIsNotNone(qs.names_a_person(text))
 

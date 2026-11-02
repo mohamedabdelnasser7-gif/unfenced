@@ -5,7 +5,8 @@ Both sides grow, the way the assistant's Arena grows from real days (assistant/a
 night Reflection reads an agent's new real chats (kit/chats.py, the agent's database) and sends
 the Arena new practice cases beside its lessons (item 47), for an agent of any kind (item 79), each
 into the pool of its own kind. The chats read are the agent's own: the chats its log names
-(engine/log.py trace, by case id), and for the database's own agent (the Sales agent, run with no
+(engine/log.py trace, by the chat's case id, so a later talk of a case is the agent's too, DECISIONS
+item 65), and for the database's own agent (the Sales agent, run with no
 folder of its own) the chats no log names for another agent too. An agent Quick start built reads
 only the chats its log names. Each chat is labelled:
   lost     quiet after the price (arena/label.py): kept.
@@ -90,6 +91,7 @@ from collections import Counter
 from pathlib import Path
 
 from engine import plug as plug_mod
+from engine.log import TALK
 from reflection import history as hist
 from arena import cards as cards_mod
 from arena import label as label_mod
@@ -627,7 +629,8 @@ def real_chats(db, since, until, pool=None, agent=None, own=True):
         tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         if not {"chats", "steps"} <= tables:
             return []
-        mine, args = _theirs(agent, own, "trace" in tables)
+        talks = "case_id" in {r[1] for r in c.execute("PRAGMA table_info(chats)")}
+        mine, args = _theirs(agent, own, "trace" in tables, "COALESCE(case_id, id)" if talks else "id")
         if mine is None:
             return []
         ids = {}
@@ -671,28 +674,34 @@ def real_chats(db, since, until, pool=None, agent=None, own=True):
     return out
 
 
-def _theirs(agent, own, traced):
-    """The SQL that keeps one agent's chats, and its arguments: ("", ()) for every chat, None for none."""
+def _theirs(agent, own, traced, case="id"):
+    """The SQL that keeps one agent's chats, and its arguments: ("", ()) for every chat, None for none.
+    case: the SQL for a chat's case id in the log (its own id in a database made before talks)."""
     if agent is None or (own and not traced):
         return "", ()
     if not traced:  # no log in this database: an agent with no folder of its own has no chats here
         return None, ()
-    named = "id IN (SELECT case_id FROM trace WHERE agent = ?)"
+    named = f"{case} IN (SELECT case_id FROM trace WHERE agent = ?)"
     if not own:
         return f" AND {named}", (agent,)
-    return f" AND ({named} OR id NOT IN (SELECT case_id FROM trace WHERE agent != ?))", (agent, agent)
+    return f" AND ({named} OR {case} NOT IN (SELECT case_id FROM trace WHERE agent != ?))", (agent, agent)
 
 
 def decided(db, plug, chat_id, until):
-    """The agent's last deciding result in its log for this chat before until (engine/plug.py
+    """The agent's last deciding result in its log for this chat's talk before until (engine/plug.py
     decides): label.LOST when bad, label.WON when good, None when there is none."""
     results = (plug.decides.good, *plug.decides.bad)
     with db.tx() as c:
         if not c.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'trace'").fetchone():
             return None
-        row = c.execute(f"SELECT result FROM trace WHERE agent = ? AND case_id = ? AND at < ? AND result IN "
-                        f"({', '.join('?' * len(results))}) ORDER BY at DESC, id DESC LIMIT 1",
-                        (plug.agent, chat_id, until, *results)).fetchone()
+        case, talk = chat_id, 1
+        if "case_id" in {r[1] for r in c.execute("PRAGMA table_info(chats)")}:
+            got = c.execute("SELECT COALESCE(case_id, id), COALESCE(talk, 1) FROM chats WHERE id = ?",
+                            (chat_id,)).fetchone()
+            case, talk = got if got is not None else (chat_id, 1)
+        row = c.execute(f"SELECT result FROM trace WHERE agent = ? AND case_id = ? AND {TALK} = ? AND at < ? "
+                        f"AND result IN ({', '.join('?' * len(results))}) ORDER BY at DESC, id DESC LIMIT 1",
+                        (plug.agent, case, talk, until, *results)).fetchone()
     if row is None:
         return None
     return label_mod.WON if row[0] == plug.decides.good else label_mod.LOST

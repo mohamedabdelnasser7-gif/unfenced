@@ -11,7 +11,10 @@ deciding result never gets a note. sweep() finds
 those cases and writes their notes, so a sweep every few seconds writes a note within seconds of
 the case ending. One note per ending: the case id and the time of its last action. A case whose
 next case keeps its id (a plug whose case id names its source) can end again later and gets a
-new note then. Rows imported from past data (log.is_history) never get a note.
+new note then. A case in talks (engine/log.py, DECISIONS item 65) is read one talk at a time: each
+talk ends on its own, gets its own note, saved under its window key (log.talk_key: the case id for
+talk 1, "<case id> talk 2" after), and a note for one talk goes to the next talk of the same case.
+Rows imported from past data (log.is_history) never get a note.
 
 What the writer reads. The case's own rows from the log (its actions, results and their detail)
 and, when the agent gives a reader, the case's turns: who said what, each {"from", "text"} or
@@ -75,7 +78,7 @@ import time
 import unicodedata
 
 from engine import risk as risk_mod
-from engine.log import Log, case_key, is_history, source_key
+from engine.log import TALK, Log, case_key, is_history, source_key, talk_key
 from engine.plug import CASE, Risk
 from engine.study import BAD, PartError, read_days, settle
 
@@ -205,26 +208,28 @@ class FastNotes:
         if not self.plug.decides.bad:  # with no bad deciding result no case ends not good (item 66)
             return []
         window = read_days(self.plug) * DAY  # how far back to look for a late bad result; never ends a case
-        sql = ("SELECT case_id, MAX(at) AS last FROM trace WHERE agent = ? AND action IS NOT NULL AND at <= ? "
-               "GROUP BY case_id HAVING last >= ?")
+        sql = (f"SELECT case_id, {TALK} AS talk, MAX(at) AS last FROM trace WHERE agent = ? AND action IS NOT NULL "
+               f"AND at <= ? GROUP BY case_id, {TALK} HAVING last >= ?")
         args = [self.agent, now, now - window - self.keep_days * DAY]
         with self.db.tx() as c:
-            found = c.execute(sql + " ORDER BY last, case_id", args).fetchall()
+            found = c.execute(sql + " ORDER BY last, case_id, talk", args).fetchall()
             done = {(r["case_id"], r["ended_at"]) for r in c.execute(
                 "SELECT case_id, ended_at FROM fast_notes WHERE agent = ?", (self.agent,))}
         out = []
         for r in found:
             if len(out) >= limit:
                 break
-            if (r["case_id"], r["last"]) in done:
+            key = talk_key(r["case_id"], r["talk"])  # one talk at a time: each ends on its own
+            if (key, r["last"]) in done:
                 continue
-            wrote = self._one(r["case_id"], now)
+            wrote = self._one(key, now)
             if wrote is not None:
                 out.append(wrote)
         return out
 
     def _one(self, case_id, now):
-        rows = [r for r in self.log.case(case_id) if r["at"] <= now]
+        """case_id: a talk's window key; only that talk's rows are read."""
+        rows = [r for r in self.log.talk(case_id) if r["at"] <= now]
         acted = [r["at"] for r in rows if r["action"] is not None]
         if not acted or any(is_history(r) for r in rows):
             return None
@@ -329,20 +334,26 @@ class FastNotes:
             note = dict(row)
             state = self._state(c, note, now)
             if state == WAITING:
-                if key != note["case_id"] and c.execute(
-                        "SELECT 1 FROM trace WHERE agent = ? AND case_id = ? AND action IS NOT NULL LIMIT 1",
-                        (self.agent, key)).fetchone():
+                if key != note["case_id"] and self._acted_in(c, key):
                     return None  # another case already under way: a note never joins a case half way
                 c.execute("UPDATE fast_notes SET used_case = ?, used_at = ? WHERE id = ?", (key, now, note["id"]))
             elif state != GIVEN or note["used_case"] != key:
                 return None
             return {"id": note["id"], "text": note["text"], "case": note["case_id"]}
 
+    def _acted_in(self, c, key):
+        """Has this talk (a window key) had an action yet?"""
+        case, talk = self.log.unit(key)
+        return c.execute(f"SELECT 1 FROM trace WHERE agent = ? AND case_id = ? AND {TALK} = ? AND action IS NOT NULL "
+                         "LIMIT 1", (self.agent, case, talk)).fetchone() is not None
+
     def _source(self, key, source):
+        """The source behind a talk's window key: the case id itself when the case names it."""
         if self.plug.source.known_by == CASE:
-            if source is not None and source_key(source) != key:
+            case = self.log.unit(key)[0]
+            if source is not None and source_key(source) != case:
                 raise ValueError(f"for {self.agent} the case id names the source; leave source out")
-            return key
+            return case
         if source is None:
             raise ValueError(f"{self.agent} names the source of each row; give it")
         return source_key(source)
@@ -406,8 +417,9 @@ class FastNotes:
         """Has the note's one next case ended: a deciding result since it was first given? No day
         count ends it (DECISIONS item 66)."""
         deciders = {self.plug.decides.good, *self.plug.decides.bad}
-        for r in c.execute("SELECT result FROM trace WHERE agent = ? AND case_id = ? AND at >= ? AND at <= ? "
-                           "ORDER BY at, id", (self.agent, note["used_case"], note["used_at"], now)):
+        case, talk = self.log.unit(note["used_case"])
+        for r in c.execute(f"SELECT result FROM trace WHERE agent = ? AND case_id = ? AND {TALK} = ? AND at >= ? "
+                           "AND at <= ? ORDER BY at, id", (self.agent, case, talk, note["used_at"], now)):
             if r["result"] in deciders:
                 return True
         return False

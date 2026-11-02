@@ -23,6 +23,16 @@ A chat ends after quiet (DECISIONS item 54, sales/quiet.py): notice_at is when t
 the customer the chat closes soon, closed_at is when it closed. open() never returns a closed
 chat: the customer's next message starts a new chat on the same channel and customer_id.
 first_chat() names the customer across their chats: the id of their first chat on that channel.
+
+Case and talk (DECISIONS item 65). A customer who writes again after their chat closed is the same
+case: the new chat keeps the case id of their last chat on the channel and is its next talk (talk 2,
+talk 3), so the log (engine/log.py) saves it under the same case id with its own talk number, its
+own result and its own Reflection. A new customer's first chat starts a case named by its own id,
+talk 1. The case id is always a chat id, never the customer's number. A branch (a replay copy) is a
+case of its own, talk 1, as before. talk() gives a chat's (case id, talk), chat_of() the chat of a
+talk. A database made before talks gets the two columns, and every chat in it is left as it was: its
+own case, talk 1, so every saved result stays where it is; a customer's next chat after the upgrade
+continues their last chat's case.
 receive() finds the open chat and saves the customer's step in one transaction, so a close can never
 come between the two: the step lands in an open chat, or in a new one when the last closed first.
 mark_notice() and close() take the tick's view of the chat (last_n, its last customer or agent step)
@@ -58,7 +68,9 @@ CREATE TABLE IF NOT EXISTS chats (
   updated_at REAL NOT NULL,
   model_errors INTEGER NOT NULL DEFAULT 0,
   notice_at REAL,
-  closed_at REAL
+  closed_at REAL,
+  case_id TEXT,
+  talk INTEGER
 );
 CREATE INDEX IF NOT EXISTS chats_customer ON chats (channel, customer_id, parent_id);
 CREATE TABLE IF NOT EXISTS steps (
@@ -86,6 +98,8 @@ CHAT_COLUMNS = (
     ("model_errors", "INTEGER NOT NULL DEFAULT 0"),
     ("notice_at", "REAL"),
     ("closed_at", "REAL"),
+    ("case_id", "TEXT"),
+    ("talk", "INTEGER"),
 )
 SEEN_COLUMNS = (
     ("status", "TEXT NOT NULL DEFAULT 'done'"),
@@ -102,6 +116,8 @@ PENDING_FOR = ("EXISTS (SELECT 1 FROM seen_messages m WHERE m.status = 'pending'
                "AND json_extract(m.payload, '$.customer_id') = {customer})")
 # Only pending rows are ever looked up by state; done ones pile up and are never read again.
 PENDING_INDEX = "CREATE INDEX IF NOT EXISTS seen_pending ON seen_messages (at) WHERE status = 'pending'"
+# One chat per talk of a case (branches aside, each its own case).
+TALK_INDEX = "CREATE UNIQUE INDEX IF NOT EXISTS chats_talk ON chats (case_id, talk) WHERE parent_id IS NULL"
 FIRST_STAGE = "asking"
 MAX_ATTEMPTS = 3
 PERSON = "person"   # the name on an assistant step a team member wrote, in an imported chat
@@ -122,6 +138,9 @@ class Chats:
                         c.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
                         close_old = close_old or (table, name) == ("chats", "closed_at")
             c.execute(PENDING_INDEX)
+            # a chat made before talks is left as it was: its own case, talk 1
+            c.execute("UPDATE chats SET case_id = id, talk = 1 WHERE case_id IS NULL")
+            c.execute(TALK_INDEX)
             if close_old:  # after seen_messages has its columns, which the pending check reads
                 self._close_old(c)
 
@@ -146,11 +165,14 @@ class Chats:
 
     def _open(self, c, channel, customer_id):
         row = c.execute(
-            "SELECT id, closed_at FROM chats WHERE channel = ? AND customer_id = ? AND parent_id IS NULL "
+            "SELECT id, closed_at, case_id, talk FROM chats WHERE channel = ? AND customer_id = ? AND parent_id IS NULL "
             "ORDER BY created_at DESC, rowid DESC LIMIT 1", (channel, customer_id)).fetchone()
         if row and row["closed_at"] is None:
             return row["id"]
-        return self._new(c, channel, customer_id)
+        if row is None:
+            return self._new(c, channel, customer_id)
+        # the customer wrote again after their chat closed: the same case, its next talk
+        return self._new(c, channel, customer_id, case_id=row["case_id"] or row["id"], talk=(row["talk"] or 1) + 1)
 
     def receive(self, channel, customer_id, content=None, media=None, message_id=None):
         """Save a customer's message as a user step in their open chat, or in a new chat when the last
@@ -171,6 +193,32 @@ class Chats:
                 "AND f.parent_id IS NULL WHERE ch.id = ? ORDER BY f.created_at, f.rowid LIMIT 1",
                 (chat_id,)).fetchone()
         return row["id"] if row else chat_id
+
+    def talk(self, chat_id):
+        """(case id, talk) of a chat: the case it belongs to and which talk of it, from 1. (chat_id,
+        None) when the chat is not saved here, so a log row for it names the chat itself."""
+        with self.db.tx() as c:
+            row = c.execute("SELECT case_id, talk FROM chats WHERE id = ?", (chat_id,)).fetchone()
+        return (row["case_id"] or chat_id, row["talk"] or 1) if row else (chat_id, None)
+
+    def chat_of(self, case_id, talk=1):
+        """The chat that is this talk of this case (never a branch's copy unless the branch is the
+        case), or None when there is none."""
+        with self.db.tx() as c:
+            row = c.execute("SELECT id FROM chats WHERE COALESCE(case_id, id) = ? AND COALESCE(talk, 1) = ? "
+                            "ORDER BY parent_id IS NOT NULL, created_at, rowid LIMIT 1", (case_id, talk)).fetchone()
+        return row["id"] if row else None
+
+    def customer_cases(self, chat_id):
+        """The case ids of this chat's customer on its channel (never a branch), oldest first;
+        [chat_id] when it is not saved here. More than one only for chats made before talks."""
+        with self.db.tx() as c:
+            rows = c.execute(
+                "SELECT COALESCE(f.case_id, f.id) AS case_id FROM chats ch JOIN chats f ON f.channel = ch.channel "
+                "AND f.customer_id = ch.customer_id AND f.parent_id IS NULL WHERE ch.id = ? "
+                "GROUP BY COALESCE(f.case_id, f.id) ORDER BY MIN(f.created_at), MIN(f.rowid)",
+                (chat_id,)).fetchall()
+        return [r["case_id"] for r in rows] or [chat_id]
 
     def customer_chats(self, chat_id):
         """Every chat of this chat's customer on its channel (never a branch), oldest first; [chat_id]
@@ -235,12 +283,15 @@ class Chats:
             return True
 
     def _new(self, c, channel, customer_id, stage=FIRST_STAGE, failed=0, parent=None, at_step=None,
-             model_errors=0):
+             model_errors=0, case_id=None, talk=1):
+        """A new chat: talk `talk` of case_id, or with no case_id the first talk of a case named by
+        its own id."""
         chat_id = uuid.uuid4().hex
         now = self.clock()
         c.execute("INSERT INTO chats (id, channel, customer_id, stage, failed_checks, model_errors, parent_id, "
-                  "branched_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                  (chat_id, channel, customer_id, stage, failed, model_errors, parent, at_step, now, now))
+                  "branched_at, created_at, updated_at, case_id, talk) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                  (chat_id, channel, customer_id, stage, failed, model_errors, parent, at_step, now, now,
+                   chat_id if case_id is None else case_id, talk))
         return chat_id
 
     def get(self, chat_id):

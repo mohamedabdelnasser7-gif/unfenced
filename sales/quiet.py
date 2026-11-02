@@ -14,7 +14,8 @@ thread (channels/whatsapp.py), with a clock tests can set.
 - A chat that closes with no order gets the result chat_closed at once: the plug's bad deciding
   result, so the fast reflection sweep (reflection/fast.py) writes its note in the same sweep
   and that night's Reflection reads the chat as lost. A chat with an order closes with no row.
-- The customer's next message starts a new chat on the same customer_id (kit/chats.py).
+- The customer's next message starts a new chat on the same customer_id (kit/chats.py): the same
+  case, its next talk, so each close and its result belong to that one talk (DECISIONS item 65).
 - A paused agent (kit/switch.py) sends no notice and closes no chat.
 - A chat whose notice was already due when this process started (it went quiet before a restart or
   an upgrade) closes at the first tick, silently, with its result as above: no customer gets a
@@ -107,7 +108,6 @@ def _close(ch, chats, results, now, quiet=NOTICE_AFTER + CLOSE_AFTER):
     with chats.db.tx():
         if not chats.close(ch["id"], now, last_n=ch.get("last_n")):
             return False
-        if not results.query(case=ch["id"], result=PLUG.decides.good):
-            results.result(ch["id"], CLOSED, stage=ch["stage"], at=now,
-                           detail={"quiet_minutes": int(quiet // 60)})
+        if not any(r["outcome"] == PLUG.decides.good for r in results.for_chat(ch["id"])):  # this talk's order
+            results.record(ch["id"], CLOSED, stage=ch["stage"], at=now, detail={"quiet_minutes": int(quiet // 60)})
     return True

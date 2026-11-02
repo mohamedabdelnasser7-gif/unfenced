@@ -77,6 +77,7 @@ import urllib.request
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from engine.log import TALK, talk_key
 from reflection.results import late
 from channels.whatsapp import DeadlineReader, FIRST_LINE_DEADLINE, MAX_OPEN, MIN_SECRET, REQUEST_DEADLINE, \
     SOCKET_TIMEOUT
@@ -205,7 +206,8 @@ class Deliveries:
 
     def case_for_order(self, order, what):
         """(plug, case id) of the one case this order belongs to, among the agents that take
-        this result, or None when there is none or more than one."""
+        this result, or None when there is none or more than one. The case id is a window key
+        (engine/log.py talk_key), so a case in talks gets the result on the talk that ordered."""
         names = order_names(order)
         found = []
         sales = self.results.plug
@@ -219,10 +221,10 @@ class Deliveries:
                 continue
             with self.db.tx() as c:
                 rows = c.execute(
-                    "SELECT DISTINCT case_id FROM trace WHERE agent = ? AND action IS NOT NULL "
+                    f"SELECT DISTINCT case_id, {TALK} AS talk FROM trace WHERE agent = ? AND action IS NOT NULL "
                     "AND json_valid(detail) AND json_extract(detail, '$.history') IS NULL "
                     f"AND json_extract(detail, '$.order') IN ({marks})", (plug.agent, *names)).fetchall()
-            found += [(plug, r["case_id"]) for r in rows]
+            found += [(plug, talk_key(r["case_id"], r["talk"])) for r in rows]  # one talk of a case
             if len(found) > 1:
                 break
         return found[0] if len(found) == 1 else None

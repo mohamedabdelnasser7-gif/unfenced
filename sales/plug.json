@@ -1,7 +1,7 @@
 {
   "agent": "sales",
   "about": "Answers a store's customers on WhatsApp and takes orders after a plain yes.",
-  "case": "One WhatsApp chat with one customer; the case id is the chat id. A chat closes after an hour of quiet; the customer's next message starts a new chat.",
+  "case": "One customer on WhatsApp; the case id is the id of their first chat. A chat closes after an hour of quiet; the customer's next message starts a new chat, the next talk of the same case (talk 2, talk 3), and each talk has its own result.",
   "fields": ["retail"],
   "stages": ["asking", "ordering", "my_order"],
   "actions": {
@@ -40,7 +40,7 @@
     "area": "The customer's area."
   },
   "source": {
-    "about": "The person writing in, in one chat, so the chat id names them in the log. Their next chat after one closes is a new case; the fast note follows them there (reflection/fast.py).",
+    "about": "The person writing in, so the case id names them in the log. Their next chat after one closes is the next talk of the same case; the fast note follows them there (reflection/fast.py).",
     "known_by": "case"
   },
   "harm": {

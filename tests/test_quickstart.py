@@ -25,11 +25,16 @@ from tests.fake_model import FakeModel, say
 ROOT = Path(__file__).resolve().parent.parent
 
 
+CASE = {"input": "a customer's question about whether an item is in stock", "starts": "person",
+        "output": "a clear in stock or out of stock answer", "ends": "the customer has the answer"}
+
+
 def card_reply(name="Stock watcher", key="stock_watcher", question="Which store do you sell on?",
-               follow="Here is my first guess. Add or change anything you like before I build it.", needs=None):
+               follow="Here is my first guess. Add or change anything you like before I build it.", needs=None,
+               case=CASE, bad="You hear about a low item only after it ran out."):
     return say(json.dumps({"card": {
         "name": name, "key": key, "does": "Checks stock every morning and tells you which items run low.",
-        "good": "You hear about a low item a day before it runs out.",
+        "case": case, "good": "You hear about a low item a day before it runs out.", "bad": bad,
         "never": ["Never orders stock by itself", "Never messages a supplier"],
         "needs": needs if needs is not None else [{"what": "Your store's stock", "tool": "store"},
                                                    {"what": "Bosta stock reports", "tool": "bosta"}]},
@@ -179,7 +184,7 @@ class QuickStartPage(unittest.TestCase):
                          [("good-1", {"reply": True}),
                           ("never-1", {"reply": True, "never": "Never orders stock by itself", "judge": True}),
                           ("needs-1", {"reply": True, "tools": ["store"]}), ("good-2", {"reply": True})])
-        self.assertEqual(self.model.calls[2]["messages"][0]["content"], turn_exam.SYSTEM)
+        self.assertEqual(self.model.calls[2]["messages"][0]["content"], turn_exam.SYSTEM + turn_exam.CASE_PART)
         self.assertEqual({k: (v.share, v.days) for k, v in plug.levels.items()}, {"fast": (0.5, 7), "careful": (0.2, 14)})
         self.assertIn("store", plug.risk.tools)
         self.assertIn(("number", "[0-9]"), plug.risk.patterns)

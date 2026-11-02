@@ -13,6 +13,13 @@ they open, a few example lines, and why the last one never gets there). Each tex
 MAX_TEXT characters and each list to MAX_ITEMS. An answer that cannot be read as that JSON is a
 model fault: it raises kit/model.py ModelError, and the run stops as it does for any model fault.
 
+A card with a case (DECISIONS item 68: card.json "case", what arrives, who starts, what the agent
+produces, when it ends) plays that case, not a chat: the model also writes each person's "input", the
+full first input of their case as it arrives (a whole ticket, a brief, a whole email thread), or for a
+case the agent starts, the record it starts from (a lead's details). The input is kept beside the
+persona fields, cut to MAX_INPUT, and arena/practice.py opens the match with it. Each person writes in
+the language the agent's card is written in, unless its work says otherwise.
+
 Every card says "made_up": true, so the page can say the customers are made up, with chats, won
 and lost at 0 (no real chat stands behind it). The cards are saved in the agent's folder,
 practice-cards/persona-NN.json, with the card.json fingerprint they were written from, and used
@@ -51,6 +58,7 @@ LANGUAGES = ("arabic", "franco", "english")
 LENGTHS = ("short", "medium", "long")
 MAX_TEXT = 200
 MAX_ITEMS = 4
+MAX_INPUT = 1200  # characters of a case's first input (a ticket, a brief, a thread)
 FOLDER = "practice-cards"
 CARD_FILE = re.compile(r"persona-\d{2}\.json")
 EFFORT = "medium"
@@ -70,7 +78,8 @@ SYSTEM = (
     "one JSON object only, no other text: {\"customers\": [one object for each kind asked, in the same "
     "order]}. Each object has: \"want\" (a list of up to 4 short lines, what the person wants from the "
     "agent), \"worry\" (one short line), \"settles_it\" (a list of up to 4 short lines, what makes the "
-    "person satisfied), \"language\" (arabic, franco or english; Egyptian customers mostly write arabic), "
+    "person satisfied), \"language\" (arabic, franco or english; the language the agent card is written in, "
+    "unless its work says otherwise), "
     "\"length\" (short, medium or long), \"opening\" (a few words on what the first message is about), "
     "\"examples\" (up to 4 lines the person might write), and for the kind never only, \"why_not\" (one "
     "short line, why this person will not reach the good result in this chat). Kinds: easy means a clear "
@@ -93,6 +102,34 @@ BLEND_SYSTEM = (
     "who cannot reach the good result only, \"why_not\" (one short line, why not in this chat). Make every "
     "person different. Use no real names, phone numbers or addresses."
 )
+
+
+CASE_PART = (
+    " The agent card has a case: what one case is for this agent. Each person is the source of one such case, "
+    "and the want, worry and settles_it are about that case. Add \"input\": the full first input of their case "
+    "exactly as it arrives, written as this person would (the whole ticket, the brief, the whole email thread), "
+    "at most 1200 characters. When the case starts with the agent, \"input\" is the record the agent starts "
+    "from (for example a lead's details), and the person is the one the agent writes to, who may never answer."
+)
+
+
+def asked_card(card):
+    """What the model reads of the agent's card: name, does, good, never, and bad and case when it has them."""
+    out = {k: card.get(k) for k in ("name", "does", "good", "never")}
+    for k in ("bad", "case"):
+        if card.get(k):
+            out[k] = card[k]
+    return out
+
+
+def system_for(system, card):
+    """The system line for card: with CASE_PART when the card has a case."""
+    return system + (CASE_PART if isinstance(card.get("case"), dict) else "")
+
+
+def _input(v):
+    v = " ".join(v.split()) if isinstance(v, str) else ""
+    return v[:MAX_INPUT]
 
 
 class Unreadable(ModelError):
@@ -144,13 +181,19 @@ def card_of(i, kind, got, agent, source, n):
                       "opening": {opening: 1.0}},
             "chats": 0, "won": 0, "lost": 0, "examples": _texts(got.get("examples")),
             "share": round(1 / n, 3), "arena_weight": round(1 / n, 3),
-            "made_up": True, "kind": kind, "agent": agent, "from_card": source}
+            "made_up": True, "kind": kind, "agent": agent, "from_card": source, **_case_input(got)}
+
+
+def _case_input(got):
+    """{"input": the case's first input} when the model wrote one, else nothing."""
+    text = _input(got.get("input"))
+    return {"input": text} if text else {}
 
 
 def write(agent, card, model, kinds=KINDS):
     """The practice customers for agent, from its card.json (a dict), in one model call."""
-    ask = {"agent_card": {k: card.get(k) for k in ("name", "does", "good", "never")}, "kinds": list(kinds)}
-    out = model.chat([{"role": "system", "content": SYSTEM},
+    ask = {"agent_card": asked_card(card), "kinds": list(kinds)}
+    out = model.chat([{"role": "system", "content": system_for(SYSTEM, card)},
                       {"role": "user", "content": json.dumps(ask, ensure_ascii=False)}],
                      effort=EFFORT, max_tokens=MAX_TOKENS)
     got = _json(out.get("content") if isinstance(out, dict) else None)
@@ -321,15 +364,14 @@ def blended(i, b, got, agent, source, n):
             "chats": 0, "won": 0, "lost": 0, "examples": _texts(got.get("examples")),
             "share": b["share"] or round(1 / n, 3), "arena_weight": b["weight"] or round(1 / n, 3),
             "made_up": True, "kind": "never" if never else "behaviour", "agent": agent, "from_card": source,
-            "behaviour_from": [b["id"]]}
+            "behaviour_from": [b["id"]], **_case_input(got)}
 
 
 def blend(agent, card, model, profiles):
     """The practice customers for agent with the behaviour of the owner's real cards (profiles, from
     owner_cards) and wants from its card.json, in one model call."""
-    ask = {"agent_card": {k: card.get(k) for k in ("name", "does", "good", "never")},
-           "people": [asked(b) for b in profiles]}
-    out = model.chat([{"role": "system", "content": BLEND_SYSTEM},
+    ask = {"agent_card": asked_card(card), "people": [asked(b) for b in profiles]}
+    out = model.chat([{"role": "system", "content": system_for(BLEND_SYSTEM, card)},
                       {"role": "user", "content": json.dumps(ask, ensure_ascii=False)}],
                      effort=EFFORT, max_tokens=MAX_TOKENS)
     got = _json(out.get("content") if isinstance(out, dict) else None)

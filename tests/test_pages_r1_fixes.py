@@ -227,7 +227,7 @@ class BoxCopy(Base):
     def test_the_box_says_what_a_correction_does(self):
         page = pages.Pages(self.m).get("/agents/sales", {}, "t")
         self.assertIn(pages.h(pages.SAY_NOTE), page)
-        for said in ("short exam", "at once as a hotfix in half the chats", "high risk", "your yes on Today"):
+        for said in ("short exam", "at once as a hotfix in half the cases", "high risk", "your yes on Today"):
             self.assertIn(said, pages.SAY_NOTE)
 
 

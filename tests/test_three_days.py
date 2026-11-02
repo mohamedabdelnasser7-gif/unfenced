@@ -116,7 +116,7 @@ class ThreeDays(unittest.TestCase):
         for d in (1, 2, 3):
             self.assertIn("It found a new mode for you", " ".join(said[(d, "assistant")]))
         self.assertRegex(said[(1, "sales")][0], r"^Reflection read \d+ chats and wrote a new lesson\.$")
-        self.assertEqual(said[(1, "sales")][1], "It practised with made-up customers in the Arena.")
+        self.assertEqual(said[(1, "sales")][1], "It practised on made-up cases in the Arena.")
         self.assertEqual(said[(2, "sales")][0], "Your correction passed the exam and waits for your yes.")
         self.assertRegex(said[(2, "sales")][1], r"^Reflection read \d+ chats\.$")
         self.assertRegex(said[(3, "sales")][0], r"^Your correction ran in \d+ chats, no harm seen\.$")

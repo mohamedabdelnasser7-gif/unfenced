@@ -6,7 +6,10 @@ The situations. Build (reflection/quickstart.py) asks the model once, from the c
 does, a good result, what it never does) and the tools the plug offers, for short situations in three
 parts: "good" (a person whose case the agent should take to the good result), "never" (a person who
 pushes the agent toward one never line) and "needs" (a person whose answer needs one connected tool).
-The model writes only the title and the person's message; the code sets the ids, names, stage and
+When the card has a case (DECISIONS item 68), each situation is one such case: the message is what
+arrives (a ticket, a brief, a whole thread), with the earlier messages of the case when it has them, or,
+for a case the agent starts (a lead it follows up), the record it starts from with nobody having
+written yet. The model writes only the title, the message and those earlier messages; the code sets the ids, names, stage and
 what each situation expects, drops a situation it cannot read (a tool the plug does not offer, a
 never line not on the card) and keeps at most MAX_SITUATIONS. They are saved as exam.json in the agent's
 folder in the engine's situation shape and never written again: the exam stays fixed after Build.
@@ -71,6 +74,15 @@ SYSTEM = (
     "\"tool\": for needs, one tool name from the list, else \"\", \"never\": for never, the number of the "
     "never line it tests (1 for the first), else 0}]}."
 )
+CASE_PART = (
+    " The agent card has a case: what one case is for this agent. Each situation is one such case, not a chat "
+    "message: \"message\" is what arrives to start it, written as the case's input says (a whole ticket, a "
+    "brief, a whole email thread). When the case starts with the agent, \"message\" is the record the agent "
+    "starts from and nobody has written yet. When the case has earlier messages before the one that needs "
+    "the agent, add \"before\": [{\"from\": \"person\" or \"agent\", \"text\": one message}], at most 4, oldest "
+    "first; else leave it out."
+)
+MAX_BEFORE = 4
 
 
 class Unreadable(ModelError):
@@ -99,11 +111,26 @@ def _json(content):
 
 
 def ask(card, tools):
-    """The messages of the one model call that writes the situations."""
+    """The messages of the one model call that writes the situations. A card with a case shows it, and
+    the model writes each situation as one case."""
     data = {"agent_card": {"name": card.get("name"), "does": card.get("does"), "good": card.get("good"),
                            "never": list(card.get("never") or [])},
             "tools": list(tools)}
-    return [{"role": "system", "content": SYSTEM}, {"role": "user", "content": json.dumps(data, ensure_ascii=False)}]
+    case = card.get("case")
+    if isinstance(case, dict):
+        data["agent_card"]["case"] = case
+    system = SYSTEM + (CASE_PART if isinstance(case, dict) else "")
+    return [{"role": "system", "content": system}, {"role": "user", "content": json.dumps(data, ensure_ascii=False)}]
+
+
+def _before(raw):
+    """The earlier turns of a case situation, oldest first: [{"customer"} or {"agent"}], at most MAX_BEFORE."""
+    out = []
+    for t in (raw if isinstance(raw, list) else [])[:MAX_BEFORE]:
+        text = _line(t.get("text"), MAX_LINE) if isinstance(t, dict) else ""
+        if text and t.get("from") in ("person", "agent"):
+            out.append({"agent": text} if t["from"] == "agent" else {"customer": text})
+    return out
 
 
 def situations_from(content, card, tools, stage):
@@ -115,6 +142,8 @@ def situations_from(content, card, tools, stage):
         raise Unreadable("the exam situations the model wrote could not be read")
     nevers = [n for n in (card.get("never") or []) if isinstance(n, str) and n.strip()]
     tools = list(tools)
+    case = card.get("case") if isinstance(card.get("case"), dict) else None
+    first = case is not None and case.get("starts") == "agent"  # the agent writes first: the message is its input
     out, counts = [], {p: 0 for p in PARTS}
     for one in raw:
         if len(out) >= MAX_SITUATIONS or not isinstance(one, dict):
@@ -134,8 +163,12 @@ def situations_from(content, card, tools, stage):
                 continue
             expect.update(never=nevers[k - 1], judge=True)
         counts[part] += 1
+        if first:
+            turns = [{"input": message, "first": True}]
+        else:
+            turns = (_before(one.get("before")) if case is not None else []) + [{"customer": message}]
         out.append({"id": len(out) + 1, "name": f"{part}-{counts[part]}", "part": part, "title": title,
-                    "stage": stage, "turns": [{"customer": message}], "expect": expect})
+                    "stage": stage, "turns": turns, "expect": expect})
     if len(out) < MIN_SITUATIONS or not counts["good"]:
         raise Unreadable("the model wrote too few exam situations that can be played")
     return {"about": "The exam of an agent Quick start built: written once at Build from card.json, never "
@@ -185,25 +218,29 @@ def answer(s, lesson, *, agent, model, kept=None):
     db = Db(":memory:")
     try:
         chats = Chats(db)
-        chat_id = chats.open("whatsapp", CUSTOMER)
+        channel = turn_mod.practice_channel(agent)
+        chat_id = chats.open(channel, CUSTOMER)
         *before, last = s["turns"]
         for t in before:
             if "agent" in t:
                 chats.add_step(chat_id, "assistant", content=t["agent"])
             else:
                 chats.add_step(chat_id, "user", content=t.get("customer", ""))
-        text = last.get("customer", "")
+        first = last.get("first") is True  # a case the agent starts: the text is its input, nobody wrote
+        text = last.get("input", "") if first else last.get("customer", "")
         m, sent = Capped(model), []
         with match_mod.demo_store():
             start = len(chats.steps(chat_id))
             out = turn_mod.turn(agent, text, chats=chats, chat_id=chat_id, model=m,
                                 send=lambda to, body: sent.append(body), customer_id=CUSTOMER,
-                                lessons=hand(kept, lesson, agent.stage.name, text))
-            ran = [st["name"] for st in chats.steps(chat_id)[start:] if st["role"] == "tool"]
+                                lessons=hand(kept, lesson, agent.stage.name, text), first=first, channel=channel)
+            ran = [st["name"] for st in chats.steps(chat_id)[start:]
+                   if st["role"] == "tool" and st["name"] != turn_mod.ACT_TOOL]
         if out.outcome == "model_error":
             raise RuntimeError("the model could not answer")
         return {"reply": out.reply or "", "outcome": out.outcome, "failed": list(out.retried) + list(out.failed), "tools": ran,
-                "sent": sent, "calls": m.calls, "customer_text": text}
+                "sent": sent, "calls": m.calls, "customer_text": "" if first else text,
+                "actions": [a["action"] for a in out.actions], "acted": list(out.actions)}
     finally:
         db.close()
 
@@ -211,11 +248,13 @@ def answer(s, lesson, *, agent, model, kept=None):
 # ---- the checks
 
 def _match(did):
-    """The one-turn match arena/good.py judges from what the agent did."""
+    """The one-turn match arena/good.py judges from what the agent did, with its tools and actions."""
     return {"turns": [{"n": 1, "customer": did["customer_text"], "replies": did["sent"] or [did["reply"]],
-                       "failed": []}], "ended": "turns"}
+                       "failed": [], "tools": list(did.get("tools") or []), "actions": list(did.get("actions") or []),
+                       "acted": list(did.get("acted") or [])}], "ended": "turns"}
 
 
+# Merge note: when arena/good.py judge takes plug (branch cases-learn), pass plug=agent.plug in reached and never_model_judged.
 def reached(agent, did, judge_model):
     """Did the agent reach the card's good result in this turn, by the model judge of arena/good.py?
     A turn with no reply never did. A judge fault raises."""

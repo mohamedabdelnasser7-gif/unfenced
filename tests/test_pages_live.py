@@ -92,7 +92,7 @@ class LiveDatabase(unittest.TestCase):
         self.assertIn(f'<b>{pages.name("sales")} <span class="st live">Live</span>', self.last_night())
         page = self.p.get("/agents/sales", {}, "t")
         self.assertIn('aria-label="Status: Live"', page)
-        self.assertIn("Answering chats", page)
+        self.assertIn("Working on real cases", page)
         self.assertEqual(self.status(self.p.get("/agents", {}, "t"), "marketing"), "Training")
 
     def test_no_chats_or_history_chats_only_stay_training(self):

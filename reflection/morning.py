@@ -690,7 +690,7 @@ class Morning:
         note = gate.skipped_note(result)
         note = f" {note}" if note else ""
         if state == TRYING:
-            return (f"Your correction is lesson {new_id}. It passed the exam and runs now as a hotfix in half the chats. "
+            return (f"Your correction is lesson {new_id}. It passed the exam and runs now as a hotfix in half the cases. "
                     f"Reflection checks it tonight.{note}")
         if not result.passed:
             return f"Your correction is lesson {new_id}. It waits for your yes on Today: it {result.line()}.{note}"

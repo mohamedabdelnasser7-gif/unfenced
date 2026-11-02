@@ -58,7 +58,7 @@ class World:
 
     def chat(self, messages, tools=None, effort="medium", max_tokens=1500, whole=False):
         system = messages[0]["content"]
-        if system == madeup.SYSTEM:
+        if system in (madeup.SYSTEM, madeup.SYSTEM + madeup.CASE_PART):
             self.calls["cards"] += 1
             return say(json.dumps({"customers": self.people}))
         if system == good.SYSTEM:
@@ -67,7 +67,8 @@ class World:
             if self.judge is not None:
                 return self.judge(messages)
             return say(json.dumps({"reached": self.reached, "broke_never": False, "turn": 1, "why": "a clear answer"}))
-        if system.startswith("You are a person writing on WhatsApp"):
+        if system.startswith(("You are a person writing on WhatsApp", "You are the person behind one case",
+                               "You are a person that an agent")):
             self.calls["customer"] += 1
             if self.customer is not None:
                 return self.customer(messages)
@@ -680,8 +681,8 @@ class StackReviewRound1(unittest.TestCase):
         price = "It is 99,999 EGP."
         out, sent, _ = self.turn(agent, World(agent=lambda m, t: say(price)))
         self.assertEqual((out.outcome, sent, len(out.failed)), ("no_safe_reply", [], turn.MAX_FAILED_CHECKS))
-        quiet = turn.load(self.built_again([{"what": "Your store's stock", "tool": "store"}]))
-        self.assertFalse(quiet.full_check)  # no customers: the style check only
+        quiet = turn.load(self.built_again([{"what": "Your own notes", "tool": ""}]))
+        self.assertFalse(quiet.full_check)  # no customers and no store: the style check only
         out, sent, _ = self.turn(quiet, World(agent=lambda m, t: say(price)))
         self.assertEqual((out.outcome, sent), ("replied", [price]))
 

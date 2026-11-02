@@ -100,7 +100,7 @@ class TwoTabs(unittest.TestCase):
         self.assertIn(pages.CORRECTED, les["source"])
         self.assertTrue(L.exam_of(les["id"])["passed"])
         self.assertEqual(len(calls), 1)  # the page's exam, run once, is the one Lessons.correct saves
-        self.assertIn("runs now as a hotfix in half the chats", said)
+        self.assertIn("runs now as a hotfix in half the cases", said)
         page = self.get("/agents/sales")
         self.assertIn("Hotfix", page)
         self.assertIn('action="/correct"', page)

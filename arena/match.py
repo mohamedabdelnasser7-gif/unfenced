@@ -118,16 +118,19 @@ def _draw(rng, shares):
     return rng.choices(keys, weights=[shares[k] for k in keys])[0]
 
 
-def fill(prompt, card, rng):
-    """The prompt with the card's fields in. Returns (text, the opening drawn)."""
+def fill(prompt, card, rng, defaults=None):
+    """The prompt with the card's fields in. Returns (text, the opening drawn). defaults: the want and
+    the buy trigger to use when the card has none (a practice for an agent built by Quick start passes
+    its own card's), else a shop's."""
+    defaults = defaults or {}
     style = card.get("style") or {}
     opening = _draw(rng, style.get("opening")) or "a greeting"
     patience = card.get("patience") or {}
     why = card.get("why_unwinnable") or "not buying today"
     fields = {
-        "want": ", ".join(card.get("want") or []) or "something from the shop",
+        "want": ", ".join(card.get("want") or []) or defaults.get("want") or "something from the shop",
         "worry": card.get("worry") or "nothing special",
-        "buy_trigger": ", ".join(card.get("buy_trigger") or []) or "a clear answer",
+        "buy_trigger": ", ".join(card.get("buy_trigger") or []) or defaults.get("buy_trigger") or "a clear answer",
         "patience": str(int(patience.get("most") or 0)),
         "language": {"arabic": "Egyptian Arabic", "franco": "Franco Arabic (Arabic in Latin letters)",
                      "english": "English"}.get(_top(style.get("language")), "Egyptian Arabic"),
@@ -142,10 +145,10 @@ def fill(prompt, card, rng):
 class Customer:
     """The persona: the next customer line from the chat so far, or None when it leaves."""
 
-    def __init__(self, card, model, prompt=GENERIC_PROMPT, seed=0):
+    def __init__(self, card, model, prompt=GENERIC_PROMPT, seed=0, defaults=None):
         self.card = card
         self.model = model
-        self.system, self.opening = fill(prompt, card, random.Random(f"{card.get('id')}:{seed}"))
+        self.system, self.opening = fill(prompt, card, random.Random(f"{card.get('id')}:{seed}"), defaults)
         self.lines = []      # what the customer said, in turn
         self.answers = []    # what the store said after each line, joined
 

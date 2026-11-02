@@ -177,10 +177,11 @@ def check_cards(given, folder):
         raise run.Refused("the cards folder is a link")
     where = where.resolve()
     if where == run.DEMO_CARDS.resolve():
-        return
+        return where
     owner = grow.owner_of(folder)
-    if paths.inside_repo(where) or not paths.within(where, owner):
+    if (paths.inside_repo(where) and not paths.within(where, paths.DATA)) or not paths.within(where, owner):
         raise run.Refused("the cards folder sits outside the agent's owner folder; real cards never cross owners")
+    return where
 
 
 def stricter(trust, plug):
@@ -299,8 +300,7 @@ def main(argv=None, *, agent_model=None, customer_model=None, judge_model=None):
             customer_model = customer_model or model_mod.Model()
             judge_model = judge_model or model_mod.Model()
         if args.cards:
-            check_cards(args.cards, folder)
-            cards = run.load_cards(args.cards)
+            cards = run.load_cards(check_cards(args.cards, folder))
             made_up, behaviour_from = any(c.get("made_up") is True for c in cards), 0
         else:
             profiles = madeup.owner_cards(folder)

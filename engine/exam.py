@@ -142,7 +142,7 @@ def load(path, stages):
     """Read and check a situations file. ValueError names the first thing wrong."""
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, RecursionError) as e:
         raise ValueError(f"exam situations {Path(path).name}: {e}") from None
     sits = data.get("situations") if isinstance(data, dict) else None
     if not isinstance(sits, list) or not sits:

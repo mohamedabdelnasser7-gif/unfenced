@@ -126,7 +126,7 @@ def owner_name(folder):
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return None
     name = data.get("owner") if isinstance(data, dict) else None
     return name if isinstance(name, str) and KIND.fullmatch(name) else None
@@ -136,7 +136,7 @@ def _plug_at(folder):
     path = Path(folder) / "plug.json"
     try:
         return plug_mod.load(path) if path.is_file() else None
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return None
 
 
@@ -198,7 +198,7 @@ class Pool:
             raise Refused("the pool sits outside the owner's state folder; pools never cross owners")
         try:
             data, written = json.loads(self.path.read_text(encoding="utf-8")), self.path.stat().st_mtime
-        except (OSError, ValueError):
+        except (OSError, ValueError, RecursionError):
             data, written = {}, None
         data = data if isinstance(data, dict) else {}
         if data.get("kind", kind) != kind:

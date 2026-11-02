@@ -437,6 +437,42 @@ class Refusals(Base):
         code, _ = self.main("--quick", "--cards", str(run.DEMO_CARDS), world=World())
         self.assertEqual(code, 0, self.err)
 
+    def test_a_linked_card_inside_the_owner_folder_is_refused(self):
+        # red team wireall r2 item 1: a card file linked in from another owner's folder never plays
+        other = tempfile.TemporaryDirectory()
+        self.addCleanup(other.cleanup)
+        theirs = Path(other.name) / "persona-01.json"
+        shutil.copy(run.DEMO_CARDS / "persona-01.json", theirs)
+        mine = self.folder / "mycards"
+        mine.mkdir()
+        shutil.copy(run.DEMO_CARDS / "persona-02.json", mine / "persona-02.json")
+        (mine / "persona-01.json").symlink_to(theirs)
+        code, _ = self.main("--quick", "--cards", str(mine), world=World())
+        self.assertEqual(code, 2)
+        self.assertIn("never a link", self.err)
+        (mine / "persona-01.json").unlink()
+        shutil.copy(run.DEMO_CARDS / "persona-01.json", mine / "persona-01.json")
+        code, _ = self.main("--quick", "--cards", str(mine), world=World())
+        self.assertEqual(code, 0, self.err)
+
+    def test_a_deep_owner_marker_or_card_is_handled(self):
+        # red team wireall r2 item 2: the parser's RecursionError is made here, as in the test below
+        from arena import grow
+        deep, loads = "[[[deep]]]", json.loads
+
+        def parse(text, *a, **k):
+            if text == deep:
+                raise RecursionError("maximum recursion depth exceeded")
+            return loads(text, *a, **k)
+        (self.root / "owner.json").write_text(deep)
+        mine = self.folder / "mycards"
+        mine.mkdir()
+        (mine / "persona-01.json").write_text(deep)
+        with mock.patch("json.loads", side_effect=parse):
+            self.assertIsNone(grow.owner_name(self.root))
+            with self.assertRaises(run.Refused):
+                run.load_cards(mine)
+
     def test_deeply_nested_json_is_left_out(self):
         # red team wireall r1 item 3: JSON too deep for the parser is left out, never a crash. How deep
         # json.loads goes depends on the Python build, so the parser's RecursionError is made here.

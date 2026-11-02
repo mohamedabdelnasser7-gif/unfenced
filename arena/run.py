@@ -219,7 +219,12 @@ def load_cards(folder):
         raise Refused(f"no cards folder at {folder}")
     cards = []
     for p in sorted(folder.glob("persona-*.json")):
-        c = json.loads(p.read_text(encoding="utf-8"))
+        if p.is_symlink() or not p.is_file() or p.resolve().parent != folder.resolve():
+            raise Refused(f"{p.name}: a card is a plain file in the cards folder, never a link")
+        try:
+            c = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError, RecursionError) as e:
+            raise Refused(f"{p.name}: {type(e).__name__}") from None
         if not isinstance(c, dict) or not isinstance(c.get("id"), str) or \
                 not isinstance(c.get("arena_weight"), (int, float)):
             raise Refused(f"{p.name}: a card is an object with an id and an arena_weight")

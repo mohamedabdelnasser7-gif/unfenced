@@ -295,7 +295,8 @@ class Between:
         examiner = lessons.examiner = night.Counted(self._exam(lessons))
         study = night.LinkedStudy(self.db, self.plug, proposer=parts.Proposer(model=study_m),
                                   tagger=parts.Tagger(model=study_m), fit=parts.FitCheck(model=open_m),
-                                  adapter=parts.Adapter(model=open_m), others=(), lessons=lessons,
+                                  adapter=parts.Adapter(model=open_m), lessons=lessons,
+                                  others=night.other_plugs(self.plug, db=Path(self.state) / "ascent.db" if self.state else None),
                                   ideas=parts.Ideas(model=study_m))
         study.log = _Only(study.log, ids)
         until = float(self.now())

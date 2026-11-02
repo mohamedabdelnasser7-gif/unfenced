@@ -19,6 +19,12 @@ calling it with a round's number then:
    there (high risk with no Accept high risk, a copy of a case's words, close to a pulled line or
    against a live one) takes it right after, and the result is saved on the lesson as its exam,
    so its card shows it; it still waits for a person's yes either way.
+   A lesson the gate refused for what it broke goes straight back to the study with it (Mohamed
+   2026-11-02, "Yes now"; DECISIONS item 50): Study.rewrite gives the idea part that line and its
+   earlier tries, each with the situation and check it failed and its fixed and broken counts, and
+   the one new line it writes takes the gate in the same round. At most REWRITES new tries a
+   lesson, on the run's call cap; a try that still fails stays out like any refused lesson. A lesson
+   whose exam could not run is not rewritten. No line is ever written by hand.
 3. Hands on (Pool) only a lesson that passed and that the lessons' own rules let go ahead with no
    further yes: on trial or kept, or low risk and waiting its turn. A high risk lesson goes ahead
    only on a person's yes, or under Accept high risk as the engine already allows; a lesson that
@@ -62,6 +68,7 @@ from engine.study import longest
 
 DAY = 86400.0
 LIVE_BUSY = "not handed, live busy"  # a passed lesson the live database could not take this run
+REWRITES = 2  # new tries a lesson the gate refused may take in the same round (Mohamed 2026-11-02, "Yes now")
 CAP_NOTE = "the model call cap was reached during the night study; nothing it left unchecked is handed on"
 
 
@@ -290,6 +297,7 @@ class Between:
         out["notes"] += rep["notes"]
         for card in rep["cards"]:
             out["lessons"].append(self._gate(lessons, examiner, card["lesson_id"], until))
+        self._rewrite(study, lessons, examiner, out, until)
         for one in out["lessons"]:
             if one.get("live"):
                 out["notes"].append(f'lesson {one["lesson_id"]}: {one["live"]}')
@@ -307,6 +315,39 @@ class Between:
             out["stopped"] = "cap"
             out["notes"].append(CAP_NOTE)
         return out
+
+    def _rewrite(self, study, lessons, examiner, out, until):
+        """Each lesson the gate refused for what it broke goes back to the study with it and is
+        rewritten (Study.rewrite), and the new try takes the gate in this same round, at most
+        REWRITES times a lesson, while the run's call cap holds. A rewrite that passes is handed on
+        as any lesson that passes; one that still fails stays out, as does a lesson whose exam
+        could not run. Each try is named in out["rewrites"] as {of, try, lesson_id, idea, passed,
+        why}, and each rewritten lesson is in out["lessons"] with "rewrite_of"."""
+        since = until - (longest(self.plug) + 2) * DAY
+        rewrites = []
+        for first in list(out["lessons"]):
+            if first["passed"] or not _broke_something(lessons.exam_of(first["lesson_id"])):
+                continue
+            chain = [first["lesson_id"]]
+            for n in range(1, REWRITES + 1):
+                if self.calls.reached:
+                    break
+                got = study.rewrite(chain, since, until, now=until)
+                out["notes"] += got["notes"]
+                one = {"of": first["lesson_id"], "try": n, "lesson_id": got["lesson_id"], "idea": got["idea"],
+                       "passed": False, "why": got["why"]}
+                rewrites.append(one)
+                if got["lesson_id"] is None:
+                    continue
+                gated = self._gate(lessons, examiner, got["lesson_id"], until)
+                gated["rewrite_of"] = first["lesson_id"]
+                out["lessons"].append(gated)
+                one["passed"], one["why"] = gated["passed"], gated["why"] or None
+                if gated["passed"] or not _broke_something(lessons.exam_of(got["lesson_id"])):
+                    break
+                chain.append(got["lesson_id"])
+        if rewrites:
+            out["rewrites"] = rewrites
 
     def _gate(self, lessons, examiner, lesson_id, now):
         """One new lesson through the gate, when the study's own write did not take it there, and
@@ -340,6 +381,12 @@ class Between:
         return out
 
 
+def _broke_something(row):
+    """A failed exam row with at least one fail that is not the exam itself failing to run, so a
+    rewrite has something to avoid."""
+    return any(f.get("check") != exam_mod.NOT_RUN for f in exam_mod.fails_of(row))
+
+
 class _Only:
     """The study's log, reading only the round's cases (Log.window and its agent's view)."""
 
@@ -362,7 +409,12 @@ def line(one):
             f"refused {one['refused']}, handed to round {one['after_round'] + 1} {one['handed']}")
     if one.get("waits_for_yes"):
         text += f", waiting for a yes {one['waits_for_yes']}"
-    text += f"; eval gate fixed {one['fixed']}, broke {one['broke']}; {one['calls']} model calls"
+    text += f"; eval gate fixed {one['fixed']}, broke {one['broke']}"
+    if one.get("rewrites"):  # the new tries of lessons the gate refused, in the same round
+        tries = one["rewrites"]
+        text += (f"; rewrites after a failed gate: {sum(1 for r in tries if r['lesson_id'] is not None)} written, "
+                 f"{sum(1 for r in tries if r['passed'])} passed")
+    text += f"; {one['calls']} model calls"
     if one.get("stopped") == "cap":
         text += "; stopped at the model call cap"
     return text

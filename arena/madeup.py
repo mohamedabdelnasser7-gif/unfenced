@@ -182,7 +182,7 @@ def read(folder, agent, card, source=None):
             return None
         try:
             c = json.loads(p.read_text(encoding="utf-8"))
-        except (OSError, ValueError, UnicodeDecodeError):
+        except (OSError, ValueError, UnicodeDecodeError, RecursionError):
             return None
         if not isinstance(c, dict) or c.get("made_up") is not True or c.get("agent") != agent or \
                 c.get("from_card") != source or c.get("id") != p.stem:

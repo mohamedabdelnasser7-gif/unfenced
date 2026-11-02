@@ -332,7 +332,8 @@ class Examiner:
         did not reach it, answers that situation again on the kept lessons only, only where the new
         line did not reach (its calls returned). A judge or an answer that raises fails the situation
         (fail closed). A judge fault on the side without the line is not kept, so the next lesson
-        asks again; only "reached" is kept, so one false "not reached" never switches the check off."""
+        asks again. No verdict is kept across lessons in either direction: one wrong judge answer holds at
+        most the lesson whose exam saw it."""
         by_id, out, made = {s["id"]: s for s in sits}, [], 0
         for r in rows:
             s = by_id.get(r.situation)
@@ -347,8 +348,6 @@ class Examiner:
                         did = answer(s, None, agent=self.agent, model=self.model, kept=self.kept)
                         made += int(did.get("calls") or 0)
                         before = reached(self.agent, did, self.judge_model)
-                        if before and cached is not None:
-                            cached[2][r.situation] = True
                     if before:
                         why = "the good result was reached without the new line and not with it"
             except Exception as e:
@@ -359,16 +358,14 @@ class Examiner:
 
     def _before(self, sid, cached):
         """Did the run on the kept lessons only reach situation sid's good result? Its did is judged
-        once a set of kept lessons. False (a situation that failed its checks there, or was judged not
-        reached) means not known: the caller answers it again without the new line. One whose answer
-        raised there raises (fail closed)."""
-        res, dids, judged = cached
-        if sid not in judged:
-            row = next((r for r in res.rows if r.situation == sid), None)
-            if row is None or row.check in (engine_exam.ANSWER, engine_exam.NOT_RUN):
-                raise ModelError("the run without the new line could not answer")
-            judged[sid] = bool(row.passed and sid in dids and reached(self.agent, dids[sid], self.judge_model))
-        return judged[sid]
+        again for every lesson, so no verdict outlives the lesson it was made for. False (a situation
+        that failed its checks there, or was judged not reached) means not known: the caller answers it
+        again without the new line. One whose answer raised there raises (fail closed)."""
+        res, dids, _ = cached
+        row = next((r for r in res.rows if r.situation == sid), None)
+        if row is None or row.check in (engine_exam.ANSWER, engine_exam.NOT_RUN):
+            raise ModelError("the run without the new line could not answer")
+        return bool(row.passed and sid in dids and reached(self.agent, dids[sid], self.judge_model))
 
     def _kept_ids(self):
         if self.kept is None:

@@ -291,6 +291,25 @@ class TheExaminer(Base):
         self.assertEqual(got[0].calls, clean.calls + 2)  # the good situation answered again, counted
         self.assertEqual((got[1].calls, got[2].calls), (clean_again.calls,) * 2)  # then "reached" is kept
 
+    def test_one_false_reached_without_the_line_holds_only_the_lesson_that_saw_it(self):
+        # review wireall r3 item 1: an agent whose good result takes more than one message reads "not
+        # reached" on both sides; one wrong "reached" on the side without the line must not hold every
+        # later harmless lesson
+        seen = []
+
+        def judge(messages):
+            if OPENING in messages[1]["content"]:
+                seen.append(1)
+                if len(seen) == 2:  # the first lesson's judgement of the run without the line
+                    return say(json.dumps({"reached": True, "broke_never": False, "turn": 1, "why": "wrong"}))
+            return say(json.dumps({"reached": False, "broke_never": False, "turn": 1, "why": "not yet"}))
+        world = World(judge=judge)
+        ex = turn_exam.Examiner(self.agent, model=world, judge_model=world, count=True)
+        got = [ex("Answer in one short line.", (plug_mod.ALL,)) for _ in range(3)]
+        self.assertFalse(got[0].passed)
+        self.assertIn("reached without the new line and not with it", got[0].first.why)
+        self.assertEqual([g.passed for g in got[1:]], [True, True])
+
     def test_a_run_without_the_line_that_could_not_answer_fails_the_situation(self):
         # review wireall r2 item 7 (G6): _before raising fails the situation, never passes it
         faults = [1]

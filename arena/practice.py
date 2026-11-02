@@ -314,7 +314,7 @@ def main(argv=None, *, agent_model=None, customer_model=None, judge_model=None):
                          matches=args.matches,
                          rounds=args.rounds, seed=args.seed, state=folder, reports=reports)
         rep = arena.run()
-    except (run.Refused, turn_mod.Refused, run.CapReached, ModelError, OSError, ValueError) as e:
+    except (run.Refused, turn_mod.Refused, run.CapReached, ModelError, OSError, ValueError, RecursionError) as e:
         print(f"Not run: {e}", file=sys.stderr)
         return 2
     print(json.dumps(rep, ensure_ascii=False, indent=1) if args.json else text(rep))

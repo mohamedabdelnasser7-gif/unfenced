@@ -455,6 +455,38 @@ class Refusals(Base):
         code, _ = self.main("--quick", "--cards", str(mine), world=World())
         self.assertEqual(code, 0, self.err)
 
+    def test_a_hard_linked_card_is_refused(self):
+        # review wireall r3 item 4: a hard link has no link mark and the same parent, so count its links
+        other = tempfile.TemporaryDirectory()
+        self.addCleanup(other.cleanup)
+        mine = self.folder / "mycards"
+        mine.mkdir()
+        shutil.copy(run.DEMO_CARDS / "persona-01.json", mine / "persona-01.json")
+        theirs = Path(other.name) / "persona-02.json"
+        shutil.copy(run.DEMO_CARDS / "persona-02.json", theirs)
+        try:
+            os.link(theirs, mine / "persona-02.json")
+        except OSError:
+            self.skipTest("hard links across these folders are not possible here")
+        code, _ = self.main("--quick", "--cards", str(mine), world=World())
+        self.assertEqual(code, 2)
+        self.assertIn("never a link", self.err)
+
+    def test_owner_cards_under_data_are_accepted(self):
+        # review wireall r3 item 2: the repo rule lets data/ through, as grow.check_owner does
+        from arena import paths
+        mine = self.folder / "mycards"
+        mine.mkdir()
+        for n in ("01", "02"):
+            shutil.copy(run.DEMO_CARDS / f"persona-{n}.json", mine / f"persona-{n}.json")
+        with mock.patch.object(paths, "ROOT", self.root), mock.patch.object(paths, "DATA", self.root):
+            code, _ = self.main("--quick", "--cards", str(mine), world=World())
+            self.assertEqual(code, 0, self.err)
+            elsewhere = self.root / "elsewhere"
+            shutil.copytree(mine, elsewhere)
+            code, _ = self.main("--quick", "--cards", str(elsewhere), world=World())
+            self.assertEqual(code, 2)
+
     def test_a_deep_owner_marker_or_card_is_handled(self):
         # red team wireall r2 item 2: the parser's RecursionError is made here, as in the test below
         from arena import grow

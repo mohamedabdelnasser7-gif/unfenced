@@ -164,7 +164,7 @@ the count file could not be read, when it could not; then every take() is refuse
             return 0
         except OSError:
             self.problem = f"the call count file {self.path.name} cannot be opened"
-        except ValueError:
+        except (ValueError, RecursionError):
             self.problem = f"the call count file {self.path.name} is not a count the Arena wrote"
         else:
             if not isinstance(saved, dict) or not isinstance(saved.get("day"), str):
@@ -219,7 +219,7 @@ def load_cards(folder):
         raise Refused(f"no cards folder at {folder}")
     cards = []
     for p in sorted(folder.glob("persona-*.json")):
-        if p.is_symlink() or not p.is_file() or p.resolve().parent != folder.resolve():
+        if p.is_symlink() or not p.is_file() or p.resolve().parent != folder.resolve() or p.stat().st_nlink > 1:
             raise Refused(f"{p.name}: a card is a plain file in the cards folder, never a link")
         try:
             c = json.loads(p.read_text(encoding="utf-8"))
@@ -832,7 +832,7 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
     """reflection: for tests, the models of the step between rounds ({"study", "open", "exam"}) and
     optionally "examiner" (arena/rounds.py Between); a real run makes them (reflection_models)."""
     ap = argparse.ArgumentParser(prog="arena/run.py", description="The Arena: persona matches and the gate.")
-    ap.add_argument("--cards", default=str(DEFAULT_CARDS))
+    ap.add_argument("--cards", default=str(DEFAULT_CARDS), help="a folder of card files: plain files, no links")
     ap.add_argument("--matches", type=int, default=10, help="training matches a round")
     ap.add_argument("--rounds", type=int, default=DEFAULT_ROUNDS)
     ap.add_argument("--held-out", default="", help="card ids held out, comma separated")

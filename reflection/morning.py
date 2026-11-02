@@ -1109,10 +1109,10 @@ class Morning:
         """{case reference: [(case id, names, last row's time)]} this agent's cases that wait on a
         late result (reflection/late.py open_cases) with a row in the last LATE_DAYS."""
         from reflection import late as late_mod
-        out = {}
+        out, key = {}, late_mod.ref_key(self.db)
         for case_id, rows, names in late_mod.open_cases(self.db, plug, since=now - LATE_DAYS * DAY, now=now,
                                                         log=self._late_log(plug)):
-            out.setdefault(late_mod.case_ref(plug, case_id, rows), []).append((case_id, names, rows[-1]["at"]))
+            out.setdefault(late_mod.case_ref(plug, case_id, rows, key), []).append((case_id, names, rows[-1]["at"]))
         return out
 
     def _late_plug(self, agent):

@@ -21,7 +21,9 @@ that fails is counted and the run goes on. With no BOSTA_API_KEY the check does 
 so. Nothing here prints the key.
 """
 import hashlib
+import hmac
 import re
+import secrets
 
 from engine.log import Log, case_key, is_history
 from engine.study import GOOD, PENDING, read_days, settle
@@ -32,6 +34,7 @@ MAX_ASKS = 200
 BEFORE = 0.001       # seconds: an API result is saved this much before the night's own time
 COURIER = ("delivered", "refused")
 _REF = re.compile(r"^[A-Za-z0-9._-]{1,40}$")
+REF_SCHEMA = "CREATE TABLE IF NOT EXISTS case_ref_key (id INTEGER PRIMARY KEY CHECK (id = 1), key TEXT NOT NULL)"
 
 
 def takes(plug):
@@ -63,15 +66,31 @@ def open_cases(db, plug, *, since, now, log=None):
     return out
 
 
-def case_ref(plug, case_id, rows):
+def ref_key(db, *, make=None):
+    """The key behind made references (case_ref): made once at random and kept in the database
+    (one row in case_ref_key), so a reference cannot be worked back to its case id by trying every
+    phone number. Two writers at the same moment still keep one key. make: gives a new key as 64
+    hex letters (the made-up sample days give a fixed one, so the same seed gives the same days)."""
+    with db.tx() as c:
+        c.execute(REF_SCHEMA)
+        c.execute("INSERT OR IGNORE INTO case_ref_key (id, key) VALUES (1, ?)", ((make or _new_key)(),))
+        return bytes.fromhex(c.execute("SELECT key FROM case_ref_key WHERE id = 1").fetchone()["key"])
+
+
+def _new_key():
+    return secrets.token_hex(32)
+
+
+def case_ref(plug, case_id, rows, key):
     """What a person calls a case on the morning page and in a sheet: its order number when a row
-    names one ("#1001" is 1001), else c- and ten letters made from the agent and the case id, so no
-    raw case id (a phone number, say) is ever on the page."""
+    names one ("#1001" is 1001), else c- and ten letters, an HMAC SHA256 of the agent and the case
+    id under key (ref_key), so no raw case id (a phone number, say) is ever on the page or can be
+    worked out from it."""
     for r in reversed(rows):
         ref = norm_ref((r["detail"] or {}).get("order"))
         if ref:
             return ref
-    return "c-" + hashlib.sha256(f"{plug.agent}\0{case_id}".encode("utf-8")).hexdigest()[:10]
+    return "c-" + hmac.new(key, f"{plug.agent}\0{case_id}".encode("utf-8"), hashlib.sha256).hexdigest()[:10]
 
 
 def norm_ref(value):

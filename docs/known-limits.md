@@ -65,6 +65,7 @@ A result that shows days later, such as a delivery, settles a case only when it 
 - One case kind per agent. A Sales case is a chat, and its order and delivery are results of that chat; an agent cannot also count each parcel as a case of its own.
 - With no webhook, no API answer and no person, a case stays pending. It is never a loss, and a lesson on trial with that case waits for its verdict with no day limit.
 - The Morning page lists a waiting case only when it has a row in the last 90 days (LATE_DAYS). An older one still waits, unseen.
+- A made reference (c- and ten letters, for a case with no order number) now comes from a key kept in the database, so one already shown changes once; a sheet made with the old one is skipped and named.
 - The scheduled night runs only while the WhatsApp server runs. A server that was down at NIGHT_HOUR runs that night once when it is back; older missed nights are not made up.
 - A night that is refused (a missing key, no database) or fails is recorded for that agent and night, and is not tried again until the next night.
 - Each scheduled night runs in its own process with 5 hours to finish; one still running then is killed and recorded failed (timeout), and that agent's night is not tried again until the next night.

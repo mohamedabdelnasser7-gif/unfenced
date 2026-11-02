@@ -3,6 +3,7 @@ both pages with a button per result (/late_mark), and a sheet upload (/late_shee
 of case, result). Each write goes through reflection/results.py late(), once a case for its group,
 with who and when. The served tests start a page on a free port and stop it in each test."""
 import hashlib
+import hmac
 import http.client
 import threading
 import time
@@ -65,11 +66,30 @@ class Listed(Base):
         self.parcel("+201001234567")  # no order number: a made reference, never the case id
         self.parcel("p2", 7)
         self.parcel("p3", 7)  # two cases share order 7: neither shown
-        ref = "c-" + hashlib.sha256("shipper\0+201001234567".encode()).hexdigest()[:10]
+        ref = "c-" + hmac.new(late_mod.ref_key(self.db), "shipper\0+201001234567".encode(),
+                              hashlib.sha256).hexdigest()[:10]
         self.assertEqual([c["ref"] for c in self.view()["cases"]], [ref])
         page = pages.Pages(self.m).get("/", {}, "t0ken")
         self.assertNotIn("201001234567", page.replace(ref, ""))
         self.assertIn(ref, page)
+
+    def test_a_made_reference_needs_the_kept_key(self):
+        """Red team late r1 finding 2: a plain hash of the agent and the case id gave a phone number
+        back in minutes. The key is random, made once and kept, one row in the database."""
+        self.parcel("+201001234567")
+        ref = self.view()["cases"][0]["ref"]
+        plain = "c-" + hashlib.sha256("shipper\0+201001234567".encode()).hexdigest()[:10]
+        self.assertNotEqual(ref, plain)
+        self.assertRegex(ref, r"^c-[0-9a-f]{10}$")
+        key = late_mod.ref_key(self.db)
+        self.assertEqual(len(key), 32)
+        self.assertEqual(late_mod.ref_key(self.db), key)
+        self.assertEqual(self.view()["cases"][0]["ref"], ref)  # the same on every draw
+        with self.db.tx() as c:
+            self.assertEqual(c.execute("SELECT count(*) FROM case_ref_key").fetchone()[0], 1)
+        other = Db(":memory:")
+        self.addCleanup(other.close)
+        self.assertNotEqual(late_mod.ref_key(other), key)  # another database, another key
 
     def test_at_most_a_few_an_agent_the_longest_waiting_first_and_no_count(self):
         for n in range(mo.LATE_SHOWN + 3):

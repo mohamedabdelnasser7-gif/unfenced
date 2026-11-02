@@ -83,6 +83,10 @@ TOOLS = {
     "email": "Email: an uploaded mailbox export; sort mail and write reply drafts, nothing goes out without the user's yes",
     "calendar": "Calendar: book or move meetings with no clash, inside the user's rules",
 }
+# Keys the personal assistant reaches through its own files (assistant/), with no kit/tools file behind
+# them: a built agent names the need, marked not connected yet, until a kit tool exists (kit/turn.py
+# would list it as missing and practise with no mailbox).
+NOT_BUILT = ("email", "calendar")
 # Services no repo tool reaches. A need that names one is not connected yet, even when the model
 # matched it to a tool for something close (a courier's stock is not the store's stock): the store
 # tool reads Shopify or a catalogue file, nothing else. Shopify, WhatsApp and a mailbox export are
@@ -339,7 +343,7 @@ def clean_card(raw, need_case=True):
         tool = n.get("tool") if isinstance(n, dict) else ""
         tool = tool if isinstance(tool, str) and tool in TOOLS and not outside(what) else ""
         if what:
-            needs.append({"what": what, "tool": tool, "connected": bool(tool)})
+            needs.append({"what": what, "tool": tool, "connected": bool(tool) and tool not in NOT_BUILT})
     card = {"name": line(c.get("name"), CAPS["name"]), "key": line(c.get("key"), CAPS["key"]),
             "does": line(c.get("does"), CAPS["does"]), "good": line(c.get("good"), CAPS["good"]),
             "never": [x for x in (line(v, CAPS["never"]) for v in never[:MOST_NEVER]) if x], "needs": needs}
@@ -640,7 +644,8 @@ class QuickStart:
 
 
 def _tool_lines():
-    return "\n".join(f"- {k}: {v}" for k, v in TOOLS.items())
+    return "\n".join(f"- {k}: {v}" + (" (not connected for a new agent yet)" if k in NOT_BUILT else "")
+                     for k, v in TOOLS.items())
 
 
 def _model_card(card):

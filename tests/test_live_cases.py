@@ -120,6 +120,22 @@ class TheCardCarriesTheCase(Base):
                     turn.load(folder)
 
 
+class EmailAndCalendarAreNotConnectedYet(unittest.TestCase):
+    """B7: no kit tool reads a mailbox or a calendar, so a built agent's card marks them not connected."""
+
+    def test_email_and_calendar_needs_read_not_connected(self):
+        got = qs.clean_card({"card": {"name": "Inbox", "key": "inbox", "does": "Sorts mail.", "case": TICKET_CASE,
+                                      "good": "Sorted.", "bad": "Missed.", "never": [],
+                                      "needs": [{"what": "Your mailbox", "tool": "email"},
+                                                {"what": "Your calendar", "tool": "calendar"},
+                                                {"what": "Your store", "tool": "store"}]},
+                             "question": "", "follow": "Change anything."})
+        self.assertEqual([n["connected"] for n in got["card"]["needs"]], [False, False, True])
+        self.assertEqual(qs.connected(got["card"]), ["store"])
+        self.assertIn("email: ", qs._tool_lines())
+        self.assertIn("not connected for a new agent yet", qs._tool_lines())
+
+
 class ATagIsNotAHandOver(unittest.TestCase):
     """DECISIONS 72: a declared tag action such as needs the team passes; a hand over is still refused."""
 

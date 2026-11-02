@@ -10,8 +10,15 @@ member's reply; its step is the example the reflection reads). Orders: order_dra
 made a summary, with its total) and order_created (the customer said yes and the store took
 the order, with its number, total and COD risk). chat_closed comes from sales/quiet.py when a
 chat closes after quiet with no order (DECISIONS item 54): the case is lost at once. delivered
-and refused come from Bosta's delivery webhook (channels/bosta.py), matched to the chat through
-the order number its order_created row names (chat_for_order). The night study reads this log.
+and refused are the Sales plug's second signal (DECISIONS item 66): they come from Bosta's
+delivery webhook (channels/bosta.py), matched to the chat through the order number its
+order_created row names (chat_for_order), from Bosta's API on the night run (reflection/late.py)
+or from a person on the morning page, each through late(), once a case. The night study reads
+this log.
+
+late() is for any agent, not only Sales: it adds a result that came later to a case of the plug
+it is given, when that result is one of the plug's late results (engine/plug.py Plug.late: a slow
+deciding result, or a second signal).
 
 Rows live in the engine's log (engine/log.py) under the Sales agent plug
 (sales/plug.json); a case is one chat and an outcome is a result. A row's source is
@@ -27,9 +34,14 @@ on such a database moves every row into the engine's log under the same id and d
 the old table, in one transaction. A row the plug cannot place (another agent, an
 undeclared outcome) stops the move and leaves the old table as it was.
 """
-from engine.log import Log
+import json
+import time
+
+from engine.log import Log, case_key, is_history
 from kit.db import Db
 from reflection import PLUG
+
+MAX_BY = 60  # who marked a result, as saved in its detail
 
 
 class Results(Log):
@@ -69,6 +81,46 @@ class Results(Log):
                 f"AND json_extract(detail, '$.order') IN ({marks})",
                 (self.plug.agent, *names)).fetchall()
         return rows[0]["case_id"] if len(rows) == 1 else None
+
+
+def late(db, plug, case_id, outcome, *, detail=None, by=None, now=None):
+    """Add one result that came later to a case of this plug: from a tool's webhook
+    (channels/bosta.py), a tool's API on the night run (reflection/late.py) or a person on the
+    morning page or in an uploaded sheet. outcome must be one of the plug's late results
+    (Plug.late): a deciding result when one of them is slow, or a second signal result. Once a
+    case for each of the two groups: when the case already has a result of the outcome's group,
+    nothing is saved and None comes back; else the new row's id. The check and the write are one
+    SQL statement, so two writers at the same moment (the webhook and a person) still save one.
+    A case with no row, or one imported from the past, is refused (ValueError): a late result
+    never starts a case. by: who brought it (a person's name, "api" or "sheet"), saved in the
+    detail; now: its time, the clock when left out."""
+    deciding, second = plug.late()
+    group = deciding if outcome in deciding else second if outcome in second else ()
+    if not group:
+        raise ValueError(f"{plug.agent} takes no late result {outcome!r}")
+    if plug.result(outcome).after is not None:
+        raise ValueError(f"{outcome!r} ends an action; it never comes on its own")
+    log = Log(db, plug)
+    rows = log.case(case_id)
+    if not rows:
+        raise ValueError("no such case")
+    if any(is_history(r) for r in rows):
+        raise ValueError("a case imported from the past takes no late result")
+    d = dict(detail or {})
+    if by is not None:
+        d["by"] = str(by)[:MAX_BY]
+    source = next((r["source"] for r in reversed(rows) if r["source"] is not None), None)
+    at = time.time() if now is None else float(now)
+    marks = ", ".join("?" for _ in group)
+    key = case_key(case_id)
+    with db.tx() as c:
+        cur = c.execute(
+            "INSERT INTO trace (agent, case_id, action, result, cause, lessons, stage, step, detail, at, source) "
+            "SELECT ?, ?, NULL, ?, NULL, '[]', NULL, NULL, ?, ?, ? "
+            f"WHERE NOT EXISTS (SELECT 1 FROM trace WHERE agent = ? AND case_id = ? AND result IN ({marks}))",
+            (plug.agent, key, outcome, json.dumps(d, ensure_ascii=False) if d else None, at, source,
+             plug.agent, key, *group))
+        return cur.lastrowid if cur.rowcount == 1 else None
 
 
 def _sales_row(r):

@@ -9,11 +9,13 @@ through a public tunnel or a host, like the WhatsApp webhook.
   nothing; it sends one custom header the business sets beside the webhook URL.
 - Delivered (state 45) records "delivered" on the chat; a refusal (state 47 with exception
   code 8) records "refused", and so does a send returned to the business (state 46,
-  Mohamed's call 14A, 29 Oct). Both are slow results of the Sales agent plug, saved through
-  reflection/results.py. This webhook is an optional result source: the results are recorded on
-  the case and read by the delivery cards (reflection/facts.py), but they never decide a case;
-  the order placed does, against a chat that closed after quiet with no order (chat_closed,
-  sales/plug.json decides).
+  Mohamed's call 14A, 29 Oct). For the Sales agent both are its second signal (sales/plug.json
+  second_signal, DECISIONS item 66): shown beside a good chat and read by the delivery cards
+  (reflection/facts.py), never deciding it; the order placed does, against a chat that closed
+  after quiet with no order. For any other agent whose plug names delivered or refused among
+  its late results (engine/plug.py Plug.late: decides with a slow result, or second_signal) the
+  result goes to that agent's case, and there it may decide the case. Every result is saved
+  through reflection/results.py late(), once a case for its group.
 - A returned send most likely reaches the webhook as a delivery of its own: type RTO (the
   return leg), its own _id, state 46, and the send's businessReference. So a 46 is found
   through the same order lookup as the send and is taken once per order, not per delivery:
@@ -24,10 +26,14 @@ through a public tunnel or a host, like the WhatsApp webhook.
   not list 46 for a send: it costs nothing, since the order still gets one refused whichever
   delivery reports the return. A refusal takes its order first, so a 47 with code 8 after any
   46 for its order, on the send or on the return leg, is a replay (409).
-- The chat is found through the order number the Sales agent already logs on its
-  order_created row: Bosta echoes the businessReference the delivery was created with, which
-  must be that order number (#1001, or 1001; both are one order). No chat, or more than one,
-  is an unknown order and is refused (404); nothing is saved.
+- The case is found through the order number: Bosta echoes the businessReference the
+  delivery was created with, which must be that order number (#1001, or 1001; both are one
+  order). For the Sales agent it is the order its order_created row names (a Shopify order);
+  for another agent, any action row of its own whose detail names that order. Only agents whose
+  plug takes that result are searched. No case, or more than one across all those agents, is an
+  unknown order and is refused (404); nothing is saved. A case that already has a result of that
+  group (from the API check or a person on the morning page) saves nothing: 200 "already
+  recorded".
 - Each delivery gets each result once. A message already taken is refused (409): a replay
   or a retry saves nothing twice. A 46 already taken for its order is the one exception
   above: 200, and still nothing saved. A result whose write fails is forgotten, so Bosta
@@ -70,6 +76,7 @@ import urllib.parse
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from reflection.results import late
 from channels.whatsapp import DeadlineReader, FIRST_LINE_DEADLINE, MAX_OPEN, MIN_SECRET, REQUEST_DEADLINE, \
     SOCKET_TIMEOUT
 
@@ -166,8 +173,8 @@ def outcome(ev):
 
 
 def order_names(order):
-    """The order numbers a businessReference can stand for: as given, and with a # when it has none."""
-    return (order,) if order.startswith("#") else (order, "#" + order)
+    """The order numbers a businessReference can stand for: as given, and with its # added or taken off."""
+    return (order, order[1:]) if order.startswith("#") else (order, "#" + order)
 
 
 def order_ref(order):
@@ -185,11 +192,39 @@ def secret_ok(header, secret):
 class Deliveries:
     """Takes one Bosta message: records its result on the chat, tells the team, or ignores it."""
 
-    def __init__(self, results, tell_team=None):
+    def __init__(self, results, tell_team=None, plugs=()):
+        """plugs: the other agents' plugs (reflection/night.py other_plugs); only those whose
+        late results name delivered or refused are searched for an order's case."""
         self.results = results
         self.db = results.db
         self.tell_team = tell_team
+        self.plugs = [p for p in plugs if p.agent != results.plug.agent and
+                      {"delivered", "refused"} & {r for group in p.late() for r in group}]
         self.db.script(SEEN)
+
+    def case_for_order(self, order, what):
+        """(plug, case id) of the one case this order belongs to, among the agents that take
+        this result, or None when there is none or more than one."""
+        names = order_names(order)
+        found = []
+        sales = self.results.plug
+        if what in {r for group in sales.late() for r in group}:
+            chat = self.results.chat_for_order(*names)
+            if chat is not None:
+                found.append((sales, chat))
+        marks = ", ".join("?" for _ in names)
+        for plug in self.plugs:
+            if what not in {r for group in plug.late() for r in group}:
+                continue
+            with self.db.tx() as c:
+                rows = c.execute(
+                    "SELECT DISTINCT case_id FROM trace WHERE agent = ? AND action IS NOT NULL "
+                    "AND json_valid(detail) AND json_extract(detail, '$.history') IS NULL "
+                    f"AND json_extract(detail, '$.order') IN ({marks})", (plug.agent, *names)).fetchall()
+            found += [(plug, r["case_id"]) for r in rows]
+            if len(found) > 1:
+                break
+        return found[0] if len(found) == 1 else None
 
     def accept(self, payload):
         """(HTTP status, short reply) for one parsed body."""
@@ -199,10 +234,13 @@ class Deliveries:
         what = outcome(ev)
         if what is None:
             return 200, "ignored"
-        chat = self.results.chat_for_order(*order_names(ev.order))
-        if chat is None:
-            log.warning("a Bosta message names an order no single chat placed; refused")
+        found = None if what == "attempt" else self.case_for_order(ev.order, what)
+        if what == "attempt":
+            found = self.case_for_order(ev.order, "delivered") or self.case_for_order(ev.order, "refused")
+        if found is None:
+            log.warning("a Bosta message names an order no single case placed; refused")
             return 404, "unknown order"
+        plug, case = found
         key = f"{ev.delivery}:{what}"
         if what == "attempt":
             key += f":{ev.code}:{ev.attempts}:{ev.stamp}"
@@ -214,11 +252,13 @@ class Deliveries:
             self._note(ev)
             return 200, "noted"
         try:
-            self.results.record(chat, what, detail={"order": ev.order, "bosta": ev.tracking or ev.delivery,
-                                                    "state": ev.state, "code": ev.code or None, "at": ev.stamp})
+            row = late(self.db, plug, case, what, detail={"order": ev.order, "bosta": ev.tracking or ev.delivery,
+                                                          "state": ev.state, "code": ev.code or None, "at": ev.stamp})
         except Exception:
             self._forget(*taken)
             raise
+        if row is None:  # the API check or a person brought this case's result first
+            return 200, "already recorded"
         log.info("%s recorded for an order", what)
         return 200, "recorded"
 
@@ -364,11 +404,14 @@ def main():
     secret = env.get("BOSTA_WEBHOOK_SECRET")
     if len(secret) < MIN_SECRET:
         raise SystemExit(f"BOSTA_WEBHOOK_SECRET in .env must be set, at least {MIN_SECRET} characters.")
+    from kit.db import DEFAULT_PATH
+    from reflection.night import other_plugs
+    from reflection import PLUG
     db = Db()
     tell = team_sender()
     if tell is None:
         log.info("no WhatsApp keys: failed delivery attempts go to this log only")
-    app = Deliveries(Results(db), tell_team=tell)
+    app = Deliveries(Results(db), tell_team=tell, plugs=other_plugs(PLUG, db=str(DEFAULT_PATH)))
     port = int(env.get("BOSTA_PORT", PORT_DEFAULT))
     server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(secret, app.accept))
     log.info("listening on 127.0.0.1:%d%s", port, PATH)

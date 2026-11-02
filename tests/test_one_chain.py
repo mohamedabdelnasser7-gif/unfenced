@@ -44,6 +44,7 @@ def delivery_plug():
     """The Sales plug with delivered deciding good and refused bad; everything else as it is."""
     d = json.loads((ROOT / "sales" / "plug.json").read_text(encoding="utf-8"))
     d["decides"] = {"good": "delivered", "bad": ["refused"]}
+    d.pop("second_signal", None)  # delivered decides here, so it is no second signal
     return plug_mod.from_dict(d, folder=ROOT / "sales")
 
 

@@ -54,6 +54,7 @@ def delivery_plug():
     settling guards checked."""
     d = json.loads((ROOT / "sales" / "plug.json").read_text(encoding="utf-8"))
     d["decides"] = {"good": "delivered", "bad": ["refused", "chat_closed"]}
+    d.pop("second_signal", None)  # delivered decides here, so it is no second signal
     return plug_mod.from_dict(d, folder=ROOT / "sales")
 
 

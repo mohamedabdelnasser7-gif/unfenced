@@ -29,10 +29,13 @@ stops the service.
 
 Its own process. Each night runs as the manual command in a child process (run_night), from the
 repo root, so what a night changes for itself (the exam's demo store, its env, logging and the
-store's cache) never reaches the server's live turns. The child has LIMIT seconds, under STALE; one
-still running then is killed and recorded failed, "timeout", so a stuck call never holds the
-scheduler's thread and no second runner takes over a night that still runs. Its printed lines go
-to NIGHTS_LOG next to the database.
+store's cache) never reaches the server's live turns. The child has LIMIT seconds, under STALE, held
+on both sides. The scheduler kills one still running then and records it failed, "timeout", so a
+stuck call never holds the scheduler's thread and no second runner takes over a night that still
+runs. The child, given the limit on its command line (--limit), ends itself at that limit and as
+soon as the pipe from the server closes (guard), so a server that stops mid night, however it
+stops, never leaves a night running with no limit. Its printed lines go to NIGHTS_LOG next to the
+database.
 
 The night itself asks the courier's API first (reflection/night.py courier_check), so the results
 it brings count that night.
@@ -44,6 +47,7 @@ The manual night command (python3 -m reflection.night) is the same command: run 
 nothing here, so a manual run never stops the scheduled one.
 """
 import logging
+import math
 import os
 import re
 import signal
@@ -156,20 +160,54 @@ class TimedOut(Exception):
 
 def run_night(plug_path, db_path, now, *, limit=LIMIT, module="reflection.night"):
     """One agent's night, the manual command (reflection/night.py main) in a child process from the
-    repo root. Its exit code; TimedOut when it ran past limit seconds, after the child is killed.
-    module: the command to run (the tests give a small stand in)."""
-    cmd = [sys.executable, "-m", module, "--plug", str(plug_path), "--db", str(db_path), "--until", repr(float(now))]
+    repo root, given limit (--limit) and a pipe from this process on its stdin, which nothing writes
+    to: the child ends itself at limit or when the pipe closes (guard). Its exit code; TimedOut when
+    it ran past limit seconds, killed here or by its own alarm. module: the command to run (the
+    tests give a small stand in)."""
+    cmd = [sys.executable, "-m", module, "--plug", str(plug_path), "--db", str(db_path), "--until", repr(float(now)),
+           "--limit", repr(float(limit))]
     with _output(db_path) as out:
-        child = subprocess.Popen(cmd, cwd=str(ROOT), stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
+        child = subprocess.Popen(cmd, cwd=str(ROOT), stdin=subprocess.PIPE, stdout=out, stderr=subprocess.STDOUT,
                                  start_new_session=True)
         try:
-            return child.wait(timeout=limit)
+            code = child.wait(timeout=limit)
         except subprocess.TimeoutExpired:
             _kill(child)
             raise TimedOut(f"past {limit:g} seconds") from None
         except BaseException:  # the server is stopping: no night outlives it
             _kill(child)
             raise
+        finally:
+            child.stdin.close()
+    if code == -signal.SIGALRM:  # the child's own limit came first
+        raise TimedOut(f"past {limit:g} seconds, ended by its own limit")
+    return code
+
+
+def guard(limit, fd=0):
+    """The child's own end, called first by a night the scheduler started (reflection/night.py
+    --limit): SIGALRM at limit seconds, rounded up, whose default action ends the process wherever
+    it is; and a watcher thread on the pipe from the server (stdin's descriptor, read raw, so the
+    thread never holds a lock the interpreter needs at exit), which ends the child once the pipe
+    closes. The server never writes to it, so it closes only when the server's end does: the server
+    stopped, however it stopped. Call it from the main thread."""
+    signal.signal(signal.SIGALRM, signal.SIG_DFL)
+    signal.alarm(max(1, math.ceil(float(limit))))
+    threading.Thread(target=_watch, args=(fd,), daemon=True, name="server-pipe").start()
+
+
+def _watch(fd):
+    """Read the pipe until it closes, then end this process and its group when it leads one (the
+    scheduler starts the child in its own session)."""
+    try:
+        while os.read(fd, 4096):
+            pass
+    except OSError:  # a descriptor that cannot be read: no server to wait on
+        pass
+    pid = os.getpid()
+    if os.getpgrp() == pid:
+        os.killpg(pid, signal.SIGKILL)
+    os.kill(pid, signal.SIGKILL)
 
 
 def _output(db_path):

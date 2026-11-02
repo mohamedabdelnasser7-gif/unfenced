@@ -590,7 +590,13 @@ def main(argv=None, *, until=None):
                     help="the persona recipe, outside the repo: real chats become practice customers (arena/grow.py)")
     ap.add_argument("--until", type=float, default=None,
                     help="the window's end, in seconds since 1970 (default: now; the night scheduler gives its own)")
+    ap.add_argument("--limit", type=float, default=None,
+                    help="seconds before the run ends itself; it also ends when its stdin closes (the night "
+                         "scheduler gives it, reflection/scheduler.py guard)")
     args = ap.parse_args(argv)
+    if args.limit is not None:
+        from reflection import scheduler
+        scheduler.guard(args.limit)
     if until is None:
         until = args.until
     env.load()

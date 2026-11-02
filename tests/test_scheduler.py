@@ -4,6 +4,8 @@ import functools
 import json
 import logging
 import os
+import signal
+import subprocess
 import sys
 import tempfile
 import threading
@@ -466,9 +468,11 @@ class Child(Base):
             self.assertEqual(sc.run_night(Path("a/plug.json"), self.db_path, 123.0), 0)
         cmd, kw = popen.call_args
         self.assertEqual(cmd[0], [sys.executable, "-m", "reflection.night", "--plug", "a/plug.json",
-                                  "--db", str(self.db_path), "--until", "123.0"])
+                                  "--db", str(self.db_path), "--until", "123.0", "--limit", repr(sc.LIMIT)])
         self.assertEqual(kw["cwd"], str(sc.ROOT))
+        self.assertIs(kw["stdin"], subprocess.PIPE)
         child.wait.assert_called_once_with(timeout=sc.LIMIT)
+        child.stdin.close.assert_called_once_with()
         self.assertLess(sc.LIMIT, sc.STALE)
 
     def test_the_child_is_its_own_process_and_its_exit_code_is_the_answer(self):
@@ -506,6 +510,98 @@ class Child(Base):
             self.child("sleep", limit=1.0)
         with self.assertRaises(ProcessLookupError):
             os.kill(self.seen()["pid"], 0)
+
+
+class OwnEnd(Base):
+    """Review late r2 finding 2: a server that stops mid night never leaves its night running with
+    no limit. The child ends itself at its own limit and when the pipe from the server closes
+    (scheduler.guard). The children here are the stand in, which calls guard as the night does."""
+
+    def setUp(self):
+        super().setUp()
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.dir = Path(d.name)
+        self.db_path = self.dir / "ascent.db"
+        self.env = dict(os.environ, NIGHT_CHILD_MODE="sleep", PYTHONDONTWRITEBYTECODE="1")
+
+    def start(self, limit):
+        child = subprocess.Popen([sys.executable, "-m", "tests.night_child", "--plug", "a/plug.json",
+                                  "--db", str(self.db_path), "--until", "1.0", "--limit", str(limit)],
+                                 cwd=str(sc.ROOT), env=self.env, stdin=subprocess.PIPE,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        self.addCleanup(self._gone, child)
+        self.started()
+        return child
+
+    def started(self):
+        """The stand in's pid, once it wrote child.json (after guard ran)."""
+        end = time.monotonic() + 30
+        while not (self.dir / "child.json").is_file():
+            self.assertLess(time.monotonic(), end, "the stand in never started")
+            time.sleep(0.05)
+        time.sleep(0.1)  # the file is written whole before the next look
+        return json.loads((self.dir / "child.json").read_text(encoding="utf-8"))["pid"]
+
+    @staticmethod
+    def _gone(child):
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+        if child.stdin:
+            child.stdin.close()
+
+    def ended(self, pid):
+        """True once pid is gone within 30 seconds."""
+        end = time.monotonic() + 30
+        while time.monotonic() < end:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return True
+            time.sleep(0.05)
+        return False
+
+    def test_the_child_ends_itself_at_its_limit_with_the_pipe_open(self):
+        child = self.start(1)
+        self.assertEqual(child.wait(timeout=30), -signal.SIGALRM)
+
+    def test_the_child_ends_once_the_pipe_from_the_server_closes(self):
+        child = self.start(600)
+        self.assertIsNone(child.poll())
+        child.stdin.close()
+        self.assertEqual(child.wait(timeout=30), -signal.SIGKILL)
+
+    def test_a_server_killed_mid_night_leaves_no_night_running(self):
+        server = subprocess.Popen(
+            [sys.executable, "-c", "import sys; from pathlib import Path; from reflection import scheduler as sc; "
+                                   "sc.run_night(Path('a/plug.json'), Path(sys.argv[1]), 1.0, "
+                                   "module='tests.night_child', limit=600.0)", str(self.db_path)],
+            cwd=str(sc.ROOT), env=self.env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL)
+        self.addCleanup(self._gone, server)
+        pid = self.started()
+        self.addCleanup(lambda: self.ended(pid) or os.killpg(pid, signal.SIGKILL))
+        server.kill()  # no finally runs, as when the server dies or its daemon thread is cut
+        server.wait()
+        self.assertTrue(self.ended(pid), "the night outlived its server")
+
+    def test_the_real_night_calls_guard_first_when_given_a_limit(self):
+        from reflection import night
+        with mock.patch.object(sc, "guard") as guard, mock.patch.object(night.env, "load"), \
+                mock.patch.object(night, "missing_keys", return_value=["X"]), mock.patch("sys.stderr"):
+            self.assertEqual(night.main(["--limit", "5", "--db", str(self.db_path)]), 2)
+            guard.assert_called_once_with(5.0)
+            guard.reset_mock()
+            self.assertEqual(night.main(["--db", str(self.db_path)]), 2)  # by hand: no limit, no guard
+            guard.assert_not_called()
+
+    def test_its_own_limit_first_is_a_timeout(self):
+        child = mock.Mock()
+        child.wait.return_value = -signal.SIGALRM
+        with mock.patch.object(sc.subprocess, "Popen", return_value=child), self.assertRaises(sc.TimedOut):
+            sc.run_night(Path("a/plug.json"), self.db_path, 123.0)
+        child.stdin.close.assert_called_once_with()
 
 
 class Channel(unittest.TestCase):

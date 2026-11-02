@@ -1,5 +1,5 @@
 # For judges
-*Created: 2026-10-31. Last updated: 2026-11-02.*
+*Created: 2026-10-31. Last updated: 2026-11-03.*
 
 Every model this project calls is a Meta model: Muse Spark on the Meta Model API, or Muse Spark Open on Baseten. You do not need to connect any other account. The store name is made up; the products and prices are real; the practice customers are built from real chats with names, numbers and addresses removed.
 
@@ -24,6 +24,38 @@ Which key runs what:
 | Neither | Nothing is called. The run prints one line that points you to the recorded replay below |
 
 Keys can also come from your shell environment; a value there wins over `.env`. The code never prints a key.
+
+## Open the page
+
+```
+python3 -I sim/three_days.py data/sample-days
+python3 -m reflection.morning --demo-days data/sample-days
+```
+
+The first command writes three made-up working mornings to `data/sample-days`, which git ignores. It calls no model. The second serves them on your own machine and prints the address to open, with a Day 1, Day 2 and Day 3 switch at the top. Each day runs on a throwaway copy, so anything you press there leaves the sample files as they were. Ctrl+C stops the page.
+
+## Chat with the Sales agent
+
+Open Agents, then Sales. The Try Sales box sits on its page. Write to it the way a customer would, about a product, a size or delivery, and the trained Sales agent answers on the demo store with your own model key. No real order or message goes out, and these chats never count for the gate, the exam or Connect. Start over opens a new chat. Each answer counts toward the same daily model call cap as the Arena.
+
+With no key in `.env`, the box says so and points you to the recorded replay below.
+
+## Connect to WhatsApp
+
+The Connect button on an agent's page stays locked until a full Arena run on the page's own database has passed its gate. The run seals what it saved, so a result written or changed by hand never unlocks it. The quick run below never unlocks it, and the sample days do not either. Once Connect is on, Pull takes the agent off WhatsApp again.
+
+To see it unlock, run the full Arena on the page's database (`data/ascent.db`, which the Sales agent makes when it first runs), then open the page on it:
+
+```
+python3 -I arena/run.py --db data/ascent.db
+python3 -m reflection.morning
+```
+
+The full run uses many more model calls than the quick one. Answering real WhatsApp messages also needs a WhatsApp Business number and its settings (the `WHATSAPP_` values read in `channels/whatsapp.py`), which this setup does not include.
+
+## Open console
+
+Every agent's page has an Open console link. The console shows how that agent's loop ran, read only from what the engine already saved: the newest Arena run and its matches, the lessons and their exams, the corrections, the night reports and the live chats. Press a row to see what the agent saw, what it decided and the raw record. Anything that was never saved for that turn says so.
 
 ## Quick Arena run
 

@@ -4,13 +4,18 @@ A new agent is a folder, <db folder>/agents/<name>/, holding the three files Qui
 writes (reflection/quickstart.py):
   plug.json        passes engine/plug.py from_dict; its "agent" is the folder's name.
   instructions.md  its prompt, as written for the owner's yes.
-  card.json        the card the owner said yes to: name, does, good, never, needs. Build also writes
-                   agent, tools, level and at, and each need as {what, tool, connected}; a need reads
-                   as its "what", and the rest is checked for shape and left alone.
+  card.json        the card the user said yes to: name, does, good, never, needs, and from the
+                   live cases work (DECISIONS item 68) bad, the bad result, and case, what one case
+                   is: {input: what arrives, starts: "person" or "agent", output: what the agent
+                   produces or does, ends: when the case is over}. Build also writes agent, tools,
+                   level and at, and each need as {what, tool, connected}; a need reads as its "what",
+                   and the rest is checked for shape and left alone. A card with no case is a chat
+                   case, as every card was before.
 
 load(folder) reads them, under size caps and with no link followed, into an Agent. turn() runs one
 message from the person the agent serves, the way sales/loop.py runs a Sales turn, cut down to
-what any agent has:
+what any agent has. With first=True the text is the case's input, not a person's message: the agent
+writes first (a lead it follows up), and the input is saved under a frame line so later turns read it.
 
 1. instructions.md is the system prompt. The lessons it has earned go under the plug's slot line
    (none in the Arena's first runs: every agent starts from zero, DECISIONS item 20).
@@ -22,15 +27,22 @@ what any agent has:
    kit/tools files behind them, and whatsapp as the channel the chat is on, no tool. A name with no
    tool file is left out and listed in Agent.missing. At most MAX_TOOL_STEPS tool steps a turn
    and MAX_CALLS_PER_STEP calls a step, then the model must answer in words.
-4. The send check: the full check (kit/send_check.py) when the plug declares a "reply" action, as
-   the Sales plug does, or its card connects whatsapp (it talks to customers), so script, style, amounts from tools only, stock counts and links all
-   hold; the house style part only (banned words, dashes, emoji, markdown) for any other agent,
-   whose replies are not a store's answers to a customer. A failed reply is never sent: the model
+4. The send check: the full check (kit/send_check.py) when the card connects whatsapp or store (it
+   talks to customers or quotes the store), so script, style, amounts from tools only, stock counts
+   and links all hold; a folder written by hand, whose card names no tools, keeps the older rule: the
+   full check when the plug declares a "reply" action, as the Sales plug does. The house style part
+   only (banned words, dashes, emoji, markdown) for any other agent, whose replies are not a store's
+   answers to a customer: a ticket agent that names a refund amount is not held to store prices. A failed reply is never sent: the model
    retries with the feedback, and after MAX_FAILED_CHECKS failed drafts no safe reply can be sent:
    nothing goes out and the turn ends "no_safe_reply", as sales/loop.py does. No chat goes to a
    person (DECISIONS items 53 and 57): there is no hand off to fall back on.
-5. A model that does not answer ends the turn "model_error" with nothing sent.
-6. The pause switch (kit/switch.py, DECISIONS item 54): while the agent is paused the message is still
+5. Actions: a card with a case offers one more tool, take_action, whose action is one of the plug's
+   declared actions other than reply (a tag such as "needs the team", a close). Nothing runs; the
+   action and its short note are saved as a tool step and come back in TurnResult.actions, so the
+   practice match and its judge see what the agent did beside what it wrote (DECISIONS item 72: a
+   case that needs people ends with the agent's own tag, never a hand over).
+6. A model that does not answer ends the turn "model_error" with nothing sent.
+7. The pause switch (kit/switch.py, DECISIONS item 54): while the agent is paused the message is still
    saved, so the chat is whole when it resumes, and the turn ends "paused" with nothing sent and no
    model call, as sales/loop.py does for the Sales agent.
 
@@ -60,7 +72,7 @@ FILES = ("plug.json", "instructions.md", "card.json")
 AGENTS = "agents"  # <db folder>/agents/<name>/: where Quick start's Build writes an agent (reflection/quickstart.py)
 PAUSED = "paused"
 MAX_AGENTS = 50  # agent folders built() reads at most
-CARD_KEYS = ("name", "does", "good", "never", "needs")
+CARD_KEYS = ("name", "does", "good", "never", "needs", "bad", "case")
 BUILT_KEYS = ("agent", "tools", "level", "at")  # what Quick start's Build adds to the card (reflection/quickstart.py)
 MAX_FILE_BYTES = {"plug.json": 200_000, "instructions.md": 40_000, "card.json": 20_000}
 MAX_CARD_LINE = 600
@@ -72,8 +84,15 @@ QUICK_TOOLS = {"orders": ("find_order", "draft_order"), "whatsapp": ()}
 MAX_TOOL_STEPS = 4
 MAX_CALLS_PER_STEP = 3
 MAX_FAILED_CHECKS = 3
-REPLY_ACTION = "reply"  # a plug with this action answers customers: the full send check applies
-CHANNEL = "whatsapp"   # a card that connects it talks to customers: the full send check applies too
+REPLY_ACTION = "reply"  # a hand-written folder's plug with this action answers customers: the full send check
+FULL_CHECK_TOOLS = ("whatsapp", "store")  # a card that connects one talks to customers or quotes the store: the full check
+CHANNEL = "whatsapp"
+CASE_KEYS = ("input", "starts", "output", "ends")
+STARTS = ("person", "agent")  # who writes first in a case
+ACT_TOOL = "take_action"  # a case agent's declared actions (a tag, a close); runs nothing, is only recorded
+MAX_ACT_NOTE = 200
+FIRST = ("(A new case. You write first: nobody has written to you yet. The case you start from: {input}) "
+         "Write your first message for this case.")
 RETRY = loop.RETRY
 
 
@@ -92,6 +111,7 @@ class Agent:
     missing: tuple        # tool names the plug names that no tool file has (or that are left out)
     stage: Stage
     full_check: bool
+    acts: tuple = ()      # the declared actions take_action offers (a card with a case only)
 
 
 def _read(folder, name):
@@ -125,6 +145,18 @@ def _lines(v, what):
     return [_line(x.get("what") if isinstance(x, dict) and what == "needs" else x, what) for x in items]
 
 
+def read_case(v):
+    """card.json case as {input, starts, output, ends}, or None when the card has none (a chat case)."""
+    if v is None:
+        return None
+    if not isinstance(v, dict) or set(v) - set(CASE_KEYS):
+        raise Refused("card.json case: {input, starts, output, ends}")
+    if v.get("starts") not in STARTS:
+        raise Refused("card.json case starts: person or agent")
+    return {"input": _line(v.get("input"), "case input"), "starts": v["starts"],
+            "output": _line(v.get("output"), "case output"), "ends": _line(v.get("ends"), "case ends")}
+
+
 def card_tools(text):
     """The tools card.json says are connected (Build writes them), as a set, or None when it names none
     (a folder written by hand). A list of plain tool names, else Refused."""
@@ -142,8 +174,9 @@ def card_tools(text):
 
 
 def read_card(text, agent=None):
-    """card.json as {name, does, good, never, needs}: good is required, it decides the Arena. The keys
-    Build adds (BUILT_KEYS) are allowed; its agent, when there, must be this agent."""
+    """card.json as {name, does, good, never, needs}, with bad and case when the card has them: good is
+    required, it decides the Arena. The keys Build adds (BUILT_KEYS) are allowed; its agent, when there,
+    must be this agent. A card without bad or case reads exactly as before, so its fingerprint holds."""
     try:
         d = json.loads(text)
     except (ValueError, RecursionError):
@@ -155,9 +188,15 @@ def read_card(text, agent=None):
         raise Refused(f"card.json has keys it should not: {', '.join(unknown)}")
     if agent is not None and "agent" in d and d["agent"] != agent:
         raise Refused(f"card.json names the agent {d['agent']}, but its folder is {agent}")
-    return {"name": _line(d.get("name"), "name"), "does": _line(d.get("does"), "does"),
+    card = {"name": _line(d.get("name"), "name"), "does": _line(d.get("does"), "does"),
             "good": _line(d.get("good"), "good"), "never": _lines(d.get("never"), "never"),
             "needs": _lines(d.get("needs"), "needs")}
+    if d.get("bad") not in (None, ""):
+        card["bad"] = _line(d["bad"], "bad")
+    case = read_case(d.get("case"))
+    if case is not None:
+        card["case"] = case
+    return card
 
 
 def tools_of(plug):
@@ -197,9 +236,13 @@ def load(folder):
             raise Refused(f"plug.json names tools the card does not connect: {', '.join(extra)}")
     offered, missing = tools_of(p)
     stage = Stage(p.stages[0] if p.stages else "all", card["name"], card["does"], offered, ())
-    talks = REPLY_ACTION in p.actions or (connected is not None and CHANNEL in connected)
+    if connected is None:  # a folder written by hand: the older rule
+        talks = REPLY_ACTION in p.actions
+    else:
+        talks = bool(connected & set(FULL_CHECK_TOOLS))
+    acts = tuple(a for a in p.actions if a != REPLY_ACTION) if "case" in card else ()
     return Agent(name=p.agent, folder=folder, plug=p, instructions=instructions, card=card, tools=offered,
-                 missing=missing, stage=stage, full_check=talks)
+                 missing=missing, stage=stage, full_check=talks, acts=acts)
 
 
 def built(db_folder, most=MAX_AGENTS):
@@ -229,6 +272,7 @@ class TurnResult:
     reply: str | None = None
     failed: list = field(default_factory=list)  # [{check, why}] when the turn ended on failed checks
     retried: list = field(default_factory=list)  # [{check, why}] of the drafts that failed before the reply went out
+    actions: list = field(default_factory=list)  # [{action, note}] take_action recorded this turn
 
 
 def system_prompt(agent, lessons=()):
@@ -247,12 +291,43 @@ def _check(agent, reply, customer_text, amounts, vocab, sizes, names, chats, cha
                             links=loop.store_links(chats, chat_id), names=names)
 
 
-def turn(agent, text, *, chats, chat_id, model, send, customer_id, lessons=(), message=None):
+PRACTICE_CHANNEL = "practice"
+ORDER_FILES = ("find_order", "draft_order")  # they know the customer by the WhatsApp number
+
+
+def practice_channel(agent):
+    """The channel a practice or exam chat opens on: WhatsApp for a chat case (a card with no case) or an
+    agent whose order tools know the customer by the WhatsApp number, else the practice channel."""
+    if "case" not in agent.card or any(t in agent.tools for t in ORDER_FILES):
+        return CHANNEL
+    return PRACTICE_CHANNEL
+
+
+def act_definition(agent):
+    """The take_action tool for a case agent, or None when it declares no action to take."""
+    if not agent.acts:
+        return None
+    lines = "; ".join(f"{a}: {agent.plug.actions[a]}" for a in agent.acts)
+    return {"type": "function", "function": {
+        "name": ACT_TOOL,
+        "description": ("Take one of your declared actions in this case and say it in a short note (for a tag, "
+                        "the tag). Nothing else runs; it is recorded as what you did. Your actions: " + lines),
+        "parameters": {"type": "object", "properties": {
+            "action": {"type": "string", "enum": list(agent.acts)},
+            "note": {"type": "string", "description": "A short note on what you did, for a tag the tag itself."}},
+            "required": ["action"], "additionalProperties": False}}}
+
+
+def turn(agent, text, *, chats, chat_id, model, send, customer_id, lessons=(), message=None, first=False,
+         channel=CHANNEL):
     """One message from the person the agent serves. send(to, text) is the only way out.
     message: the channels/base.py Message the tools may read (who wrote, a voice note); made from
-    text when None."""
+    text when None. first: text is the case's input and the agent writes first (no person wrote).
+    channel: the channel the Message names when none is given (the Arena passes its practice one)."""
     from channels.base import Message
-    msg = message or Message(channel="whatsapp", customer_id=customer_id, text=text)
+    if first:
+        text = FIRST.format(input=" ".join(str(text or "").split()))
+    msg = message or Message(channel=channel, customer_id=customer_id, text=text)
     history = chats.messages(chat_id)
     chats.add_step(chat_id, "user", content=text or None)
     if switch.is_paused(agent.name, db=chats.db):  # saved above; nothing goes out while paused
@@ -268,20 +343,21 @@ def turn(agent, text, *, chats, chat_id, model, send, customer_id, lessons=(), m
             log.exception("store data unavailable; no price can pass the check this turn")
     convo = history + [{"role": "user", "content": text or "(empty message)"}]
     system = system_prompt(agent, lessons)
-    failed = []
+    failed, acted = [], []
+    said = "" if first else text  # the person's words the full check reads; a case input is not theirs
     try:
         while True:
-            reply = _draft(ctx, system, convo, amounts)
-            passed, feedback = _check(agent, reply, text, amounts, vocab, sizes, names, chats, chat_id)
+            reply = _draft(ctx, system, convo, amounts, agent, acted)
+            passed, feedback = _check(agent, reply, said, amounts, vocab, sizes, names, chats, chat_id)
             if passed and reply:
                 send(customer_id, reply)
                 chats.add_step(chat_id, "assistant", content=reply)
-                return TurnResult("replied", reply, retried=list(failed))
+                return TurnResult("replied", reply, retried=list(failed), actions=list(acted))
             feedback = feedback or "The reply was empty. Write one."
             failed.append({"check": "send_check", "why": " ".join(feedback.split())[:300]})
             if len(failed) >= MAX_FAILED_CHECKS:  # no safe reply: nothing goes out (sales/loop.py)
                 loop.drop_draft(chats, chat_id)
-                return TurnResult("no_safe_reply", None, failed)
+                return TurnResult("no_safe_reply", None, failed, actions=list(acted))
             convo.append({"role": "assistant", "content": reply})
             convo.append({"role": "user", "content": RETRY.format(feedback=feedback)})
     except ModelError as e:
@@ -290,11 +366,13 @@ def turn(agent, text, *, chats, chat_id, model, send, customer_id, lessons=(), m
         return TurnResult("model_error")
 
 
-def _draft(ctx, system, convo, amounts):
-    """Model steps until it answers in words: the draft reply."""
+def _draft(ctx, system, convo, amounts, agent=None, acted=None):
+    """Model steps until it answers in words: the draft reply. A take_action call (a case agent's
+    declared action) runs nothing: it is added to acted and the model reads that it was recorded."""
+    act = act_definition(agent) if agent is not None else None
     for step in range(MAX_TOOL_STEPS + 1):
         last = step == MAX_TOOL_STEPS
-        defs = [] if last else tools.definitions(ctx.stage)
+        defs = [] if last else tools.definitions(ctx.stage) + ([act] if act else [])
         out = ctx.model.chat([system] + convo, tools=defs or None)
         out = out if isinstance(out, dict) else {}
         calls = out.get("tool_calls") or []
@@ -308,6 +386,8 @@ def _draft(ctx, system, convo, amounts):
             name = fn.get("name") if isinstance(fn.get("name"), str) else ""
             if i >= MAX_CALLS_PER_STEP:
                 result = dict(loop.TOO_MANY_CALLS)
+            elif act is not None and name == ACT_TOOL:
+                result = _act(agent, loop._arguments(fn.get("arguments")), acted)
             else:
                 result = tools.run(name, loop._arguments(fn.get("arguments")), ctx)
             body = json.dumps(result, ensure_ascii=False)
@@ -317,6 +397,19 @@ def _draft(ctx, system, convo, amounts):
             if name in tools.AMOUNT_TOOLS:
                 amounts |= send_check.amounts_in(result)
     return ""
+
+
+def _act(agent, args, acted):
+    """One take_action call: recorded in acted when it names a declared action, else feedback."""
+    args = args if isinstance(args, dict) else {}
+    name = args.get("action")
+    if name not in agent.acts:
+        return {"ok": False, "feedback": f"Take one of your declared actions: {', '.join(agent.acts)}."}
+    note = args.get("note")
+    note = " ".join(note.split())[:MAX_ACT_NOTE] if isinstance(note, str) else ""
+    if acted is not None:
+        acted.append({"action": name, "note": note})
+    return {"ok": True, "recorded": name}
 
 
 def order_made(chats, chat_id):

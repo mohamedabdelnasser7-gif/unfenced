@@ -209,7 +209,7 @@ class TurnGate(Gate):
 
     def __init__(self, examiner, *, agent, judge_model, **kw):
         from arena import practice
-        self.agent, self.prompts = agent, {practice.PROMPT_SHA: practice.PROMPT}
+        self.agent, self.prompts = agent, dict(practice.PROMPTS)  # chat, case and agent-first prompts
         super().__init__(examiner, **kw)
         self.judge_model = self.calls.model(judge_model)
 

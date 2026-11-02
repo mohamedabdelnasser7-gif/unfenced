@@ -502,11 +502,15 @@ class App:
         return n
 
     def live(self):
-        """Is the Sales agent live on WhatsApp now? The fixed setting when one was given, else its latest
-        Connect or Pull. A state that cannot be read counts as not live, so nothing goes out."""
-        if self.connected is not None:
-            return bool(self.connected)
+        """Is the Sales agent live on WhatsApp now? Off when fixed off; fixed on, live until a Pull made
+        after this process started (Pull always works); else its latest Connect or Pull. A state that
+        cannot be read counts as not live, so nothing goes out."""
+        if self.connected is False:
+            return False
         try:
+            if self.connected:
+                got = connections.state(self.chats.db, AGENT).get(connections.WHATSAPP)
+                return not (got and not got["on"] and got["at"] >= self.started)
             return connections.live(self.chats.db, AGENT, connections.WHATSAPP)
         except Exception:
             log.exception("the live state could not be read; answering nothing")

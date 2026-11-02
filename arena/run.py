@@ -386,6 +386,7 @@ class Arena:
         self.calls = calls
         self.agent_model, self.customer_model = calls.model(agent_model), calls.model(customer_model)
         self.trust = trust or dict(PUBLIC_TRUST)
+        self.quick = False  # main sets it for --quick: its item never unlocks Connect (Morning.gate)
         self.facts = self.trust.get("zero_failed_checks", True) if fact_checks is None else bool(fact_checks)
         self.prompt, self.matches, self.rounds, self.seed = prompt, int(matches), int(rounds), seed
         self.prompt_sha = match_mod.prompt_sha(prompt)
@@ -545,7 +546,7 @@ class Arena:
         last = rounds[-1]["gate"]
         item = {"agent": self.agent, "kind": "arena_rounds", "at": self.now(), "run": self.run_id, "stopped": stopped,
                 "rounds": len(rounds), "gate_won": last["won"], "gate_played": last["played"],
-                "needs": self.trust["wins"], "lost": [], "reflection": self.reflection_rows(rounds),
+                "needs": self.trust["wins"], "quick": self.quick, "lost": [], "reflection": self.reflection_rows(rounds),
                 "line": f"The Arena ran {len(rounds)} round{'' if len(rounds) == 1 else 's'} and stopped, {stopped}: "
                         f"{last['won']} of {last['played']} held-out matches won in the last, {self.trust['wins']} needed."}
         return self._write_item(item)
@@ -1001,6 +1002,7 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
                       fact_checks=None if args.fact_checks is None else args.fact_checks == "on", seed=args.seed,
                       learn=learn, between=between, lessons=lessons, state=state, pool=practice,
                       before_match=before_match, notes=notes)
+        arena.quick = bool(args.quick)
         rep = arena.run()
         if planned is not None:
             rep["replay"] = (arena.replay(*planned) if rep["stopped"] == PASSED

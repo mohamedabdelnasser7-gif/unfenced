@@ -306,6 +306,7 @@ class Parts(Base):
         names = sorted(p.name for p in folder.iterdir() if p.name.startswith("arena-"))
         items = [n for n in names if n.startswith("arena-sales-")]  # a pass writes its Morning item too
         self.assertEqual(len(items), 1)
+        self.assertIs(json.loads((folder / items[0]).read_text(encoding="utf-8"))["quick"], False)
         self.assertEqual([n for n in names if n not in items], [run.CALLS_FILE, "arena-calls.lock", run.MATCHES_FILE])
         ignored = (REPO / ".gitignore").read_text(encoding="utf-8").split()
         for name in names + [run.CALLS_FILE + ".tmp"]:  # the temp file a crash could leave
@@ -315,6 +316,20 @@ class Parts(Base):
             with contextlib.redirect_stderr(io.StringIO()) as err:
                 self.assertEqual(run.main(["--matches", "1"] + argv, agent_model=Agent(), customer_model=Customer()), 2)
             self.assertIn("Not run:", err.getvalue())
+
+    def test_a_quick_run_marks_its_item_quick(self):
+        """Review simplify round 1, finding 1: the page never unlocks Connect on a quick run's item."""
+        folder = self.dir / "quick"
+        folder.mkdir()
+        db = folder / "ascent.db"
+        Db(str(db)).close()
+        with contextlib.redirect_stdout(io.StringIO()):
+            run.main(["--quick", "--db", str(db), "--json"], agent_model=Agent(),
+                     customer_model=Customer(buyers={c["worry"] for c in run.load_cards(run.DEMO_CARDS)}))
+        items = [p for p in folder.iterdir() if p.name.startswith("arena-sales-")]
+        self.assertEqual(len(items), 1)
+        for p in items:
+            self.assertIs(json.loads(p.read_text(encoding="utf-8")).get("quick"), True)
 
     def test_cli_hands_the_agent_its_kept_lessons(self):
         """Review round 1, finding 7: with --db the agent plays with its kept lessons, as the exam

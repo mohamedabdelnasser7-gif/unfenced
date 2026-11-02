@@ -233,6 +233,16 @@ class OverTheServer(Base):
             e.close()
             return e.code, ""
 
+    def test_a_quick_run_never_unlocks_connect(self):
+        """Review simplify round 1, finding 1: --quick is a gate of one match, never enough to go live."""
+        self.arena(won=1, played=1, needs=1, quick=True)
+        gate = self.m.gate("sales")
+        self.assertFalse(gate["passed"])
+        self.assertIn("quick one", gate["said"])
+        status, page = self.post("/connect", [("agent", "sales"), ("channel", "whatsapp")])
+        self.assertIn("Not connected.", page)
+        self.assertFalse(connections.live(self.db, "sales", "whatsapp"))
+
     def test_connect_is_refused_before_the_gate_and_works_after_then_pull(self):
         status, page = self.post("/connect", [("agent", "sales"), ("channel", "whatsapp")])
         self.assertEqual(status, 200)  # the 303 back, followed: the flash says why
@@ -297,6 +307,17 @@ class TheChannel(unittest.TestCase):
         sent = len(self.graph.sent)
         self.assertIsNone(self.one(app, "wamid.m2"))
         self.assertEqual(len(self.graph.sent), sent)
+
+    def test_fixed_on_still_stops_at_a_pull_made_after_it_started(self):
+        """Review simplify round 1, finding 2: Pull always works, WHATSAPP_LIVE=on included."""
+        connections.disconnect(self.db, "sales", "whatsapp", why="Pull", by="the user", now=NOW - 60)
+        app = self.app(FakeModel(say(ANSWER)), connected=True)  # a Pull before the start does not count
+        self.assertEqual(self.one(app).outcome, "replied")
+        connections.disconnect(self.db, "sales", "whatsapp", why="Pull", by="the user", now=NOW + 1)
+        sent = len(self.graph.sent)
+        self.assertIsNone(self.one(app, "wamid.m2"))
+        self.assertEqual(len(self.graph.sent), sent)
+        self.assertEqual(app.quiet_once(), [])
 
     def test_the_setting_fixes_it_either_way(self):
         connections.connect(self.db, "sales", "whatsapp", why="The gate passed.", by="the user", now=NOW)

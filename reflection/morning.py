@@ -786,6 +786,9 @@ class Morning:
         won, played, needs = item["gate_won"], item["gate_played"], item["needs"]
         if won is None or played is None or not needs:
             return {"passed": False, "said": "Its latest Arena run has no gate result.", "at": item["at"]}
+        if item.get("quick"):  # a gate of one match: a look for judges, never enough to go live
+            return {"passed": False, "said": f"Its latest Arena run, on {_when(item['at'])}, was the quick one; "
+                    "a full run has to pass the gate first.", "at": item["at"]}
         passed = item["kind"] == "arena_rounds" and won >= needs
         run = "Its practice in the Arena" if item["practice"] else "Its latest Arena run"
         said = (f"{run} passed the gate on {_when(item['at'])}." if passed
@@ -1562,7 +1565,8 @@ class Morning:
                                       "rounds": _arena_rounds(item.get("reflection")), "kind": item["kind"],
                                       "gate_won": _count(item.get("gate_won")),
                                       "gate_played": _count(item.get("gate_played")),
-                                      "needs": _count(item.get("needs")), "practice": item.get("practice") is True}
+                                      "needs": _count(item.get("needs")), "practice": item.get("practice") is True,
+                                      "quick": item.get("quick") is True}
         return out, problems
 
     def read_mode_cards(self):

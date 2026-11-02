@@ -681,6 +681,37 @@ class RealFullExam(Base):
         # the first lesson, handed on before the second's full exam, is never on its kept side
         self.assertEqual(made[0]["at"], [(GOOD, []), (WHOLESALE, [])])
 
+    def test_a_full_exam_that_would_go_over_its_call_cap_is_held_and_hands_nothing(self):
+        """Review simplify round 2, the cost note: at most FULL_CAP model calls a lesson's full exam; one
+        that would take more is held as could not run, so nothing is handed, and the next lesson starts
+        a new full exam rather than reuse a run on the kept lessons cut short."""
+        from unittest import mock
+        real, used = rounds.full_examiner, []
+
+        def counting(plug, kept, model):  # the model calls each lesson's full exam made
+            class Count:
+                def chat(self, *a, **kw):
+                    out = model.chat(*a, **kw)
+                    used[-1] += 1
+                    return out
+            ex = real(plug, kept, Count())
+
+            def examine(text, tags):
+                used.append(0)
+                return ex(text, tags)
+            return examine
+        with mock.patch.object(rounds, "FULL_CAP", 60), mock.patch.object(rounds, "full_examiner", counting):
+            db, got, _ = self.run_real([GOOD, WHOLESALE], [])
+        self.assertEqual(len(got["lessons"]), 2)
+        for one in got["lessons"]:
+            with self.subTest(lesson=one["text"]):
+                self.assertTrue(one["passed"])  # the scoped exam passed it
+                self.assertIn("more than 60 model calls", one["full_exam"])
+                self.assertFalse(one["handed"])
+                self.assertIsNone(one["live_id"])
+        self.assertEqual(used, [60, 60])  # each lesson's full exam stopped at the cap, the second on a new run
+        self.assertEqual(self.lessons(db)[0], {})
+
     def test_a_run_with_no_examiner_given_hands_between_the_real_full_exam(self):
         """Review simplify round 2, finding 2: run.main's own wiring, with no "examiner" in reflection,
         gives Between rounds.full_examiner as its full exam, and the scoped real exam as its exam."""

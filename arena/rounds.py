@@ -75,6 +75,7 @@ from engine.study import read_days
 DAY = 86400.0
 LIVE_BUSY = "not handed, live busy"  # a passed lesson the live database could not take this run
 EXAM_CAP = 60  # model calls one lesson's exam may take between rounds, the run on the kept lessons included (--exam-cap)
+FULL_CAP = 200  # model calls one lesson's full exam may take before hand_live, the run on the kept lessons included
 REWRITES = 2  # new tries a lesson the gate refused may take in the same round (Mohamed 2026-11-02, "Yes now")
 CAP_NOTE = "the model call cap was reached during the night study; nothing it left unchecked is handed on"
 
@@ -182,6 +183,31 @@ class LiveKept:
         return (self.pool._fixes(stage) + kept)[:min(limit, MAX_PICK)]
 
 
+class FullCapReached(Exception):
+    """The full exam asked for more than FULL_CAP model calls for one lesson."""
+
+
+class _Budget:
+    """The full exam's model with at most FULL_CAP calls a lesson (start() before each lesson): a call
+    that would go over is refused and over is set, so the exam is held as could not run."""
+
+    def __init__(self, inner, cap):
+        self.inner, self.cap, self.left, self.over = inner, cap, cap, False
+
+    def start(self):
+        self.left, self.over = self.cap, False
+
+    def chat(self, messages, tools=None, effort="medium", max_tokens=1500, whole=False):
+        if self.left < 1:
+            self.over = True
+            raise FullCapReached(f"the full exam would take more than {self.cap} model calls")
+        self.left -= 1
+        return self.inner.chat(messages, tools=tools, effort=effort, max_tokens=max_tokens, whole=whole)
+
+    def __getattr__(self, name):  # the route and model id a part names in its label
+        return getattr(self.inner, name)
+
+
 def goes_ahead(les, trial, passed):
     """May a lesson that took the gate be handed to the next round? Only when it passed and its own
     rules let it go ahead with no further yes: on trial or kept, or low risk and waiting its turn."""
@@ -286,7 +312,7 @@ class Between:
 
     def __init__(self, db, plug, *, calls, state, pool, agent_model, customer_model, models, examiner=real_examiner,
                  now=time.time, live=None, full=None):
-        self.full, self._full = full, None  # the run's one full exam (_full_exam)
+        self.full, self._full, self._budget = full, None, None  # the run's one full exam and its cap (_full_exam)
         self.db, self.plug, self.calls, self.state, self.pool = db, plug, calls, state, pool
         self.agent_model, self.customer_model = agent_model, customer_model
         self.models, self.examiner, self.now = dict(models), examiner, now
@@ -428,7 +454,9 @@ class Between:
                "why": exam_mod.held_line(row), "gate": exam_mod.effect_of(row)}
         if passed and self.live is not None and self.full is not None:  # the full exam before real customers
             full = self._full_exam(les)
-            out["full_exam"] = "passed" if full.passed else f"held: {full.line()}"
+            first = full.first
+            why = f" ({first.why})" if first is not None and first.check == exam_mod.NOT_RUN and first.why else ""
+            out["full_exam"] = "passed" if full.passed else f"held: {full.line()}{why}"
             if not full.passed:  # it stays in the Arena: not handed live, nor to the next round
                 out["live_id"] = None
                 out["live"] = f"{FULL_HELD} ({full.line()})"
@@ -451,13 +479,21 @@ class Between:
     def _full_exam(self, les):
         """The full exam of one lesson that passed the Arena's exam, before it is handed on: against the
         live agent's kept lessons (LiveKept), on one examiner a run, so its run on those kept lessons is
-        made once and reused. An exam that raises is held as could not run (fail closed)."""
+        made once and reused, under FULL_CAP model calls a lesson. An exam that raises or would go over
+        the cap is held as could not run (fail closed); after going over, the next lesson starts a new
+        examiner, so a run on the kept lessons cut short is never reused."""
         try:
             if self._full is None:
-                self._full = self.full(self.plug, LiveKept(self.pool), self.calls.model(self.models["exam"]))
-            return self._full(les["text"], les["stages"])
+                self._budget = _Budget(self.calls.model(self.models["exam"]), FULL_CAP)
+                self._full = self.full(self.plug, LiveKept(self.pool), self._budget)
+            self._budget.start()
+            full = self._full(les["text"], les["stages"])
         except Exception as e:  # fail closed: a full exam that cannot run hands nothing
-            return exam_mod.could_not_run(e)
+            full = exam_mod.could_not_run(e)
+        if self._budget is not None and self._budget.over:
+            self._full = self._budget = None
+            full = exam_mod.could_not_run(FullCapReached(f"the full exam would take more than {FULL_CAP} model calls"))
+        return full
 
 
 FULL_HELD = "passed the Arena's exam but not the full exam, so it stays in the Arena and is not handed live"

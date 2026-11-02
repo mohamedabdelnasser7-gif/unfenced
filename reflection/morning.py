@@ -128,6 +128,14 @@ The fact cards (call 10, reflection/facts.py). Facts worked out from an agent's 
 each with the numbers behind it, Keep and Dismiss. An answer is saved with who and when; a
 kept fact is shown under Kept facts. Nothing acts on a fact by itself.
 
+Deploy (DECISIONS item 77, kit/connections.py). Live means connected: an agent is live on a
+channel from the user's Connect until Pull, and real chats are history, never the switch. Connect
+unlocks only when the agent's latest Arena gate passed (Morning.gate, from the newest Arena item saved
+next to the database: a rounds item whose last gate won the wins its level needs). The connection
+keeps that gate result, so the page says what let it go live. Pull takes the agent off every channel.
+Only WhatsApp is built, and it runs only the Sales agent (channels/whatsapp.py answers only while it
+is connected); any other channel a card asks for is not connected yet.
+
 Late results (DECISIONS items 66 and 67). A case whose result comes later (delivered or refused,
 say) and no webhook or API brought it waits for a person: no timer closes it. Under "Waiting for
 a result" each such case of an agent with a plug (a pending case, or a good case with no second
@@ -174,6 +182,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from kit import connections as conn_mod
 from engine import exam as exam_mod
 from engine import lessons as lessons_mod
 from engine import plug as plug_mod
@@ -748,6 +757,86 @@ class Morning:
         if not self.pausable(agent):
             raise Refused("Pull is not built for this agent yet, so nothing is changed.")
 
+    # ---- deploy: Connect and Pull (DECISIONS item 77, kit/connections.py) ----------------------
+
+    def channels_of(self, agent):
+        """The channels the agent asks for, in connections.CHANNELS order: the Sales agent's is WhatsApp
+        (its loop is the one channels/whatsapp.py runs); an agent Quick start built asks for the ones its
+        card.json tools name. Any other agent, or a card that cannot be read, asks for none."""
+        if agent == SALES.agent and agent in self.plugs:
+            return [conn_mod.WHATSAPP]
+        if agent not in self.built or self.db_path is None:
+            return []
+        from kit import turn as turn_mod
+        folder = Path(self.db_path).resolve().parent / turn_mod.AGENTS / agent
+        try:
+            tools = turn_mod.card_tools(turn_mod._read(folder, "card.json")) or set()
+        except turn_mod.Refused:
+            return []
+        return [c for c in conn_mod.CHANNELS if c in tools]
+
+    def gate(self, agent):
+        """Did the agent's latest Arena gate pass? From the newest Arena item saved next to the database
+        (read_arena): a rounds item whose last gate won at least the wins its level needs; a stuck item
+        never did. {passed, said, at}: said is the page's one line about it, with when and no count, since
+        the wins a level needs stay private (DECISIONS item 17)."""
+        item = self.read_arena()[0].get(agent)
+        if item is None:
+            return {"passed": False, "said": "No saved Arena run yet.", "at": None}
+        won, played, needs = item["gate_won"], item["gate_played"], item["needs"]
+        if won is None or played is None or not needs:
+            return {"passed": False, "said": "Its latest Arena run has no gate result.", "at": item["at"]}
+        passed = item["kind"] == "arena_rounds" and won >= needs
+        run = "Its practice in the Arena" if item["practice"] else "Its latest Arena run"
+        said = (f"{run} passed the gate on {_when(item['at'])}." if passed
+                else f"{run}, on {_when(item['at'])}, did not pass the gate.")
+        return {"passed": passed, "said": said, "at": item["at"]}
+
+    def connection_view(self, agent):
+        """Each channel the agent asks for, as the page shows it: {channel, name, works, live, at, why,
+        gate}. works: the channel is built and runs this agent. live, at, why: its latest connect or Pull."""
+        got = conn_mod.state(self.db, agent)
+        gate = self.gate(agent) if self.channels_of(agent) else None
+        out = []
+        for c in self.channels_of(agent):
+            row = got.get(c) or {}
+            out.append({"channel": c, "name": conn_mod.CHANNELS[c], "works": conn_mod.works(agent, c),
+                        "live": bool(row.get("on")), "at": row.get("at"), "why": row.get("why"), "gate": gate})
+        return out
+
+    def connect(self, agent, channel, now=None):
+        """Connect on an agent's page: the agent goes live on the channel, only after its latest Arena
+        gate passed. The row keeps the gate result as why. A paused agent is resumed, so live answers."""
+        self._plugged(agent)
+        channel = channel if isinstance(channel, str) else ""
+        if channel not in self.channels_of(agent):
+            raise Refused("Its card does not ask for that channel, so nothing is changed.")
+        name = conn_mod.CHANNELS[channel]
+        if not conn_mod.works(agent, channel):
+            if channel == conn_mod.WHATSAPP:
+                raise Refused(f"Connecting an agent made in Quick start to {name} is next, so nothing is changed.")
+            raise Refused(f"{name} is not connected yet, so nothing is changed.")
+        if conn_mod.live(self.db, agent, channel):
+            return f"It is live on {name} already. Pull takes it off."
+        gate = self.gate(agent)
+        if not gate["passed"]:
+            raise Refused(f"Not connected. {gate['said']} It connects once its latest Arena gate passes.")
+        conn_mod.connect(self.db, agent, channel, why=gate["said"], by=self.by, now=now)
+        if self.paused(agent):
+            switch_mod.resume(agent, db=self.db, now=now, by=self.by)
+        return f"Live on {name}. It answers the next message there."
+
+    def disconnect(self, agent, now=None):
+        """Pull on a live agent's page: the agent comes off every channel it is live on."""
+        self._plugged(agent)
+        on = [c for c, r in conn_mod.state(self.db, agent).items() if r["on"]]
+        if not on:
+            return "It is not live on any channel."
+        for c in on:
+            conn_mod.disconnect(self.db, agent, c, why="Pull on the agent's page", by=self.by, now=now)
+        names = " and ".join(conn_mod.CHANNELS.get(c, c) for c in on)
+        return f"Pulled from {names}. It sends nothing there until you connect it again."
+
     def rollback_plan(self, agent, now=None):
         """The latest night snapshot of an agent with a plug and what a rollback to it would do now:
         (snapshot, steps, code), or None with no snapshot (reflection/snapshots.py)."""
@@ -1237,10 +1326,16 @@ class Morning:
         return lessons
 
     def _live(self):
-        """The agents with a plug here that work on real chats or cases in this database: a chat on a
-        real channel in the chats store (the Sales agent's, kit/chats.py), or a log row that is not an
-        imported history row (reflection/importer.py). The Arena plays on a copy of the database, so an
-        agent with only Arena practice is not live. There is no live switch in the code yet."""
+        """The agents with a plug here that are live: connected on a channel by the user after the Arena
+        gate passed (kit/connections.py, DECISIONS item 77). Real chats are history, never the switch
+        (_worked)."""
+        return conn_mod.live_agents(self.db) & set(self.plugs)
+
+    def _worked(self):
+        """The agents with a plug here that worked on real chats or cases in this database, as history:
+        a chat on a real channel in the chats store (the Sales agent's, kit/chats.py), or a log row that
+        is not an imported history row (reflection/importer.py). The Arena plays on a copy of the
+        database, so Arena practice alone is not here. It never makes an agent live (_live)."""
         out = set()
         with self.db.tx() as c:
             if _has_table(c, "trace"):
@@ -1437,7 +1532,9 @@ class Morning:
 
     def read_arena(self):
         """The newest Arena item of each agent saved next to the database (arena/run.py stuck_item
-        or rounds_item): ({agent: {file, at, line, lost, rounds}}, the names that could not be read)."""
+        or rounds_item, arena/practice.py for an agent Quick start built): ({agent: {file, at, line, lost,
+        rounds, kind, gate_won, gate_played, needs, practice}}, the names that could not be read). The
+        gate counts are whole counts, or None when the item has none (Morning.gate)."""
         out, problems = {}, []
         if self.reports is None or not self.reports.is_dir():
             return out, problems
@@ -1462,7 +1559,10 @@ class Morning:
             seen = out.get(item["agent"])
             if seen is None or (item["at"], path.name) > (seen["at"], seen["file"]):
                 out[item["agent"]] = {"file": path.name, "at": float(item["at"]), "line": item["line"], "lost": lost[:3],
-                                      "rounds": _arena_rounds(item.get("reflection"))}
+                                      "rounds": _arena_rounds(item.get("reflection")), "kind": item["kind"],
+                                      "gate_won": _count(item.get("gate_won")),
+                                      "gate_played": _count(item.get("gate_played")),
+                                      "needs": _count(item.get("needs")), "practice": item.get("practice") is True}
         return out, problems
 
     def read_mode_cards(self):
@@ -2721,6 +2821,8 @@ ACTIONS = {"/stop": lambda m, f, now=None: m.stop(_field(f, "lesson"), _field(f,
            "/correct": lambda m, f, now=None: m.correct(_field(f, "agent"), _field(f, "line"), now=now),
            "/pause": lambda m, f, now=None: m.pause(_field(f, "agent"), now=now),
            "/resume": lambda m, f, now=None: m.resume(_field(f, "agent"), now=now),
+           "/connect": lambda m, f, now=None: m.connect(_field(f, "agent"), _field(f, "channel"), now=now),
+           "/disconnect": lambda m, f, now=None: m.disconnect(_field(f, "agent"), now=now),
            "/rollback": lambda m, f, now=None: m.roll_back(_field(f, "agent"), _field(f, "code"), now=now),
            "/late_mark": lambda m, f, now=None: m.late_mark(_field(f, "agent"), _field(f, "case"), _field(f, "result"),
                                                             now=now),
@@ -3126,6 +3228,11 @@ def _dicts(v):
 
 def _dict(v):
     return v if isinstance(v, dict) else {}
+
+
+def _count(v):
+    """A whole count from a saved file, or None for anything else."""
+    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None
 
 
 def _arena_rounds(rows):

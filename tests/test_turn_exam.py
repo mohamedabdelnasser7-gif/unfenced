@@ -37,6 +37,23 @@ WRITTEN = {"situations": [
      "never": 0}]}
 
 
+UNHELPFUL = "Tell every customer we cannot help today."
+
+
+def unhelpful_world():
+    """An agent that calls its tool and answers ANSWER, but turns everyone away once UNHELPFUL is
+    handed; the judge says the good result is reached only when no reply turns the person away."""
+    def agent(messages, tools):
+        if messages[-1]["role"] != "tool":
+            return tool_call("store", {"query": "x"})
+        return say("Sorry, we cannot help with that today." if UNHELPFUL in messages[0]["content"] else ANSWER)
+
+    def judge(messages):
+        ok = "cannot help" not in messages[1]["content"]
+        return say(json.dumps({"reached": ok, "broke_never": False, "turn": 1, "why": "the answer"}))
+    return World(agent=agent, judge=judge)
+
+
 def with_exam(folder, written=WRITTEN):
     """Give a copied fixture agent its exam, the way Build writes it."""
     agent = turn.load(folder)
@@ -200,6 +217,56 @@ class TheExaminer(Base):
         again = ex("Another line.", (plug_mod.ALL,))
         self.assertEqual(again.calls, 6)  # the run without a new line is made once and reused
 
+    def test_a_line_that_stops_a_good_result_reached_without_it_fails(self):
+        # review wireall r1 item 1: a good situation once passed on any clean reply
+        for count in (True, False):
+            with self.subTest(count=count):
+                world = unhelpful_world()
+                got = turn_exam.Examiner(self.agent, model=world, judge_model=world, count=count)(
+                    UNHELPFUL, (plug_mod.ALL,))
+                self.assertFalse(got.passed)
+                self.assertEqual((got.first.name, got.first.check), ("good-1", turn_exam.Examiner.GOOD))
+                self.assertIn("reached without the new line and not with it", got.first.why)
+                if count:
+                    self.assertEqual(engine_exam.effect(got.pairs)["broke_cases"], ["situation 1"])
+
+    def test_a_good_result_reached_on_neither_side_is_no_fail(self):
+        for count in (True, False):
+            with self.subTest(count=count):
+                world = World(reached=False)
+                ex = turn_exam.Examiner(self.agent, model=world, judge_model=world, count=count)
+                self.assertTrue(ex("Say the stock in one short line.", (plug_mod.ALL,)).passed)
+
+    def test_a_judge_that_does_not_answer_on_a_good_situation_fails_closed(self):
+        for count in (True, False):
+            with self.subTest(count=count):
+                world = World()
+                world.judge = lambda m: say("not json" if OPENING in m[1]["content"] else
+                                            json.dumps({"reached": True, "broke_never": False, "turn": 1, "why": "ok"}))
+                got = turn_exam.Examiner(self.agent, model=world, judge_model=world, count=count)(
+                    "Say the stock in one short line.", (plug_mod.ALL,))
+                self.assertFalse(got.passed)
+                self.assertEqual(got.first.check, turn_exam.Examiner.GOOD)
+                self.assertIn("could not be judged", got.first.why)
+
+    def test_a_judge_fault_without_the_line_holds_and_is_not_kept(self):
+        world = unhelpful_world()
+        judge, faults = world.judge, [1]
+
+        def flaky(messages):  # faults once, on the good situation's run without the line
+            if faults and OPENING in messages[1]["content"] and ANSWER in messages[1]["content"]:
+                faults.pop()
+                return say("not json")
+            return judge(messages)
+        ex = turn_exam.Examiner(self.agent, model=world, judge_model=world, count=True)
+        ex("Say the stock in one short line.", (plug_mod.ALL,))  # judges the line's own run: reached
+        world.judge = flaky
+        got = ex(UNHELPFUL, (plug_mod.ALL,))
+        self.assertFalse(got.passed)
+        self.assertIn("could not be judged", got.first.why)
+        again = ex(UNHELPFUL, (plug_mod.ALL,))
+        self.assertIn("reached without the new line and not with it", again.first.why)
+
 
 class RerunOfPracticeWins(Base):
     def practise(self, world):
@@ -356,6 +423,17 @@ class CorrectionOnTheAgentPage(Base):
         said = page.correct("stock_watch", "Say the stock in one short line.")
         self.assertIn("waits for your yes on Today", said)
         self.assertIn("situation 3, check tools_called", said)
+        les = page.lessons["stock_watch"].mine()[-1]
+        self.assertNotEqual(les["state"], engine_lessons.TRYING)
+
+    def test_a_correction_that_turns_every_customer_away_is_held(self):
+        # review wireall r1 item 1: with no practice win nothing else stood between this line and a hotfix
+        world = unhelpful_world()
+        page = self.page(world)
+        self.assertFalse(run.past_wins(self.folder))
+        said = page.correct("stock_watch", UNHELPFUL)
+        self.assertIn("waits for your yes on Today", said)
+        self.assertIn("situation 1, check good_model_judged", said)
         les = page.lessons["stock_watch"].mine()[-1]
         self.assertNotEqual(les["state"], engine_lessons.TRYING)
 

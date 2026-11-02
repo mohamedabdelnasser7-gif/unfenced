@@ -21,6 +21,12 @@ The checks, in code wherever a rule can be read off what the agent did:
                       card's good result and never lines: it fails only when the judge says a never
                       line was broken. Its name says it is judged by a model.
 
+Beside the plug's checks, the Examiner (the gate before a trial) judges each "good" situation with the
+same model judge: good_model_judged fails a lesson when a good situation the agent reached without the
+new line is not reached with it. A good situation reached on neither side is no fail, so a good
+result one message cannot reach never holds a line. A judge that raises fails that situation (fail
+closed).
+
 Each situation runs through kit/turn.py turn in a throwaway in-memory database on the demo store with
 no Shopify keys (arena/match.py demo_store), and its replies go to a list, so an exam never messages
 anyone or writes a real order. At most CALL_CAP model calls a situation; a model that does not
@@ -204,6 +210,21 @@ def answer(s, lesson, *, agent, model, kept=None):
 
 # ---- the checks
 
+def _match(did):
+    """The one-turn match arena/good.py judges from what the agent did."""
+    return {"turns": [{"n": 1, "customer": did["customer_text"], "replies": did["sent"] or [did["reply"]],
+                       "failed": []}], "ended": "turns"}
+
+
+def reached(agent, did, judge_model):
+    """Did the agent reach the card's good result in this turn, by the model judge of arena/good.py?
+    A turn with no reply never did. A judge fault raises."""
+    from arena import good
+    if did["outcome"] != "replied":
+        return False
+    return good.judge(_match(did), agent.card, judge_model, facts=False)["won"]
+
+
 def checks(agent, judge_model):
     """{name: check(situation, did) -> "" or why} for this agent; never_model_judged asks judge_model."""
     from arena import good
@@ -231,9 +252,7 @@ def checks(agent, judge_model):
     def never_model_judged(s, did):
         if not s["expect"].get("judge") or did["outcome"] != "replied":
             return ""
-        match = {"turns": [{"n": 1, "customer": did["customer_text"], "replies": did["sent"] or [did["reply"]],
-                            "failed": []}], "ended": "turns"}
-        judged = good.judge(match, agent.card, judge_model, facts=False)
+        judged = good.judge(_match(did), agent.card, judge_model, facts=False)
         return judged["why"] if judged["why"].startswith(good.BROKE) else ""
 
     return {"no_safe_reply": no_safe_reply, "send_check": send_check, "declared_tools": declared_tools,
@@ -248,23 +267,32 @@ def situations(agent):
     return engine_exam.load(plug.exam.situations, plug.stages or (agent.stage.name,))
 
 
-def run(agent, model, judge_model, *, kept=None, lesson=None, stop_at_first=False, sits=None):
+def run(agent, model, judge_model, *, kept=None, lesson=None, stop_at_first=False, sits=None, seen=None):
     """One exam run. lesson: (text, stage tags) of a new line, or None; kept: a Lessons whose kept
-    lessons are handed."""
+    lessons are handed; seen: a dict that gets what the agent did, by situation id."""
     sits = situations(agent) if sits is None else sits
-    return engine_exam.sit(sits, lambda s, les: answer(s, les, agent=agent, model=model, kept=kept),
-                           checks(agent, judge_model), agent.plug.exam.checks, lesson, stop_at_first=stop_at_first)
+
+    def one(s, les):
+        did = answer(s, les, agent=agent, model=model, kept=kept)
+        if seen is not None:
+            seen[s["id"]] = did
+        return did
+    return engine_exam.sit(sits, one, checks(agent, judge_model), agent.plug.exam.checks, lesson,
+                           stop_at_first=stop_at_first)
 
 
 class Examiner:
     """The gate before a trial for a built agent, in the Sales Examiner's shape (reflection/exam.py):
     callable(text, tags) -> engine.exam.Result. count=True runs every situation with the new line and
     pairs each with a run on the kept lessons only (made once for each set of kept lessons), so the
-    gate's counts cover the whole exam (DECISIONS item 27)."""
+    gate's counts cover the whole exam (DECISIONS item 27). Either way a good situation the agent
+    reached without the new line and not with it fails the lesson (good_model_judged)."""
+
+    GOOD = "good_model_judged"
 
     def __init__(self, agent, kept=None, model=None, judge_model=None, *, count=False):
         self.agent, self.kept, self.model, self.judge_model, self.count = agent, kept, model, judge_model, count
-        self._without = {}
+        self._without = {}  # kept ids -> (Result, {situation id: did}, {situation id: reached})
 
     def __call__(self, text, tags):
         if self.model is None or self.judge_model is None:
@@ -272,17 +300,75 @@ class Examiner:
             self.model = self.model or model_mod.Model()
             self.judge_model = self.judge_model or model_mod.Model()
         lesson = (text, tuple(tags))
-        if not self.count:
-            return run(self.agent, self.model, self.judge_model, kept=self.kept, lesson=lesson, stop_at_first=True)
         sits = situations(self.agent)
+        if not self.count:
+            seen = {}
+            got = run(self.agent, self.model, self.judge_model, kept=self.kept, lesson=lesson, stop_at_first=True,
+                      sits=sits, seen=seen)
+            if not got.passed:
+                return got
+            rows, made = self._good(sits, got.rows, seen, None)
+            return engine_exam.Result(passed=all(r.passed for r in rows), rows=rows, calls=int(got.calls) + made)
         key = self._kept_ids()
-        without, made = self._without.get(key), 0
-        if without is None:
-            without = self._without[key] = run(self.agent, self.model, self.judge_model, kept=self.kept, sits=sits)
-            made = int(without.calls)
-        got = run(self.agent, self.model, self.judge_model, kept=self.kept, lesson=lesson, sits=sits)
-        return engine_exam.Result(passed=got.passed, rows=got.rows, calls=int(got.calls) + made,
-                                  pairs=engine_exam.pair_rows(without.rows, got.rows))
+        cached, made = self._without.get(key), 0
+        if cached is None:
+            done = {}
+            res = run(self.agent, self.model, self.judge_model, kept=self.kept, sits=sits, seen=done)
+            cached = self._without[key] = (res, done, {})
+            made = int(res.calls)
+        without = cached[0]
+        seen = {}
+        got = run(self.agent, self.model, self.judge_model, kept=self.kept, lesson=lesson, sits=sits, seen=seen)
+        rows, _ = self._good(sits, got.rows, seen, cached)
+        if any(r.check in (engine_exam.ANSWER, engine_exam.NOT_RUN) for r in without.rows):
+            self._without.pop(key, None)  # a model fault without the line is not kept: the next lesson runs it again
+        return engine_exam.Result(passed=got.passed and all(r.passed for r in rows), rows=rows,
+                                  calls=int(got.calls) + made, pairs=engine_exam.pair_rows(without.rows, rows))
+
+    def _good(self, sits, rows, seen, cached):
+        """(rows, calls): rows with a failed good_model_judged row for each good situation that passed its
+        checks with the new line, is not reached with it and was reached without it. cached: (the
+        run on the kept lessons only, its dids, its judged) when counted; None answers that situation
+        again on the kept lessons only, only where the new line did not reach (its calls returned).
+        A judge or an answer that raises fails the situation (fail closed). A judge fault on the side
+        without the line is not kept, so the next lesson asks again."""
+        by_id, out, made = {s["id"]: s for s in sits}, [], 0
+        for r in rows:
+            s = by_id.get(r.situation)
+            if not r.passed or s is None or s["part"] != "good" or r.situation not in seen:
+                out.append(r)
+                continue
+            why = ""
+            try:
+                if not reached(self.agent, seen[r.situation], self.judge_model):
+                    if cached is None:
+                        did = answer(s, None, agent=self.agent, model=self.model, kept=self.kept)
+                        made += int(did.get("calls") or 0)
+                        before = reached(self.agent, did, self.judge_model)
+                    else:
+                        before = self._before(r.situation, cached)
+                    if before:
+                        why = "the good result was reached without the new line and not with it"
+            except Exception as e:
+                why = f"the good result could not be judged: {e}"
+            out.append(engine_exam.Row(r.situation, r.name, r.part, False, self.GOOD, _line(why, MAX_LINE))
+                       if why else r)
+        return out, made
+
+    def _before(self, sid, cached):
+        """Did the run on the kept lessons only reach situation sid's good result? Judged once a set
+        of kept lessons. A situation that failed its checks there did not; one whose answer raised
+        there raises (fail closed)."""
+        res, dids, judged = cached
+        if sid not in judged:
+            row = next((r for r in res.rows if r.situation == sid), None)
+            if row is None or row.check in (engine_exam.ANSWER, engine_exam.NOT_RUN):
+                raise ModelError("the run without the new line could not answer")
+            if not row.passed or sid not in dids:
+                judged[sid] = False
+            else:
+                judged[sid] = reached(self.agent, dids[sid], self.judge_model)
+        return judged[sid]
 
     def _kept_ids(self):
         if self.kept is None:

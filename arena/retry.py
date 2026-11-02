@@ -1,5 +1,5 @@
 """Try again (new, 2026-11-02; Mohamed: "when a human do some corrections and the matches finished. he
-can run another match", "i don't think it needs full run", "try again make sense"; DECISIONS item 80).
+can run another match", "i don't think it needs full run", "try again make sense"; DECISIONS item 81).
 
 After an Arena run has stopped and the user corrected some lost replies (Correct this on the Arena
 screen), Try again plays only the practice matches that run lost again, against the same practice

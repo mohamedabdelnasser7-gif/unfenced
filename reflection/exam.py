@@ -31,7 +31,6 @@ import tempfile
 import time
 import zlib
 from pathlib import Path
-from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -344,17 +343,12 @@ def run(plug, model, *, kept=None, lesson=None, stop_at_first=False, sits=None, 
     stage tags) of a new line, or None. kept: a Lessons whose kept lessons are handed. safety: the
     checks that block (engine/exam.py sit); None: every check does."""
     sits = situations(plug) if sits is None else sits
-    env = {k: v for k, v in os.environ.items() if k not in KEEP_OUT}
-    store._cache.update(at=0.0, items=None)
-    was = logging.root.manager.disable
-    logging.disable(logging.WARNING)  # a turn's warnings (no store keys, a model error) stay out of the run
-    try:
-        with mock.patch.dict(os.environ, env, clear=True):
-            return engine_exam.sit(sits, lambda s, les: answer(s, les, model=model, kept=kept), CHECKS,
-                                   plug.exam.checks, lesson, stop_at_first=stop_at_first, safety=safety)
-    finally:
-        logging.disable(was)
-        store._cache.update(at=0.0, items=None)
+    from arena import match as match_mod  # the one demo store lock: a Try again or practice thread in the same
+    # process swaps the same environment, so an exam outside the lock could restore the store keys inside
+    # a match, or drop them from the page (review simplify round 3, finding 1)
+    with match_mod.demo_store():  # no store keys or operator number, a fresh cache, a turn's warnings quiet
+        return engine_exam.sit(sits, lambda s, les: answer(s, les, model=model, kept=kept), CHECKS,
+                               plug.exam.checks, lesson, stop_at_first=stop_at_first, safety=safety)
 
 
 class Examiner:

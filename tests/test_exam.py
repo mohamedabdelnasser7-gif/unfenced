@@ -290,6 +290,21 @@ class Checks(unittest.TestCase):
         exam.run(PLUG, FakeModel(look), sits=[BY_NAME["ar-care"]])
         self.assertEqual(seen, {k: None for k in KEYS})
 
+    def test_run_holds_the_demo_store_lock(self):
+        """Review simplify r3 finding 1: the whole run holds arena/match.py's demo store lock, so a Try again
+        thread in the same process never swaps the environment in the middle of an exam."""
+        from unittest import mock
+        from arena import match
+        held = []
+
+        def sit(*a, **k):
+            held.append(match._DEMO._is_owned())
+            return "ran"
+        with mock.patch.object(exam.engine_exam, "sit", sit):
+            self.assertEqual(exam.run(PLUG, FakeModel(say("x")), sits=[BY_NAME["ar-care"]]), "ran")
+        self.assertEqual(held, [True])
+        self.assertFalse(match._DEMO._is_owned())
+
     def test_answer_alone_has_no_store_keys(self):
         """Review wireall r3 T18: answer() called on its own, outside run(), still runs on the demo store."""
         clean_env(self, SHOPIFY_STORE="x.myshopify.com", SHOPIFY_TOKEN="t", OPERATOR_WHATSAPP="201000000999")

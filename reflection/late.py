@@ -14,7 +14,9 @@ person on the morning page (docs/known-limits.md).
 What the API can say is in channels/bosta.py api_outcome: delivered, or returned to the business
 (recorded as refused). A refusal at the door is not in the API's view and never comes from here.
 Each answer goes through reflection/results.py late(), by "api", once a case for its group, so a
-person or the webhook that came first wins. At most MAX_ASKS calls a run, one at a time; a call
+person or the webhook that came first wins. Each is saved BEFORE seconds ahead of the night's own
+time, since the study reads rows before that time (engine/log.py window): tonight's study sees what
+this check brought. At most MAX_ASKS calls a run, one at a time; a call
 that fails is counted and the run goes on. With no BOSTA_API_KEY the check does nothing and says
 so. Nothing here prints the key.
 """
@@ -27,6 +29,7 @@ from reflection.results import late
 
 DAY = 86400.0
 MAX_ASKS = 200
+BEFORE = 0.001       # seconds: an API result is saved this much before the night's own time
 COURIER = ("delivered", "refused")
 _REF = re.compile(r"^[A-Za-z0-9._-]{1,40}$")
 
@@ -116,7 +119,7 @@ def check(db, plugs, fetch, *, now, limit=MAX_ASKS):
                 continue
             if outcome not in takes:
                 continue
-            row = late(db, plug, case_id, outcome, by="api", now=now,
+            row = late(db, plug, case_id, outcome, by="api", now=now - BEFORE,
                        detail={"bosta": tracking, "state": code, "from": "api"})
             if row is None:
                 rep["already"] += 1

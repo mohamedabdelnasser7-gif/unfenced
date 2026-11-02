@@ -130,6 +130,17 @@ class NightCheck(unittest.TestCase):
         self.assertEqual((rows[-1]["result"], rows[-1]["detail"]["by"]), ("delivered", "api"))
         self.assertEqual(settle(self.shipper, rows, T0 + 4 * 86400)[0], GOOD)
 
+    def test_an_api_result_counts_in_tonights_study(self):
+        """Review late r1 finding 3: the study reads rows before the night's own time, so a result
+        saved at that time waited for the next night."""
+        from engine import study
+        self.parcel("p1", "111")
+        now = T0 + 3 * 86400
+        late_mod.check(self.db, [self.shipper], lambda t: ("delivered", 45), now=now)
+        self.assertLess(self.ship.case("p1")[-1]["at"], now)
+        cases = study._read(self.shipper, self.ship.window(now - 30 * 86400, now), now)
+        self.assertEqual([(c.id, c.status) for c in cases], [("p1", GOOD)])
+
     def test_a_failed_call_is_counted_and_the_limit_holds(self):
         for n in range(5):
             self.parcel(f"p{n}", f"{n}00", at=T0 + n)

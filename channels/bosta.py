@@ -396,13 +396,15 @@ def make_handler(secret, accept, timeout=SOCKET_TIMEOUT, deadline=REQUEST_DEADLI
 API_BASE = "https://app.bosta.co/api/v2/deliveries/business/"
 API_KEY = "BOSTA_API_KEY"
 MAX_API_BODY = 256 * 1024
-API_TIMEOUT = 15
+API_TIMEOUT = 15                    # seconds for the whole call: each read, and the answer in all
+API_CHUNK = 16 * 1024
 
 
 def api_outcome(tracking, key, *, opener=None, timeout=API_TIMEOUT):
     """(delivered or refused or None, the state code) for one tracking number, from Bosta's API.
-    Raises on a failed call, so the caller counts it and moves on. The key is sent only to
-    app.bosta.co, with no redirect followed, and never logged."""
+    Raises on a failed call, so the caller counts it and moves on, and when the whole answer has not
+    come within timeout seconds of the call, so an answer sent a byte at a time never holds the
+    night. The key is sent only to app.bosta.co, with no redirect followed, and never logged."""
     from kit import net
     tracking = _text(tracking)
     if not tracking or len(tracking) > 64 or not tracking.isalnum():
@@ -411,10 +413,9 @@ def api_outcome(tracking, key, *, opener=None, timeout=API_TIMEOUT):
         raise ValueError(f"{API_KEY} is not set")
     req = urllib.request.Request(API_BASE + urllib.parse.quote(tracking, safe=""),
                                  headers={"Authorization": key, "Accept": "application/json"})
+    deadline = time.monotonic() + timeout
     with (opener or net.open_once)(req, timeout) as r:
-        raw = r.read(MAX_API_BODY + 1)
-    if len(raw) > MAX_API_BODY:
-        raise ValueError("the answer was too large")
+        raw = _read_by(r, deadline)
     data = json.loads(raw)
     view = data.get("data") if isinstance(data, dict) else None
     view = view if isinstance(view, dict) else {}
@@ -473,3 +474,20 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def _read_by(r, deadline):
+    """The answer's body, read a chunk at a time (read1 gives what has come, never waiting for a
+    full chunk), all of it by deadline (time.monotonic) and at most MAX_API_BODY bytes."""
+    read = getattr(r, "read1", None) or r.read
+    parts, size = [], 0
+    while True:
+        if time.monotonic() >= deadline:
+            raise TimeoutError("the answer did not come in time")
+        chunk = read(API_CHUNK)
+        if not chunk:
+            return b"".join(parts)
+        size += len(chunk)
+        if size > MAX_API_BODY:
+            raise ValueError("the answer was too large")
+        parts.append(chunk)

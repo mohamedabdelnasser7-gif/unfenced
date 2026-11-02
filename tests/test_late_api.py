@@ -3,7 +3,11 @@
 is a made-up string read from no file."""
 import io
 import json
+import threading
+import time
 import unittest
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from channels import bosta
 from engine.log import Log
@@ -58,6 +62,45 @@ class ApiOutcome(unittest.TestCase):
             bosta.api_outcome("123", "", opener=Opener(view(45)))
         with self.assertRaises(ValueError):
             bosta.api_outcome("123", KEY, opener=Opener(b"x" * (bosta.MAX_API_BODY + 1)))
+
+    def test_an_answer_sent_a_byte_at_a_time_stops_at_the_deadline(self):
+        """Red team late r1 finding 1: each read had its own timeout and the whole answer none, so a
+        server dripping one byte at a time held the night. A local server this test starts and stops."""
+        body = json.dumps(view(45)).encode()
+
+        class Drip(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                try:
+                    for b in body:
+                        self.wfile.write(bytes([b]))
+                        self.wfile.flush()
+                        time.sleep(0.02)
+                except OSError:  # the client gave up, as it should
+                    pass
+
+            def log_message(self, *a):
+                pass
+
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), Drip)
+        th = threading.Thread(target=srv.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+        th.start()
+        self.addCleanup(th.join, 5)
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        url = f"http://127.0.0.1:{srv.server_address[1]}/x"
+
+        def local(req, timeout):
+            return urllib.request.build_opener().open(urllib.request.Request(url), timeout=timeout)
+
+        started = time.monotonic()
+        with self.assertRaises(TimeoutError):
+            bosta.api_outcome("123", KEY, opener=local, timeout=0.3)
+        self.assertLess(time.monotonic() - started, 1.2)  # the body alone takes over 2 seconds
+        self.assertEqual(bosta.api_outcome("123", KEY, opener=local, timeout=30), ("delivered", 45))
 
 
 class NightCheck(unittest.TestCase):

@@ -563,14 +563,15 @@ class App:
             return []
 
     def _since(self):
-        """The quiet tick's start: the later of this process's start and the latest Connect, so a notice
-        that fell due while the agent was not live is never sent; that chat closes silently."""
-        if self.connected is not None:
-            return self.started
+        """The quiet tick's start: the later of this process's start and the latest row when it is a
+        Connect, so a notice that fell due while the agent was not live is never sent; that chat closes
+        silently. The same with WHATSAPP_LIVE=on, so a Pull then a Connect sends no overdue notice; the
+        process start alone only when there is no row."""
         try:
-            at = (connections.state(self.chats.db, AGENT).get(connections.WHATSAPP) or {}).get("at")
+            got = connections.state(self.chats.db, AGENT).get(connections.WHATSAPP)
         except Exception:
-            at = None
+            got = None
+        at = got["at"] if got and got["on"] else None
         return self.started if at is None else max(self.started, at)
 
     def sweep_once(self):

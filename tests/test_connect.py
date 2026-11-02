@@ -404,6 +404,28 @@ class TheChannel(unittest.TestCase):
         self.assertEqual(app.quiet_once(), [(chat_id, "closed")])  # closed silently, no notice
         self.assertEqual(len(self.graph.sent), sent)
 
+    def test_fixed_on_a_notice_due_between_a_pull_and_a_connect_is_never_sent(self):
+        """Review simplify round 3, finding 5: with WHATSAPP_LIVE=on the quiet tick counts from the latest
+        Connect row too, so a Pull then a later Connect sends no overdue notice; with no row it counts from
+        the process start, so a notice that falls due while it runs goes out."""
+        app = self.app(FakeModel(say(ANSWER)), connected=True)
+        chat_id = self.one(app).chat_id  # no row: the setting stands in
+        connections.disconnect(self.db, "sales", "whatsapp", why="Pull", by="the user", now=self.now + 10)
+        self.now += quiet.NOTICE_AFTER + quiet.START_GRACE + 60
+        self.assertEqual(app.quiet_once(), [])  # pulled: no notice and no close
+        connections.connect(self.db, "sales", "whatsapp", why="The gate passed.", by="the user", now=self.now)
+        sent = len(self.graph.sent)
+        self.assertEqual(app.quiet_once(), [(chat_id, "closed")])  # closed silently, no notice
+        self.assertEqual(len(self.graph.sent), sent)
+
+    def test_fixed_on_with_no_row_a_notice_due_while_it_runs_goes_out(self):
+        app = self.app(FakeModel(say(ANSWER)), connected=True)
+        chat_id = self.one(app).chat_id
+        self.now += quiet.NOTICE_AFTER + 1
+        sent = len(self.graph.sent)
+        self.assertEqual(app.quiet_once(), [(chat_id, "notice")])
+        self.assertEqual(len(self.graph.sent), sent + 1)
+
     def test_a_state_that_cannot_be_read_answers_nothing(self):
         app = self.app()
         broken = Db(":memory:")

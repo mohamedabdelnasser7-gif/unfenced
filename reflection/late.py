@@ -18,36 +18,76 @@ person or the webhook that came first wins. At most MAX_ASKS calls a run, one at
 that fails is counted and the run goes on. With no BOSTA_API_KEY the check does nothing and says
 so. Nothing here prints the key.
 """
-from engine.log import Log, case_key
-from engine.study import GOOD, read_days, settle
+import hashlib
+import re
+
+from engine.log import Log, case_key, is_history
+from engine.study import GOOD, PENDING, read_days, settle
 from reflection.results import late
 
 DAY = 86400.0
 MAX_ASKS = 200
 COURIER = ("delivered", "refused")
+_REF = re.compile(r"^[A-Za-z0-9._-]{1,40}$")
+
+
+def takes(plug):
+    """(deciding, second): the late results of this plug (Plug.late) that may come on their own,
+    so a webhook, the API or a person may add them (results.late refuses one that ends an action)."""
+    return tuple(tuple(r for r in group if plug.result(r).after is None) for group in plug.late())
+
+
+def open_cases(db, plug, *, since, now, log=None):
+    """[(case id, rows, names)] this plug's cases with a row in [since, now) that still wait on a
+    late result, in the window's order: a pending case (no deciding result, no cause) takes the
+    deciding results; a good case with no second signal result yet takes the second signal's. A case
+    imported from the past is never one. names: the results that case may take."""
+    deciding, second = takes(plug)
+    if not deciding and not second:
+        return []
+    out = []
+    for case_id, rows in (log or Log(db, plug)).window(since, now).items():
+        if any(is_history(r) for r in rows):
+            continue
+        status = settle(plug, rows, now)[0]
+        if status == PENDING and deciding:
+            names = deciding
+        elif status == GOOD and second and not {r["result"] for r in rows} & set(second):
+            names = second
+        else:
+            continue
+        out.append((case_key(case_id), rows, names))
+    return out
+
+
+def case_ref(plug, case_id, rows):
+    """What a person calls a case on the morning page and in a sheet: its order number when a row
+    names one ("#1001" is 1001), else c- and ten letters made from the agent and the case id, so no
+    raw case id (a phone number, say) is ever on the page."""
+    for r in reversed(rows):
+        ref = norm_ref((r["detail"] or {}).get("order"))
+        if ref:
+            return ref
+    return "c-" + hashlib.sha256(f"{plug.agent}\0{case_id}".encode("utf-8")).hexdigest()[:10]
+
+
+def norm_ref(value):
+    """A case reference as typed or saved, checked: "#1001" and " 1001 " are 1001; "" when it is
+    not one (letters, digits, dot, dash and underscore only, at most 40)."""
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        return ""
+    ref = str(value).strip().lstrip("#").strip()
+    return ref if _REF.match(ref) else ""
 
 
 def waiting(db, plug, now):
     """[(case id, tracking number)] this plug's cases that wait on a courier result, newest first."""
-    deciding, second = plug.late()
-    groups = [g for g in (deciding, second) if set(COURIER) & set(g)]
-    if not groups:
-        return []
     since = now - 2 * read_days(plug) * DAY
     out = []
-    cases = Log(db, plug).window(since, now)
-    for case_id, rows in sorted(cases.items(), key=lambda kv: -kv[1][-1]["at"]):
-        if any((r["detail"] or {}).get("history") for r in rows):
-            continue
-        have = {r["result"] for r in rows}
-        need = False
-        if deciding in groups and not have & set(deciding):
-            need = True
-        if second in groups and not have & set(second) and settle(plug, rows, now)[0] == GOOD:
-            need = True
+    for case_id, rows, names in sorted(open_cases(db, plug, since=since, now=now), key=lambda c: -c[1][-1]["at"]):
         tracking = next((t for r in reversed(rows) for t in [_tracking(r)] if t), None)
-        if need and tracking:
-            out.append((case_key(case_id), tracking))
+        if set(COURIER) & set(names) and tracking:
+            out.append((case_id, tracking))
     return out
 
 

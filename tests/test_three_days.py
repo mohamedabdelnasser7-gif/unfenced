@@ -232,7 +232,7 @@ class DemoServer(unittest.TestCase):
         with urllib.request.urlopen(req, timeout=10) as r:  # the redirect lands back on day 3
             after = r.read().decode("utf-8")
         self.assertIn('class="flash"', after)
-        self.assertIn("Nothing needs you today", after)
+        self.assertNotIn('id="y-h"', after)  # nothing waits for a yes; orders still wait for a result (item 66)
         self.assertEqual((self.src / "day3" / "ascent.db").read_bytes(), before)
         self.assertEqual({f.name: f.read_bytes() for f in (self.src / "day3").glob("mode-*.json")}, cards)
         self.assertIn("A new mode", self.fetch("/?day=1")[1])  # another day's copy is its own

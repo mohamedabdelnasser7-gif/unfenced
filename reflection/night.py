@@ -26,6 +26,11 @@ McNemar's p-value (engine/exam.py; reported only, pass or fail stays the gate's)
 takes the night's snapshot of the agent's lessons (reflection/snapshots.py); the report names
 it, what changed since the night before, and the command that rolls back to it.
 
+For an agent Quick start built, the night first writes its practice matches as cases
+(arena/learn_built.py from_folder): each training match saved in its folder and not in the log yet,
+won or lost, marked "arena" and "history" so the study reads it and no trial counts it. A new agent
+has no live cases, so these are what its first nights learn from.
+
 A lesson the gate failed goes back into Reflection (DECISIONS item 50): its exam row keeps every
 failed check with why and the cases it broke (engine/exam.py), and the next night's study gives
 the proposer and the idea part this agent's failed lines with what each broke, so the next try
@@ -209,7 +214,7 @@ def other_plugs(plug, root=ROOT, db=None):
 
 
 def night(db, plug, *, days=None, until=None, others=None, judge=None, proposer=None, tagger=None, fit=None,
-          adapter=None, ideas=None, exam=None, spotter=None, note_writer=None):
+          adapter=None, ideas=None, exam=None, spotter=None, note_writer=None, practice=None):
     """Run one night study over [until - days, until). Parts left out are the Meta ones, except
     the idea part: main() gives the Meta one; left out here, the night asks for no ideas, so a
     night run with scripted parts never reaches a model for ideas. exam: makes the gate before a
@@ -217,7 +222,9 @@ def night(db, plug, *, days=None, until=None, others=None, judge=None, proposer=
     main() gives the Sales agent's when its plug has an exam; left out, no exam runs, so a night
     with scripted parts never reaches a model for it either. spotter and note_writer: the hand
     over track's parts (engine/handover.py); main() gives the Meta ones; left out, nothing is
-    handed over and no line is sorted.
+    handed over and no line is sorted. practice: the folder of an agent Quick start built; its
+    practice matches not in the log yet are written first, as cases the study reads and no trial
+    counts (arena/learn_built.py from_folder); the report counts them as practice_cases.
     The trial check runs first, at until. Returns the study's report, with the runner's own
     window line, the links and the trial check ("trials") added."""
     days = default_days(plug) if days is None else float(days)
@@ -234,6 +241,10 @@ def night(db, plug, *, days=None, until=None, others=None, judge=None, proposer=
         lessons = Lessons(db, judge=judge)
     else:
         lessons = EngineLessons(db, plug, judge=judge)
+    written = None
+    if practice is not None and plug.agent != SALES.agent:
+        from arena import learn_built
+        written = learn_built.from_folder(db, plug, practice, until=until)
     counted = None
     if exam is not None:
         counted = lessons.examiner = Counted(exam(lessons))
@@ -248,6 +259,8 @@ def night(db, plug, *, days=None, until=None, others=None, judge=None, proposer=
     rep["days"] = days
     rep["parts"]["judge"] = _judge_label(judge)
     rep["trials"] = checked
+    if written is not None:
+        rep["practice_cases"] = written
     rep["links"] = links(rep, study.others, lessons)
     rep["snapshot"] = snapshots.after_night(db, plug.agent, until)
     # Fast reflection's notes on the night's cases, by the same case id (engine/fast.py): none is a
@@ -310,6 +323,20 @@ def agent_exam(plug, db=None, folder=None):
         return made
     from reflection import turn_exam
     return turn_exam.binding(plug, folder=folder, db=db)
+
+
+def built_folder(plug, plug_path):
+    """The folder of an agent Quick start built, when plug_path is its plug.json and the folder loads
+    as that agent (kit/turn.py load); None for the repo's own agents and anything else."""
+    if plug.agent == SALES.agent:
+        return None
+    from kit import turn as turn_mod
+    folder = Path(plug_path).resolve().parent
+    try:
+        agent = turn_mod.load(folder)
+    except (turn_mod.Refused, OSError, ValueError, RecursionError):
+        return None
+    return folder if agent.name == plug.agent else None
 
 
 def _judge_label(judge):
@@ -381,6 +408,10 @@ def text(rep, plug):
              f'  read {rep["read"]["cases"]} cases: settled {d["good"] + d["bad"]} ({d["good"]} {good}, {d["bad"]} not, '
              f'{d["past_window"]} of them past their window), pending {rep["pending"]}, '
              f'left out {rep["left_out"]["count"]}, not counted' + _causes(rep["left_out"])]
+    if (rep.get("practice_cases") or {}).get("written"):
+        p = rep["practice_cases"]
+        lines.append(f'  practice matches written as cases: {p["written"]} ({p["won"]} won, {p["lost"]} lost); '
+                     "the study reads them, no trial counts them")
     lines.extend(_trial_lines(rep["trials"]))
     if rep.get("exam"):
         e = rep["exam"]
@@ -586,7 +617,8 @@ def main(argv=None, *, until=None):
     try:
         exam = agent_exam(plug, args.db, folder=Path(args.plug).resolve().parent)
         rep = night(db, plug, days=args.days, until=until, ideas=parts.Ideas(), exam=exam,
-                    spotter=parts.Spotter(), note_writer=parts.NoteWriter(), others=other_plugs(plug, db=args.db))
+                    spotter=parts.Spotter(), note_writer=parts.NoteWriter(), others=other_plugs(plug, db=args.db),
+                    practice=built_folder(plug, args.plug))
     except Refused as e:
         print(f"Not run: {e}.", file=sys.stderr)
         return 2

@@ -268,6 +268,71 @@ class TheExaminer(Base):
         self.assertIn("reached without the new line and not with it", again.first.why)
 
 
+    def test_a_judge_that_says_not_reached_once_never_lets_unhelpful_lines_pass(self):
+        # review wireall r2 item 1: only "reached" is kept for the run without the line
+        world = unhelpful_world()
+        judge, flakes = world.judge, [1]
+
+        def flaky(messages):  # one false "not reached", on the good situation's run without the line
+            if flakes and OPENING in messages[1]["content"] and ANSWER in messages[1]["content"]:
+                flakes.pop()
+                return say(json.dumps({"reached": False, "broke_never": False, "turn": 1, "why": "no"}))
+            return judge(messages)
+        world.judge = flaky
+        ex = turn_exam.Examiner(self.agent, model=world, judge_model=world, count=True)
+        plain = unhelpful_world()
+        clean_ex = turn_exam.Examiner(self.agent, model=plain, judge_model=plain, count=True)
+        clean, clean_again = clean_ex(UNHELPFUL, (plug_mod.ALL,)), clean_ex(UNHELPFUL, (plug_mod.ALL,))
+        got = [ex(UNHELPFUL, (plug_mod.ALL,)) for _ in range(3)]
+        self.assertFalse(flakes)
+        for one in got:
+            self.assertFalse(one.passed)
+            self.assertIn("reached without the new line and not with it", one.first.why)
+        self.assertEqual(got[0].calls, clean.calls + 2)  # the good situation answered again, counted
+        self.assertEqual((got[1].calls, got[2].calls), (clean_again.calls,) * 2)  # then "reached" is kept
+
+    def test_a_run_without_the_line_that_could_not_answer_fails_the_situation(self):
+        # review wireall r2 item 7 (G6): _before raising fails the situation, never passes it
+        faults = [1]
+
+        def agent(messages, tools):
+            if faults and UNHELPFUL not in messages[0]["content"] and \
+                    any(OPENING in str(m.get("content")) for m in messages):
+                faults.pop()
+                raise turn_exam.ModelError("Baseten call failed: TimeoutError")
+            return base(messages, tools)
+        world = unhelpful_world()
+        base, world.agent = world.agent, agent
+        got = turn_exam.Examiner(self.agent, model=world, judge_model=world, count=True)(
+            UNHELPFUL, (plug_mod.ALL,))
+        self.assertFalse(faults)
+        self.assertFalse(got.passed)
+        self.assertEqual((got.first.name, got.first.check), ("good-1", turn_exam.Examiner.GOOD))
+        self.assertIn("could not be judged", got.first.why)
+
+    def test_a_run_without_the_line_with_a_model_fault_is_not_kept(self):
+        # review wireall r2 item 7 (G8): the next lesson makes the run without the line again
+        faults = [1]
+
+        def agent(messages, tools):
+            if faults and UNHELPFUL not in messages[0]["content"] and \
+                    any(OPENING in str(m.get("content")) for m in messages):
+                faults.pop()
+                raise turn_exam.ModelError("Baseten call failed: TimeoutError")
+            return base(messages, tools)
+        world = unhelpful_world()
+        base, world.agent = world.agent, agent
+        ex = turn_exam.Examiner(self.agent, model=world, judge_model=world, count=True)
+        self.assertIn("could not be judged", ex(UNHELPFUL, (plug_mod.ALL,)).first.why)
+        self.assertFalse(faults)
+        clean = turn_exam.Examiner(self.agent, model=unhelpful_world(), judge_model=unhelpful_world(),
+                                   count=True)(UNHELPFUL, (plug_mod.ALL,))
+        again = ex(UNHELPFUL, (plug_mod.ALL,))
+        self.assertIn("reached without the new line and not with it", again.first.why)
+        self.assertEqual(again.calls, clean.calls)  # the run without the line is made again
+        self.assertLess(ex(UNHELPFUL, (plug_mod.ALL,)).calls, again.calls)  # and kept from then on
+
+
 class RerunOfPracticeWins(Base):
     def practise(self, world):
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):

@@ -130,7 +130,7 @@ def card_tools(text):
     (a folder written by hand). A list of plain tool names, else Refused."""
     try:
         d = json.loads(text)
-    except ValueError:
+    except (ValueError, RecursionError):
         raise Refused("card.json is not JSON") from None
     if not isinstance(d, dict) or "tools" not in d:
         return None
@@ -146,7 +146,7 @@ def read_card(text, agent=None):
     Build adds (BUILT_KEYS) are allowed; its agent, when there, must be this agent."""
     try:
         d = json.loads(text)
-    except ValueError:
+    except (ValueError, RecursionError):
         raise Refused("card.json is not JSON") from None
     if not isinstance(d, dict):
         raise Refused("card.json is one object")

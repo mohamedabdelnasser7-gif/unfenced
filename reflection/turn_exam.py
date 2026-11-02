@@ -319,19 +319,20 @@ class Examiner:
         without = cached[0]
         seen = {}
         got = run(self.agent, self.model, self.judge_model, kept=self.kept, lesson=lesson, sits=sits, seen=seen)
-        rows, _ = self._good(sits, got.rows, seen, cached)
+        rows, again = self._good(sits, got.rows, seen, cached)
         if any(r.check in (engine_exam.ANSWER, engine_exam.NOT_RUN) for r in without.rows):
             self._without.pop(key, None)  # a model fault without the line is not kept: the next lesson runs it again
         return engine_exam.Result(passed=got.passed and all(r.passed for r in rows), rows=rows,
-                                  calls=int(got.calls) + made, pairs=engine_exam.pair_rows(without.rows, rows))
+                                  calls=int(got.calls) + made + again, pairs=engine_exam.pair_rows(without.rows, rows))
 
     def _good(self, sits, rows, seen, cached):
         """(rows, calls): rows with a failed good_model_judged row for each good situation that passed its
         checks with the new line, is not reached with it and was reached without it. cached: (the
-        run on the kept lessons only, its dids, its judged) when counted; None answers that situation
-        again on the kept lessons only, only where the new line did not reach (its calls returned).
-        A judge or an answer that raises fails the situation (fail closed). A judge fault on the side
-        without the line is not kept, so the next lesson asks again."""
+        run on the kept lessons only, its dids, its judged) when counted; None, or a cached run that
+        did not reach it, answers that situation again on the kept lessons only, only where the new
+        line did not reach (its calls returned). A judge or an answer that raises fails the situation
+        (fail closed). A judge fault on the side without the line is not kept, so the next lesson
+        asks again; only "reached" is kept, so one false "not reached" never switches the check off."""
         by_id, out, made = {s["id"]: s for s in sits}, [], 0
         for r in rows:
             s = by_id.get(r.situation)
@@ -341,12 +342,13 @@ class Examiner:
             why = ""
             try:
                 if not reached(self.agent, seen[r.situation], self.judge_model):
-                    if cached is None:
+                    before = cached is not None and self._before(r.situation, cached)
+                    if not before:
                         did = answer(s, None, agent=self.agent, model=self.model, kept=self.kept)
                         made += int(did.get("calls") or 0)
                         before = reached(self.agent, did, self.judge_model)
-                    else:
-                        before = self._before(r.situation, cached)
+                        if before and cached is not None:
+                            cached[2][r.situation] = True
                     if before:
                         why = "the good result was reached without the new line and not with it"
             except Exception as e:
@@ -356,18 +358,16 @@ class Examiner:
         return out, made
 
     def _before(self, sid, cached):
-        """Did the run on the kept lessons only reach situation sid's good result? Judged once a set
-        of kept lessons. A situation that failed its checks there did not; one whose answer raised
-        there raises (fail closed)."""
+        """Did the run on the kept lessons only reach situation sid's good result? Its did is judged
+        once a set of kept lessons. False (a situation that failed its checks there, or was judged not
+        reached) means not known: the caller answers it again without the new line. One whose answer
+        raised there raises (fail closed)."""
         res, dids, judged = cached
         if sid not in judged:
             row = next((r for r in res.rows if r.situation == sid), None)
             if row is None or row.check in (engine_exam.ANSWER, engine_exam.NOT_RUN):
                 raise ModelError("the run without the new line could not answer")
-            if not row.passed or sid not in dids:
-                judged[sid] = False
-            else:
-                judged[sid] = reached(self.agent, dids[sid], self.judge_model)
+            judged[sid] = bool(row.passed and sid in dids and reached(self.agent, dids[sid], self.judge_model))
         return judged[sid]
 
     def _kept_ids(self):

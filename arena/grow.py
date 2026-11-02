@@ -104,6 +104,7 @@ DEFAULT_KIND = "sales"
 KIND = plug_mod.AGENT_NAME  # one rule for a plug's kind and the pool's: a kind the plug takes, the pool takes
 POOL_FILE = "practice-{kind}.json"
 OWNER_FILE = "owner.json"
+MAX_OWNER_BYTES = 10_000  # owner.json holds one short name; a bigger file names no owner
 PERSON = "person"  # kit/chats.py PERSON: a team member's own reply
 
 
@@ -120,12 +121,16 @@ def kind_of(plug):
 
 def owner_name(folder):
     """The owner folder holds owner.json ({"owner": a name}); the name, or None when it holds none,
-    a link, or a file that is not exactly that."""
+    a link, a file over MAX_OWNER_BYTES, or a file that is not exactly that."""
     path = Path(folder) / OWNER_FILE
     if path.is_symlink() or not path.is_file():
         return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        with open(path, "rb") as f:
+            raw = f.read(MAX_OWNER_BYTES + 1)
+        if len(raw) > MAX_OWNER_BYTES:
+            return None
+        data = json.loads(raw.decode("utf-8"))
     except (OSError, ValueError, RecursionError):
         return None
     name = data.get("owner") if isinstance(data, dict) else None

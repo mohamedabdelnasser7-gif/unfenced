@@ -233,6 +233,19 @@ class Parts(Base):
         with self.assertRaises(run.Refused):
             run.split(cards, ["persona-09"])
 
+    def test_a_deep_saved_match_is_skipped_by_past_wins(self):
+        # review wireall r2 item 7: the parser's RecursionError is made here for one marker line
+        deep, loads = "[[[deep]]]", json.loads
+        won = json.dumps({"won": True, "turns": [{"who": "customer", "text": "hi"}]})
+
+        def parse(text, *a, **k):
+            if text == deep:
+                raise RecursionError("maximum recursion depth exceeded")
+            return loads(text, *a, **k)
+        (self.dir / run.MATCHES_FILE).write_text(deep + "\n" + won + "\n", encoding="utf-8")
+        with mock.patch("json.loads", side_effect=parse):
+            self.assertEqual(run.past_wins(self.dir), [loads(won)])
+
     def test_trust_file(self):
         p = self.dir / "trust.json"
         p.write_text(json.dumps({"sales": {"matches": 4, "wins": 3}}), encoding="utf-8")  # stand-in numbers

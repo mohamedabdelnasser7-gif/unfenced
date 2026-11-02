@@ -493,6 +493,40 @@ class Refusals(Base):
             self.assertEqual([a.name for a in turn.built(self.root)], ["stock_watch"])
             self.assertIsNone(madeup.owner_cards(self.folder))
 
+    def deep_parse(self):
+        """(marker, a json.loads that raises the parser's RecursionError for marker only)."""
+        deep, loads = "[[[deep]]]", json.loads
+
+        def parse(text, *a, **k):
+            if text == deep:
+                raise RecursionError("maximum recursion depth exceeded")
+            return loads(text, *a, **k)
+        return deep, parse
+
+    def test_a_deep_card_is_refused_by_read_card(self):
+        # review wireall r2 item 4
+        deep, parse = self.deep_parse()
+        with mock.patch("json.loads", side_effect=parse), self.assertRaises(turn.Refused):
+            turn.read_card(deep)
+
+    def test_a_deep_card_is_refused_by_card_tools(self):
+        # review wireall r2 item 4
+        deep, parse = self.deep_parse()
+        with mock.patch("json.loads", side_effect=parse), self.assertRaises(turn.Refused):
+            turn.card_tools(deep)
+
+    def test_a_folder_with_a_deep_card_is_left_out_of_built(self):
+        # review wireall r2 item 4: built() catches Refused only, so a deep card must read as Refused
+        deep, parse = self.deep_parse()
+        bad = self.root / "agents" / "deepcard"
+        shutil.copytree(FIXTURE, bad)
+        plug = json.loads((bad / "plug.json").read_text())
+        (bad / "plug.json").write_text(json.dumps(dict(plug, agent="deepcard")))
+        self.assertEqual([a.name for a in turn.built(self.root)], ["deepcard", "stock_watch"])
+        (bad / "card.json").write_text(deep)
+        with mock.patch("json.loads", side_effect=parse):
+            self.assertEqual([a.name for a in turn.built(self.root)], ["stock_watch"])
+
     def test_the_sales_agent_practises_through_its_own_run(self):
         sales = self.root / "agents" / "sales"
         shutil.copytree(FIXTURE, sales)

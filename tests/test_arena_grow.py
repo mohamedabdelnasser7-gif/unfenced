@@ -991,6 +991,15 @@ class OwnerMarker(unittest.TestCase):
             self.assertEqual(grow.owner_of(self.root / "mine"), self.root / "mine", bad)
             self.assertEqual(grow.siblings(self.root, "sales"), [], bad)
 
+    def test_an_owner_file_over_the_cap_names_no_owner(self):
+        # review wireall r2 item 4: owner.json is read only up to MAX_OWNER_BYTES
+        name = json.dumps({"owner": "acme"})
+        path = self.root / grow.OWNER_FILE
+        path.write_text(name + " " * (grow.MAX_OWNER_BYTES - len(name)), encoding="utf-8")
+        self.assertEqual(grow.owner_name(self.root), "acme")
+        path.write_text(name + " " * (grow.MAX_OWNER_BYTES - len(name) + 1), encoding="utf-8")
+        self.assertIsNone(grow.owner_name(self.root))
+
     def test_personas_state_reads_the_pool_the_arena_reads(self):
         from arena import personas
         write_owner(self.root, "acme")

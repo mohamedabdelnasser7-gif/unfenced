@@ -192,6 +192,15 @@ class Checks(unittest.TestCase):
         self.both("days_from_tools", "ar-far", good, [say("بنوصل أسوان في 3 ايام.")])
         self.both("tools", "ar-far", good, [say("بنوصل أسوان، هسأل الفريق على السعر.")])
 
+    def test_the_exchange_days_are_not_a_delivery_day_count(self):
+        """The right exchange answer names the instructions' days, which no tool gives."""
+        days = exam.EXCHANGE_DAYS
+        self.both("days_from_tools", "franco-2",
+                  [say(f"momken tbadel khelal {days} yom, bs lazem ykon mlbestosh w el packaging mwgod")],
+                  [say(f"hywsal khelal {days} yom")])
+        self.both("days_from_tools", "franco-2", [say(f"تقدر تبدل خلال {days} يوم بس لازم يكون متلبسش و علبته موجودة")],
+                  [say("momken tbadel khelal 30 yom")])
+
     def test_amount_from_tool_on_a_photo(self):
         self.both("amount_from_tool", "real-other-type-photo",
                   [call("store", query="boots"), say("دي الـ Phantom 6 Elite بـ 16,500 جنيه، هسأل الفريق على أنواع تانية.")],

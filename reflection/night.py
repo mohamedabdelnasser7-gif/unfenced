@@ -1,5 +1,8 @@
-"""The night runner: one night study of one agent on its real cases. A person runs it; it is
-not scheduled.
+"""The night runner: one night study of one agent on its real cases. It runs by itself once a
+night for every agent (reflection/scheduler.py, started with the WhatsApp server, at NIGHT_HOUR
+in NIGHT_TZ, default 03:00 Africa/Cairo; NIGHT_HOUR=off turns that off), and a person can run it
+any time with the command below. A manual run is not recorded by the scheduler, so it never
+stops that night's scheduled run.
 
     python3 -m reflection.night [--plug sales/plug.json] [--days N] [--db PATH] [--json]
 
@@ -12,8 +15,9 @@ META_STUDY_ROUTE=open), and the fit check, the adapter and the risk judge on Mus
 reads their cases and kept lessons. The idea part, on the study route too, gives at most 3
 ideas a night: lessons with no past cases behind them, each going the normal way to a trial.
 
-N comes from the plug unless --days gives it: twice the longest time the plug's deciding
-results take to show, so a case acted on early in the window has had time to settle.
+N comes from the plug unless --days gives it: twice the longest time the plug says its deciding
+results take to show (engine/study.py read_days, 7 days when it says none). It sets only how
+far back the night reads: no day count settles a case, and a case still waiting is pending.
 
 Before the study it asks the courier's API for this agent's cases still waiting on a delivery
 result (reflection/late.py, DECISIONS item 66), when BOSTA_API_KEY is set; the report has one

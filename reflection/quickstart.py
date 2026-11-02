@@ -256,7 +256,8 @@ An example plug, for a personal assistant:
 Rules for this plug:
 - agent is "{agent}". Leave out exam, kind, owner and hands_over.
 - Connected tools: {tools}. Its actions use only these, or plain writing the model does itself. Anything else the card needs is not connected yet: leave it out.
-- decides.good is the result that matches the card's good result.
+- decides.good is the result that matches the card's good result. decides.bad names at least one result that ends a case without it (for example the chat closing with no sale, or the user correcting the work): with none, no case could ever end not good and the agent could never learn from a miss. No timer ends a case, so a case with neither waits for one.
+- Leave out shows_in_days in results: no day count settles anything.
 - No chat goes to a person: no handoff tool, no with_person stage, no action that passes a chat to a team. Leave the subject of people taking chats out of the plug and the instructions entirely, never lines too.
 - risk high covers anything that goes out in the user's name, money, promises, dates and personal data. It starts strict.
 - instructions: the agent's own prompt in plain words, from the card: what it does and for whom, what a good result is, what it never does, and how it uses its connected tools. No dashes.
@@ -342,13 +343,16 @@ def connected(card):
 
 def clean_plug(raw, agent, tools):
     """The model's plug with what the code sets itself: the agent's name, the strict trial levels,
-    no keys that need files or other agents, its tools exactly the connected ones (each high risk), and any
-    number marked high risk.
+    no keys that need files or other agents, its tools exactly the connected ones (each high risk), any
+    number marked high risk, and no shows_in_days on a result.
     Shapes the model got wrong are left for engine/plug.py to refuse."""
     if not isinstance(raw, dict):
         return raw
     out = {k: v for k, v in raw.items() if k not in LEFT_OUT}
     out["agent"] = agent
+    if isinstance(out.get("results"), dict):  # shown only, never settling (item 66): Build writes none
+        out["results"] = {n: ({k: v for k, v in r.items() if k != "shows_in_days"} if isinstance(r, dict) else r)
+                          for n, r in out["results"].items()}
     out["trial"] = json.loads(json.dumps(STRICT_TRIAL))
     risk = out.get("risk")
     high = risk.get("high") if isinstance(risk, dict) else None
@@ -376,6 +380,9 @@ def check_plug(d):
         plug_mod.from_dict(d)
     except ValueError as e:
         return str(e)
+    if not d["decides"]["bad"]:  # item 66: with no timer, a plug with no bad result never ends a case not good
+        return ("decides.bad is empty: name at least one declared result that ends a case without the good "
+                "result, so a case can end not good and the agent can learn from a miss")
     return None
 
 
@@ -599,11 +606,16 @@ def _model_card(card):
 
 
 def _example():
+    """The assistant's plug as the example, with no shows_in_days: Build asks for none (item 66)."""
     path = Path(__file__).resolve().parent.parent / "assistant" / "plug.json"
     try:
-        return path.read_text(encoding="utf-8")
-    except OSError:
+        d = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
         return "{}"
+    for r in (d.get("results") or {}).values():
+        if isinstance(r, dict):
+            r.pop("shows_in_days", None)
+    return json.dumps(d, ensure_ascii=False, indent=2)
 
 
 def _agents_dir(folder):

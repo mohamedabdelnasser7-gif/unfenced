@@ -225,6 +225,19 @@ class QuickStartPage(unittest.TestCase):
         self.assertIn("not a declared result", fix)
         self.assertTrue((self.folder / "agents" / "stock_watcher" / "plug.json").is_file())
 
+    def test_build_always_names_a_bad_result_and_no_days(self):
+        """Item 66: no timer ends a case, so a plug with no bad result could never end one not good."""
+        empty = plug_dict(decides={"good": "day_clean", "bad": []})
+        plug_mod.from_dict(qs.clean_plug(empty, "a", []))  # the engine itself still takes it
+        self.assertIn("decides.bad is empty", qs.check_plug(qs.clean_plug(empty, "a", [])))
+        self.assertIsNone(qs.check_plug(qs.clean_plug(plug_dict(), "a", [])))
+        self.assertIn("decides.bad names at least one result", qs.BUILD_PROMPT)
+        self.assertIn("Leave out shows_in_days", qs.BUILD_PROMPT)
+        cleaned = qs.clean_plug(plug_dict(), "a", [])
+        self.assertFalse([n for n, r in cleaned["results"].items() if "shows_in_days" in r])
+        self.assertNotIn("shows_in_days", qs._example())
+        self.assertEqual(json.loads(qs._example())["agent"], "assistant")
+
     def test_a_plug_never_sends_a_chat_to_a_person(self):
         self.assertNotIn("handoff", qs.TOOLS)
         self.assertIsNotNone(qs.check_plug(qs.clean_plug(plug_dict(stages=["watching", "with_person"]), "a", [])))

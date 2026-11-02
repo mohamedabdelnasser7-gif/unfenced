@@ -304,7 +304,9 @@ class Parts(Base):
                             customer_model=Customer(buyers={c["worry"] for c in run.load_cards(run.DEMO_CARDS)}))
         self.assertEqual(code, 0)
         names = sorted(p.name for p in folder.iterdir() if p.name.startswith("arena-"))
-        self.assertEqual(names, [run.CALLS_FILE, "arena-calls.lock", run.MATCHES_FILE])
+        items = [n for n in names if n.startswith("arena-sales-")]  # a pass writes its Morning item too
+        self.assertEqual(len(items), 1)
+        self.assertEqual([n for n in names if n not in items], [run.CALLS_FILE, "arena-calls.lock", run.MATCHES_FILE])
         ignored = (REPO / ".gitignore").read_text(encoding="utf-8").split()
         for name in names + [run.CALLS_FILE + ".tmp"]:  # the temp file a crash could leave
             self.assertTrue(any(fnmatch.fnmatchcase(name, pat) for pat in ignored), name)
@@ -409,6 +411,7 @@ class HeldOut(Base):
                                 trust=dict(run.PUBLIC_TRUST), matches=1, rounds=1, seed=seed,
                                 now=lambda: 1_790_000_000.0).run()
                 self.assertEqual(rep["stopped"], run.PASSED, rep["rounds"][0]["gate"])
+                self.assertEqual(rep["item"]["kind"], "arena_rounds")  # the pass is saved, so Connect unlocks
                 train, held = run.split(cards, seed=seed)
                 self.assertFalse(any(c["unwinnable"] for c in held))
                 self.assertEqual(len({c["worry"] for c in held}), len(held))  # one card a worry

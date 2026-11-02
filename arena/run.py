@@ -521,7 +521,7 @@ class Arena:
             rep["error"] = self.error
         if stopped == STUCK:
             rep["stuck"] = self.stuck_item(rounds)
-        elif any("reflection" in r for r in rounds):
+        elif rounds and (stopped == PASSED or any("reflection" in r for r in rounds)):  # a round one pass unlocks Connect too
             rep["item"] = self.rounds_item(rounds, stopped)
         return rep
 

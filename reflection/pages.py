@@ -586,6 +586,8 @@ QUICK_NEXT = "Connecting an agent made in Quick start to {name} is next."
 def connection_line(c):
     """The one line under a channel the agent asks for: live since when and the gate result that
     unlocked it, or why Connect waits, or not connected yet."""
+    if c.get("setting"):  # no row yet: the server's demo setting keeps it on (kit/connections.py fixed)
+        return f'Live on {c["name"]}: the server setting keeps it on. Pull takes it off.'
     if c["live"]:
         return f'Live on {c["name"]} since {mo._when(c["at"])}. {c["why"]}'
     if not c["works"]:

@@ -25,8 +25,9 @@ It listens on 127.0.0.1:PORT (default 8080). Meta must reach it through a public
   the user has the Sales agent connected on WhatsApp from its page, after its Arena gate passed. When it
   is not, a message is marked done and not saved, nothing is sent, the quiet tick sends no notice and
   closes no chat, and the log says so in one line. A notice that fell due before the latest Connect is
-  never sent. WHATSAPP_LIVE=on or off fixes it for a demo; unset, it follows Connect and Pull. The
-  webhook's signature check runs the same either way.
+  never sent. WHATSAPP_LIVE=off keeps it silent for a demo; on stands in for a missing row only, so
+  it answers unless the latest row is a Pull, whenever that Pull was made (Pull always works);
+  unset, it follows Connect and Pull. The webhook's signature check runs the same either way.
 - No hand-off to a person (DECISIONS item 53): every message is a customer message and the
   agent answers it. A reply is a plain text message: it never quotes the customer's message
   (no context, no reply-to). Statuses are not read.
@@ -99,7 +100,7 @@ TYPING_TIMEOUT = 3  # seconds at most for the typing dots: a slow Graph never ho
 FAST_EVERY = 30  # seconds between quiet ticks and fast reflection sweeps, so a note is written within seconds of a chat ending
 OLD_FIELDS = ("context_id", "error_code")  # Incoming fields before DECISIONS item 53
 AGENT = "sales"  # the one agent this channel runs (kit/connections.py WORKS)
-LIVE_SETTING = "WHATSAPP_LIVE"  # unset: follow Connect and Pull; "on" or "off" fixes it, for the demo
+LIVE_SETTING = connections.SETTINGS[connections.WHATSAPP]  # unset: follow Connect and Pull; on or off, the demo
 NOT_LIVE_LOG = "the Sales agent is not live on WhatsApp: a message came in and nothing was sent"
 
 
@@ -465,8 +466,8 @@ class App:
     def __init__(self, chats, model, lessons, results, graph, limits=None, maxsize=MAX_QUEUE, fast=None, clock=None,
                  connected=None):
         """connected: None follows the user's Connect and Pull on the agent page (kit/connections.py,
-        read from the chats' database before every turn and tick); True or False fixes it, for tests
-        and the demo (main reads WHATSAPP_LIVE)."""
+        read from the chats' database before every turn and tick); False keeps it silent and True
+        answers unless the latest row is a Pull, for tests and the demo (main reads WHATSAPP_LIVE)."""
         self.chats, self.model, self.lessons, self.results, self.graph = chats, model, lessons, results, graph
         self.connected = connected
         self.limits = limits
@@ -502,15 +503,16 @@ class App:
         return n
 
     def live(self):
-        """Is the Sales agent live on WhatsApp now? Off when fixed off; fixed on, live until a Pull made
-        after this process started (Pull always works); else its latest Connect or Pull. A state that
-        cannot be read counts as not live, so nothing goes out."""
+        """Is the Sales agent live on WhatsApp now? Off when fixed off; fixed on, live unless its latest
+        row (by row, never by clock) is a Pull, so Pull always works, a Pull made before this process
+        started too; else its latest Connect or Pull. A state that cannot be read counts as not live,
+        so nothing goes out."""
         if self.connected is False:
             return False
         try:
             if self.connected:
                 got = connections.state(self.chats.db, AGENT).get(connections.WHATSAPP)
-                return not (got and not got["on"] and got["at"] >= self.started)
+                return got is None or got["on"]
             return connections.live(self.chats.db, AGENT, connections.WHATSAPP)
         except Exception:
             log.exception("the live state could not be read; answering nothing")

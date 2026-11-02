@@ -797,14 +797,20 @@ class Morning:
 
     def connection_view(self, agent):
         """Each channel the agent asks for, as the page shows it: {channel, name, works, live, at, why,
-        gate}. works: the channel is built and runs this agent. live, at, why: its latest connect or Pull."""
+        gate, setting}. works: the channel is built and runs this agent. live, at, why: its latest
+        connect or Pull; with no row, live when the channel's demo setting is on (conn_mod.fixed), and
+        setting says so, so the page offers Pull whenever the channel may answer."""
         got = conn_mod.state(self.db, agent)
         gate = self.gate(agent) if self.channels_of(agent) else None
         out = []
         for c in self.channels_of(agent):
-            row = got.get(c) or {}
-            out.append({"channel": c, "name": conn_mod.CHANNELS[c], "works": conn_mod.works(agent, c),
-                        "live": bool(row.get("on")), "at": row.get("at"), "why": row.get("why"), "gate": gate})
+            row = got.get(c)
+            works = conn_mod.works(agent, c)
+            setting = row is None and works and conn_mod.fixed(c) is True
+            row = row or {}
+            out.append({"channel": c, "name": conn_mod.CHANNELS[c], "works": works,
+                        "live": bool(row.get("on")) or setting, "at": row.get("at"), "why": row.get("why"),
+                        "gate": gate, "setting": setting})
         return out
 
     def connect(self, agent, channel, now=None):
@@ -830,14 +836,17 @@ class Morning:
         return f"Live on {name}. It answers the next message there."
 
     def disconnect(self, agent, now=None):
-        """Pull on a live agent's page: the agent comes off every channel it is live on."""
+        """Pull on an agent's page: an off row for every built channel the agent asks for, live or not,
+        and for any other it is live on, so a channel the demo setting keeps on with no row stops too
+        (kit/connections.py, item 5). With no channel to write, nothing is changed."""
         self._plugged(agent)
-        on = [c for c, r in conn_mod.state(self.db, agent).items() if r["on"]]
-        if not on:
+        off = [c for c in self.channels_of(agent) if conn_mod.works(agent, c)]
+        off += [c for c, r in conn_mod.state(self.db, agent).items() if r["on"] and c not in off]
+        if not off:
             return "It is not live on any channel."
-        for c in on:
+        for c in off:
             conn_mod.disconnect(self.db, agent, c, why="Pull on the agent's page", by=self.by, now=now)
-        names = " and ".join(conn_mod.CHANNELS.get(c, c) for c in on)
+        names = " and ".join(conn_mod.CHANNELS.get(c, c) for c in off)
         return f"Pulled from {names}. It sends nothing there until you connect it again."
 
     def rollback_plan(self, agent, now=None):

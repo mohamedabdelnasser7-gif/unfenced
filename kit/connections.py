@@ -10,6 +10,10 @@ and its pause switch (kit/switch.py). DECISIONS item 77: deploy is the user's st
 3. Pull. Takes the agent off every channel it is live on, one row a channel.
 4. The channel reads it. channels/whatsapp.py answers only while the Sales agent is live on
    WhatsApp; when it is not, it sends nothing and logs one line.
+5. The demo setting (SETTINGS, fixed). WHATSAPP_LIVE=off keeps the channel silent; on stands in
+   only for a missing row: the channel answers unless the latest row is an off row, so Pull always
+   works, before or after the server started and across a restart. Pull writes an off row for every
+   channel the agent asks for, live or not, so it stops a channel the setting keeps on.
 
 CHANNELS: the channels an agent can ask for, by the tool name a card names (reflection/quickstart.py
 TOOLS). WORKS: the channels built so far and the agents each one runs: channels/whatsapp.py runs only
@@ -21,12 +25,14 @@ and when. The latest row of an agent and channel wins. Rows are never changed, d
 An agent with no row is on no channel. A read never makes the table, so a page view or a channel's
 check on a new database changes nothing and reads as not live.
 """
+import os
 import time
 
 CHANNELS = {"whatsapp": "WhatsApp", "email": "Email"}  # tool name: the name the page shows
 WHATSAPP = "whatsapp"
 WORKS = {WHATSAPP: ("sales",)}  # the channels built, and the agents each one runs
 ON, OFF = "on", "off"
+SETTINGS = {WHATSAPP: "WHATSAPP_LIVE"}  # the demo setting of a channel (channels/whatsapp.py reads the same name)
 MAX_WHY = 400
 
 SCHEMA = """
@@ -82,6 +88,13 @@ def live(db, agent, channel):
     """True while the agent is live on the channel. Reads only."""
     got = state(db, agent).get(channel)
     return bool(got and got["on"])
+
+
+def fixed(channel):
+    """The channel's demo setting (SETTINGS) from the environment: True for on, False for off, None when
+    unset, empty or anything else (the channel's own server refuses to start on anything else)."""
+    value = os.environ.get(SETTINGS.get(channel, ""), "").strip().lower()
+    return {ON: True, OFF: False}.get(value)
 
 
 def live_agents(db):

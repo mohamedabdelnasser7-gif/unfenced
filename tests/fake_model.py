@@ -110,9 +110,9 @@ def tool_names(tools):
 
 
 def clean_env(test, **extra):
-    """Run a test with no Shopify keys and no operator number unless given."""
+    """Run a test with no Shopify keys, no operator number and no WHATSAPP_LIVE unless given."""
     env = {k: v for k, v in os.environ.items()
-           if k not in ("SHOPIFY_STORE", "SHOPIFY_TOKEN", "OPERATOR_WHATSAPP", "BASETEN_MODEL")}
+           if k not in ("SHOPIFY_STORE", "SHOPIFY_TOKEN", "OPERATOR_WHATSAPP", "BASETEN_MODEL", "WHATSAPP_LIVE")}
     env.update(extra)
     p = mock.patch.dict(os.environ, env, clear=True)
     p.start()

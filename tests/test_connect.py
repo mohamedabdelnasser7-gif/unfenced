@@ -198,8 +198,36 @@ class Pull(Base):
         self.assertIn(f"Pulled {mo._when(NOW + 20)}.", self.conn(page))
         self.assertIn('action="/connect"', page)
         self.assertNotIn('action="/disconnect"', page)
-        self.assertEqual(self.m.disconnect("sales", now=NOW + 30), "It is not live on any channel.")
-        self.assertEqual(len(connections.history(self.db, "sales")), 2)
+        # Pull always writes its off row (review simplify round 2, finding 3), live or not
+        self.assertEqual(self.m.disconnect("sales", now=NOW + 30), said)
+        self.assertEqual([r["on"] for r in connections.history(self.db, "sales")], [True, False, False])
+
+    def test_with_the_setting_on_and_no_row_the_page_offers_pull_and_pull_writes_its_row(self):
+        """Review simplify round 2, finding 3a: WHATSAPP_LIVE=on with no connection row answers, so the
+        page offers Pull, and Pull writes an off row that silences the channel."""
+        clean_env(self, WHATSAPP_LIVE="on")
+        page = self.page()
+        self.assertIn('action="/disconnect"', self.bar(page))
+        self.assertIn("the server setting keeps it on", self.conn(page))
+        self.assertNotIn('action="/connect"', page)
+        self.assertEqual(self.m.disconnect("sales", now=NOW), "Pulled from WhatsApp. It sends nothing there until "
+                         "you connect it again.")
+        self.assertEqual([(r["channel"], r["on"]) for r in connections.history(self.db, "sales")], [("whatsapp", False)])
+        page = self.page()
+        self.assertNotIn('action="/disconnect"', page)
+        self.assertIn(f"Pulled {mo._when(NOW)}.", self.conn(page))
+        chats = Chats(self.db, clock=lambda: NOW + 1)
+        app = wa.App(chats, FakeModel(), Lessons(self.db), Results(self.db), SendingGraph(b"", "audio/ogg"),
+                     clock=lambda: NOW + 1, connected=wa.live_setting("on"))
+        self.assertFalse(app.live())
+
+    def test_with_no_setting_and_no_row_pull_stays_greyed_out(self):
+        clean_env(self)
+        page = self.page()
+        self.assertNotIn('action="/disconnect"', page)
+        self.assertIn(pages.NOT_LIVE, self.bar(page))
+        clean_env(self, WHATSAPP_LIVE="off")
+        self.assertNotIn('action="/disconnect"', self.page())
 
 
 class OverTheServer(Base):
@@ -308,16 +336,29 @@ class TheChannel(unittest.TestCase):
         self.assertIsNone(self.one(app, "wamid.m2"))
         self.assertEqual(len(self.graph.sent), sent)
 
-    def test_fixed_on_still_stops_at_a_pull_made_after_it_started(self):
-        """Review simplify round 1, finding 2: Pull always works, WHATSAPP_LIVE=on included."""
-        connections.disconnect(self.db, "sales", "whatsapp", why="Pull", by="the user", now=NOW - 60)
-        app = self.app(FakeModel(say(ANSWER)), connected=True)  # a Pull before the start does not count
-        self.assertEqual(self.one(app).outcome, "replied")
-        connections.disconnect(self.db, "sales", "whatsapp", why="Pull", by="the user", now=NOW + 1)
+    def test_fixed_on_answers_until_the_latest_row_is_a_pull_whenever_it_was_made(self):
+        """Review simplify round 2, finding 3c: with WHATSAPP_LIVE=on the latest row decides, never the
+        clock: a Pull made before this process started counts, a Connect after it answers again."""
+        app = self.app(FakeModel(say(ANSWER), say(ANSWER)), connected=True)
+        self.assertEqual(self.one(app).outcome, "replied")  # no row: the setting stands in
+        connections.disconnect(self.db, "sales", "whatsapp", why="Pull", by="the user", now=NOW - 60)  # before start
         sent = len(self.graph.sent)
         self.assertIsNone(self.one(app, "wamid.m2"))
         self.assertEqual(len(self.graph.sent), sent)
         self.assertEqual(app.quiet_once(), [])
+        connections.connect(self.db, "sales", "whatsapp", why="The gate passed.", by="the user", now=NOW - 120)
+        self.assertEqual(self.one(app, "wamid.m3").outcome, "replied")  # the newer row, an older clock
+        connections.disconnect(self.db, "sales", "whatsapp", why="Pull", by="the user", now=NOW - 300)
+        self.assertIsNone(self.one(app, "wamid.m4"))
+
+    def test_fixed_on_stays_silent_after_a_pull_and_a_restart(self):
+        """Review simplify round 2, finding 3b: a Pull, then the server restarts with WHATSAPP_LIVE=on."""
+        connections.connect(self.db, "sales", "whatsapp", why="The gate passed.", by="the user", now=NOW)
+        connections.disconnect(self.db, "sales", "whatsapp", why="Pull", by="the user", now=NOW + 1)
+        self.now = NOW + 100  # the restart
+        app = self.app(FakeModel(), connected=wa.live_setting("on"))  # a model call would fail the test
+        self.assertIsNone(self.one(app, "wamid.r1"))
+        self.assertEqual(self.graph.sent, [])
 
     def test_the_setting_fixes_it_either_way(self):
         connections.connect(self.db, "sales", "whatsapp", why="The gate passed.", by="the user", now=NOW)

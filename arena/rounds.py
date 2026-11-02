@@ -241,6 +241,14 @@ def real_examiner(plug, kept, model, cap=EXAM_CAP):
     return exam_mod_sales.Examiner(plug, kept=kept, model=model, count=True, scope=True, cap=cap)
 
 
+def full_examiner(plug, kept, model):
+    """The Sales agent's full exam, every situation, as the night runs it: what a lesson that passed the
+    scoped exam takes once more before hand_live writes it to the live database, so nothing reaches
+    real customers on the scoped exam alone (DECISIONS item 75: the scoped exam is for the Arena)."""
+    from reflection import exam as exam_mod_sales
+    return exam_mod_sales.Examiner(plug, kept=kept, model=model, count=True)
+
+
 class Between:
     """The night study and the eval gate between two Arena rounds. models: {"study": the proposer,
     tagger and idea part's model, "open": the fit check, adapter and risk judge's model, "exam": the
@@ -248,10 +256,13 @@ class Between:
     counted (the gate counts them). examiner(plug, kept, model): the exam (real_examiner). db: the
     Arena's own copy of the agent's database; live: a callable giving the live agent's Lessons,
     called at the first lesson that passes, which hand_live writes it to (None: db is the agent's
-    own database, and there is nothing to hand)."""
+    own database, and there is nothing to hand). full(plug, kept, model): the full exam a passed lesson
+    takes before it is handed live (full_examiner); a lesson that fails it, or whose full exam cannot
+    run, stays in the Arena and is not handed. None hands on the scoped pass (tests with a fake exam)."""
 
     def __init__(self, db, plug, *, calls, state, pool, agent_model, customer_model, models, examiner=real_examiner,
-                 now=time.time, live=None):
+                 now=time.time, live=None, full=None):
+        self.full = full
         self.db, self.plug, self.calls, self.state, self.pool = db, plug, calls, state, pool
         self.agent_model, self.customer_model = agent_model, customer_model
         self.models, self.examiner, self.now = dict(models), examiner, now
@@ -394,6 +405,16 @@ class Between:
         out = {"lesson_id": lesson_id, "text": les["text"], "risk": les["risk"], "state": les["state"],
                "passed": passed, "handed": handed, "waits_for_yes": passed and not handed and les["state"] == WAITING,
                "why": exam_mod.held_line(row), "gate": exam_mod.effect_of(row)}
+        if passed and self.live is not None and self.full is not None:  # the full exam before real customers
+            try:
+                full = self.full(self.plug, self.pool, self.calls.model(self.models["exam"]))(les["text"], les["stages"])
+            except Exception as e:  # fail closed: a full exam that cannot run hands nothing
+                full = exam_mod.could_not_run(e)
+            out["full_exam"] = "passed" if full.passed else f"held: {full.line()}"
+            if not full.passed:
+                out["live_id"] = None
+                out["live"] = f"{FULL_HELD} ({full.line()})"
+                return out
         if passed and self.live is not None:  # only a lesson that passed reaches the live database
             try:
                 if self._live is None:
@@ -403,6 +424,9 @@ class Between:
                 out["live_id"] = None
                 out["live"] = f"{LIVE_BUSY} ({e})"
         return out
+
+
+FULL_HELD = "passed the Arena's exam but not the full exam, so it stays in the Arena and is not handed live"
 
 
 def _broke_something(row):

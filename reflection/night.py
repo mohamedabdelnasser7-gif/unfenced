@@ -311,29 +311,26 @@ class Counted:
         return result
 
 
-def sales_exam(plug, db=None, scope=False):
+def sales_exam(plug, db=None):
     """The exam main() gives the night: the Sales agent's examiner on Muse Spark Open, when the plug
     is the Sales agent's and names an exam; None otherwise (another agent's exam has no binding yet).
     db: the agent's database path; the Arena wins the gate reruns are the ones saved next to it.
-    scope=True (the page, so a correction answers in about a minute): the Arena's scoped exam under
-    its exam cap (arena/rounds.py EXAM_CAP); the night keeps the full exam (DECISIONS item 75)."""
+    Always the full exam: what it passes can reach real customers (the scoped one is the Arena's)."""
     if plug.exam is None or plug.agent != SALES.agent:
         return None
     from reflection import exam as exam_mod
     from arena import gate  # the eval gate: the exam, then the Arena rerun of past wins (DECISIONS item 8)
-    from arena import rounds
-    cap = rounds.EXAM_CAP if scope else None
     # count=True: the gate also counts the cases each lesson fixed and broke (DECISIONS item 27)
-    return lambda lessons: gate.wrap(exam_mod.Examiner(plug, kept=lessons, model=model_mod.Model(), count=True,
-                                                       scope=scope, cap=cap), lessons, db=db)
+    return lambda lessons: gate.wrap(exam_mod.Examiner(plug, kept=lessons, model=model_mod.Model(), count=True),
+                                     lessons, db=db)
 
 
-def agent_exam(plug, db=None, folder=None, scope=False):
+def agent_exam(plug, db=None, folder=None):
     """The exam the night and the Morning page give an agent: the Sales agent's (sales_exam), else the
     exam of an agent Quick start built (reflection/turn_exam.py binding: its folder, or
     <db folder>/agents/<agent>, wrapped in the Arena rerun of its past practice wins); None for an agent
-    with no exam. scope: the Sales agent's scoped exam (sales_exam), for the page."""
-    made = sales_exam(plug, db, scope=scope)
+    with no exam."""
+    made = sales_exam(plug, db)
     if made is not None:
         return made
     from reflection import turn_exam

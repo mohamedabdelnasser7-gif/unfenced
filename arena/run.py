@@ -980,6 +980,8 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
             lessons = _Lessons(pool, None)
             if between_models is not None:
                 exam_cap = rounds_mod.EXAM_CAP if args.exam_cap is None else args.exam_cap
+                # a given exam (tests) brings its own full exam, or none; the real one runs the full exam before live
+                full = between_models.pop("full", None if "examiner" in between_models else rounds_mod.full_examiner)
                 examiner = between_models.pop("examiner", functools.partial(rounds_mod.real_examiner, cap=exam_cap))
                 notes_model = between_models.pop("notes", None)  # the quick note's writer; none, no notes
                 def live_lessons():  # opened at the first lesson that passes the gate, not before
@@ -987,7 +989,8 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
                     return SalesLessons(live[0])
                 between = rounds_mod.Between(db, SALES_PLUG, calls=calls, state=state, pool=pool,
                                              agent_model=agent_model, customer_model=customer_model,
-                                             models=between_models, examiner=examiner, live=live_lessons)
+                                             models=between_models, examiner=examiner, live=live_lessons,
+                                             full=full)
                 learn = between.learn
                 if notes_model is not None:
                     notes = quick_notes(SALES_PLUG, calls, notes_model)

@@ -472,7 +472,7 @@ class Binding(Base):
     def test_the_sales_agent_keeps_its_own_binding(self):
         with mock.patch.object(night, "sales_exam", return_value="sales binding") as made:
             self.assertEqual(night.agent_exam(SALES, "x.db"), "sales binding")
-        made.assert_called_once_with(SALES, "x.db", scope=False)
+        made.assert_called_once_with(SALES, "x.db")
 
     def test_the_counted_examiner_counts_a_built_agents_exam(self):
         world = World()

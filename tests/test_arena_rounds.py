@@ -135,7 +135,8 @@ class Base(unittest.TestCase):
         Db(str(path)).close()
         return path
 
-    def cli(self, db, ideas, *, refuse=(), cap=1000, rounds_n=2, state=None, accept=False, buyers=(), cards=None):
+    def cli(self, db, ideas, *, refuse=(), cap=1000, rounds_n=2, state=None, accept=False, buyers=(), cards=None,
+            full=None):
         self.agent, self.customer = Agent(), Customer(buyers)
         calls_file = (run.state_dir(db) if db else Path(state)) / run.CALLS_FILE
         self.night, self.exam_model, self.exams = Night(ideas, self.agent, calls_file), ExamModel(), Exams(refuse)
@@ -147,9 +148,10 @@ class Base(unittest.TestCase):
         argv = ["--cards", str(cards or self.cards), "--matches", "2", "--rounds", str(rounds_n), "--held-out", "persona-02",
                 "--trust", str(self.trust), "--cap", str(cap), "--json"] + where
         with contextlib.redirect_stdout(io.StringIO()) as out:
-            code = run.main(argv, agent_model=self.agent, customer_model=self.customer,
-                            reflection={"study": self.night, "open": self.night, "exam": self.exam_model,
-                                        "examiner": self.exams})
+            reflection = {"study": self.night, "open": self.night, "exam": self.exam_model, "examiner": self.exams}
+            if full is not None:
+                reflection["full"] = full
+            code = run.main(argv, agent_model=self.agent, customer_model=self.customer, reflection=reflection)
         return code, json.loads(out.getvalue())
 
     def lessons(self, db):
@@ -527,6 +529,47 @@ class LiveStaysLive(Base):
             rounds.hand_live(copy, L, failed)
         self.assertEqual(sorted(x["text"] for x in L.mine()), sorted([GOOD, "Name the size chart."]))
 
+
+    def test_a_lesson_that_fails_the_full_exam_is_not_handed_live(self):
+        """Review simplify round 1 (red team A): the scoped exam alone never reaches real customers; a
+        passed lesson takes the full exam before hand_live, and one that fails it stays in the Arena."""
+        db = self.live_db()
+        before = dump(db)
+        code, rep = self.cli(db, [GOOD, BAD], refuse=[BAD], full=Exams([GOOD]))
+        got = rep["rounds"][0]["reflection"]
+        passed = [one for one in got["lessons"] if one["passed"]][0]
+        self.assertIsNone(passed["live_id"])
+        self.assertIn(rounds.FULL_HELD, passed["live"])
+        self.assertTrue(passed["full_exam"].startswith("held"))
+        self.assertEqual(dump(db), before)
+
+    def test_a_lesson_that_passes_the_full_exam_is_handed_live(self):
+        db = self.live_db()
+        code, rep = self.cli(db, [GOOD, BAD], refuse=[BAD], full=Exams([]))
+        got = rep["rounds"][0]["reflection"]
+        passed = [one for one in got["lessons"] if one["passed"]][0]
+        self.assertEqual(passed["full_exam"], "passed")
+        live, _ = self.lessons(db)
+        self.assertEqual(passed["live_id"], live[GOOD]["id"])
+
+    def test_a_full_exam_that_raises_hands_nothing(self):
+        db = self.live_db()
+        before = dump(db)
+        def broken(plug, kept, model):
+            def run_it(text, tags):
+                raise RuntimeError("no model")
+            return run_it
+        code, rep = self.cli(db, [GOOD, BAD], refuse=[BAD], full=broken)
+        passed = [one for one in rep["rounds"][0]["reflection"]["lessons"] if one["passed"]][0]
+        self.assertIsNone(passed["live_id"])
+        self.assertEqual(dump(db), before)
+
+    def test_the_real_run_takes_the_full_exam_before_live(self):
+        from reflection import exam as exam_mod_sales
+        made = rounds.full_examiner(PLUG, None, None)
+        self.assertIsInstance(made, exam_mod_sales.Examiner)
+        self.assertFalse(made.scope)
+        self.assertIsNone(made.cap)
 
     def test_a_busy_live_database_is_noted_on_the_round_and_the_report_still_comes(self):
         """Review round 1, finding 4: sqlite3.Error from the live database leaves the run and its report."""

@@ -1,6 +1,5 @@
 """Correct this: a correction sent from beside the reply the agent lost a practice match on
-(reflection/pages.py correct_this), the same hotfix as the box on the agent's page, and the page's
-Sales exam scoped so it answers fast (reflection/night.py sales_exam scope). No model call."""
+(reflection/pages.py correct_this), the same hotfix as the box on the agent's page, through the full exam. No model call."""
 import unittest
 from pathlib import Path
 
@@ -53,16 +52,13 @@ class CorrectThis(unittest.TestCase):
         self.assertEqual(self.p.back("/agents/sales"), "/agents/sales")
 
 
-class PageExamScoped(unittest.TestCase):
-    def test_page_exam_is_scoped_and_the_night_full(self):
+class PageExamFull(unittest.TestCase):
+    def test_the_page_exam_is_the_full_one(self):
+        """A correction can start at once on real cases, so the page keeps the full exam (red team A)."""
         plug = plug_mod.load(ROOT / "sales" / "plug.json")
-        page = night.sales_exam(plug, scope=True)(None)
-        self.assertTrue(page.scope)
-        from arena import rounds
-        self.assertEqual(page.cap, rounds.EXAM_CAP)
-        nightly = night.sales_exam(plug)(None)
-        self.assertFalse(nightly.scope)
-        self.assertIsNone(nightly.cap)
+        page = night.sales_exam(plug)(None)
+        self.assertFalse(page.scope)
+        self.assertIsNone(page.cap)
 
 
 if __name__ == "__main__":

@@ -587,7 +587,8 @@ def _causes(left):
 
 
 def main(argv=None, *, until=None):
-    """until: the window's end, the clock when left out (tests give a fixed one)."""
+    """until: the window's end; --until gives it on the command line (the night scheduler does), the
+    clock when neither is given (tests give a fixed one)."""
     ap = argparse.ArgumentParser(description="One night study of one agent on its real cases, with the Meta parts.")
     ap.add_argument("--plug", default=str(DEFAULT_PLUG), help="the agent's plug file (default: the Sales agent's)")
     ap.add_argument("--days", type=float, default=None, help="the window in days (default: from the plug)")
@@ -597,7 +598,11 @@ def main(argv=None, *, until=None):
                     help="the personal assistant's folder: moments, modes and past days (default: data/assistant)")
     ap.add_argument("--recipe", default=None,
                     help="the persona recipe, outside the repo: real chats become practice customers (arena/grow.py)")
+    ap.add_argument("--until", type=float, default=None,
+                    help="the window's end, in seconds since 1970 (default: now; the night scheduler gives its own)")
     args = ap.parse_args(argv)
+    if until is None:
+        until = args.until
     env.load()
     try:
         missing = missing_keys()

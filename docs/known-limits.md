@@ -67,6 +67,6 @@ A result that shows days later, such as a delivery, settles a case only when it 
 - The Morning page lists a waiting case only when it has a row in the last 90 days (LATE_DAYS). An older one still waits, unseen.
 - The scheduled night runs only while the WhatsApp server runs. A server that was down at NIGHT_HOUR runs that night once when it is back; older missed nights are not made up.
 - A night that is refused (a missing key, no database) or fails is recorded for that agent and night, and is not tried again until the next night.
-- A night that hangs keeps its thread, so no other scheduled night runs in that server until it restarts. Its lock and its record go stale after 6 hours, so another server on the same database can take over.
+- Each scheduled night runs in its own process with 5 hours to finish; one still running then is killed and recorded failed (timeout), and that agent's night is not tried again until the next night.
 
-Next: the tracking number saved on the Sales order row when the store ships it, so the API check reaches every order, and a time limit on each night.
+Next: the tracking number saved on the Sales order row when the store ships it, so the API check reaches every order.

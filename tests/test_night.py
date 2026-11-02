@@ -166,6 +166,16 @@ class OneNight(Setup):
         self.assertEqual(rep["window"], {"since": fk.UNTIL - 30 * 86400, "until": fk.UNTIL})
         self.assertEqual([c["state"] for c in rep["cards"]], ["trying"])
 
+    def test_until_on_the_command_line_is_the_windows_end(self):
+        """The night scheduler runs this command in a child process and gives its until this way."""
+        self.env()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            code = night.main(["--plug", str(self.plug_path), "--db", str(self.db_path), "--days", "30", "--json",
+                               "--until", repr(float(fk.UNTIL))])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out.getvalue())["window"], {"since": fk.UNTIL - 30 * 86400, "until": fk.UNTIL})
+
     def test_json_prints_the_same_report(self):
         self.env()
         code, out, _ = self.run_main("--json")

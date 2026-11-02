@@ -1,7 +1,13 @@
 """The night scheduler (reflection/scheduler.py): each agent's night once a night, by itself.
 A fake clock and a fake night run: nothing sleeps, no night really runs, no server starts."""
+import functools
+import json
+import logging
 import os
+import sys
+import tempfile
 import threading
+import time
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -431,10 +437,75 @@ class Agents(unittest.TestCase):
             out = sc.agents("/x/ascent.db")
         self.assertEqual(out, sc.agents(":memory:"))
 
-    def test_run_night_is_the_manual_command(self):
-        with mock.patch("reflection.night.main", return_value=0) as main:
-            self.assertEqual(sc.run_night(Path("a/plug.json"), "/d/ascent.db", 123.0), 0)
-        main.assert_called_once_with(["--plug", "a/plug.json", "--db", "/d/ascent.db"], until=123.0)
+
+
+class Child(Base):
+    """Review late r1 finding 1, red team 1 and 3: each night runs as the manual command in a child
+    process with a time limit, so it never changes the server's env, logging or store, and a stuck
+    night is killed and recorded before its record goes stale. The children here are a small stand
+    in (tests/night_child.py), never the real night."""
+
+    def setUp(self):
+        super().setUp()
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.dir = Path(d.name)
+        self.db_path = self.dir / "ascent.db"
+
+    def child(self, mode, **kw):
+        with mock.patch.dict(os.environ, {"NIGHT_CHILD_MODE": mode}):
+            return sc.run_night(Path("a/plug.json"), self.db_path, 1793667600.5, module="tests.night_child", **kw)
+
+    def seen(self):
+        return json.loads((self.dir / "child.json").read_text(encoding="utf-8"))
+
+    def test_run_night_is_the_manual_command_in_a_child_from_the_repo_root(self):
+        child = mock.Mock()
+        child.wait.return_value = 0
+        with mock.patch.object(sc.subprocess, "Popen", return_value=child) as popen:
+            self.assertEqual(sc.run_night(Path("a/plug.json"), self.db_path, 123.0), 0)
+        cmd, kw = popen.call_args
+        self.assertEqual(cmd[0], [sys.executable, "-m", "reflection.night", "--plug", "a/plug.json",
+                                  "--db", str(self.db_path), "--until", "123.0"])
+        self.assertEqual(kw["cwd"], str(sc.ROOT))
+        child.wait.assert_called_once_with(timeout=sc.LIMIT)
+        self.assertLess(sc.LIMIT, sc.STALE)
+
+    def test_the_child_is_its_own_process_and_its_exit_code_is_the_answer(self):
+        self.assertEqual(self.child("exit 3"), 3)
+        seen = self.seen()
+        self.assertNotEqual(seen["pid"], os.getpid())
+        self.assertEqual(Path(seen["cwd"]).resolve(), sc.ROOT.resolve())
+        self.assertEqual(seen["until"], 1793667600.5)
+        self.assertIn("stand in night of a/plug.json: exit 3", (self.dir / sc.NIGHTS_LOG).read_text(encoding="utf-8"))
+
+    def test_what_a_night_changes_for_itself_never_reaches_the_server(self):
+        before = logging.root.manager.disable
+        with mock.patch.dict(os.environ, {"SHOPIFY_STORE": "probe-shop.example"}):
+            self.assertEqual(self.child("bleed"), 0)
+            self.assertEqual(os.environ.get("SHOPIFY_STORE"), "probe-shop.example")
+        self.assertEqual(self.seen()["store"], "probe-shop.example")  # the child had it, then dropped its own
+        self.assertEqual(logging.root.manager.disable, before)
+
+    def test_a_night_past_its_limit_is_killed_and_recorded_failed_timeout(self):
+        run = functools.partial(sc.run_night, module="tests.night_child", limit=1.0)
+        s = sc.Scheduler(self.db, self.db_path, when=WHEN, run=run, clock=self.clock,
+                         find=lambda: [("alpha", Path("alpha/plug.json"))], holder="here")
+        started = time.monotonic()
+        with mock.patch.dict(os.environ, {"NIGHT_CHILD_MODE": "sleep"}), self.assertLogs("scheduler", "ERROR"):
+            rep = s.once()
+        self.assertLess(time.monotonic() - started, 30)
+        self.assertEqual(rep["ran"], {"alpha": sc.FAILED})
+        self.assertEqual([(r["state"], r["why"]) for r in s.runs()], [(sc.FAILED, sc.TIMEOUT)])
+        self.assertIsNone(self.lock_row())
+        with self.assertRaises(ProcessLookupError):
+            os.kill(self.seen()["pid"], 0)
+
+    def test_run_night_raises_timed_out_after_the_kill(self):
+        with self.assertRaises(sc.TimedOut):
+            self.child("sleep", limit=1.0)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(self.seen()["pid"], 0)
 
 
 class Channel(unittest.TestCase):

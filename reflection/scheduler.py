@@ -15,7 +15,7 @@ down at that hour runs the night once when it is back, and older missed nights a
 Once per night per agent, in the database. Before an agent's night starts, a row (agent, night)
 goes into night_runs in one statement that adds it only when none is there: a restart, a second
 process or a second tick never runs that night again, even after a crash part way. The row ends
-done, failed with why (the night's exit code, or the error's type), or, when a run that started
+done, failed with why (the night's exit code, timeout, or the error's type), or, when a run that started
 never ended (a crash), stopped once it is older than STALE.
 
 One lock. A second service on the same database never runs nights at the same time: the night_lock
@@ -25,19 +25,31 @@ tick takes it over, so it is never stuck. STALE is longer than a night should ev
 
 One agent's failure is its own. Each agent's night runs on its own: a refusal (a missing key, a
 missing database) or an error is recorded for that agent and the next one runs; nothing here ever
-stops the service. The night itself asks the courier's API first (reflection/night.py
-courier_check), so the results it brings count that night.
+stops the service.
+
+Its own process. Each night runs as the manual command in a child process (run_night), from the
+repo root, so what a night changes for itself (the exam's demo store, its env, logging and the
+store's cache) never reaches the server's live turns. The child has LIMIT seconds, under STALE; one
+still running then is killed and recorded failed, "timeout", so a stuck call never holds the
+scheduler's thread and no second runner takes over a night that still runs. Its printed lines go
+to NIGHTS_LOG next to the database.
+
+The night itself asks the courier's API first (reflection/night.py courier_check), so the results
+it brings count that night.
 
 The agents. Every plug in the repo (<folder>/plug.json) and every agent Quick start built next to
 the database (kit/turn.py built), by name, one run each, in that order.
 
-The manual night command (python3 -m reflection.night) is unchanged: it records nothing here, so
-a manual run never stops the scheduled one.
+The manual night command (python3 -m reflection.night) is the same command: run by hand it records
+nothing here, so a manual run never stops the scheduled one.
 """
 import logging
 import os
 import re
+import signal
 import socket
+import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -53,6 +65,9 @@ HOUR_DEFAULT, TZ_DEFAULT = 3, "Africa/Cairo"
 OFF = "off"
 TICK = 60.0                  # seconds between looks
 STALE = 6 * 3600.0           # seconds: a lock or a started run this old is a crash's
+LIMIT = 5 * 3600.0           # seconds a night's child process may run before it is killed
+NIGHTS_LOG = "nights.log"    # next to the database: what each night's child printed
+TIMEOUT = "timeout"
 RUNNING, DONE, FAILED, STOPPED = "running", "done", "failed", "stopped"
 HOUR_FORM = re.compile(r"[0-9]{1,2}")
 FROM_ENV = object()            # Scheduler(when=...) left out: read NIGHT_HOUR and NIGHT_TZ
@@ -134,10 +149,45 @@ def agents(db_path, root=ROOT):
     return out
 
 
-def run_night(plug_path, db_path, now):
-    """One agent's night, the manual command's way (reflection/night.py main). Its exit code."""
-    from reflection import night
-    return night.main(["--plug", str(plug_path), "--db", str(db_path)], until=now)
+class TimedOut(Exception):
+    """A night's child process ran past its limit and was killed."""
+
+
+def run_night(plug_path, db_path, now, *, limit=LIMIT, module="reflection.night"):
+    """One agent's night, the manual command (reflection/night.py main) in a child process from the
+    repo root. Its exit code; TimedOut when it ran past limit seconds, after the child is killed.
+    module: the command to run (the tests give a small stand in)."""
+    cmd = [sys.executable, "-m", module, "--plug", str(plug_path), "--db", str(db_path), "--until", repr(float(now))]
+    with _output(db_path) as out:
+        child = subprocess.Popen(cmd, cwd=str(ROOT), stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
+                                 start_new_session=True)
+        try:
+            return child.wait(timeout=limit)
+        except subprocess.TimeoutExpired:
+            _kill(child)
+            raise TimedOut(f"past {limit:g} seconds") from None
+        except BaseException:  # the server is stopping: no night outlives it
+            _kill(child)
+            raise
+
+
+def _output(db_path):
+    """Where a night's child prints: NIGHTS_LOG next to the database, added to; nowhere when that
+    cannot be opened."""
+    try:
+        return open(Path(db_path).resolve().parent / NIGHTS_LOG, "ab")
+    except OSError:
+        return open(os.devnull, "wb")
+
+
+def _kill(child):
+    """The child and anything it started, killed and waited for."""
+    try:
+        os.killpg(child.pid, signal.SIGKILL)
+    except OSError:  # already gone
+        pass
+    child.kill()
+    child.wait()
 
 
 class Scheduler:
@@ -177,6 +227,9 @@ class Scheduler:
                 try:
                     code = self.run(path, self.db_path, self.clock())
                     state, why = (DONE, None) if code == 0 else (FAILED, f"exit {code}")
+                except TimedOut:
+                    state, why = FAILED, TIMEOUT
+                    log.error("the night of %s ran past its limit and was killed", agent)
                 except (Exception, SystemExit) as e:  # SystemExit: an argparse refusal ends no thread
                     state, why = FAILED, type(e).__name__
                     log.exception("the night of %s failed", agent)

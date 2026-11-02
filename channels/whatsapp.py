@@ -39,7 +39,8 @@ It listens on 127.0.0.1:PORT (default 8080). Meta must reach it through a public
   an order and writes each one note for that customer's next chat only; the turn reads it into
   the prompt. A tick or sweep that fails is logged and the next one tries again.
 - Night studies (reflection/scheduler.py): one more thread runs each agent's night once a night,
-  at NIGHT_HOUR (default 3) in NIGHT_TZ (default Africa/Cairo). NIGHT_HOUR=off turns it off. It
+  at NIGHT_HOUR (default 3) in NIGHT_TZ (default Africa/Cairo), each night in a child process of
+  its own so it never changes this server's env, logging or store. NIGHT_HOUR=off turns it off. It
   is never needed to answer: when it cannot start, the server runs as before.
 
 Graph API version: GRAPH_API_VERSION, default v26.0, the latest in Meta's changelog

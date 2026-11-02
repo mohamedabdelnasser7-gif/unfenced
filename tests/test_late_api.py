@@ -60,8 +60,20 @@ class ApiOutcome(unittest.TestCase):
                 bosta.api_outcome(bad, KEY, opener=Opener(view(45)))
         with self.assertRaises(ValueError):
             bosta.api_outcome("123", "", opener=Opener(view(45)))
-        with self.assertRaises(ValueError):
-            bosta.api_outcome("123", KEY, opener=Opener(b"x" * (bosta.MAX_API_BODY + 1)))
+
+    def test_a_valid_answer_over_the_cap_is_refused(self):
+        """Review late r2 sweep: the old body was not JSON, so it failed with no cap too. This one is a
+        valid delivered answer, padded past MAX_API_BODY; without the cap it would read as delivered."""
+        def padded(size):
+            base = json.dumps({**view(45), "pad": ""}).encode()
+            return json.dumps({**view(45), "pad": "x" * (size - len(base))}).encode()
+
+        under = padded(bosta.MAX_API_BODY)
+        self.assertEqual(len(under), bosta.MAX_API_BODY)
+        self.assertEqual(bosta.api_outcome("123", KEY, opener=Opener(under)), ("delivered", 45))
+        over = padded(bosta.MAX_API_BODY + 1)
+        with self.assertRaisesRegex(ValueError, "too large"):
+            bosta.api_outcome("123", KEY, opener=Opener(over))
 
     def test_an_answer_sent_a_byte_at_a_time_stops_at_the_deadline(self):
         """Red team late r1 finding 1: each read had its own timeout and the whole answer none, so a

@@ -7,7 +7,8 @@ Morning.connect and disconnect, reflection/pages.py Connections, channels/whatsa
    reason and the POST is refused; after a pass it connects, and the page says since when and what
    unlocked it. Pull takes it off. No count of the gate shows (item 17).
 3. The POSTs carry the page's token and pass its Origin and Host checks, like every other answer.
-4. An agent Quick start built asks for the channels its card names; WhatsApp for it is next.
+4. The channel answers only while connected: when not, it sends nothing and logs one line.
+5. An agent Quick start built asks for the channels its card names; WhatsApp for it is next.
 Temp databases and folders only, no model call, no network."""
 import json
 import tempfile
@@ -18,14 +19,23 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from channels import whatsapp as wa
 from engine import plug as plug_mod
 from kit import connections, switch
+from kit.chats import Chats
 from kit.db import Db
 from reflection import morning as mo
 from reflection import pages
+from reflection.lessons import Lessons
+from reflection.results import Results
+from sales import quiet
+from tests.fake_model import FakeModel, clean_env, say
+from tests.test_whatsapp import SendingGraph, payload, text_msg
 
 ROOT = Path(__file__).resolve().parent.parent
 NOW = 1_800_000_000.0
+WHO = "201111111111"
+ANSWER = "أهلا بيك، تحب تعرف إيه؟"
 
 
 class Base(unittest.TestCase):
@@ -247,6 +257,79 @@ class OverTheServer(Base):
         self.assertEqual(self.post("/disconnect", [("agent", "sales")], origin=False)[0], 403)
         self.assertEqual(self.post("/disconnect", [("agent", "sales")], token="wrong")[0], 403)
         self.assertTrue(connections.live(self.db, "sales", "whatsapp"))
+
+
+class TheChannel(unittest.TestCase):
+    """channels/whatsapp.py: with no fixed setting it follows Connect and Pull in the database."""
+
+    def setUp(self):
+        clean_env(self)
+        self.now = NOW
+        self.db = Db(":memory:")
+        self.addCleanup(self.db.close)
+        self.chats = Chats(self.db, clock=lambda: self.now)
+        self.graph = SendingGraph(b"", "audio/ogg")
+
+    def app(self, model=None, **kw):
+        return wa.App(self.chats, model or FakeModel(), Lessons(self.db), Results(self.db), self.graph,
+                      clock=lambda: self.now, **kw)
+
+    def one(self, app, mid="wamid.m1"):
+        app.accept(wa.parse(payload(text_msg(mid, "التوصيل بكام؟", frm=WHO))))
+        return app.work_one(app.q.get_nowait())
+
+    def test_not_connected_sends_nothing_and_logs_one_line(self):
+        app = self.app(FakeModel())  # a model call would fail the test: FakeModel has no answer queued
+        with self.assertLogs("channels.whatsapp", "INFO") as logs:
+            self.assertIsNone(self.one(app))
+        self.assertEqual(logs.output, [f"INFO:channels.whatsapp:{wa.NOT_LIVE_LOG}"])
+        self.assertEqual(self.graph.sent, [])
+        self.assertTrue(self.chats.saved("wamid.m1"))  # done, so a restart never answers it late
+        self.assertEqual(self.chats.pending(), [])
+        self.assertEqual(app.quiet_once(), [])
+
+    def test_connected_answers_and_pull_silences_it_again(self):
+        connections.connect(self.db, "sales", "whatsapp", why="The gate passed.", by="the user", now=NOW)
+        app = self.app(FakeModel(say(ANSWER)))
+        self.assertEqual(self.one(app).outcome, "replied")
+        self.assertEqual(self.graph.sent[-1], (WHO, ANSWER))
+        connections.disconnect(self.db, "sales", "whatsapp", why="Pull", by="the user", now=NOW + 1)
+        sent = len(self.graph.sent)
+        self.assertIsNone(self.one(app, "wamid.m2"))
+        self.assertEqual(len(self.graph.sent), sent)
+
+    def test_the_setting_fixes_it_either_way(self):
+        connections.connect(self.db, "sales", "whatsapp", why="The gate passed.", by="the user", now=NOW)
+        self.assertIsNone(self.one(self.app(connected=False)))
+        self.assertEqual(self.graph.sent, [])
+        self.assertEqual(self.one(self.app(FakeModel(say(ANSWER)), connected=True), "wamid.m2").outcome, "replied")
+        self.assertEqual(wa.live_setting(""), None)
+        self.assertEqual(wa.live_setting(None), None)
+        self.assertIs(wa.live_setting(" ON "), True)
+        self.assertIs(wa.live_setting("off"), False)
+        with self.assertRaises(SystemExit):
+            wa.live_setting("yes")
+
+    def test_a_notice_due_while_not_connected_is_never_sent(self):
+        connections.connect(self.db, "sales", "whatsapp", why="The gate passed.", by="the user", now=NOW)
+        app = self.app(FakeModel(say(ANSWER)))
+        chat_id = self.one(app).chat_id
+        connections.disconnect(self.db, "sales", "whatsapp", why="Pull", by="the user", now=NOW + 10)
+        self.now += quiet.NOTICE_AFTER + quiet.START_GRACE + 60  # past the quick restart grace
+        self.assertEqual(app.quiet_once(), [])  # not connected: no notice and no close
+        connections.connect(self.db, "sales", "whatsapp", why="The gate passed.", by="the user", now=self.now)
+        sent = len(self.graph.sent)
+        self.assertEqual(app.quiet_once(), [(chat_id, "closed")])  # closed silently, no notice
+        self.assertEqual(len(self.graph.sent), sent)
+
+    def test_a_state_that_cannot_be_read_answers_nothing(self):
+        app = self.app()
+        broken = Db(":memory:")
+        broken.close()
+        app.chats = Chats.__new__(Chats)
+        app.chats.db = broken
+        with self.assertLogs("channels.whatsapp", "ERROR"):
+            self.assertFalse(app.live())
 
 
 class AQuickStartAgent(unittest.TestCase):

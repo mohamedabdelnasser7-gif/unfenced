@@ -27,7 +27,7 @@ class Requeue(Base):
         a = self.turn(who=WHO).chat_id
         b = self.turn(who=OTHER).chat_id
         self.later(60)
-        old = wa.App(self.chats, FakeModel(), self.lessons, self.results, self.graph())
+        old = wa.App(self.chats, FakeModel(), self.lessons, self.results, self.graph(), connected=True)
         old.accept(wa.parse(payload(text_msg("wamid.a2", "طيب مقاس 43", frm=WHO))))
         old.accept(wa.parse(payload(text_msg("wamid.b2", "تمام هاخده", frm=OTHER))))
         self.later(2 * 3600)  # the process was down two hours
@@ -36,7 +36,7 @@ class Requeue(Base):
             self.later(31)  # the first turn outlasts the first tick's 30 seconds
             return say(ANSWER)
 
-        app = wa.App(self.chats, FakeModel(slow, say(ANSWER)), self.lessons, self.results, self.graph())
+        app = wa.App(self.chats, FakeModel(slow, say(ANSWER)), self.lessons, self.results, self.graph(), connected=True)
         self.assertEqual(app.requeue_pending(), 2)
         self.assertEqual(app.work_one(app.q.get_nowait()).chat_id, a)
         self.assertNotIn(b, [c for c, _ in app.quiet_once()])

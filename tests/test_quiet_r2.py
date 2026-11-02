@@ -41,7 +41,7 @@ class Due(Base):
 
     def app(self, **k):
         return wa.App(self.chats, FakeModel(*[say(ANSWER)] * 4), self.lessons, self.results,
-                      TypingGraph(b"", "audio/ogg"), **k)
+                      TypingGraph(b"", "audio/ogg"), connected=True, **k)
 
     def test_a_notice_due_during_a_slow_sweep_still_goes_and_the_close_waits_30_minutes_after_it(self):
         app = self.app(fast=SlowSweep(self))
@@ -123,7 +123,7 @@ class StuckPending(Base):
 
     def test_a_stuck_message_holds_its_chat_for_close_after_at_most(self):
         self.assertEqual(chats_mod.PENDING_HOLD, quiet.CLOSE_AFTER)
-        app = wa.App(self.chats, FakeModel(*[say(ANSWER)] * 4), self.lessons, self.results, TypingGraph(b"", "audio/ogg"))
+        app = wa.App(self.chats, FakeModel(*[say(ANSWER)] * 4), self.lessons, self.results, TypingGraph(b"", "audio/ogg"), connected=True)
         app.accept(wa.parse(payload(text_msg("wamid.m1", "hi", frm=WHO))))
         first = app.work_one(app.q.get_nowait()).chat_id
         self.later(quiet.NOTICE_AFTER - 60)
@@ -263,7 +263,7 @@ class SqlGuards(Base):
 
     def setUp(self):
         super().setUp()
-        self.app = wa.App(self.chats, FakeModel(say(ANSWER)), self.lessons, self.results, TypingGraph(b"", "audio/ogg"))
+        self.app = wa.App(self.chats, FakeModel(say(ANSWER)), self.lessons, self.results, TypingGraph(b"", "audio/ogg"), connected=True)
 
     def accept_during(self, who, text):
         def slow_send(to, line):

@@ -316,7 +316,7 @@ class Parsing(unittest.TestCase):
         self.assertEqual(wa.parse(payload({"type": "text"})), [])
 
     def test_retries_are_deduped(self):
-        app = wa.App(Chats(Db(":memory:")), None, None, None, None)
+        app = wa.App(Chats(Db(":memory:")), None, None, None, None, connected=True)
         self.addCleanup(app.chats.db.close)
         items = wa.parse(payload(text_msg("wamid.same", "hi")))
         app.accept(items)
@@ -605,7 +605,7 @@ class Queueing(unittest.TestCase):
         self.chats = Chats(self.db)
 
     def app(self, **kw):
-        return wa.App(self.chats, None, None, None, None, **kw)
+        return wa.App(self.chats, None, None, None, None, connected=True, **kw)
 
     def test_default_queue_size(self):
         self.assertEqual((wa.MAX_QUEUE, self.app().q.maxsize), (200, 200))
@@ -688,7 +688,7 @@ class WorkerTurns(unittest.TestCase):
         self.graph = SendingGraph(OGG, "audio/ogg; codecs=opus")
 
     def run_one(self, message, model=None, limits=None):
-        app = wa.App(self.chats, model or FakeModel(), Lessons(self.db), Results(self.db), self.graph, limits=limits)
+        app = wa.App(self.chats, model or FakeModel(), Lessons(self.db), Results(self.db), self.graph, limits=limits, connected=True)
         app.accept(wa.parse(payload(message)))
         return app.work_one(app.q.get_nowait())
 
@@ -761,7 +761,7 @@ class TypingDots(unittest.TestCase):
 
     def app(self, *script, limits=None):
         return wa.App(self.chats, InOrderModel(self.events, *script), Lessons(self.db), Results(self.db), self.graph,
-                      limits=limits)
+                      limits=limits, connected=True)
 
     def run_one(self, message, *script, limits=None):
         app = self.app(*script, limits=limits)
@@ -842,7 +842,7 @@ class CrashedTurns(unittest.TestCase):
         self.addCleanup(self.db.close)
         self.chats, self.results = Chats(self.db), Results(self.db)
         self.graph = SendingGraph(OGG, "audio/ogg; codecs=opus")
-        self.app = wa.App(self.chats, FakeModel(), Lessons(self.db), self.results, self.graph)
+        self.app = wa.App(self.chats, FakeModel(), Lessons(self.db), self.results, self.graph, connected=True)
 
     def crash(self, *messages, when=None, after=False):
         """Queue the messages and run the worker. work_one raises, on every call or on the calls

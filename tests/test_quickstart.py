@@ -189,6 +189,7 @@ class QuickStartPage(unittest.TestCase):
         self.assertEqual([n["connected"] for n in card["needs"]], [True, False])
         self.assertIn("watch the store", (where / "instructions.md").read_text(encoding="utf-8"))
         self.assertIn("Built. Its files are in agents/stock_watcher", self.get())
+        self.assertIn("what you write below makes another agent", self.get())  # a change after Build is next
         self.assertIn("level", card)
         self.assertNotIn("bosta", json.dumps(json.loads((where / "plug.json").read_text(encoding="utf-8"))["risk"]))
 

@@ -134,7 +134,14 @@ def _customer(s):
 
 
 def answer(s, lesson, *, model, kept=None):
-    """Run one situation through the Sales agent's reply path. Returns what the agent did."""
+    """Run one situation through the Sales agent's reply path on the demo store with no Shopify keys
+    (arena/match.py demo_store), so an exam never writes a real draft order. Returns what the agent did."""
+    from arena import match as match_mod
+    with match_mod.demo_store():
+        return _answer(s, lesson, model=model, kept=kept)
+
+
+def _answer(s, lesson, *, model, kept=None):
     from reflection.results import Results
     db = Db(":memory:")
     try:

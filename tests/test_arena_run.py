@@ -261,7 +261,10 @@ class Parts(Base):
 
     def test_no_real_trust_level_in_the_repo(self):
         """Trust levels stay out of the public repo (DECISIONS item 17): a level written in any file
-        here is the placeholder (every match won) or uses the stand-in count of STAND_IN matches."""
+        here is the placeholder (every match won), the public Sales level of 7 of 10 (DECISIONS item 63)
+        or uses the stand-in count of STAND_IN matches."""
+        PUBLIC = (10, 7)  # the one level the README names (DECISIONS item 63)
+        self.assertEqual((run.PUBLIC_TRUST["matches"], run.PUBLIC_TRUST["wins"]), PUBLIC)
         found = []
         level = re.compile(r"""["']matches["']\s*:\s*(\d+)\s*,\s*["']wins["']\s*:\s*(\d+)""")
         seen = 0
@@ -274,7 +277,7 @@ class Parts(Base):
                     continue
                 seen += 1
                 for m, w in level.findall(path.read_text(encoding="utf-8", errors="replace")):
-                    if int(m) != int(w) and int(m) != STAND_IN:
+                    if int(m) != int(w) and int(m) != STAND_IN and (int(m), int(w)) != PUBLIC:
                         found.append(f"{path.relative_to(REPO)}: {m} matches, {w} wins")
         self.assertGreater(seen, 100)
         self.assertEqual(found, [])

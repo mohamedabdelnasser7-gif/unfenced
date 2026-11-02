@@ -683,13 +683,15 @@ class Morning:
         rated = lessons.rate(text)  # the judge, outside the transaction (edit)
         return self.edit(lesson_id, text, now=now, exam=result, rated=rated)
 
-    def correct(self, agent, line, now=None):
+    def correct(self, agent, line, now=None, by=None):
         """A correction or an idea the user sends on an agent's page: a hotfix (DECISIONS 56,
         Lessons.correct). It takes the short exam first, the one the page already runs (outside the
         transaction); once it passes it starts at once on half the chats, whatever the level, and never
         waits behind a lesson on trial. A high risk one, or one the exam holds, waits for a yes on Today
         (engine.lessons WANTS_YES). An agent with no exam here is refused: a correction never starts
-        untested. The night's Reflection reads it like any idea; its source is Lessons.HOTFIX_SOURCE."""
+        untested. The night's Reflection reads it like any idea; its source is Lessons.HOTFIX_SOURCE.
+        by: who sent it, kept as its yes_by; None is the page's own (self.by, the user). The console
+        sends "operator" (reflection/console.py), down the same path and the same exam."""
         lessons, text, stage = self._idea_checked(agent, line, plug_mod.ALL)  # a refused line takes no exam
         result = self._correction_exam(lessons, text)
         if result is None:
@@ -698,7 +700,7 @@ class Morning:
         with self.page.one():
             lessons, text, stage = self._idea_checked(agent, line, plug_mod.ALL)  # again: the lessons may have moved
             try:
-                new_id = lessons.correct(text, [stage], yes_by=self.by, exam=result, now=now, rated=rated)
+                new_id = lessons.correct(text, [stage], yes_by=by or self.by, exam=result, now=now, rated=rated)
             except ValueError as e:
                 raise Refused(f"The correction was refused: {e}.") from None
             state = lessons.get(new_id)["state"]
@@ -3039,8 +3041,10 @@ def _handler(morning, token, pages=None):
                 got = pages.get(parts.path, query, token, flash)
                 if got is None:
                     return self._send(404, "Not found.\n")
-                box["flash"] = None
-                return self._send(200, got, page=True, csp=pages.csp)
+                if self.headers.get("X-Poll") != "1":  # the console's refresh leaves the one-time message alone
+                    box["flash"] = None
+                csp = pages.csp_for(parts.path) if hasattr(pages, "csp_for") else pages.csp
+                return self._send(200, got, page=True, csp=csp)
             if urllib.parse.urlsplit(self.path).path != "/":
                 return self._send(404, "Not found.\n")
             flash, box["flash"] = box["flash"], None
@@ -3088,6 +3092,9 @@ def _handler(morning, token, pages=None):
                 box["flash"] = str(e)
             except (ValueError, sqlite3.Error) as e:
                 box["flash"] = f"Not done: {e}"
+            to = getattr(box["flash"], "location", None)  # an answer that names where the page goes next (Build)
+            if to and pages is not None and hasattr(pages, "land"):
+                back = pages.land(to, back)
             self._send(303, "Done.\n", location=back)
 
     return Handler

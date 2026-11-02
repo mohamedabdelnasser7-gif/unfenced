@@ -39,6 +39,7 @@ import re
 import urllib.parse
 
 from engine import lessons as lessons_mod
+from reflection import console as console_mod
 from reflection import morning as mo
 from reflection import quickstart as qs_mod
 from reflection import snapshots
@@ -51,7 +52,7 @@ NAMES = mo.AGENT_NAMES
 CORRECTED = lessons_mod.HOTFIX_SOURCE  # the source line of a correction (Morning.correct, Lessons.correct)
 _AGENT = re.compile(r"^[a-z][a-z_]{0,30}$")
 ROLLBACK = "/rollback"  # /agents/<name>/rollback: the plan a rollback would carry out, and its one button
-_BACK = re.compile(r"^/(?:agents(?:/[a-z][a-z_]{0,30})?|new(?:/build)?)?$")
+_BACK = re.compile(r"^/(?:agents(?:/[a-z][a-z_]{0,30})?|new(?:/build)?|console)?$")
 ICON = dict(mo.ICONS, pen='<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
             loop='<path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3"/><path d="M18 3v4h-4M6 21v-4h4"/>',
             undo='<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>', pause='<path d="M9 6v12M15 6v12"/>',
@@ -118,7 +119,10 @@ class Pages:
         # the page's own answers, taken by the server next to morning.TWO_TAB_ACTIONS
         self.actions = {"/quickstart": lambda m, f, now=None: self._quick(self.quick.say, m, now, mo._field(f, "text")),
                         "/quickstart/build": lambda m, f, now=None: self._build(m, now),
-                        "/quickstart/clear": lambda m, f, now=None: self._quick(self.quick.clear, m, now)}
+                        "/quickstart/clear": lambda m, f, now=None: self._quick(self.quick.clear, m, now),
+                        # the console's Operator correction: the same path as the agent page's (Morning.correct)
+                        "/console/correct": lambda m, f, now=None: m.correct(mo._field(f, "agent"), mo._field(f, "line"),
+                                                                             now=now, by=console_mod.OPERATOR)}
 
     def back(self, value):
         """Where an answer returns to: one of the page's own paths, with the demo day; else /."""
@@ -129,9 +133,24 @@ class Pages:
         agent = (query.get("agent") or [""])[0]
         if path == "/new/build" and _AGENT.match(agent):  # the Arena screen of that agent (Try again)
             keep.append(f"agent={agent}")
+        if path == "/console" and _AGENT.match(agent):  # the console, its view and the row that was open
+            st = console_mod.state_of(query, agent)
+            keep += [f"{k}={st[k]}" for k in ("agent", "view", "sub", "f", "row", "pane") if st[k]]
         if self.demo:
             keep.append(f"day={self._day(query)}")
         return path + ("?" + "&".join(keep) if keep else "")
+
+    def land(self, to, back):
+        """Where an answer that names its next page goes (Build: the Arena screen): to, checked as any
+        back is, on the demo day back was on."""
+        day = urllib.parse.parse_qs(urllib.parse.urlsplit(back).query).get("day")
+        if self.demo and day:
+            to += ("&" if "?" in to else "?") + "day=" + urllib.parse.quote(day[0])
+        return self.back(to)
+
+    def csp_for(self, path):
+        """The policy a page is sent with: the console's own (its one script by hash), else the page's."""
+        return console_mod.csp() if path == "/console" else self.csp
 
     def morning_for(self, back):
         if not self.demo:
@@ -200,6 +219,11 @@ class Pages:
         if path == "/new/build":
             agent = (query.get("agent") or [""])[0]
             return self.shell(build(m, agent if agent in m.plugs else None, ctx), "agents", ctx, flash)
+        if path == "/console":
+            agent = (query.get("agent") or [""])[0] or mo.SALES.agent
+            if not _AGENT.match(agent):
+                return None
+            return console_mod.page(m, agent, query, token=token, flash=flash, now=now, day=day if self.demo else None)
         return None
 
     def shell(self, body, on, ctx, flash):
@@ -581,7 +605,13 @@ def agent_page(m, view, agent, ctx):
                      f'<p>It practised on made-up cases. <a class="lk" href="/new/build?agent={h(agent)}{day}">'
                      'See where it slipped</a></p></div>')
     out.append('<section class="grp sq" aria-labelledby="r-h"><h3 id="r-h">Reflection notes</h3>'
-               + ("".join(notes) or '<div class="nr"><p>Nothing yet.</p></div>') + "</section></div>")
+               + ("".join(notes) or '<div class="nr"><p>Nothing yet.</p></div>') + "</section>")
+    if agent in m.plugs:  # the technical view of its loop (reflection/console.py)
+        day = f'&day={ctx["day"]}' if ctx["day"] else ""
+        out.append(f'<section class="grp sq" aria-labelledby="c-h"><h3 id="c-h">Console</h3><div class="nr"><p>'
+                   f'<a class="lk" href="/console?agent={h(agent)}{h(day)}">Open console</a>, what the engine saved for '
+                   'this agent, as it runs.</p></div></section>')
+    out.append("</div>")
     return "".join(out)
 
 

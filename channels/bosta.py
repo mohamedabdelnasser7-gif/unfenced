@@ -403,8 +403,9 @@ API_CHUNK = 16 * 1024
 def api_outcome(tracking, key, *, opener=None, timeout=API_TIMEOUT):
     """(delivered or refused or None, the state code) for one tracking number, from Bosta's API.
     Raises on a failed call, so the caller counts it and moves on, and when the whole answer has not
-    come within timeout seconds of the call, so an answer sent a byte at a time never holds the
-    night. The key is sent only to app.bosta.co, with no redirect followed, and never logged."""
+    come within timeout seconds of the call, so a body sent a byte at a time never holds the night.
+    The status line and headers are bounded only per read; a server that drips them is stopped by the
+    night's own limit (reflection/scheduler.py LIMIT). The key is sent only to app.bosta.co, with no redirect followed, and never logged."""
     from kit import net
     tracking = _text(tracking)
     if not tracking or len(tracking) > 64 or not tracking.isalnum():

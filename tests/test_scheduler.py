@@ -532,5 +532,26 @@ class Channel(unittest.TestCase):
         self.assertLess(src.index("start_nights("), src.index("serve_forever"))
 
 
+class NightsLog(unittest.TestCase):
+    """Red team late r2: the nights log is this user's only and does not grow without end."""
+
+    def test_made_for_this_user_only(self):
+        import stat
+        with tempfile.TemporaryDirectory() as d:
+            with sc._output(Path(d) / "ascent.db") as f:
+                f.write(b"x")
+            mode = stat.S_IMODE((Path(d) / sc.NIGHTS_LOG).stat().st_mode)
+            self.assertEqual(mode, 0o600)
+
+    def test_past_the_cap_it_starts_again(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(sc, "NIGHTS_LOG_MAX", 10):
+            log = Path(d) / sc.NIGHTS_LOG
+            log.write_bytes(b"y" * 11)
+            with sc._output(Path(d) / "ascent.db") as f:
+                f.write(b"new")
+            self.assertEqual(log.read_bytes(), b"new")
+            self.assertEqual((Path(d) / (sc.NIGHTS_LOG + ".1")).read_bytes(), b"y" * 11)
+
+
 if __name__ == "__main__":
     unittest.main()

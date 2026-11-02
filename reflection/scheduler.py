@@ -67,6 +67,7 @@ TICK = 60.0                  # seconds between looks
 STALE = 6 * 3600.0           # seconds: a lock or a started run this old is a crash's
 LIMIT = 5 * 3600.0           # seconds a night's child process may run before it is killed
 NIGHTS_LOG = "nights.log"    # next to the database: what each night's child printed
+NIGHTS_LOG_MAX = 5 * 1024 * 1024  # bytes; past it the log starts again, the last one kept as nights.log.1
 TIMEOUT = "timeout"
 RUNNING, DONE, FAILED, STOPPED = "running", "done", "failed", "stopped"
 HOUR_FORM = re.compile(r"[0-9]{1,2}")
@@ -172,10 +173,14 @@ def run_night(plug_path, db_path, now, *, limit=LIMIT, module="reflection.night"
 
 
 def _output(db_path):
-    """Where a night's child prints: NIGHTS_LOG next to the database, added to; nowhere when that
-    cannot be opened."""
+    """Where a night's child prints: NIGHTS_LOG next to the database, added to, readable by this
+    user only (it names cases); past NIGHTS_LOG_MAX it moves to nights.log.1 and starts again;
+    nowhere when that cannot be opened."""
+    path = Path(db_path).resolve().parent / NIGHTS_LOG
     try:
-        return open(Path(db_path).resolve().parent / NIGHTS_LOG, "ab")
+        if path.is_file() and path.stat().st_size > NIGHTS_LOG_MAX:
+            os.replace(path, path.with_name(NIGHTS_LOG + ".1"))
+        return os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), "ab")
     except OSError:
         return open(os.devnull, "wb")
 

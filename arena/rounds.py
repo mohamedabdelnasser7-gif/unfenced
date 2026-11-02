@@ -19,6 +19,12 @@ calling it with a round's number then:
    there (high risk with no Accept high risk, a copy of a case's words, close to a pulled line or
    against a live one) takes it right after, and the result is saved on the lesson as its exam,
    so its card shows it; it still waits for a person's yes either way.
+   A lesson the gate refused for what it broke goes straight back to the study with it (Mohamed
+   2026-11-02, "Yes now"; DECISIONS item 50): Study.rewrite gives the idea part that line and its
+   earlier tries, each with the situation and check it failed and its fixed and broken counts, and
+   the one new line it writes takes the gate in the same round. At most REWRITES new tries a
+   lesson, on the run's call cap; a try that still fails stays out like any refused lesson. A lesson
+   whose exam could not run is not rewritten. No line is ever written by hand.
 3. Hands on (Pool) only a lesson that passed and that the lessons' own rules let go ahead with no
    further yes: on trial or kept, or low risk and waiting its turn. A high risk lesson goes ahead
    only on a person's yes, or under Accept high risk as the engine already allows; a lesson that
@@ -35,6 +41,15 @@ calling it with a round's number then:
    live database is busy or locked (sqlite3.Error), the lesson is not handed this run: the round
    notes "not handed, live busy" and the run and its report go on.
 
+5. Hands a correction the user typed on the live page while the run goes on (live_hotfixes; Mohamed
+   2026-11-02, "So hotfix should be in arena too then", and "It shouldn't make the same mistake in
+   the same run"): before every match, Pool.refresh reads the live database, read only, for the
+   agent's corrections that passed their exam, run there as a hotfix (on trial or kept) and were
+   added since the run started, and the Pool hands them first in every match after, and to the
+   gate of each new lesson. A correction pulled since is no longer handed. Nothing the run makes
+   (cases, lessons, exams, matches) is ever written to the live database by this step. A live
+   database that is busy, locked or gone keeps the corrections read last.
+
 Every model call of the study, the risk judge, the exam and the rerun is taken from the Arena's own
 call count (arena/run.py Calls, arena-calls.json), so one cap holds the whole run. At the cap each
 part fails closed: no candidates or ideas, the judge unsure (so high), the exam not run (so the
@@ -42,27 +57,79 @@ lesson is refused). Nothing from that study is handed on, and arena/run.py stops
 """
 import sqlite3
 import time
+from pathlib import Path
 
 from engine import exam as exam_mod
 from engine import switches as switches_mod
-from engine.lessons import KEPT, MAX_PICK, PULLED, TRYING, WAITING
+from engine.lessons import HOTFIX_SOURCE, KEPT, MAX_PICK, PERSON, PULLED, TRYING, WAITING
 from engine.plug import ALL
 from engine.risk import LOW
 from engine.study import read_days
 
 DAY = 86400.0
 LIVE_BUSY = "not handed, live busy"  # a passed lesson the live database could not take this run
+REWRITES = 2  # new tries a lesson the gate refused may take in the same round (Mohamed 2026-11-02, "Yes now")
 CAP_NOTE = "the model call cap was reached during the night study; nothing it left unchecked is handed on"
+
+
+def live_hotfixes(path, agent, since):
+    """The agent's corrections in the live database at path that passed their exam, run there as a
+    hotfix (on trial or kept) and were added at or after since, oldest first, each as the Pool hands
+    it: kept, its stages and fields as lists, and its id the live id made negative (live_id keeps the
+    live one), so it never reads as a lesson of the Arena's copy. The database is opened read only.
+    sqlite3.Error when it cannot be read (busy, locked, gone, or a database with no lessons yet)."""
+    con = sqlite3.connect(f"{Path(path).resolve().as_uri()}?mode=ro", uri=True, timeout=1)
+    try:
+        con.row_factory = sqlite3.Row
+        rows = con.execute(
+            "SELECT l.* FROM lessons l JOIN lesson_exams e ON e.lesson_id = l.id WHERE l.agent = ? AND l.source = ? "
+            "AND l.origin = ? AND e.passed = 1 AND l.state IN (?, ?) AND l.added_at >= ? ORDER BY l.id",
+            (agent, HOTFIX_SOURCE, PERSON, TRYING, KEPT, float(since))).fetchall()
+    finally:
+        con.close()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d.update(id=-int(d["id"]), live_id=int(d["id"]), state=KEPT,
+                 stages=[t for t in (d.get("stages") or "").split(",") if t],
+                 fields=[t for t in (d.get("fields") or "").split(",") if t])
+        out.append(d)
+    return out
 
 
 class Pool:
     """The lessons the Arena hands (the reflection/exam.py _Lessons kept shape: live() and pick()):
-    the agent's kept lessons, then the lessons this run passed between rounds and handed on, each
-    read again at every call, so one pulled since is not handed. A handed lesson reads as kept here
-    because the Arena hands it in every match, as the exam hands a kept one."""
+    the corrections read from the live database (hotfixes, refreshed before every match), then the
+    agent's kept lessons, then the lessons this run passed between rounds and handed on, each read
+    again at every call, so one pulled since is not handed. A handed lesson reads as kept here
+    because the Arena hands it in every match, as the exam hands a kept one. hotfixes: a callable
+    giving the live corrections (live_hotfixes), or None."""
 
-    def __init__(self, lessons):
+    def __init__(self, lessons, hotfixes=None):
         self.lessons, self.handed = lessons, []
+        self.hotfixes, self.fixes, self.busy, self.seen = hotfixes, [], None, []
+
+    def refresh(self):
+        """Read the live corrections again (before every match). A live database that cannot be read
+        keeps the ones read last and says why in busy."""
+        if self.hotfixes is None:
+            return self.fixes
+        try:
+            got = list(self.hotfixes())
+        except sqlite3.Error as e:
+            self.busy = f"{LIVE_BUSY} ({e})"
+            return self.fixes
+        self.busy = None
+        mine = {les["text"] for les in self.lessons.live() if les["state"] == KEPT}
+        mine |= {les["text"] for les in self._passed()}
+        self.fixes = [les for les in got if les["text"] not in mine]
+        for les in self.fixes:
+            if les["live_id"] not in self.seen:
+                self.seen.append(les["live_id"])
+        return self.fixes
+
+    def _fixes(self, stage=None):
+        return [dict(les) for les in self.fixes if not stage or stage in les["stages"] or ALL in les["stages"]]
 
     def hand_on(self, lesson_id):
         if lesson_id not in self.handed:
@@ -80,11 +147,12 @@ class Pool:
         return out
 
     def live(self, stage=None, now=None):
-        return [les for les in self.lessons.live(stage, now) if les["state"] == KEPT] + self._passed(stage)
+        return (self._fixes(stage) + [les for les in self.lessons.live(stage, now) if les["state"] == KEPT]
+                + self._passed(stage))
 
     def pick(self, stage, text, limit=MAX_PICK, *, case=None, now=None, every_share=False):
         kept = [p for p in self.lessons.pick(stage, text, limit, now=now, every_share=True) if p["state"] == KEPT]
-        return (kept + self._passed(stage))[:min(limit, MAX_PICK)]
+        return (self._fixes(stage) + kept + self._passed(stage))[:min(limit, MAX_PICK)]
 
 
 def goes_ahead(les, trial, passed):
@@ -206,6 +274,12 @@ class Between:
         ids, self.pending = self.pending, []
         out = {"after_round": round_no, "cases": len(ids), "proposed": 0, "passed": 0, "refused": 0,
                "waits_for_yes": 0, "handed": 0, "fixed": 0, "broke": 0, "calls": 0, "lessons": [], "notes": []}
+        if self.pool.seen:  # corrections from the live page this run hands (Pool.refresh)
+            out["hotfixes"] = list(self.pool.seen)
+            out["notes"].append("corrections from the live page handed in this run: live lesson "
+                                + ", ".join(map(str, self.pool.seen)))
+        if self.pool.busy:
+            out["notes"].append(f"corrections from the live page: {self.pool.busy}")
         if not ids:
             out["notes"].append("no lost training match this round, so nothing to study")
             return out
@@ -223,6 +297,7 @@ class Between:
         out["notes"] += rep["notes"]
         for card in rep["cards"]:
             out["lessons"].append(self._gate(lessons, examiner, card["lesson_id"], until))
+        self._rewrite(study, lessons, examiner, out, until)
         for one in out["lessons"]:
             if one.get("live"):
                 out["notes"].append(f'lesson {one["lesson_id"]}: {one["live"]}')
@@ -240,6 +315,39 @@ class Between:
             out["stopped"] = "cap"
             out["notes"].append(CAP_NOTE)
         return out
+
+    def _rewrite(self, study, lessons, examiner, out, until):
+        """Each lesson the gate refused for what it broke goes back to the study with it and is
+        rewritten (Study.rewrite), and the new try takes the gate in this same round, at most
+        REWRITES times a lesson, while the run's call cap holds. A rewrite that passes is handed on
+        as any lesson that passes; one that still fails stays out, as does a lesson whose exam
+        could not run. Each try is named in out["rewrites"] as {of, try, lesson_id, idea, passed,
+        why}, and each rewritten lesson is in out["lessons"] with "rewrite_of"."""
+        since = until - (read_days(self.plug) + 2) * DAY
+        rewrites = []
+        for first in list(out["lessons"]):
+            if first["passed"] or not _broke_something(lessons.exam_of(first["lesson_id"])):
+                continue
+            chain = [first["lesson_id"]]
+            for n in range(1, REWRITES + 1):
+                if self.calls.reached:
+                    break
+                got = study.rewrite(chain, since, until, now=until)
+                out["notes"] += got["notes"]
+                one = {"of": first["lesson_id"], "try": n, "lesson_id": got["lesson_id"], "idea": got["idea"],
+                       "passed": False, "why": got["why"]}
+                rewrites.append(one)
+                if got["lesson_id"] is None:
+                    continue
+                gated = self._gate(lessons, examiner, got["lesson_id"], until)
+                gated["rewrite_of"] = first["lesson_id"]
+                out["lessons"].append(gated)
+                one["passed"], one["why"] = gated["passed"], gated["why"] or None
+                if gated["passed"] or not _broke_something(lessons.exam_of(got["lesson_id"])):
+                    break
+                chain.append(got["lesson_id"])
+        if rewrites:
+            out["rewrites"] = rewrites
 
     def _gate(self, lessons, examiner, lesson_id, now):
         """One new lesson through the gate, when the study's own write did not take it there, and
@@ -273,6 +381,12 @@ class Between:
         return out
 
 
+def _broke_something(row):
+    """A failed exam row with at least one fail that is not the exam itself failing to run, so a
+    rewrite has something to avoid."""
+    return any(f.get("check") != exam_mod.NOT_RUN for f in exam_mod.fails_of(row))
+
+
 class _Only:
     """The study's log, reading only the round's cases (Log.window and its agent's view)."""
 
@@ -295,7 +409,12 @@ def line(one):
             f"refused {one['refused']}, handed to round {one['after_round'] + 1} {one['handed']}")
     if one.get("waits_for_yes"):
         text += f", waiting for a yes {one['waits_for_yes']}"
-    text += f"; eval gate fixed {one['fixed']}, broke {one['broke']}; {one['calls']} model calls"
+    text += f"; eval gate fixed {one['fixed']}, broke {one['broke']}"
+    if one.get("rewrites"):  # the new tries of lessons the gate refused, in the same round
+        tries = one["rewrites"]
+        text += (f"; rewrites after a failed gate: {sum(1 for r in tries if r['lesson_id'] is not None)} written, "
+                 f"{sum(1 for r in tries if r['passed'])} passed")
+    text += f"; {one['calls']} model calls"
     if one.get("stopped") == "cap":
         text += "; stopped at the model call cap"
     return text

@@ -482,7 +482,9 @@ class BuildStartsAShortPractice(Base):
         got = []
         quick = self.real(lambda folder, **kw: got.append(kw["learn"]))
         self.m.db_path = str(self.root / "ascent.db")
-        with mock.patch.dict(sys.modules, {"arena.learn_built": fake}):
+        import arena
+        with mock.patch.dict(sys.modules, {"arena.learn_built": fake}), \
+                mock.patch.object(arena, "learn_built", fake, create=True):
             quick.start_practice(self.m, "ticket_desk")
             self.wait("ticket_desk")
         self.assertEqual(got, [("learner", "ticket_desk")])

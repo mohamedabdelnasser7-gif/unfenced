@@ -54,7 +54,9 @@ a lesson card through the agent's own lessons and risk check.
    it broke (the first fail as one line of at most FIRST_FAIL_MAX characters, the failed checks
    with why, the cases it broke and the fixed and broken counts, from its exam row), so they
    write a different try for that pattern. A new try is a new lesson; the failed one is never rewritten
-   and still waits for a person's yes.
+   and still waits for a person's yes. Inside an Arena run (arena/rounds.py) Study.rewrite asks the
+   idea part for one new try of one failed lesson right away, given only that line and its earlier
+   tries as failed, and writes it as an idea by the same rules.
 6. Learn across agents. With a fit check and an adapter given, the study reads the other
    agents of the same database, in any field; the ones sharing a field come first, which
    only decides who gets the night's trial places. For each other agent it finds patterns
@@ -351,6 +353,72 @@ class Study:
                 continue
             rec["lesson_id"] = card["lesson_id"]
             known[_norm(idea["lesson"])] = KNOWN
+
+    def rewrite(self, tries, since, until, *, now=None):
+        """One new try of a lesson that failed the eval gate, in the same Arena run (arena/rounds.py;
+        Mohamed 2026-11-02, "Yes now"). tries: the lesson's id, then the id of each earlier rewrite
+        of it, every one failed. The idea part is asked for one line, given the cases in [since,
+        until) as its sample and only these lines as failed, each with what it broke as in 5 (the
+        situation and check it failed, the fixed and broken counts). The first line it gives that is
+        new is written as an idea, as _ideas writes one: a line known or failed before is not
+        written, and one close to a failed or pulled line waits for a yes. Returns {"idea": the line
+        or None, "lesson_id": the new lesson or None, "card": its card or None, "why": what stopped
+        it or None, "notes": [...]}. A failing idea part writes nothing."""
+        since, until = float(since), float(until)
+        self._now = now
+        out = {"idea": None, "lesson_id": None, "card": None, "why": None, "notes": []}
+        if self.ideas is None:
+            out["why"] = "no idea part"
+            return out
+        plug = self.plug
+        texts = _Texts(self.lessons)
+        cases = _read(plug, self.log.window(since, until), until)
+        mine = self.lessons.mine()
+        every = self._failed_tries(mine)
+        chain = [int(t) for t in tries]
+        given = sorted((t for t in every if t["lesson_id"] in chain), key=lambda t: -chain.index(t["lesson_id"]))
+        if not given:
+            out["why"] = "no failed lesson to rewrite"
+            return out
+        known = _known(mine, {t["lesson_id"] for t in every})
+        pulled = _pulled(mine) + [(_norm(t["lesson"]), t["lesson"]) for t in every]
+        self._failed_lines = {t["lesson"] for t in every}
+        self._given_ids = {t["lesson_id"] for t in given}
+        self._given = [{k: v for k, v in t.items() if k != "lesson_id"} for t in given]
+        sample = self._pick([c for c in cases if c.status in (GOOD, BAD)])
+        try:
+            raw = self.ideas(plug, [_view(plug, c, texts, blind=False) for c in sample], 1,
+                             [les["text"] for les in mine if les["id"] not in self._given_ids], failed=self._given)
+        except Exception as e:  # a failing idea part makes no rewrite
+            out["why"] = f"the idea part failed ({_failed(e)})"
+            return out
+        if not isinstance(raw, list):
+            out["why"] = "the idea part gave no list"
+            return out
+        source = (f"night study of {plug.agent}, cases from {_day(since)} to {_day(until)}: a rewrite of lesson "
+                  f"{chain[0]}, which failed the eval gate ({given[0]['first_fail']}), with no past cases behind it")
+        why = "the idea part gave no line"
+        for item in raw:
+            try:
+                idea = _adapted(plug, item)
+            except ValueError as e:
+                why = str(e)
+                continue
+            out["idea"] = idea["lesson"]
+            if _norm(idea["lesson"]) in known:
+                why = known[_norm(idea["lesson"])]
+                continue
+            rep = {"cards": [], "notes": out["notes"]}
+            try:
+                card = self._write(idea, source, [c.text for c in sample], None, None, rep,
+                                   close=_close(idea["lesson"], pulled, self._failed_lines), kind=IDEA)
+            except ValueError as e:  # refused by the lessons, or another agent's matter
+                why = f"not written: {e}"
+                continue
+            out.update(lesson_id=card["lesson_id"], card=card, why=None)
+            return out
+        out["why"] = why
+        return out
 
     def _find(self, plug, cases, known, texts, notes, failed=None):
         """One agent's candidates with their numbers and verdicts, and the winners, strongest first.
@@ -885,6 +953,8 @@ def _case_name(fail):
         return "the gate could not run"
     if fail.get("check") == exam_mod.RERUN:
         return f'rerun of past win {fail.get("name") or fail["situation"]}'
+    if fail.get("check") == exam_mod.ROUND:
+        return f'practice round match {fail["situation"]}' + (f' ({fail["name"]})' if fail.get("name") else "")
     name = fail.get("name")
     return f'situation {fail["situation"]}' + (f" ({name})" if name else "")
 

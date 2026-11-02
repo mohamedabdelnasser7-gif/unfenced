@@ -78,6 +78,7 @@ MAX_FAILS = 10  # failed rows kept on one exam row
 NOT_RUN = "error"  # the check name saved when the exam itself could not run
 ANSWER = "answer"  # the check name of a situation whose answer raised (engine sit)
 RERUN = "arena_rerun"  # the check name of the eval gate's Arena rerun of past wins (arena/gate.py)
+ROUND = "practice_round"  # the check name of a correction's practice round (arena/gate.py CorrectionRound)
 LIKELY = 0.05  # a p-value under this reads "likely real"
 
 
@@ -130,6 +131,8 @@ def fail_line(row):
         return "failed the exam: it could not run"
     if row.check == RERUN:  # its number counts the past wins rerun, not the exam's situations
         return f"failed the Arena rerun of past wins, at rerun {row.situation}"
+    if row.check == ROUND:  # its number counts the practice round's matches
+        return f"failed the practice round, at match {row.situation}"
     return f"failed the exam: situation {row.situation}, check {row.check}"
 
 

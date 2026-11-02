@@ -707,7 +707,7 @@ class Morning:
         if examiner is None:
             return None
         try:
-            return examiner(text, lessons.plug.stage_tags([plug_mod.ALL]))
+            return getattr(examiner, "correction", examiner)(text, lessons.plug.stage_tags([plug_mod.ALL]))
         except Exception as e:
             return exam_mod.could_not_run(e)
 

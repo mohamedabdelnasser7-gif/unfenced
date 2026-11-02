@@ -315,7 +315,7 @@ class Practice(run.Arena):
             if m.get("ended") == VOID:  # a model did not answer: dropped, never a loss
                 self.halt, self.error = run.MODEL_ERROR, m.get("error") or ""
                 return None
-            judged = good.judge(m, self.who.card, self.judge_model, facts=self.facts)
+            judged = good.judge(m, self.who.card, self.judge_model, facts=self.facts, plug=self.who.plug)
         except run.CapReached:
             self.halt = run.CAP
             return None

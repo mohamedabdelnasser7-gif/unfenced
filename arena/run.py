@@ -89,7 +89,6 @@ pointing to the recorded replay (recorded/play.py) and exits 2 before reading an
 import argparse
 import datetime
 import fcntl
-import inspect
 import json
 import os
 import random
@@ -430,10 +429,8 @@ class Arena:
         return m, judged
 
     def _fast(self):
-        """The quick notes for match_mod.play, once play takes them (fast=, which it hands to loop.turn)."""
-        if self.notes is None or "fast" not in inspect.signature(match_mod.play).parameters:
-            return {}
-        return {"fast": self.notes}
+        """The quick notes for match_mod.play (fast=, which it hands to loop.turn)."""
+        return {} if self.notes is None else {"fast": self.notes}
 
     def run(self):
         rounds, best, flat, stopped = [], None, 0, ROUNDS

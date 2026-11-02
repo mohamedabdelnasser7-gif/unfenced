@@ -198,11 +198,12 @@ def _tool_results(chats, chat_id, start):
 
 
 def play(card, *, agent_model, customer_model, prompt=GENERIC_PROMPT, lessons=None, seed=0, max_turns=MAX_TURNS,
-         opening=None, checker=None, stop=None):
+         opening=None, checker=None, stop=None, fast=None):
     """Play one match. lessons: what loop.turn hands (reflection/exam.py _Lessons shape); None hands
     none. opening: a customer first line to use as it is (the replay and the rerun), else the
     persona writes it. checker(reply, customer_text, tool_results, orders) -> [failed checks].
-    stop(turns) -> True ends the match there (ended "sign": the sale closed). Returns the match dict."""
+    stop(turns) -> True ends the match there (ended "sign": the sale closed). fast: the run's quick
+    note after a loss (arena/notes.py), handed to loop.turn. Returns the match dict."""
     from reflection.exam import _Lessons  # the exam's lesson hand: the new line first, then the kept ones
     hand = lessons if lessons is not None else _Lessons(None, None)
     customer = Customer(card, customer_model, prompt, seed)
@@ -228,7 +229,7 @@ def play(card, *, agent_model, customer_model, prompt=GENERIC_PROMPT, lessons=No
                 seen = _last_row(results, chat_id)
                 out = loop.turn(Message(channel="whatsapp", customer_id=CUSTOMER, text=line), chats=chats,
                                 model=agent_model, lessons=hand, results=results,
-                                send=lambda to, text: sent.append(text))
+                                send=lambda to, text: sent.append(text), fast=fast)
                 ran = _tool_results(chats, chat_id, start)
                 orders = loop.order_names(chats, chat_id)
                 made = loop.order_made(chats, chat_id)

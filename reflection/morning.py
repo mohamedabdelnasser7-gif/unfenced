@@ -564,13 +564,16 @@ class Morning:
     answer is one transaction: an answer that fails part way leaves nothing changed."""
 
     def __init__(self, db, plugs, *, reports=None, by=BY, judge=risk_mod.no_judge, db_file=None, exams=None,
-                 modes_state=None, built=()):
+                 modes_state=None, built=(), db_path=None):
         """exams: {agent: examiner(text, stages) -> engine.exam.Result}, the exam a person's idea takes
         (idea_exam); kept off the page's Lessons, so no exam ever runs inside an answer's transaction.
         modes_state: the assistant's folder a mode card's answer goes to (assistant/newmode.py).
         built: the names of the plugs that are agents Quick start built (kit/turn.py built), whose
-        turns read the pause switch."""
+        turns read the pause switch. db_path: the database's path on the live page (live_morning), where
+        add_built finds an agent built while the page runs; None on the sample days."""
         self.db = db
+        self.db_path = None if db_path is None else str(db_path)
+        self.judge = judge
         self.built = frozenset(built or ())
         self.modes_state = None if modes_state is None else Path(modes_state)
         self.exams = dict(exams or {})
@@ -587,6 +590,29 @@ class Morning:
         # made here, not in an answer: making Lessons, Log or the marks table runs a script, which commits
         self.trials = {a: trial_mod.Trials(self.page, p, lessons=self.lessons[a]) for a, p in self.plugs.items()}
         self.facts = facts_mod.Facts(self.page)  # the fact cards' answers table, made here for the same reason
+
+    def add_built(self):
+        """Wire each agent Quick start built since the page started into the running page, as
+        live_morning and main do at start: its plug (with_built), its Lessons and Trials, its name for
+        the pause switch and its exam (page_exams), so a correction, Pull and the exam work with no
+        restart. A built agent named like an agent on the page or a repo agent is left out. Run outside
+        any answer's transaction (making Lessons commits). Returns the names added; none with no db_path."""
+        if self.db_path is None:
+            return []
+        have = list(self.plugs.values()) + [p for p in repo_plugs() if p.agent not in self.plugs]
+        got, _ = with_built(have, self.db_path)
+        new = got[len(have):]
+        if not new:
+            return []
+        lessons = {p.agent: Lessons(self.page, p, judge=self.judge) for p in new}
+        trials = {p.agent: trial_mod.Trials(self.page, p, lessons=lessons[p.agent]) for p in new}
+        # new dicts, not changed in place: a view reading the old ones never sees one half wired
+        self.plugs = {**self.plugs, **{p.agent: p for p in new}}
+        self.lessons = {**self.lessons, **lessons}
+        self.trials = {**self.trials, **trials}
+        self.built = self.built | {p.agent for p in new}
+        self.exams = {**self.exams, **page_exams(new, self, self.db_path)}
+        return [p.agent for p in new]
 
     # ---- answers -------------------------------------------------------------------------
 
@@ -2673,7 +2699,7 @@ def live_morning(db, db_path, plugs, modes_state):
     from reflection.judge import Judge  # the live agent's judge (channels/whatsapp.py main); it reads no key until asked
     plugs, built = with_built(plugs, db_path)
     return Morning(db, plugs, reports=Path(db_path).resolve().parent, db_file=db_path if other else None,
-                   modes_state=modes_state, judge=Judge(), built=built)
+                   modes_state=modes_state, judge=Judge(), built=built, db_path=db_path)
 
 
 def with_built(plugs, db_path):

@@ -627,6 +627,55 @@ class QuickStartPage(unittest.TestCase):
         self.assertIn("&lt;b onclick=x()&gt;Which store&lt;/b&gt;?", page)
 
 
+class BuildOnARunningPage(unittest.TestCase):
+    """Review wireall r1 item 3: an agent built on the live page joins it at once (Morning.add_built),
+    its plug, Pull and exam with no restart."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.folder = Path(tmp.name).resolve()
+        self.db_path = str(self.folder / "ascent.db")
+        self.db = Db(self.db_path)
+        self.addCleanup(self.db.close)
+        with mock.patch("reflection.judge.Judge", return_value=lambda text, high, low: "low"):
+            self.m = mo.live_morning(self.db, self.db_path, [plug_mod.load(ROOT / "sales" / "plug.json")],
+                                     self.folder / "assistant")
+        self.p = pages.Pages(self.m, model=FakeModel(card_reply(), plug_reply(), exam_reply()))
+
+    def test_a_built_agent_takes_corrections_and_pull_with_no_restart(self):
+        self.p.actions["/quickstart"](self.m, {"text": ["an agent for my stock"]})
+        with mock.patch("kit.model.Model", return_value=FakeModel()):  # the exam's model; it answers nothing here
+            said = self.p.actions["/quickstart/build"](self.m, {})
+        self.assertEqual(said, "Built Stock watcher, in agents/stock_watcher.")
+        self.assertIn("stock_watcher", self.m.plugs)
+        self.assertIn("stock_watcher", self.m.trials)
+        self.assertIn("stock_watcher", self.m.exams)
+        self.assertTrue(self.m.pausable("stock_watcher"))
+        self.assertIn("Paused.", self.m.pause("stock_watcher"))
+        # the exam runs and its model gives nothing, so the correction is held for a yes (fail closed)
+        got = self.m.correct("stock_watcher", "Say which item runs low first.")
+        self.assertIn("waits for your yes on Today", got)
+        self.assertEqual(len(self.m.lessons["stock_watcher"].mine()), 1)
+
+    def test_a_built_folder_named_like_a_repo_agent_is_left_out(self):
+        where = self.folder / "agents" / "marketing"
+        where.parent.mkdir()
+        fixture = ROOT / "tests" / "agents" / "stock_watch"
+        where.mkdir()
+        for f in fixture.iterdir():
+            (where / f.name).write_bytes(f.read_bytes())
+        raw = json.loads((where / "plug.json").read_text(encoding="utf-8"))
+        (where / "plug.json").write_text(json.dumps(dict(raw, agent="marketing")), encoding="utf-8")
+        self.assertEqual(self.m.add_built(), [])
+        self.assertNotIn("marketing", self.m.plugs)
+        self.assertFalse(self.m.pausable("marketing"))
+
+    def test_the_sample_days_add_nothing(self):
+        m = mo.Morning(self.db, [plug_mod.load(ROOT / "sales" / "plug.json")], reports=self.folder)
+        self.assertEqual(m.add_built(), [])
+
+
 class QuickStartServer(unittest.TestCase):
     """The server's token, Origin and Host checks on every Quick start POST."""
 

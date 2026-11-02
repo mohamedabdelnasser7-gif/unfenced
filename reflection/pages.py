@@ -110,7 +110,7 @@ class Pages:
         self.quick = qs_mod.QuickStart(model)
         # the page's own answers, taken by the server next to morning.TWO_TAB_ACTIONS
         self.actions = {"/quickstart": lambda m, f, now=None: self._quick(self.quick.say, m, now, mo._field(f, "text")),
-                        "/quickstart/build": lambda m, f, now=None: self._quick(self.quick.build, m, now),
+                        "/quickstart/build": lambda m, f, now=None: self._build(m, now),
                         "/quickstart/clear": lambda m, f, now=None: self._quick(self.quick.clear, m, now)}
 
     def back(self, value):
@@ -138,6 +138,17 @@ class Pages:
             return step(m, *args, now=now)
         except qs_mod.Refused as e:
             raise mo.Refused(str(e)) from None
+
+    def _build(self, m, now):
+        """Build, then the new agent joins the running page (Morning.add_built): its plug, Pull and exam
+        with no restart. The agent is built already when that fails, so the flash says so and asks for a
+        restart; an agent with no exam on the page takes no correction (Morning.correct)."""
+        said = self._quick(self.quick.build, m, now)
+        try:
+            m.add_built()
+        except Exception as e:
+            return f"{said} It could not join this page ({e}). Restart the page to see it."
+        return said
 
     def _m(self, day):
         return self.live if day == self.LIVE else self.days[day]

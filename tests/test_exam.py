@@ -255,6 +255,21 @@ class Checks(unittest.TestCase):
         exam.run(PLUG, FakeModel(look), sits=[BY_NAME["ar-care"]])
         self.assertEqual(seen, {k: None for k in KEYS})
 
+    def test_answer_alone_has_no_store_keys(self):
+        """Review wireall r3 T18: answer() called on its own, outside run(), still runs on the demo store."""
+        clean_env(self, SHOPIFY_STORE="x.myshopify.com", SHOPIFY_TOKEN="t", OPERATOR_WHATSAPP="201000000999")
+        seen = {}
+        KEYS = ("SHOPIFY_STORE", "SHOPIFY_TOKEN", "OPERATOR_WHATSAPP")
+
+        def look(messages, tools):
+            import os
+            seen.update({k: os.environ.get(k) for k in KEYS})
+            return say("هسأل الفريق وأرد عليك.")
+        exam.answer(BY_NAME["ar-care"], None, model=FakeModel(look))
+        self.assertEqual(seen, {k: None for k in KEYS})
+        import os
+        self.assertEqual(os.environ.get("SHOPIFY_TOKEN"), "t")  # put back after
+
     def test_effort_and_tokens(self):
         m = FakeModel(say("هسأل الفريق."))
         exam.answer(BY_NAME["ar-care"], None, model=m)

@@ -110,7 +110,7 @@ DEFAULT_ROUNDS = 5
 NO_GAIN_ROUNDS = 2
 HELD_OUT_SHARE = 0.3
 GROWN = "grown-"  # the id of a card grown from real chats (arena/grow.py): it trains, never takes the gate
-PUBLIC_TRUST = {"matches": 10, "wins": 10, "zero_failed_checks": True}
+PUBLIC_TRUST = {"matches": 10, "wins": 7, "zero_failed_checks": True}  # the Sales level, public (DECISIONS item 63)
 TZ = "Africa/Cairo"
 PASSED, CAP, STUCK, ROUNDS, MODEL_ERROR = "passed", "cap", "stuck", "rounds", "model_error"
 # --quick, the short run for judges (docs/judges.md): one round of one training match and a gate of

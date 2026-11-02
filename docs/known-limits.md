@@ -69,6 +69,7 @@ A result that shows days later, such as a delivery, settles a case only when it 
 - The scheduled night runs only while the WhatsApp server runs. A server that was down at NIGHT_HOUR runs that night once when it is back; older missed nights are not made up.
 - A night that is refused (a missing key, no database) or fails is recorded for that agent and night, and is not tried again until the next night.
 - Each scheduled night runs in its own process with 5 hours to finish; one still running then is killed and recorded failed (timeout), and that agent's night is not tried again until the next night. The night also ends itself at 5 hours, and at once when the server stops mid night.
+- Quick start refuses a card or plug that hands a case to a person by matching words, so some phrasings get past it (for example "loop in a human"). No hand over tool exists for a built agent, so such a line is a promise in its prompt, not a transfer.
 - A server that stops mid night leaves that night's record running and its lock behind. After 6 hours (STALE) the record reads stopped and the lock is free; until then no night runs on that database, and the stopped agent's night is not tried again until the next night.
 
 Next: the tracking number saved on the Sales order row when the store ships it, so the API check reaches every order.

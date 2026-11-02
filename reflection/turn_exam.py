@@ -254,6 +254,7 @@ def _match(did):
                        "acted": list(did.get("acted") or [])}], "ended": "turns"}
 
 
+# Merge note: when arena/good.py judge takes plug (branch cases-learn), pass plug=agent.plug in reached and never_model_judged.
 def reached(agent, did, judge_model):
     """Did the agent reach the card's good result in this turn, by the model judge of arena/good.py?
     A turn with no reply never did. A judge fault raises."""

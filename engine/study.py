@@ -431,9 +431,6 @@ class Study:
                "with": {"cases": n1, "good": g1, "sources": s1}, "without": {"cases": n0, "good": g0, "sources": s0},
                "tagged": len(tagged), "unknown": len(tagged) - n1 - n0, "chance": chance, "verdict": verdict,
                "lesson_id": None}
-        second = second_counts(plug, with_)
-        if second is not None:  # shown only: how the pattern's good cases did at the second signal
-            rec["second"] = second
         return rec, with_
 
     def _pick(self, settled):
@@ -484,7 +481,6 @@ class Study:
                     "with": rec["with"]["cases"], "without": rec["without"]["cases"],
                     "total": rec["with"]["cases"] + rec["without"]["cases"],
                     "good_with": rec["with"]["good"], "good_without": rec["without"]["good"]},
-                "second": None if rec is None else rec.get("second"),  # shown only (DECISIONS item 67)
                 "source": les["source"], "from": origin, "close_to_pulled": None if failed_close else close,
                 "close_to_failed": close if failed_close else None,
                 "waits_for": turn, "replace": against,
@@ -653,24 +649,6 @@ def _shows(plug, name):
     """A result's shows_in_days as a list, or None when the plug gives none."""
     days = plug.results[name].shows_in_days
     return None if days is None else list(days)
-
-
-def second_counts(plug, cases):
-    """How the good cases among these did at the plug's second signal, shown only, never deciding:
-    {result name: count, ..., "none": cases with no second signal result yet}; None when the plug
-    names no second signal. A case's last second signal result counts."""
-    sig = plug.second_signal
-    if sig is None:
-        return None
-    names = (sig.good, *sig.bad)
-    out = {name: 0 for name in names}
-    out["none"] = 0
-    for c in cases:
-        if c.status != GOOD:
-            continue
-        got = [r["result"] for r in c.rows if r["result"] in names]
-        out[got[-1] if got else "none"] += 1
-    return out
 
 
 def idea_card(lessons, les):

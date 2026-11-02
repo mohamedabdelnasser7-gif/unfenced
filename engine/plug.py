@@ -44,13 +44,13 @@ Keys (unknown keys are refused, so a typo never passes quietly):
            until one comes (study.settle, DECISIONS item 66): from a tool's webhook
            (channels/), from a tool's API on the night run (reflection/late.py), or
            from a person on the morning page or in an uploaded sheet. No timer closes a case.
-  second_signal  optional, {good, bad}: results that follow a good case and are shown beside
+  second_signal  optional, {good, bad}: results that follow a good case and are kept on
            it, never deciding it (DECISIONS item 66, Mohamed's call B): a fast result decides the
            case, and a slow one that comes days later shows how it held. good: one declared result; bad: a
            list, maybe empty; none of them named in decides, none named twice. A good case with
-           none of them yet is still settled good and counted; the morning page and the tool's
-           API can add one, once a case, and the night study shows how each pattern's good
-           cases did at it.
+           none of them yet is still settled good and counted; the tool's webhook, its API
+           and the morning page can add one, once a case, and it stays on that case. No
+           pattern is counted by it (DECISIONS item 73): a night reads 2 days and it lands later.
   risk     {high: {about, words, patterns, tools}, low: {about}}: what is high risk in
            this business. words and patterns are {group: [...]}, so a match names its
            group. The code check looks for the words, patterns and tool names first; the
@@ -190,7 +190,7 @@ class Plug:
     kind: str = ""  # the kind of agent; the agent's name when the plug names none
     owner: str = ""  # the owner's name (arena/grow.py owner_of); empty when the plug names none
     hands_over: tuple = ()  # HandOver, one per receiving agent (engine/handover.py); () for none
-    second_signal: Decides | None = None  # results shown beside a good case, never deciding it
+    second_signal: Decides | None = None  # results kept on a good case, never deciding it
 
     def late(self):
         """The results a webhook, a tool's API or a person may add to a case later, as

@@ -30,9 +30,9 @@
     "person_replied": {"speed": "fast", "shows_in_days": [0, 1],
                        "about": "A team member's reply in a chat imported from the store's past; its step is the example the reflection reads."},
     "delivered": {"speed": "slow", "shows_in_days": [2, 7],
-                  "about": "The courier delivered the order (Bosta, optional). The second signal of a good chat, shown beside it on the night report and the morning page; it never decides a case."},
+                  "about": "The courier delivered the order (Bosta, optional). The second signal of a good chat, recorded on that chat; it never decides a case."},
     "refused": {"speed": "slow", "shows_in_days": [2, 7],
-                "about": "The customer refused the order at delivery, or Bosta returned it to the store (Bosta, optional). The second signal of a good chat, shown beside it; it never decides a case."}
+                "about": "The customer refused the order at delivery, or Bosta returned it to the store (Bosta, optional). The second signal of a good chat, recorded on that chat; it never decides a case."}
   },
   "causes": {
     "out_of_stock": "The item ran out.",

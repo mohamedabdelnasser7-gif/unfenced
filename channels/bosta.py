@@ -10,7 +10,7 @@ through a public tunnel or a host, like the WhatsApp webhook.
 - Delivered (state 45) records "delivered" on the chat; a refusal (state 47 with exception
   code 8) records "refused", and so does a send returned to the business (state 46,
   Mohamed's call 14A, 29 Oct). For the Sales agent both are its second signal (sales/plug.json
-  second_signal, DECISIONS item 66): shown beside a good chat and read by the delivery cards
+  second_signal, DECISIONS item 66): recorded on a good chat and read by the delivery cards
   (reflection/facts.py), never deciding it; the order placed does, against a chat that closed
   after quiet with no order. For any other agent whose plug names delivered or refused among
   its late results (engine/plug.py Plug.late: decides with a slow result, or second_signal) the

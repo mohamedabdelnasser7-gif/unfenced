@@ -251,8 +251,6 @@ def lesson_card(item, ctx):
     for r in item["replaces"]:
         out.append(f'<p class="why" dir="auto">A yes takes the place of: {h(r["text"])}</p>')
     out.append(f'<p class="why">{h(why)}</p>')
-    if item.get("second"):  # shown only, deciding nothing (DECISIONS item 67)
-        out.append(f'<p class="why">{h(mo.second_words(item["second"]))}</p>')
     g = item.get("gate")
     if g:
         out.append('<div class="exam"><span class="lab">In the exam</span>'

@@ -1400,7 +1400,6 @@ class Morning:
         card = les["id"] in k.wanting and not queued
         report = k.cards.get(les["id"]) or {}
         item = dict(les, card=card, exam=held, queued=queued, ahead=ahead or [], numbers=_numbers(report),
-                    second=second(report),  # shown only (DECISIONS item 67)
                     gate=exam_mod.effect_of(k.exams.get(les["id"])),  # fixed and broke in the gate, or None
                     exam_result=_exam_result(k.exams.get(les["id"])),
                     accept_high=None if t is None else t["accept_by"],
@@ -1793,30 +1792,6 @@ def name_of(agent):
     return AGENT_NAMES.get(agent, agent.replace("_", " ").capitalize())
 
 
-def second(card):
-    """The second signal counts on a saved report card (engine/study.py second_counts), checked:
-    {result name: count} with "none" last, or None. Shown only, never deciding (DECISIONS item 67)."""
-    got = card.get("second") if isinstance(card, dict) else None
-    if not isinstance(got, dict) or not 0 < len(got) <= 12:
-        return None
-    out = {}
-    for k, v in got.items():
-        if not isinstance(k, str) or not 0 < len(k) <= 40 or isinstance(v, bool) or not isinstance(v, int) or v < 0:
-            return None
-        out[k] = v
-    if not any(out.values()):
-        return None
-    if "none" in out:
-        out["none"] = out.pop("none")
-    return out
-
-
-def second_words(counts):
-    """One plain line for the second signal counts of a pattern's good cases; it decides nothing."""
-    parts = [f"{n} with no result yet" if k == "none" else f"{n} {k.replace('_', ' ')}" for k, n in counts.items()]
-    return "How its good cases did later, shown only: " + ", ".join(parts) + "."
-
-
 def _numbers(card):
     """The study's numbers on a card, and what it could gain; None when the card has none."""
     sure, cases = card.get("sure"), card.get("cases")
@@ -2098,8 +2073,6 @@ def _card_html(n, item, token):
         out.append(f'<p class="gain">What it could gain: the two sides differ by about {h(round(n_["gap"] * 100))} '
                    f'in 100 cases ending {h(good)}; the chance it is better is {h(_pct(n_["chance"]))}. '
                    f'From {h(n_["total"])} cases.</p>')
-        if item.get("second"):
-            out.append(f'<p class="gain">{h(second_words(item["second"]))}</p>')
     elif item.get("idea"):
         out.append('<div class="ilines">' + _idea_lines(item["idea"]) + "</div>")
     else:

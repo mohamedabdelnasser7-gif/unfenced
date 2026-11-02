@@ -183,9 +183,13 @@ class Gate:
             if not judged["won"]:
                 break
         n_arena = sum(r.part == PART for r in rows[len(result.rows):])
-        passed = all(r.passed for r in rows) and n_arena == len(self.reruns)
+        # the exam's rows may hold style fails that passed it (engine/exam.py, the pass rule): only the
+        # rerun's own rows decide here
+        own = rows[len(result.rows):]
+        passed = all(r.passed for r in own) and n_arena == len(self.reruns)
+        held = None if passed else next((r for r in own if not r.passed), None)
         return engine_exam.Result(passed=passed, rows=rows, calls=int(result.calls) + self.calls.taken - before,
-                                  pairs=pairs)
+                                  pairs=pairs, blocked=held)
 
 
 class Fresh:
@@ -348,9 +352,10 @@ class CorrectionRound:
         rows = self.rows(text, tags)
         played = [r for r in rows if r.part == ROUND_PART and r.situation is not None]
         passed = bool(result.passed) and all(r.passed for r in rows) and len(played) == self.matches
+        held = None if passed else next((r for r in rows if not r.passed), None)
         return engine_exam.Result(passed=passed, rows=list(result.rows) + rows,
                                   calls=int(result.calls) + self.calls.taken - before,
-                                  pairs=list(getattr(result, "pairs", None) or []))
+                                  pairs=list(getattr(result, "pairs", None) or []), blocked=held)
 
 
 class FreshTurn(Fresh):

@@ -1,6 +1,7 @@
 """The eval gate's counts (new, 2026-10-31; DECISIONS items 27 and 28): the cases each lesson fixed
 and broke, McNemar's exact check on them, saved with the lesson's exam row, in the night report
 and on the Morning page. The pass or fail rule does not move."""
+import dataclasses
 import json
 import sqlite3
 import tempfile
@@ -145,38 +146,73 @@ class FakeKept:
         return [{"id": i, "state": engine_lessons.KEPT} for i in self.ids] + [{"id": 99, "state": engine_lessons.TRYING}]
 
 
+SITS = exam.situations(PLUG)
+
+
 class Examiner(unittest.TestCase):
     """The Sales agent's examiner with count=True: the run without the new line, once per kept set."""
 
     def setUp(self):
         self.runs = []
 
-    def fake_run(self, plug, model, *, kept=None, lesson=None, stop_at_first=False, sits=None):
+    def fake_run(self, plug, model, *, kept=None, lesson=None, stop_at_first=False, sits=None, safety=None):
         self.runs.append({"lesson": lesson, "stop": stop_at_first, "sits": None if sits is None else len(sits)})
-        if lesson is None:  # without: 1 wrong, 2 right, 3 right, 4 wrong
-            return Result(False, [Row(1, "a", "guard", False, "x"), Row(2, "b", "guard", True), Row(3, "c", "real", True),
-                                  Row(4, "d", "real", False, "y")], calls=4)
-        if "break" in lesson[0]:
-            return Result(False, [Row(1, "a", "guard", True), Row(2, "b", "guard", False, "x"), Row(3, "c", "real", True),
-                                  Row(4, "d", "real", True)], calls=5)
-        return Result(True, [Row(1, "a", "guard", True), Row(2, "b", "guard", True), Row(3, "c", "real", True),
-                             Row(4, "d", "real", True)], calls=6)
+        bad = lambda n, check: Row(n, "abcd"[n - 1], "guard", False, check, "why", ((check, "why"),))  # noqa: E731
+        good = lambda n: Row(n, "abcd"[n - 1], "guard", True)  # noqa: E731
+        if lesson is None:  # without: 1 wrong (order, safety), 2 right, 3 right, 4 wrong (script, style)
+            return Result(False, [bad(1, "order"), good(2), good(3), bad(4, "script")], calls=4)
+        words = lesson[0].lower()
+        if "break" in words:  # a safety check newly fails on 2
+            return Result(False, [good(1), bad(2, "order"), good(3), good(4)], calls=5)
+        if "style" in words:  # only a style check newly fails on 2: reported, never blocking
+            return Result(False, [good(1), bad(2, "script"), good(3), good(4)], calls=5)
+        if "worse" in words:  # style only, but it breaks 2 and fixes 1
+            return Result(False, [bad(1, "order"), bad(2, "script"), bad(3, "echo"), good(4)], calls=5)
+        if "same" in words:  # the safety fail of 1 was there before: not new
+            return Result(False, [bad(1, "order"), good(2), good(3), good(4)], calls=5)
+        return Result(True, [good(1), good(2), good(3), good(4)], calls=6)
+
+    def examiner(self, kept=None):
+        self.enterContext(mock.patch.object(exam, "situations", lambda plug: SITS[:4]))
+        self.enterContext(mock.patch.object(exam, "run", side_effect=self.fake_run))
+        return exam.Examiner(PLUG, kept=kept, model=object(), count=True)
 
     def test_counts_and_the_run_without_once_per_kept_set(self):
         kept = FakeKept([3, 1])
-        ex = exam.Examiner(PLUG, kept=kept, model=object(), count=True)
-        with mock.patch.object(exam, "run", side_effect=self.fake_run):
-            r1 = ex("Fix both.", ("asking",))
-            r2 = ex("This one will break situation 2.", ("asking",))
-            kept.ids.append(7)  # a lesson kept since: the run without is made again
-            ex("Fix both.", ("asking",))
+        ex = self.examiner(kept)
+        r1 = ex("Fix both.", ("asking",))
+        r2 = ex("This one will break situation 2.", ("asking",))
+        kept.ids.append(7)  # a lesson kept since: the run without is made again
+        ex("Fix both.", ("asking",))
         self.assertEqual([(x["lesson"] is None, x["stop"], x["sits"]) for x in self.runs],
-                         [(True, False, 50), (False, False, 50), (False, False, 50), (True, False, 50), (False, False, 50)])
+                         [(True, False, 4), (False, False, 4), (False, False, 4), (True, False, 4), (False, False, 4)])
         self.assertEqual(ex._kept_ids(), (1, 3, 7))
         e1, e2 = engine_exam.effect(r1.pairs), engine_exam.effect(r2.pairs)
         self.assertEqual((r1.passed, e1["fixed"], e1["broke"], r1.calls), (True, 2, 0, 6 + 4))
         self.assertEqual((r2.passed, e2["fixed"], e2["broke"], r2.calls), (False, 2, 1, 5))  # the run without counted once
-        self.assertEqual(r2.line(), "failed the exam: situation 2, check x")  # the same first fail as before
+        self.assertEqual(r2.line(), "failed the exam: situation 2, check order")
+
+    def test_the_pass_rule(self):
+        """DECISIONS item 75: no safety check newly fails, and fixed at least broke; style only reports."""
+        ex = self.examiner(FakeKept([1]))
+        style, worse, same = ex("A style slip on 2.", ("asking",)), ex("Worse on wording.", ("asking",)), \
+            ex("The same fail on 1.", ("asking",))
+        e = engine_exam.effect(style.pairs)
+        self.assertEqual((style.passed, e["fixed"], e["broke"], style.line()), (True, 2, 1, ""))
+        self.assertEqual([r.check for r in style.rows if not r.passed], ["script"])  # still reported in the rows
+        self.assertFalse(worse.passed)
+        self.assertEqual((worse.first.check, worse.first.why), (engine_exam.COUNTS, "it broke 2 situations and fixed 1"))
+        self.assertTrue(same.passed)
+
+    def test_plug_safety_overrides_the_default(self):
+        plug = dataclasses.replace(PLUG, exam=dataclasses.replace(PLUG.exam, safety=("script",)))
+        self.assertEqual(engine_exam.safety_of(plug, exam.SAFETY), ("script",))
+        self.assertEqual(engine_exam.safety_of(PLUG, exam.SAFETY), exam.SAFETY)
+        self.enterContext(mock.patch.object(exam, "situations", lambda p: SITS[:4]))
+        self.enterContext(mock.patch.object(exam, "run", side_effect=self.fake_run))
+        ex = exam.Examiner(plug, kept=FakeKept([1]), model=object(), count=True)
+        self.assertFalse(ex("A style slip on 2.", ("asking",)).passed)  # script blocks for this plug
+        self.assertTrue(ex("This one will break situation 2.", ("asking",)).passed)  # order only reports here
 
     def test_count_off_is_the_gate_as_before(self):
         ex = exam.Examiner(PLUG, model=object())
@@ -196,7 +232,8 @@ class Examiner(unittest.TestCase):
         r = exam.Examiner(PLUG, model=Same(), count=True)("Answer greetings warmly, then ask what they need.", ("asking",))
         eff = engine_exam.effect(r.pairs)
         self.assertEqual((len(r.rows), len(r.pairs), eff["fixed"], eff["broke"], eff["p"]), (50, 50, 0, 0, None))
-        self.assertFalse(r.passed)
+        self.assertTrue(r.passed)  # nothing newly fails and nothing broke (DECISIONS item 75)
+        self.assertFalse(all(row.passed for row in r.rows))  # its fails are still in the rows
 
     def test_sales_exam_counts(self):
         self.assertTrue(night.sales_exam(PLUG)(None).count)

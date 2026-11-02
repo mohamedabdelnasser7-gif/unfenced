@@ -56,6 +56,10 @@ KEEP_OUT = ("SHOPIFY_STORE", "SHOPIFY_TOKEN", "OPERATOR_WHATSAPP")
 MAX_ROUNDS = 4
 DEFAULT_OUT = Path(tempfile.gettempdir()) / "sales-exam"
 PARTS = ("guard", "real")
+# The checks that block a lesson (DECISIONS item 75) when the plug's exam key names none; the rest
+# (script, banned_words, style, echo, exchange_line, lookup_line, cod_unasked) only report.
+SAFETY = ("amounts", "amount_from_tool", "order", "days_from_tools", "stock_count", "rule_change", "no_shop",
+          "late_order", "tools", "bot_line")
 # The store's facts the checks read, kept here, never read from the prompt: a new prompt never breaks the import.
 LOOKUP_SAID = ("لقيت طلبك على الرقم ده", "I can see your order")  # lines that announce an order lookup
 LOOKUP_ALSO = ("لقيت طلبك", "لقيت الاوردر", "I found your order", "la2eet talabak", "la2eet el order")
@@ -335,9 +339,10 @@ def situations(plug):
     return engine_exam.load(plug.exam.situations, plug.stages)
 
 
-def run(plug, model, *, kept=None, lesson=None, stop_at_first=False, sits=None):
+def run(plug, model, *, kept=None, lesson=None, stop_at_first=False, sits=None, safety=None):
     """One exam run on the demo catalogue with no Shopify keys and no operator number. lesson: (text,
-    stage tags) of a new line, or None. kept: a Lessons whose kept lessons are handed."""
+    stage tags) of a new line, or None. kept: a Lessons whose kept lessons are handed. safety: the
+    checks that block (engine/exam.py sit); None: every check does."""
     sits = situations(plug) if sits is None else sits
     env = {k: v for k, v in os.environ.items() if k not in KEEP_OUT}
     store._cache.update(at=0.0, items=None)
@@ -346,7 +351,7 @@ def run(plug, model, *, kept=None, lesson=None, stop_at_first=False, sits=None):
     try:
         with mock.patch.dict(os.environ, env, clear=True):
             return engine_exam.sit(sits, lambda s, les: answer(s, les, model=model, kept=kept), CHECKS,
-                                   plug.exam.checks, lesson, stop_at_first=stop_at_first)
+                                   plug.exam.checks, lesson, stop_at_first=stop_at_first, safety=safety)
     finally:
         logging.disable(was)
         store._cache.update(at=0.0, items=None)
@@ -354,14 +359,15 @@ def run(plug, model, *, kept=None, lesson=None, stop_at_first=False, sits=None):
 
 class Examiner:
     """The gate before a trial (engine Lessons(exam=...)): runs the exam with the new line added and
-    stops at the first fail. The model is made at the first call when none is given.
+    stops at the first situation where a safety check fails (engine/exam.py, the pass rule; style
+    checks only report). The model is made at the first call when none is given.
 
-    count=True (the gate the night and the page use, night.sales_exam): it also gives the gate's
-    counts (engine/exam.py Pair, DECISIONS item 27). The exam then runs every situation with the
-    new line (no stop at the first fail, so the counts cover the whole exam; pass or fail is the
-    same, a pass still needs every situation right) and pairs each with a run of the same
-    situations with the kept lessons only. That run is made once for each set of kept lessons and
-    reused for the next lessons it examines; its model calls count on the exam that made it."""
+    count=True (the gate the night, the page and the Arena use): it also gives the gate's counts
+    (engine/exam.py Pair, DECISIONS item 27) and passes by the rule with a run before (DECISIONS item
+    75): the exam runs every situation with the new line and pairs each with a run of the same
+    situations with the kept lessons only; the lesson passes when no safety check newly fails and it
+    fixed at least as many situations as it broke. That run is made once for each set of kept
+    lessons and reused for the next lessons it examines; its model calls count on the exam that made it."""
 
     def __init__(self, plug, kept=None, model=None, *, count=False):
         self.plug, self.kept, self.model, self.count = plug, kept, model, count
@@ -372,8 +378,9 @@ class Examiner:
             from kit import model as model_mod
             self.model = model_mod.Model()
         lesson = (text, tuple(tags))
+        safety = engine_exam.safety_of(self.plug, SAFETY)
         if not self.count:
-            return run(self.plug, self.model, kept=self.kept, lesson=lesson, stop_at_first=True)
+            return run(self.plug, self.model, kept=self.kept, lesson=lesson, stop_at_first=True, safety=safety)
         sits = situations(self.plug)
         key = self._kept_ids()
         without, made = self._without.get(key), 0
@@ -381,8 +388,7 @@ class Examiner:
             without = self._without[key] = run(self.plug, self.model, kept=self.kept, lesson=None, sits=sits)
             made = int(without.calls)
         got = run(self.plug, self.model, kept=self.kept, lesson=lesson, sits=sits)
-        return engine_exam.Result(passed=got.passed, rows=got.rows, calls=int(got.calls) + made,
-                                  pairs=engine_exam.pair_rows(without.rows, got.rows))
+        return engine_exam.judge(got.rows, without.rows, len(sits), safety, calls=int(got.calls) + made)
 
     def _kept_ids(self):
         """The ids of the kept lessons the exam hands now: the key of the run without a new line."""

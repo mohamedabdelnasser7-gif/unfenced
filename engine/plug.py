@@ -157,6 +157,7 @@ class Exam:
     checks the agent's own code runs on what it did."""
     situations: Path
     checks: tuple
+    safety: tuple | None = None  # the checks that block a lesson (engine/exam.py); None: the engine's default list
 
 
 @dataclass(frozen=True)
@@ -306,9 +307,10 @@ def _hands_over(v, agent):
 
 
 def _exam(e, folder):
-    """The optional exam key: {"situations": a relative path inside the plug's folder, "checks": [names]}."""
+    """The optional exam key: {"situations": a relative path inside the plug's folder, "checks": [names],
+    "safety": optional [names], the checks among them that block a lesson; the rest only report}."""
     e = _dict(e, "exam", empty=False)
-    _keys(e, {"situations", "checks"}, {"situations", "checks"}, "exam")
+    _keys(e, {"situations", "checks", "safety"}, {"situations", "checks"}, "exam")
     where = e["situations"]
     if not isinstance(where, str) or not where.strip():
         raise ValueError("exam situations is a path to a JSON file")
@@ -320,7 +322,14 @@ def _exam(e, folder):
         raise ValueError("exam checks names at least one check")
     if len(set(checks)) != len(checks):
         raise ValueError("exam checks: a check named twice")
-    return Exam(situations=(Path(folder) / rel) if folder is not None else rel, checks=checks)
+    safety = None
+    if "safety" in e:
+        safety = tuple(_name(c, "exam safety check") for c in _list(e["safety"], "exam safety"))
+        if len(set(safety)) != len(safety):
+            raise ValueError("exam safety: a check named twice")
+        if set(safety) - set(checks):
+            raise ValueError(f"exam safety names a check the exam does not run: {sorted(set(safety) - set(checks))[0]}")
+    return Exam(situations=(Path(folder) / rel) if folder is not None else rel, checks=checks, safety=safety)
 
 
 def _level(v, name):

@@ -502,13 +502,26 @@ class CorrectionOnTheAgentPage(Base):
         self.assertGreater(world.calls["agent"], 0)
 
     def test_a_correction_the_exam_fails_waits_for_a_yes(self):
-        world = World(agent=lambda m, t: say(ANSWER))  # never calls the store: the needs situation fails
-        page = self.page(world)
-        said = page.correct("stock_watch", "Say the stock in one short line.")
+        line = "Say the stock in one short line."
+
+        def agent(m, t):  # calls the store, except with the new line: the needs situation newly fails
+            if any(line in str(x.get("content") or "") for x in m) or m[-1]["role"] == "tool":
+                return say(ANSWER)
+            return tool_call("store", {"query": "mercurial"})
+        page = self.page(World(agent=agent))
+        said = page.correct("stock_watch", line)
         self.assertIn("waits for your yes on Today", said)
         self.assertIn("situation 3, check tools_called", said)
         les = page.lessons["stock_watch"].mine()[-1]
         self.assertNotEqual(les["state"], engine_lessons.TRYING)
+
+    def test_a_safety_fail_already_there_without_the_line_does_not_hold_it(self):
+        """DECISIONS item 75: only a safety check that newly fails holds a lesson."""
+        world = World(agent=lambda m, t: say(ANSWER))  # never calls the store, with or without the line
+        page = self.page(world)
+        said = page.correct("stock_watch", "Say the stock in one short line.")
+        self.assertIn("passed the exam", said)
+        self.assertEqual(page.lessons["stock_watch"].mine()[-1]["state"], engine_lessons.TRYING)
 
     def test_a_correction_that_turns_every_customer_away_is_held(self):
         # review wireall r1 item 1: with no practice win nothing else stood between this line and a hotfix

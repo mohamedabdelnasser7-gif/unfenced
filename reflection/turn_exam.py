@@ -51,6 +51,9 @@ from kit.model import ModelError
 
 EXAM_FILE = "exam.json"
 CHECK_NAMES = ("no_safe_reply", "send_check", "declared_tools", "tools_called", "never_model_judged")
+# The checks that block a lesson (DECISIONS item 75); send_check (a draft that failed on the way, with a
+# clean reply after it) only reports, as the Sales agent's style checks do.
+SAFETY = ("no_safe_reply", "declared_tools", "tools_called", "never_model_judged")
 PARTS = ("good", "never", "needs")
 MAX_SITUATIONS = 12
 MIN_SITUATIONS = 3
@@ -177,8 +180,9 @@ def situations_from(content, card, tools, stage):
 
 
 def plug_exam():
-    """The plug's exam key Build writes: the situations file in the agent's folder and every check."""
-    return {"situations": EXAM_FILE, "checks": list(CHECK_NAMES)}
+    """The plug's exam key Build writes: the situations file in the agent's folder, every check, and the
+    ones that block a lesson."""
+    return {"situations": EXAM_FILE, "checks": list(CHECK_NAMES), "safety": list(SAFETY)}
 
 
 # ---- the lessons handed and one situation's answer
@@ -305,9 +309,11 @@ def situations(agent):
     return engine_exam.load(plug.exam.situations, plug.stages or (agent.stage.name,))
 
 
-def run(agent, model, judge_model, *, kept=None, lesson=None, stop_at_first=False, sits=None, seen=None):
+def run(agent, model, judge_model, *, kept=None, lesson=None, stop_at_first=False, sits=None, seen=None,
+        safety=None):
     """One exam run. lesson: (text, stage tags) of a new line, or None; kept: a Lessons whose kept
-    lessons are handed; seen: a dict that gets what the agent did, by situation id."""
+    lessons are handed; seen: a dict that gets what the agent did, by situation id; safety: the
+    checks that block (engine/exam.py sit), None: every check does."""
     sits = situations(agent) if sits is None else sits
 
     def one(s, les):
@@ -316,21 +322,24 @@ def run(agent, model, judge_model, *, kept=None, lesson=None, stop_at_first=Fals
             seen[s["id"]] = did
         return did
     return engine_exam.sit(sits, one, checks(agent, judge_model), agent.plug.exam.checks, lesson,
-                           stop_at_first=stop_at_first)
+                           stop_at_first=stop_at_first, safety=safety)
 
 
 class Examiner:
     """The gate before a trial for a built agent, in the Sales Examiner's shape (reflection/exam.py):
     callable(text, tags) -> engine.exam.Result. count=True runs every situation with the new line and
     pairs each with a run on the kept lessons only (made once for each set of kept lessons), so the
-    gate's counts cover the whole exam (DECISIONS item 27). Either way a good situation the agent
-    reached without the new line and not with it fails the lesson (good_model_judged)."""
+    gate's counts cover the whole exam (DECISIONS item 27), and passes by the engine's rule with a run
+    before (DECISIONS item 75): no safety check newly fails, fixed at least broke; send_check only
+    reports. Either way a good situation the agent reached without the new line and not with it fails
+    the lesson (good_model_judged, always blocking)."""
 
     GOOD = "good_model_judged"
 
     def __init__(self, agent, kept=None, model=None, judge_model=None, *, count=False):
         self.agent, self.kept, self.model, self.judge_model, self.count = agent, kept, model, judge_model, count
         self._without = {}  # kept ids -> (Result, {situation id: did}, {situation id: reached})
+        self.safety = None  # the checks that block, read from the plug at each exam
 
     def __call__(self, text, tags):
         if self.model is None or self.judge_model is None:
@@ -339,14 +348,16 @@ class Examiner:
             self.judge_model = self.judge_model or model_mod.Model()
         lesson = (text, tuple(tags))
         sits = situations(self.agent)
+        safety = self.safety = engine_exam.safety_of(self.agent.plug, SAFETY)
         if not self.count:
             seen = {}
             got = run(self.agent, self.model, self.judge_model, kept=self.kept, lesson=lesson, stop_at_first=True,
-                      sits=sits, seen=seen)
+                      sits=sits, seen=seen, safety=safety)
             if not got.passed:
                 return got
             rows, made = self._good(sits, got.rows, seen, None)
-            return engine_exam.Result(passed=all(r.passed for r in rows), rows=rows, calls=int(got.calls) + made)
+            held = next((r for r in rows if r.check == self.GOOD), None)
+            return engine_exam.Result(passed=held is None, rows=rows, calls=int(got.calls) + made, blocked=held)
         key = self._kept_ids()
         cached, made = self._without.get(key), 0
         if cached is None:
@@ -360,12 +371,12 @@ class Examiner:
         rows, again = self._good(sits, got.rows, seen, cached)
         if any(r.check in (engine_exam.ANSWER, engine_exam.NOT_RUN) for r in without.rows):
             self._without.pop(key, None)  # a model fault without the line is not kept: the next lesson runs it again
-        return engine_exam.Result(passed=got.passed and all(r.passed for r in rows), rows=rows,
-                                  calls=int(got.calls) + made + again, pairs=engine_exam.pair_rows(without.rows, rows))
+        return engine_exam.judge(rows, without.rows, len(sits), safety, calls=int(got.calls) + made + again)
 
     def _good(self, sits, rows, seen, cached):
-        """(rows, calls): rows with a failed good_model_judged row for each good situation that passed its
-        checks with the new line, is not reached with it and was reached without it. cached: (the
+        """(rows, calls): rows with a failed good_model_judged row for each good situation where no safety
+        check failed with the new line (style fails stay on the row), is not reached with it and was
+        reached without it. cached: (the
         run on the kept lessons only, its dids, its judged) when counted; None, or a cached run that
         did not reach it, answers that situation again on the kept lessons only, only where the new
         line did not reach (its calls returned). A judge or an answer that raises fails the situation
@@ -375,7 +386,8 @@ class Examiner:
         by_id, out, made = {s["id"]: s for s in sits}, [], 0
         for r in rows:
             s = by_id.get(r.situation)
-            if not r.passed or s is None or s["part"] != "good" or r.situation not in seen:
+            if engine_exam.blocks(r, self.safety) or s is None or s["part"] != "good" or \
+                    r.situation not in seen:
                 out.append(r)
                 continue
             why = ""
@@ -390,8 +402,9 @@ class Examiner:
                         why = "the good result was reached without the new line and not with it"
             except Exception as e:
                 why = f"the good result could not be judged: {e}"
-            out.append(engine_exam.Row(r.situation, r.name, r.part, False, self.GOOD, _line(why, MAX_LINE))
-                       if why else r)
+            why = _line(why, MAX_LINE)
+            out.append(engine_exam.Row(r.situation, r.name, r.part, False, self.GOOD, why,
+                                       ((self.GOOD, why),) + tuple(r.fails)) if why else r)
         return out, made
 
     def _before(self, sid, cached):
@@ -403,7 +416,8 @@ class Examiner:
         row = next((r for r in res.rows if r.situation == sid), None)
         if row is None or row.check in (engine_exam.ANSWER, engine_exam.NOT_RUN):
             raise ModelError("the run without the new line could not answer")
-        return bool(row.passed and sid in dids and reached(self.agent, dids[sid], self.judge_model))
+        return bool(not engine_exam.blocks(row, self.safety) and sid in dids and
+                    reached(self.agent, dids[sid], self.judge_model))
 
     def _kept_ids(self):
         if self.kept is None:

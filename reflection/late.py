@@ -101,6 +101,8 @@ def line(rep):
     """One plain line for the night report."""
     if rep is None:
         return "courier API check: not run, no BOSTA_API_KEY"
+    if rep.get("broke"):
+        return f'courier API check: stopped ({rep["broke"]}); the night went on'
     return (f'courier API check: {rep["asked"]} asked, {rep["recorded"]} results recorded, '
             f'{rep["already"]} already had one, {rep["failed"]} calls failed')
 

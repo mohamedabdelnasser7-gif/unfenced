@@ -117,5 +117,24 @@ class NightCheck(unittest.TestCase):
         self.assertIn("1 results recorded", late_mod.line(rep))
 
 
+class NightWiring(unittest.TestCase):
+    """reflection/night.py courier_check: this agent's own cases, through the patched network only."""
+    setUp, parcel = NightCheck.setUp, NightCheck.parcel
+
+    def test_the_night_asks_for_its_own_waiting_cases(self):
+        from unittest import mock
+        from reflection import night
+        self.parcel("p1", "111")
+        op = Opener(view(45))
+        with mock.patch.dict("os.environ", {bosta.API_KEY: KEY}), mock.patch("kit.env.load", return_value=[]), \
+                mock.patch("kit.net.open_once", op):
+            rep = night.courier_check(self.db, self.shipper, T0 + 86400)
+        self.assertEqual((rep["asked"], rep["recorded"]), (1, 1))
+        self.assertEqual(op.reqs[0].full_url, bosta.API_BASE + "111")
+        self.assertEqual(self.ship.case("p1")[-1]["result"], "delivered")
+        self.assertIn("1 results recorded", late_mod.line(rep))
+        self.assertNotIn(KEY, late_mod.line(rep))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -16,7 +16,7 @@ from kit import net
 
 BASETEN_URL = "https://inference.baseten.co/v1/chat/completions"
 META_URL = "https://api.meta.ai/v1/chat/completions"
-OUR_ENV = ("BASETEN_API_KEY", "BASETEN_MODEL", "META_API_KEY", "META_STUDY_MODEL", "META_STUDY_ROUTE")
+OUR_ENV = ("BASETEN_API_KEY", "BASETEN_MODEL", "META_API_KEY", "META_STUDY_MODEL", "META_STUDY_ROUTE", "BOSTA_API_KEY")
 HI = [{"role": "user", "content": "hi"}]
 
 

@@ -195,6 +195,35 @@ class OneNight(Setup):
         for value in self.stand_in.values():
             self.assertNotIn(value, out + err)
 
+    def test_the_courier_check_runs_before_the_study_and_has_its_line(self):
+        self.env()
+        order = []
+        real_check, real_night = night.courier_check, night.night
+
+        def check(db, plug, now):
+            order.append(("courier", plug.agent, now))
+            return real_check(db, plug, now)
+
+        def study(*a, **k):
+            order.append(("study",))
+            return real_night(*a, **k)
+
+        with mock.patch.object(night, "courier_check", check), mock.patch.object(night, "night", study):
+            code, out, err = self.run_main()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(order, [("courier", "waterer", fk.UNTIL), ("study",)])
+        self.assertIn("courier API check: not run, no BOSTA_API_KEY", out)
+        rep = json.loads(next(self.dir.glob("night-waterer-*.json")).read_text(encoding="utf-8"))
+        self.assertIsNone(rep["courier"])
+
+    def test_a_courier_check_that_breaks_never_stops_the_night(self):
+        self.env(BOSTA_API_KEY="made-up-key")
+        with mock.patch("reflection.late.run", side_effect=RuntimeError("x")):
+            code, out, err = self.run_main()
+        self.assertEqual(code, 0, err)
+        self.assertIn("courier API check: stopped (RuntimeError); the night went on", out)
+        self.assertNotIn("made-up-key", out + err)
+
     def test_the_other_plugs_in_the_repo_are_given(self):
         self.env()
         self.run_main()

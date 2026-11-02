@@ -15,7 +15,11 @@ ideas a night: lessons with no past cases behind them, each going the normal way
 N comes from the plug unless --days gives it: twice the longest time the plug's deciding
 results take to show, so a case acted on early in the window has had time to settle.
 
-Before the study it runs the night's trial check (engine/trial.py): each lesson on trial is
+Before the study it asks the courier's API for this agent's cases still waiting on a delivery
+result (reflection/late.py, DECISIONS item 66), when BOSTA_API_KEY is set; the report has one
+line on it (courier), and a check that fails never stops the night.
+
+Before the study it also runs the night's trial check (engine/trial.py): each lesson on trial is
 kept, pulled or paused on its own cases, serious results ping, and lessons waiting their turn
 start on the stages that came free. The study then writes the night's new lessons. For the
 Sales agent, whose plug names an exam (reflection/exam.py), and any agent Quick start built with an
@@ -364,6 +368,18 @@ def new_mode(db_path, state):
     return card, None
 
 
+def courier_check(db, plug, now):
+    """The night's API check for this agent's own cases (reflection/late.py), run before the study.
+    Only this agent's plug: each agent's night asks for its own cases, so a scheduled night of every
+    agent asks once per case. None when BOSTA_API_KEY is not set; a check that breaks as a whole is
+    named by its error's type and the night goes on."""
+    from reflection import late
+    try:
+        return late.run(db, [plug], now=now)
+    except Exception as e:
+        return {"broke": type(e).__name__}
+
+
 def save(rep, db_path):
     """The report as JSON next to the database. Returns the file's path."""
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(rep["window"]["until"]))
@@ -382,6 +398,9 @@ def text(rep, plug):
              f'  read {rep["read"]["cases"]} cases: settled {d["good"] + d["bad"]} ({d["good"]} {good}, {d["bad"]} not), '
              f'pending {rep["pending"]} (waiting for their result), '
              f'left out {rep["left_out"]["count"]}, not counted' + _causes(rep["left_out"])]
+    if "courier" in rep:
+        from reflection import late
+        lines.append("  " + late.line(rep["courier"]))
     lines.extend(_trial_lines(rep["trials"]))
     if rep.get("exam"):
         e = rep["exam"]
@@ -585,9 +604,12 @@ def main(argv=None, *, until=None):
         return 2
     db = Db(args.db)
     try:
+        now = time.time() if until is None else float(until)
+        courier = courier_check(db, plug, now)  # before the study, so the results it brings count tonight
         exam = agent_exam(plug, args.db, folder=Path(args.plug).resolve().parent)
-        rep = night(db, plug, days=args.days, until=until, ideas=parts.Ideas(), exam=exam,
+        rep = night(db, plug, days=args.days, until=now, ideas=parts.Ideas(), exam=exam,
                     spotter=parts.Spotter(), note_writer=parts.NoteWriter(), others=other_plugs(plug, db=args.db))
+        rep["courier"] = courier
     except Refused as e:
         print(f"Not run: {e}.", file=sys.stderr)
         return 2

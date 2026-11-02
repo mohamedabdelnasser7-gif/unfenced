@@ -38,6 +38,9 @@ It listens on 127.0.0.1:PORT (default 8080). Meta must reach it through a public
 - Fast reflection (reflection/fast.py): the same thread then sweeps for chats that ended without
   an order and writes each one note for that customer's next chat only; the turn reads it into
   the prompt. A tick or sweep that fails is logged and the next one tries again.
+- Night studies (reflection/scheduler.py): one more thread runs each agent's night once a night,
+  at NIGHT_HOUR (default 3) in NIGHT_TZ (default Africa/Cairo). NIGHT_HOUR=off turns it off. It
+  is never needed to answer: when it cannot start, the server runs as before.
 
 Graph API version: GRAPH_API_VERSION, default v26.0, the latest in Meta's changelog
 (https://developers.facebook.com/docs/graph-api/changelog, checked 28 Oct 2026; v26.0
@@ -585,10 +588,22 @@ def missing_env():
     return missing if model.has_key() else missing + [MODEL_KEYS]
 
 
+def start_nights(db, db_path):
+    """Each agent's night study once a night (reflection/scheduler.py), as one more thread. It is
+    never needed to answer: NIGHT_HOUR=off, or a scheduler that cannot start, leaves the service
+    running as before, and the log says why. The thread, or None."""
+    try:
+        from reflection import scheduler
+        return scheduler.start(db, db_path)
+    except Exception:
+        log.exception("the night scheduler is off: it could not start")
+        return None
+
+
 def main():
     from kit import env
     from kit.chats import Chats
-    from kit.db import Db
+    from kit.db import DEFAULT_PATH, Db
     from kit.limits import Limits
     from kit.model import Model
     from reflection.fast import FastNotes
@@ -624,6 +639,7 @@ def main():
         log.info("re-queued %d messages saved before the last stop", requeued)
     threading.Thread(target=app.work, daemon=True).start()
     threading.Thread(target=app.sweep_fast, daemon=True).start()
+    start_nights(db, DEFAULT_PATH)
     log.info("listening on 127.0.0.1:%d", port)
     try:
         server.serve_forever()

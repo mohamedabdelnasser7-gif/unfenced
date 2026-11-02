@@ -867,6 +867,8 @@ def _case_name(fail):
         return "the gate could not run"
     if fail.get("check") == exam_mod.RERUN:
         return f'rerun of past win {fail.get("name") or fail["situation"]}'
+    if fail.get("check") == exam_mod.ROUND:
+        return f'practice round match {fail["situation"]}' + (f' ({fail["name"]})' if fail.get("name") else "")
     name = fail.get("name")
     return f'situation {fail["situation"]}' + (f" ({name})" if name else "")
 

@@ -18,6 +18,20 @@ match, the verdict and the turn it quotes. The rerun stops at its first loss. A 
 call cap stops, or a model that does not answer (arena/match.py VOID), holds the lesson too (fail
 closed, as an exam that could not run), with a row that says which.
 
+A correction's practice round (DECISIONS item 70). A correction a user sends on a built agent's page
+takes the exam and the rerun above (FreshTurn.correction). For an agent whose good result can take
+more than one message, the exam's good check reads "not reached" on both sides and cannot see a
+correction help, so the correction then plays one practice round before it may go live as a
+hotfix (CorrectionRound): ROUND_MATCHES fresh practice matches (arena/practice.py play, the
+customer model writing every line, the correction handed first), each judged by arena/good.py
+against the agent's card. It passes only when every match is won. A loss holds the correction
+with a "practice round" row naming the match; the cap, a model that does not answer or practice
+customers that cannot be had hold it too (fail closed). The round needs_round when the agent's
+case starts with the agent, when it has no practice win yet (nothing shows its good result fits
+one message), or when any of its wins was reached after the first turn. An agent whose every win
+was reached at the first turn keeps the exam only hotfix. The round writes no match to
+arena-matches.jsonl, no Morning item and no case, and makes no pair.
+
 A past win is skipped, never rerun, when it failed a fact check when it was played (won with the
 fact checks off), when it has no prompt fingerprint, or when the prompt it was played with cannot
 be had again (the generic prompt by its fingerprint, else the file saved with the match, read
@@ -39,6 +53,9 @@ PART = "arena"
 SKIPPED = "arena skipped"
 CHECK = engine_exam.RERUN  # "arena_rerun": a held lesson's line reads "failed the Arena rerun of past wins"
 MAX_RERUNS = 5
+ROUND_PART = "practice round"
+ROUND_CHECK = engine_exam.ROUND  # "practice_round": a held correction's line reads "failed the practice round"
+ROUND_MATCHES = 2
 FAILED_CHECKS = "it failed a fact check when it was played"
 NO_PROMPT = "it was saved with no customer prompt fingerprint"
 PROMPT_GONE = "the customer prompt it was played with is not available (moved, changed or refused)"
@@ -226,26 +243,157 @@ class TurnGate(Gate):
         return good.judge(m, self.agent.card, self.judge_model, facts=self.facts, plug=self.agent.plug)
 
 
+def _won_at(win):
+    """The turn a past win reached the good result at (its quote), or None when that cannot be read."""
+    q = win.get("quote")
+    n = q.get("turn") if isinstance(q, dict) else None
+    return n if isinstance(n, int) and not isinstance(n, bool) else None
+
+
+def needs_round(agent, wins):
+    """Does a correction for this built agent play a practice round before it may go live? Yes when its
+    case starts with the agent, when it has no practice win yet, or when any win was reached after the
+    first turn (or at a turn that cannot be read). No only when every win was reached at the first turn."""
+    from arena import good
+    if good.case_of(agent.card)["starts"] == "agent":
+        return True
+    if not wins:
+        return True
+    return any(_won_at(w) != 1 for w in wins)
+
+
+class CorrectionRound:
+    """One practice round for a correction (DECISIONS item 70): ROUND_MATCHES fresh practice matches
+    with the correction handed first, on the agent's practice customers (arena/madeup.py for_agent:
+    the saved ones, else new ones), the held out ones that can reach the good result first. Every
+    model is taken from calls. Writes no match, no item and no case."""
+
+    def __init__(self, *, agent, folder, kept, agent_model, customer_model, judge_model, calls,
+                 matches=ROUND_MATCHES, fact_checks=True):
+        self.agent, self.folder, self.kept, self.calls = agent, Path(folder), kept, calls
+        self.agent_model, self.customer_model = calls.model(agent_model), calls.model(customer_model)
+        self.judge_model = calls.model(judge_model)
+        self.matches, self.facts = int(matches), fact_checks
+
+    def cards(self):
+        """The practice customers the round plays, in order: the held out ones that can reach the good
+        result, then the rest that can, each once, repeated when there are fewer than the matches."""
+        from arena import madeup
+        cards, _ = madeup.for_agent(self.folder, self.agent.name, self.agent.card, self.customer_model,
+                                    madeup.owner_cards(self.folder))
+        winnable = [c for c in cards if run_mod.can_buy(c)]
+        try:
+            held = [c["id"] for c in run_mod.split(cards)[1] if run_mod.can_buy(c)]
+        except run_mod.Refused:
+            held = []
+        order = [c for c in winnable if c["id"] in held] + [c for c in winnable if c["id"] not in held]
+        return [order[i % len(order)] for i in range(self.matches)] if order else []
+
+    def _not_run(self, why):
+        return engine_exam.Row(None, "", ROUND_PART, False, engine_exam.NOT_RUN, why)
+
+    def _cap(self):
+        return self._not_run(f"{self.calls.problem}; it counts as the cap reached" if self.calls.problem
+                             else "the Arena call cap is reached")
+
+    def rows(self, text, tags):
+        """The round's rows: one a match played, stopping at the first loss, or one NOT_RUN row."""
+        from arena import good, practice
+        from reflection import turn_exam
+        try:
+            cards = self.cards()
+        except run_mod.CapReached:
+            return [self._cap()]
+        except ModelError as e:
+            return [self._not_run(f"a model error stopped the practice round: {match_mod.plain(str(e))}")]
+        except (run_mod.Refused, OSError, ValueError, RecursionError) as e:
+            return [self._not_run(f"the practice customers could not be had: {match_mod.plain(str(e))}")]
+        if not cards:
+            return [self._not_run("no practice customer can reach the good result")]
+        rows = []
+        for i, card in enumerate(cards, 1):
+            about = " ".join(str(x) for x in card.get("want") or [] if isinstance(x, str))
+            lessons = turn_exam.hand(self.kept, (text, tuple(tags)), self.agent.stage.name, about)
+            try:
+                m = practice.play(self.agent, card, agent_model=self.agent_model, customer_model=self.customer_model,
+                                  seed=f"correction-{i}", lessons=lessons)
+            except run_mod.CapReached:
+                m = None
+            if m is None or self.calls.reached:
+                rows.append(self._cap())
+                break
+            if m.get("ended") == match_mod.VOID:
+                rows.append(self._not_run(f"a model error stopped the practice round: {m.get('error') or ''}"))
+                break
+            try:
+                judged = good.judge(m, self.agent.card, self.judge_model, facts=self.facts, plug=self.agent.plug)
+            except run_mod.CapReached:
+                rows.append(self._cap())
+                break
+            except ModelError as e:  # a judge that did not answer: no verdict, so the correction is held
+                rows.append(self._not_run(f"a model error stopped the practice round: {match_mod.plain(str(e))}"))
+                break
+            q = judged["quote"]
+            why = "" if judged["won"] else f"lost: {judged['why']} (turn {q['turn']}, {q['who']}: {q['text']})"
+            rows.append(engine_exam.Row(i, str(card.get("id")), ROUND_PART, bool(judged["won"]),
+                                        "" if judged["won"] else ROUND_CHECK, why))
+            if not judged["won"]:
+                break
+        return rows
+
+    def __call__(self, result, text, tags):
+        """result (the exam and rerun, passed) with the round's rows added; passed only when every match
+        was played and won."""
+        before = self.calls.taken
+        rows = self.rows(text, tags)
+        played = [r for r in rows if r.part == ROUND_PART and r.situation is not None]
+        passed = bool(result.passed) and all(r.passed for r in rows) and len(played) == self.matches
+        return engine_exam.Result(passed=passed, rows=list(result.rows) + rows,
+                                  calls=int(result.calls) + self.calls.taken - before,
+                                  pairs=list(getattr(result, "pairs", None) or []))
+
+
 class FreshTurn(Fresh):
     """Fresh for a built agent: the past wins are its own practice wins in its folder (state), the call
-    count the one beside the database (reports) that its practice runs share."""
+    count the one beside the database (reports) that its practice runs share. correction() is what a
+    correction on the agent's page takes: the same, then the practice round when needs_round."""
 
     def __init__(self, examiner, kept, *, agent, state, reports, judge_model=None, **kw):
         super().__init__(examiner, kept, state=Path(state), **kw)
         self.agent, self.reports, self.judge_model = agent, Path(reports), judge_model
 
-    def gate(self):
-        wins = [w for w in run_mod.past_wins(self.state) if w.get("agent") == self.agent.name]
-        if not wins:
-            return None
+    def _wins(self):
+        return [w for w in run_mod.past_wins(self.state) if w.get("agent") == self.agent.name]
+
+    def _models(self):
         if self.agent_model is None or self.customer_model is None or self.judge_model is None:
             from kit import model as model_mod
             self.agent_model = self.agent_model or model_mod.Model()
             self.customer_model = self.customer_model or model_mod.Model()
             self.judge_model = self.judge_model or model_mod.Model()
-        calls = self.calls if self.calls is not None else run_mod.Calls(self.reports / run_mod.CALLS_FILE, self.cap)
+
+    def _calls(self):
+        return self.calls if self.calls is not None else run_mod.Calls(self.reports / run_mod.CALLS_FILE, self.cap)
+
+    def gate(self):
+        wins = self._wins()
+        if not wins:
+            return None
+        self._models()
         return TurnGate(self.examiner, agent=self.agent, judge_model=self.judge_model, wins=wins,
-                        agent_model=self.agent_model, customer_model=self.customer_model, calls=calls, kept=self.kept)
+                        agent_model=self.agent_model, customer_model=self.customer_model, calls=self._calls(),
+                        kept=self.kept)
+
+    def correction(self, text, tags):
+        """A correction's gate: the exam and the rerun, then, when they pass and needs_round, the
+        practice round (CorrectionRound)."""
+        result = self(text, tags)
+        if not result.passed or not needs_round(self.agent, self._wins()):
+            return result
+        self._models()
+        return CorrectionRound(agent=self.agent, folder=self.state, kept=self.kept, agent_model=self.agent_model,
+                               customer_model=self.customer_model, judge_model=self.judge_model,
+                               calls=self._calls())(result, text, tags)
 
 
 def wrap_turn(examiner, kept, *, agent, state, reports, agent_model=None, customer_model=None, judge_model=None,

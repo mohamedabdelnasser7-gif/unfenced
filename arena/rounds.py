@@ -44,8 +44,8 @@ calling it with a round's number then:
 5. Hands a correction the user typed on the live page while the run goes on (live_hotfixes; Mohamed
    2026-11-02, "So hotfix should be in arena too then", and "It shouldn't make the same mistake in
    the same run"): before every match, Pool.refresh reads the live database, read only, for the
-   agent's corrections that passed their exam, run there as a hotfix (on trial or kept) and were
-   added since the run started, and the Pool hands them first in every match after, and to the
+   agent's corrections that passed their exam and run there as a hotfix (on trial or kept), those
+   already running when the run started too, and the Pool hands them first in every match after, and to the
    gate of each new lesson. A correction pulled since is no longer handed. Nothing the run makes
    (cases, lessons, exams, matches) is ever written to the live database by this step. A live
    database that is busy, locked or gone keeps the corrections read last.
@@ -72,9 +72,9 @@ REWRITES = 2  # new tries a lesson the gate refused may take in the same round (
 CAP_NOTE = "the model call cap was reached during the night study; nothing it left unchecked is handed on"
 
 
-def live_hotfixes(path, agent, since):
+def live_hotfixes(path, agent):
     """The agent's corrections in the live database at path that passed their exam, run there as a
-    hotfix (on trial or kept) and were added at or after since, oldest first, each as the Pool hands
+    hotfix (on trial or kept), whenever they were added, oldest first, each as the Pool hands
     it: kept, its stages and fields as lists, and its id the live id made negative (live_id keeps the
     live one), so it never reads as a lesson of the Arena's copy. The database is opened read only.
     sqlite3.Error when it cannot be read (busy, locked, gone, or a database with no lessons yet)."""
@@ -83,8 +83,8 @@ def live_hotfixes(path, agent, since):
         con.row_factory = sqlite3.Row
         rows = con.execute(
             "SELECT l.* FROM lessons l JOIN lesson_exams e ON e.lesson_id = l.id WHERE l.agent = ? AND l.source = ? "
-            "AND l.origin = ? AND e.passed = 1 AND l.state IN (?, ?) AND l.added_at >= ? ORDER BY l.id",
-            (agent, HOTFIX_SOURCE, PERSON, TRYING, KEPT, float(since))).fetchall()
+            "AND l.origin = ? AND e.passed = 1 AND l.state IN (?, ?) ORDER BY l.id",
+            (agent, HOTFIX_SOURCE, PERSON, TRYING, KEPT)).fetchall()
     finally:
         con.close()
     out = []

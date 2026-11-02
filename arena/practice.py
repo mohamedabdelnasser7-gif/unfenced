@@ -309,7 +309,7 @@ class Practice(run.Arena):
         self.judge_model = self.calls.model(judge_model)
         self.prompt_sha, self.prompt_file = match_mod.prompt_sha(prompt_for(agent.card)), None
 
-    def play(self, card, match_id, *, opening=None, lessons=None, replay=None):
+    def play(self, card, match_id, *, opening=None, lessons=None, replay=None, training=False):
         try:
             m = play(self.who, card, agent_model=self.agent_model, customer_model=self.customer_model, seed=match_id)
             if m.get("ended") == VOID:  # a model did not answer: dropped, never a loss

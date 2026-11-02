@@ -54,7 +54,7 @@ def counts(path):
 
 
 class Reading(Base):
-    def test_only_a_passed_running_correction_added_since_is_read(self):
+    def test_only_a_passed_running_correction_is_read(self):
         db = self.db()
         d = Db(str(db))
         try:
@@ -62,22 +62,28 @@ class Reading(Base):
         finally:
             d.close()
         before = correct(db, "Greet the customer by the time of day.", now=time.time() - 60)
-        since = time.time() - 1
         held = correct(db, "Never name a price.", exam=failed)
         fix = correct(db, FIX)
-        got = rounds.live_hotfixes(db, PLUG.agent, since)
+        got = rounds.live_hotfixes(db, PLUG.agent)
         self.assertEqual([g["live_id"] for g in got], [fix])
-        self.assertNotIn(before, [g["live_id"] for g in got])
+        self.assertNotIn(before, [g["live_id"] for g in got])  # waiting behind the newer one, not running
         self.assertNotIn(held, [g["live_id"] for g in got])
         one = got[0]
         self.assertEqual((one["id"], one["state"], one["stages"], one["source"]), (-fix, KEPT, ["all"], HOTFIX_SOURCE))
-        self.assertEqual(rounds.live_hotfixes(db, "someone_else", since), [])
+        self.assertEqual(rounds.live_hotfixes(db, "someone_else"), [])
+
+    def test_one_running_before_the_run_started_is_read_too(self):
+        """Review merge r1 finding 4: the copy hands kept lessons only, so a hotfix already on trial
+        live when the run starts comes from this read or from nowhere."""
+        db = self.db()
+        before = correct(db, FIX, now=time.time() - 3600)
+        self.assertEqual([g["live_id"] for g in rounds.live_hotfixes(db, PLUG.agent)], [before])
 
     def test_a_built_agents_correction_is_read_by_its_name(self):
         db = self.db()
         plug = plugs.load(plugs.WATERER, self)
         fix = correct(db, "Water the roots, not the leaves.", agent_lessons=lambda d: Lessons(d, plug, judge=low))
-        got = rounds.live_hotfixes(db, plug.agent, 0)
+        got = rounds.live_hotfixes(db, plug.agent)
         self.assertEqual([g["live_id"] for g in got], [fix])
 
     def test_the_live_database_is_opened_read_only(self):
@@ -85,10 +91,10 @@ class Reading(Base):
         correct(db, FIX)
         before = counts(db)
         mtime = Path(db).stat().st_mtime_ns
-        rounds.live_hotfixes(db, PLUG.agent, 0)
+        rounds.live_hotfixes(db, PLUG.agent)
         self.assertEqual((counts(db), Path(db).stat().st_mtime_ns), (before, mtime))
         with self.assertRaises(sqlite3.Error):  # no database there: an error, never a new file
-            rounds.live_hotfixes(self.dir / "none.db", PLUG.agent, 0)
+            rounds.live_hotfixes(self.dir / "none.db", PLUG.agent)
         self.assertFalse((self.dir / "none.db").exists())
 
 

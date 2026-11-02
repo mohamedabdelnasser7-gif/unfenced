@@ -133,6 +133,21 @@ class InTheRun(Base):
             self.assertIsNone(c.execute("SELECT 1 FROM sqlite_master WHERE name = 'fast_notes'").fetchone())
             self.assertIsNone(c.execute("SELECT 1 FROM lessons WHERE text = ?", (NOTE,)).fetchone())
 
+    def test_only_training_matches_get_the_notes(self):
+        """Review merge r1 finding 2: the live agent never gets a quick note, so neither does the gate."""
+        real, handed = match_mod.play, []
+
+        def play(card, **kw):
+            handed.append((str(kw.get("seed")), kw.get("fast")))
+            return real(card, **kw)
+        with mock.patch.object(match_mod, "play", play):
+            self.run_with_notes(self.db())
+        gate = [f for seed, f in handed if "-g" in seed]
+        training = [f for seed, f in handed if "-t" in seed]
+        self.assertTrue(gate and training)
+        self.assertEqual(gate, [None] * len(gate))
+        self.assertTrue(all(f is not None for f in training))
+
     def test_no_notes_model_means_no_notes(self):
         db = self.db()
         code, rep = self.cli(db, [GOOD])

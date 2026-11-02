@@ -2,13 +2,20 @@
 47, 48, 51).
 
 Both sides grow, the way the assistant's Arena grows from real days (assistant/arena.py). Each
-night Reflection reads the Sales agent's new real chats (kit/chats.py, the agent's database) and
-sends the Arena new practice cases beside its lessons (item 47):
+night Reflection reads an agent's new real chats (kit/chats.py, the agent's database) and sends
+the Arena new practice cases beside its lessons (item 47), for an agent of any kind (item 79), each
+into the pool of its own kind. The chats read are the agent's own: the chats its log names
+(engine/log.py trace, by case id), and for the database's own agent (the Sales agent, run with no
+folder of its own) the chats no log names for another agent too. An agent Quick start built reads
+only the chats its log names. Each chat is labelled:
   lost     quiet after the price (arena/label.py): kept.
   hard     won, but only after at least HARD_TURNS customer messages, a person stepping in or a
            failed send check: kept.
   easy     any other win: skipped, there is nothing in it to practise.
-  unclear  skipped, never guessed (arena/label.py).
+  unclear  skipped, never guessed (arena/label.py). For a kind the label rules were not written for
+           (any kind but sales), a chat they leave unclear is settled by the agent's own log
+           instead: its last deciding result (engine/plug.py decides) makes it lost when bad and a
+           win when good (then hard or easy as above).
 A customer keeps one chat per channel for good (kit/chats.py), so the pool keeps each chat's
 progress by the last step it read, not by the chat: a later talk in the same chat is read from
 the step after it. Only a settled talk moves the progress on: won, lost, or quiet with no price
@@ -604,9 +611,11 @@ def _shares(cards, sides):
 LIVE = "parent_id IS NULL AND channel NOT LIKE 'history:%'"  # no branch, no imported history chat
 
 
-def real_chats(db, since, until, pool=None):
+def real_chats(db, since, until, pool=None, agent=None, own=True):
     """[(chat id, reflection/history.py Chat, hard signs, (last step, its time))] for the pool's
-    pending chats first, then the agent's other chats with a message in [since, until): the steps
+    pending chats first, then the agent's other chats with a message in [since, until). agent: the
+    agent whose chats they are (see the module lines); None reads every chat. own: the database's
+    own agent, which also reads the chats no log names for another agent. The steps
     after the last one the pool read (pool.progress), before until; customer steps as the
     customer's, the agent's and a person's replies as the store's; tool calls and events left
     out, a failed send check and a person's reply counted. The last step is None when no new step
@@ -618,13 +627,16 @@ def real_chats(db, since, until, pool=None):
         tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         if not {"chats", "steps"} <= tables:
             return []
+        mine, args = _theirs(agent, own, "trace" in tables)
+        if mine is None:
+            return []
         ids = {}
         for chat_id in list(pool.pending) if pool is not None else []:
-            row = c.execute(f"SELECT id, customer_id FROM chats WHERE id = ? AND {LIVE}", (chat_id,)).fetchone()
+            row = c.execute(f"SELECT id, customer_id FROM chats WHERE id = ? AND {LIVE}{mine}", (chat_id, *args)).fetchone()
             if row is not None:
                 ids[row[0]] = row[1]
-        for row in c.execute(f"SELECT id, customer_id FROM chats WHERE {LIVE} AND updated_at >= ? AND updated_at < ? "
-                             "ORDER BY created_at", (since, until)):
+        for row in c.execute(f"SELECT id, customer_id FROM chats WHERE {LIVE}{mine} AND updated_at >= ? AND updated_at < ? "
+                             "ORDER BY created_at", (*args, since, until)):
             ids.setdefault(row[0], row[1])
         out = []
         for chat_id, customer in ids.items():
@@ -657,6 +669,33 @@ def real_chats(db, since, until, pool=None):
             chat.addresses = typed["addresses"]
             out.append((chat_id, chat, signs, last))
     return out
+
+
+def _theirs(agent, own, traced):
+    """The SQL that keeps one agent's chats, and its arguments: ("", ()) for every chat, None for none."""
+    if agent is None or (own and not traced):
+        return "", ()
+    if not traced:  # no log in this database: an agent with no folder of its own has no chats here
+        return None, ()
+    named = "id IN (SELECT case_id FROM trace WHERE agent = ?)"
+    if not own:
+        return f" AND {named}", (agent,)
+    return f" AND ({named} OR id NOT IN (SELECT case_id FROM trace WHERE agent != ?))", (agent, agent)
+
+
+def decided(db, plug, chat_id, until):
+    """The agent's last deciding result in its log for this chat before until (engine/plug.py
+    decides): label.LOST when bad, label.WON when good, None when there is none."""
+    results = (plug.decides.good, *plug.decides.bad)
+    with db.tx() as c:
+        if not c.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'trace'").fetchone():
+            return None
+        row = c.execute(f"SELECT result FROM trace WHERE agent = ? AND case_id = ? AND at < ? AND result IN "
+                        f"({', '.join('?' * len(results))}) ORDER BY at DESC, id DESC LIMIT 1",
+                        (plug.agent, chat_id, until, *results)).fetchone()
+    if row is None:
+        return None
+    return label_mod.WON if row[0] == plug.decides.good else label_mod.LOST
 
 
 TYPED_NAMES = ("name",)          # draft_order arguments that hold a person's name
@@ -727,15 +766,20 @@ def hard(chat, signs):
             or bool(signs.get("check_failed")))
 
 
+ENDED_BY_LOG = "settled by the agent's own deciding result"
 SETTLED = frozenset({label_mod.NO_PRICE})  # unclear but over: quiet with no price given
 WAITING = frozenset({label_mod.OPEN, label_mod.UNANSWERED, label_mod.VOICE})  # unclear for now, settles soon
 
 
-def grow(db, pool, *, since, until, tagger, calls=None, most=MAX_NEW, quiet_hours=label_mod.QUIET_HOURS):
-    """The night's new practice items from the real chats into the pool. Returns counts only."""
+def grow(db, pool, *, since, until, tagger, calls=None, most=MAX_NEW, quiet_hours=label_mod.QUIET_HOURS, plug=None,
+         own=True):
+    """The night's new practice items from the real chats into the pool. Returns counts only. plug:
+    the agent whose chats are read (see the module lines); None reads every chat, as the Sales
+    agent's database holds only its own. own: as in real_chats."""
     from arena.personas import turns_of  # the persona build's own turns, cleaned the same way
     n = Counter()
-    chats = real_chats(db, since - quiet_hours * 3600, until, pool)
+    chats = real_chats(db, since - quiet_hours * 3600, until, pool, agent=None if plug is None else plug.agent, own=own)
+    by_log = plug is not None and kind_of(plug) != DEFAULT_KIND  # the label rules are written for sales chats
     cleaner = Cleaner({name for _, chat, _, _ in chats for name in chat.names})  # every name of the night
     for chat_id, chat, signs, last in chats:
         if last is None:  # no step since the last one read
@@ -744,6 +788,10 @@ def grow(db, pool, *, since, until, tagger, calls=None, most=MAX_NEW, quiet_hour
             continue
         n["read"] += 1
         lab, why = label_mod.label(chat, until, quiet_hours)
+        if lab == label_mod.UNCLEAR and by_log:
+            got = decided(db, plug, chat_id, until)
+            if got is not None:
+                lab, why = got, ENDED_BY_LOG
         if lab == label_mod.UNCLEAR:
             n["unclear, skipped"] += 1
             if why in SETTLED:
@@ -783,14 +831,17 @@ def tag_model():
     return model_mod.Model(timeout=tag_mod.TIMEOUT, route=model_mod.OPEN)
 
 
-def night(db_path, plug, recipe_path, since, until):
-    """The night step for an agent that grows practice customers: new real chats into its owner's
-    pool. Returns counts and the pool's summary; stopped names why nothing more was read."""
+def night(db_path, plug, recipe_path, since, until, folder=None, own=True):
+    """The night step for an agent of any kind: its new real chats into its owner's pool of its kind.
+    folder: the folder of an agent Quick start built (reflection/night.py built_folder), its owner
+    found from there (owner_of) and its daily cap kept there; None for an agent whose folder is the
+    database's. own: the database's own agent, the Sales agent (see the module lines). Returns counts and the pool's summary; stopped names why nothing
+    more was read."""
     from arena import recipe as recipe_mod
     from arena import run as arena_run
     from arena import tag as tag_mod
     from kit.db import Db
-    folder = Path(db_path).expanduser().resolve().parent
+    folder = Path(db_path).expanduser().resolve().parent if folder is None else Path(folder).expanduser().resolve()
     rep = {"kind": kind_of(plug), "stopped": None}
     if not recipe_path:
         rep["stopped"] = "no recipe given (--recipe); no chat read"
@@ -805,7 +856,8 @@ def night(db_path, plug, recipe_path, since, until):
     tagger = tag_mod.Tagger(model=calls.model(tag_model()), cap=MAX_NEW, recipe=recipe)
     db = Db(str(db_path))
     try:
-        rep.update(grow(db, pool, since=since, until=until, tagger=tagger, calls=calls))
+        rep.update(grow(db, pool, since=since, until=until, tagger=tagger, calls=calls,
+                        plug=None if own and kind_of(plug) == DEFAULT_KIND else plug, own=own))
     finally:
         db.close()
     if rep.get("added"):

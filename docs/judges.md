@@ -35,6 +35,14 @@ The Arena plays practice customers against the Sales agent and then runs a small
 
 The full run drops `--quick` and names a folder for its files with `--state` (options at the top of `arena/run.py`).
 
+## Agents of one kind learning together
+
+```
+python3 -I demo/make_loop_state.py
+```
+
+This writes a made-up owner to `data/demo-loop`: two Sales style agents of one kind, a support agent, a few made-up chats and one lesson the first agent kept. It prints three night commands. With a key, run them in order: the first two grow practice customers from their lost chats, each of its own kind, and the last finds its sibling's kept lesson, adapts it and holds it for a yes, since it has no exam to try it through yet.
+
 ## No key: the recorded replay
 
 ```

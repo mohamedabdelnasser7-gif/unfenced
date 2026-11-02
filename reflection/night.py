@@ -81,11 +81,13 @@ as mode_card (None when the night wrote none), and the Morning page shows it for
 rename or drop. The Arena's calls count against its daily cap; a model that does not answer, or
 the cap, stops the step with no card and the report names why (mode_card_stopped).
 
-For the Sales agent, and any agent of its kind, the night then grows its practice customers
-(arena/grow.py, DECISIONS items 30, 32, 47, 48, 51): the window's new real chats, labelled from
-the chat itself, the lost and hard ones cleaned and tagged with the persona recipe (--recipe, a
-private file outside the repo), join the owner's pool, shared by that owner's agents of the same
-kind only, so tomorrow's Arena faces them. The tagger's calls count against the Arena's daily cap.
+For every agent, of any kind (DECISIONS item 79), the night then grows its practice customers
+(arena/grow.py, DECISIONS items 30, 32, 47, 48, 51): the window's new real chats that are the
+agent's own, labelled from the chat itself (for a kind other than sales, a chat that leaves unclear
+is settled by the agent's own deciding result), the lost and hard ones cleaned and tagged with the
+persona recipe (--recipe, a private file outside the repo), join the owner's pool of the agent's
+kind, shared by that owner's agents of the same kind only, so tomorrow's Arena faces them. An agent
+Quick start built finds its owner from its own folder (agents/owner.json). The tagger's calls count against the Arena's daily cap.
 The report names the counts as practice (practice.stopped says why, with no recipe given too, or
 the step's error by its type when it failed: the report is still saved).
 
@@ -678,11 +680,11 @@ def main(argv=None, *, until=None):
             rep["mode_card_stopped"] = stopped
     # ---- practice customers from the window's real chats (arena/grow.py; DECISIONS items 30, 48, 51)
     from arena import grow
-    if grow.kind_of(plug) == grow.DEFAULT_KIND:
-        try:
-            rep["practice"] = grow.night(args.db, plug, args.recipe, rep["window"]["since"], rep["window"]["until"])
-        except Exception as e:  # the lessons went in already: the report and its rollback line are still saved
-            rep["practice"] = {"kind": grow.kind_of(plug), "stopped": f"failed: {type(e).__name__}"}
+    try:  # every kind grows its own pool (DECISIONS item 79); a built agent's owner is found from its folder
+        rep["practice"] = grow.night(args.db, plug, args.recipe, rep["window"]["since"], rep["window"]["until"],
+                                     folder=built_folder(plug, args.plug), own=plug.agent == SALES.agent)
+    except Exception as e:  # the lessons went in already: the report and its rollback line are still saved
+        rep["practice"] = {"kind": grow.kind_of(plug), "stopped": f"failed: {type(e).__name__}"}
     # ---- end of the practice step
     path = save(rep, args.db)
     if args.json:

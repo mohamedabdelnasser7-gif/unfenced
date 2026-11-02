@@ -189,7 +189,7 @@ class OverTheServer(Base):
         L = self.m.lessons["sales"]
         les = L.mine()[-1]
         self.assertEqual((les["text"], les["state"], les["share"], les["source"]), (LOW, TRYING, HOTFIX_SHARE, HOTFIX_SOURCE))
-        self.assertIn("runs now as a hotfix in half the chats", page)
+        self.assertIn("runs now as a hotfix in half the cases", page)
         self.assertIn("Hotfix", page)
         self.post("/correct", [("agent", "sales"), ("line", HIGH)])
         held = L.mine()[-1]

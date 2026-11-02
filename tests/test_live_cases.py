@@ -136,6 +136,20 @@ class EmailAndCalendarAreNotConnectedYet(unittest.TestCase):
         self.assertIn("not connected for a new agent yet", qs._tool_lines())
 
 
+class ThePlanCardShowsTheCase(unittest.TestCase):
+    """DECISIONS 68: the card shows One case is, the good result and the bad result, in the model's words."""
+
+    def test_one_case_is_good_and_bad_are_shown(self):
+        from reflection import pages
+        card = {"name": "Lead follow up", "does": "Follows up new leads.", "case": LEAD_CASE, "good": "The lead answers.",
+                "bad": "The lead never hears back.", "never": [], "needs": []}
+        html = pages.plan_card(card)
+        for words in ("One case is", LEAD_CASE["input"], LEAD_CASE["output"], "The agent writes first",
+                      "A good result", "A bad result", "The lead never hears back."):
+            self.assertIn(words, html.replace("&#x27;", "'"))
+        self.assertNotIn("One case is", pages.plan_card(dict(card, case=None, bad="")))
+
+
 class ATagIsNotAHandOver(unittest.TestCase):
     """DECISIONS 72: a declared tag action such as needs the team passes; a hand over is still refused."""
 

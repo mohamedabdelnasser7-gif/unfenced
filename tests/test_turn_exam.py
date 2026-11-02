@@ -496,7 +496,7 @@ class CorrectionOnTheAgentPage(Base):
         world = World()
         page = self.page(world)
         said = page.correct("stock_watch", "Say the stock in one short line.")
-        self.assertIn("runs now as a hotfix in half the chats", said)
+        self.assertIn("runs now as a hotfix in half the cases", said)
         les = page.lessons["stock_watch"].mine()[-1]
         self.assertEqual((les["state"], les["share"]), (engine_lessons.TRYING, engine_lessons.HOTFIX_SHARE))
         self.assertGreater(world.calls["agent"], 0)

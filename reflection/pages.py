@@ -330,7 +330,7 @@ def _corrected(i):
 
 
 # Under the box on an agent's page: what a correction does (Morning.correct), and nothing it does not.
-SAY_NOTE = ("Takes a short exam, then starts at once as a hotfix in half the chats. If it is high risk or "
+SAY_NOTE = ("Takes a short exam, then starts at once as a hotfix in half the cases. If it is high risk or "
             "does not pass, it waits for your yes on Today. Reflection reads it tonight.")
 ANSWERED = "Answered chats today. Reflection reads them tonight."
 
@@ -385,9 +385,9 @@ def night_lines(a, now, answered=0):
         lines.append((7, "It found a new mode for you and tried it on your past days in the Arena."))
     if fresh and rep.get("hotfix"):
         n = rep["hotfix"]
-        lines.append((8, f"{_plural(n, 'chat')} that ended with no order got a hotfix note for that customer's next chat."))
+        lines.append((8, f"{_plural(n, 'case')} that ended with no order got a hotfix note for that customer's next case."))
     if a.get("arena") and a["arena"]["at"] >= now - day:
-        lines.append((9, "It practised with made-up customers in the Arena."))
+        lines.append((9, "It practised on made-up cases in the Arena."))
     if answered:
         lines.append((10, ANSWERED))
     if lines:
@@ -408,7 +408,7 @@ def status_of(m, agent):
 
 
 # The line under the status on an agent's page.
-STATUS_SAID = {"Live": "Answering chats", "Training": "Practising in the Arena",
+STATUS_SAID = {"Live": "Working on real cases", "Training": "Practising in the Arena",
                "Paused": "Paused: it sends nothing until you press Resume"}
 
 
@@ -458,7 +458,7 @@ def agents(m, view, ctx):
     rows = "".join(f'<a class="agl" href="/agents/{h(a)}{ctx["q"]}"><span class="av">{mo._agent_icon(a)}</span>'
                    f'<b>{h(name(a))}</b><span class="st{" live" if status_of(m, a) == "Live" else ""}">'
                    f'{status_of(m, a)}</span></a>' for a in names)
-    return ('<section class="top"><h1>Agents</h1><p>Each one learns from its own chats.</p></section><div class="col">'
+    return ('<section class="top"><h1>Agents</h1><p>Each one learns from its own cases.</p></section><div class="col">'
             f'<a class="yes" href="/new{ctx["q"]}">{icon("plus")}New agent</a>'
             f'<section class="grp sq" aria-label="Your agents">{rows}</section></div>')
 
@@ -529,7 +529,7 @@ def agent_page(m, view, agent, ctx):
     if a.get("arena"):  # its own words, never the Arena item's line: that line counts matches won
         day = f'&day={ctx["day"]}' if ctx["day"] else ""
         notes.append(f'<div class="nr"><span class="to">{icon("note")}From the Arena, {h(mo._date(a["arena"]["at"]))}</span>'
-                     f'<p>It practised with made-up customers. <a class="lk" href="/new/build?agent={h(agent)}{day}">'
+                     f'<p>It practised on made-up cases. <a class="lk" href="/new/build?agent={h(agent)}{day}">'
                      'See where it slipped</a></p></div>')
     out.append('<section class="grp sq" aria-labelledby="r-h"><h3 id="r-h">Reflection notes</h3>'
                + ("".join(notes) or '<div class="nr"><p>Nothing yet.</p></div>') + "</section></div>")
@@ -599,7 +599,7 @@ def new_agent(m, quick, ctx):
         out.append('<p class="no-yet">Quick start needs the database folder. Start the page with --db.</p>')
     chat = bool(last) and not built
     if ctx["token"]:
-        hint = "" if chat else ' placeholder="I want an agent that answers my store\'s customers on WhatsApp."'
+        hint = "" if chat else ' placeholder="I want an agent that answers my support tickets and tags the ones that need the team."'
         label = "Your answer, or anything to add or change" if chat else "What agent do you want?"
         out.append(f'<form id="qs-say" method="post" action="/quickstart">{_hidden(ctx)}<div class="field">'
                    f'<textarea class="typed{" sm" if chat else ""}" name="text" rows="{2 if chat else 3}" '
@@ -614,7 +614,7 @@ def new_agent(m, quick, ctx):
         out.append(f'<div class="act">{act}</div>')
     out.append("</article>")
     return ('<div class="qs"><section class="top s1-top"><div><h1>New agent</h1><p>Say what you want it to do. It '
-            'practises in the Arena before it meets a real customer.</p></div></section>'
+            'practises in the Arena before it takes a real case.</p></div></section>'
             '<div class="mode" role="tablist" aria-label="How to build"><span class="on" role="tab" aria-selected="true">'
             'Quick start</span><span class="off" role="tab" aria-selected="false" aria-disabled="true">Brainstorm '
             f'<i>Soon</i></span></div><div class="s1">{"".join(out)}<aside class="side1"><section class="bs" '
@@ -624,9 +624,22 @@ def new_agent(m, quick, ctx):
 
 
 def plan_card(card):
-    """The model's card as one plain white card, then what it needs, each marked connected or not yet."""
+    """The model's card as one plain white card, then what it needs, each marked connected or not yet.
+    One case is: what arrives, what the agent gives and when it is over, in the model's words under the
+    page's labels, and a line when the agent writes first; then the good and the bad result (DECISIONS
+    item 68). The user changes any of them by a message in the box; the model writes the card again."""
     never = "".join(f'<li dir="auto">{h(x)}</li>' for x in card["never"])
-    rows = [("What it does", f'<p dir="auto">{h(card["does"])}</p>'), ("A good result", f'<p dir="auto">{h(card["good"])}</p>')]
+    rows = [("What it does", f'<p dir="auto">{h(card["does"])}</p>')]
+    case = card.get("case")
+    if case:
+        parts = [("Arrives", case["input"]), ("It gives", case["output"]), ("Over when", case["ends"])]
+        lis = "".join(f'<li dir="auto"><b>{t}</b> {h(v)}</li>' for t, v in parts)
+        if case.get("starts") == "agent":
+            lis += "<li><b>Starts</b> The agent writes first</li>"
+        rows.append(("One case is", f'<ul class="case">{lis}</ul>'))
+    rows.append(("A good result", f'<p dir="auto">{h(card["good"])}</p>'))
+    if card.get("bad"):
+        rows.append(("A bad result", f'<p dir="auto">{h(card["bad"])}</p>'))
     if never:
         rows.append(("It never", f"<ul>{never}</ul>"))
     out = [f'<section class="plan" aria-label="The agent"><h3 dir="auto">{h(card["name"])}</h3><dl>'
@@ -663,21 +676,21 @@ def build(m, agent, ctx):
     run = arena.get(agent) if agent else None
     title = f"Building your {name(agent).lower()}" if agent else "Building your agent"
     tiles, seen = [], set()
-    for x in (run or {}).get("lost") or []:  # one tile a practice customer and line; the card's id is never shown
+    for x in (run or {}).get("lost") or []:  # one tile a practice case and line; the card's id is never shown
         if (x["card"], x["text"]) in seen:
             continue
         seen.add((x["card"], x["text"]))
         quote = f'<p class="out" dir="auto">"{h(x["text"])}"</p>' if x["text"] else ""
         tiles.append(f'<article class="tile lost"><div class="t-h"><span class="pav">{icon("chat")}</span><div>'
-                     '<b>Practice customer</b><small>Made up for the Arena</small></div><span class="res">Lost</span>'
+                     '<b>Practice case</b><small>Made up for the Arena</small></div><span class="res">Lost</span>'
                      f'</div><p class="persona" dir="auto">{h(_cap(x["why"]))}.</p>{quote}</article>')
     if not tiles:
         tiles.append('<div class="ghost"><span class="pav" aria-hidden="true"></span>No saved practice run yet.</div>')
     when = f'Newest run, {mo._when(run["at"])}.' if run else "No saved run yet."
     return (f'<div class="qs"><section class="top"><div><h1>{h(title)}</h1><p class="num">{h(when)}</p></div></section>'
             '<div class="s2"><section class="a-climb" aria-label="How close it is"><article class="glow sq">'
-            '<div class="glow-h"><span class="gchip">In the Arena</span><span class="gsub">practising with made-up '
-            f'customers</span></div>{CLIMB}<div class="climb-l"><span>Started</span><span>Ready to go live</span></div>'
+            '<div class="glow-h"><span class="gchip">In the Arena</span><span class="gsub">practising on made-up '
+            f'cases</span></div>{CLIMB}<div class="climb-l"><span>Started</span><span>Ready to go live</span></div>'
             '<p class="calm">Nothing to do here. You get one note when it is ready to go live.</p></article></section>'
             '<section class="a-matches" aria-labelledby="m-h"><div class="sec-h"><h2 id="m-h">Practice matches</h2>'
             f'<small>Where it slipped</small></div><div class="tiles">{"".join(tiles)}</div></section></div></div>')

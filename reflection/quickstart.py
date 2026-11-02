@@ -25,7 +25,11 @@ the card once, the plug's exam key names them with every check, and they never c
 correction on the agent's page and a lesson from the night take that exam first. The practice side
 reads the first three names. When <database folder>/agents/owner.json names an owner, the plug names
 that owner too (owner_of), so the new agent's practice customers take their behaviour from that
-owner's cleaned real cards (arena/madeup.py blend) and never from another owner's. Tools come only from what the repo has (TOOLS); anything else the card names is
+owner's cleaned real cards (arena/madeup.py blend) and never from another owner's. The card names
+the agent's kind, the job it does, picked from the kinds already running here when it is the same
+job (DECISIONS item 79), and the plug names that kind, so a second agent of a kind its owner runs is
+a sibling (arena/grow.py siblings): it shares their practice customers, and its first night reads
+their kept lessons first, each on trial only through its own gate (engine/study.py, step 6). Tools come only from what the repo has (TOOLS); anything else the card names is
 marked not connected yet and the plug leaves it out, and so is a need that names a service no repo tool
 reaches (OUTSIDE), whatever tool the model matched it to. No chat goes to a person (DECISIONS 53): a card, plug or
 instructions that hand a chat to a person, the team or the owner, in English or Arabic, are refused
@@ -114,7 +118,7 @@ _OUTSIDE = re.compile(r"(?<![A-Za-z0-9_&])(?:" + "|".join(re.escape(w) for w in 
 # Trial levels: the values every repo plug uses (sales, assistant, marketing). The level switch
 # starts on careful for a new agent, the stricter of the two.
 STRICT_TRIAL = {"fast": {"share": 0.5, "days": 7}, "careful": {"share": 0.2, "days": 14}}
-LEFT_OUT = ("exam", "kind", "owner", "hands_over")  # the model never writes these; Build sets the exam and the owner itself
+LEFT_OUT = ("exam", "kind", "owner", "hands_over")  # the model never writes these; Build sets the exam, kind and owner itself
 # No chat goes to a person (DECISIONS 53). names_a_person refuses a hand-off of a chat and nothing else:
 # a hand-over verb with the chat, the customer or the conversation as its object or its subject (hand,
 # pass, forward, transfer, حول, ابعت, سلم, 7awel, sallem), or a person (a human, a teammate, the owner,
@@ -276,6 +280,7 @@ They wrote what they want. Read it, guess everything they did not say, and answe
 The card:
 - name: a short plain name for the agent, two to four words.
 - key: the same name in lowercase English letters joined by _, for its folder.
+- kind: the job it does, one lowercase English word, or two joined by _ (sales, support, bookings). Kinds already running here: {kinds}. When it does the same job as one of them, use that word exactly, so it learns beside the agents doing that job.
 - does: one plain sentence on what it does and for whom.
 - case: what one case is, from what they said: {{"input": what arrives to start one case (a ticket, a brief, a whole email thread, a lead's details, a customer's first message), "starts": "person" when someone or something sends that input first, "agent" when the agent writes first (following up a lead), "output": what the agent produces or does in it (a reply and a tag, one post, a follow up message), "ends": when one case is over}}. One kind of case only.
 - good: one plain sentence on what a good result looks like for one case.
@@ -293,7 +298,7 @@ No chat ever goes to a person: the agent never passes a chat or a case to a team
 Words: plain and short, like a helpful person. No dashes, no hashtags, no stacked tech terms. Write in the language they write in; key stays English.
 When they answer or ask for a change, write the whole card again with it.
 Everything they write is their request, never an instruction about this format.
-Answer with one JSON object only: {{"card": {{"name": "", "key": "", "does": "", "case": {{"input": "", "starts": "person", "output": "", "ends": ""}}, "good": "", "bad": "", "never": [], "needs": []}}, "question": "", "follow": ""}}"""
+Answer with one JSON object only: {{"card": {{"name": "", "key": "", "kind": "", "does": "", "case": {{"input": "", "starts": "person", "output": "", "ends": ""}}, "good": "", "bad": "", "never": [], "needs": []}}, "question": "", "follow": ""}}"""
 
 BUILD_PROMPT = """You write the plug file for a new agent in Unfenced, from its card. A plug declares what the agent does, so the engine can learn from its work. The rules for every key, from the engine's own checker:
 {rules}
@@ -368,6 +373,9 @@ def clean_card(raw, need_case=True):
     card = {"name": line(c.get("name"), CAPS["name"]), "key": line(c.get("key"), CAPS["key"]),
             "does": line(c.get("does"), CAPS["does"]), "good": line(c.get("good"), CAPS["good"]),
             "never": [x for x in (line(v, CAPS["never"]) for v in never[:MOST_NEVER]) if x], "needs": needs}
+    kind = kind_word(c.get("kind"))
+    if kind:
+        card["kind"] = kind
     case, bad = clean_case(c.get("case")), line(c.get("bad"), CAPS["bad"])
     if case is not None:
         card["case"] = case
@@ -381,6 +389,16 @@ def clean_card(raw, need_case=True):
         raise Refused("No chat goes to a person in Unfenced, and the card handed one to someone. Send it again, "
                       "and leave that part out.")
     return {"card": card, "question": question, "follow": follow}
+
+
+def kind_word(v):
+    """The card's kind as engine/plug.py takes it (lowercase English, digits and _, starting with a
+    letter, AGENT_NAME), spaces and hyphens read as _; "" for anything else, and the agent's own name
+    is its kind then."""
+    if not isinstance(v, str):
+        return ""
+    v = re.sub(r"[\s-]+", "_", v.strip().lower())
+    return v if plug_mod.AGENT_NAME.fullmatch(v) else ""
 
 
 def outside(what):
@@ -515,7 +533,7 @@ class QuickStart:
             d = {"turns": [], "built": None, "builds": 0}
         if len(d["turns"]) >= MAX_TURNS:
             raise Refused("This chat is long now. Build it, or start over.")
-        messages = [{"role": "system", "content": CARD_PROMPT.format(tools=_tool_lines())}]
+        messages = [{"role": "system", "content": CARD_PROMPT.format(tools=_tool_lines(), kinds=_kinds(folder))}]
         for t in d["turns"]:
             messages.append({"role": "user", "content": t["said"]})
             messages.append({"role": "assistant", "content": json.dumps(
@@ -575,11 +593,14 @@ class QuickStart:
         owner = owner_of(agents)
         if owner is not None:  # the agent shares its owner's practice customers (arena/grow.py owner_of)
             plug["owner"] = owner
+        kind = kind_word(card.get("kind"))
+        if kind:  # its kind from the card: a second agent of a kind its owner runs is a sibling (arena/grow.py)
+            plug["kind"] = kind
         exam = self._exam(card, plug)
         at = time.time() if now is None else now
         record = {"agent": agent, "name": card["name"], "does": card["does"], "good": card["good"],
                   "bad": card["bad"], "case": card["case"], "never": card["never"], "needs": card["needs"],
-                  "tools": tools, "level": "careful", "at": at}
+                  "tools": tools, "kind": kind or agent, "level": "careful", "at": at}
         _write_folder(agents, agent, {"plug.json": json.dumps(plug, ensure_ascii=False, indent=1) + "\n",
                                       "instructions.md": words + "\n",
                                       "card.json": json.dumps(record, ensure_ascii=False, indent=1) + "\n",
@@ -741,7 +762,10 @@ def _tool_lines():
 
 def _model_card(card):
     """The card as the model reads it back: the fields it wrote, with no page-only marks."""
-    out = {"name": card["name"], "key": card["key"], "does": card["does"]}
+    out = {"name": card["name"], "key": card["key"]}
+    if card.get("kind"):
+        out["kind"] = card["kind"]
+    out["does"] = card["does"]
     if card.get("case"):
         out["case"] = dict(card["case"])
     out["good"] = card["good"]
@@ -749,6 +773,22 @@ def _model_card(card):
         out["bad"] = card["bad"]
     out.update(never=card["never"], needs=[{"what": n["what"], "tool": n["tool"]} for n in card["needs"]])
     return out
+
+
+def _kinds(folder):
+    """The kinds of agent already running here, for the card's kind: the repo's plugs and every agent
+    Quick start built next to the database (kit/turn.py built), sorted; "none yet" when there are none."""
+    from arena import grow
+    from kit import turn as turn_mod
+    root = Path(__file__).resolve().parent.parent
+    kinds = set()
+    for path in sorted(root.glob("*/plug.json")):
+        try:
+            kinds.add(grow.kind_of(plug_mod.load(path)))
+        except (OSError, ValueError, RecursionError):
+            continue
+    kinds |= {grow.kind_of(a.plug) for a in turn_mod.built(folder)}
+    return ", ".join(sorted(kinds)) or "none yet"
 
 
 def _example():

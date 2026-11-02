@@ -19,7 +19,9 @@ Morning methods only, so no engine rule lives here.
     /agents/<name>/rollback  what Roll back would do, lesson by lesson, and its one button.
     /new           New agent, Quick start B screen 1: the Quick start chat (reflection/quickstart.py), its
                    card, at most one question and the second message, the same box, Send and Build.
-    /new/build     screen 2: the newest Arena run saved next to the database, as tiles and a path.
+    /new/build     screen 2: the newest Arena run saved next to the database, as tiles and a path. When
+                   it lost matches, Try again plays only those again with the corrections that passed
+                   (Morning.try_again, arena/retry.py); each retried tile then says Won again or Still lost.
 
 A correction sent on an agent's page that is high risk waits for a yes on Today (Morning.correct); its
 card says why in one plain sentence (plain_risk), never the engine's word lists, and the Hotfix chip
@@ -122,8 +124,14 @@ class Pages:
         """Where an answer returns to: one of the page's own paths, with the demo day; else /."""
         parts = urllib.parse.urlsplit(str(value or ""))
         path = parts.path if _BACK.match(parts.path or "") and not parts.netloc and not parts.scheme else "/"
-        day = self._day(urllib.parse.parse_qs(parts.query))
-        return path + (f"?day={day}" if self.demo else "")
+        query = urllib.parse.parse_qs(parts.query)
+        keep = []
+        agent = (query.get("agent") or [""])[0]
+        if path == "/new/build" and _AGENT.match(agent):  # the Arena screen of that agent (Try again)
+            keep.append(f"agent={agent}")
+        if self.demo:
+            keep.append(f"day={self._day(query)}")
+        return path + ("?" + "&".join(keep) if keep else "")
 
     def morning_for(self, back):
         if not self.demo:
@@ -775,18 +783,27 @@ def build(m, agent, ctx):
     run = arena.get(agent) if agent else None
     title = f"Building your {name(agent).lower()}" if agent else "Building your agent"
     tok = ctx["token"] if agent and agent in m.lessons else None
+    tried = {r["card"]: r for r in ((run or {}).get("retry") or {}).get("results") or [] if r["result"] != "not_played"}
     tiles, seen = [], set()
     for x in (run or {}).get("lost") or []:  # one tile a practice case and line; the card's id is never shown
-        if (x["card"], x["text"]) in seen:
+        again = tried.get(x["card"])
+        key = x["card"] if again else (x["card"], x["text"])  # a retried case: one tile, its newest result
+        if key in seen:
             continue
-        seen.add((x["card"], x["text"]))
-        quote = f'<p class="out" dir="auto">"{h(x["text"])}"</p>' if x["text"] else ""
-        fix = correct_this(ctx, agent) if tok and x["text"] else ""
-        tiles.append(f'<article class="tile lost"><div class="t-h"><span class="pav">{icon("chat")}</span><div>'
-                     '<b>Practice case</b><small>Made up for the Arena</small></div><span class="res">Lost</span>'
-                     f'</div><p class="persona" dir="auto">{h(_cap(x["why"]))}.</p>{quote}{fix}</article>')
+        seen.add(key)
+        why, text, res, cls = x["why"], x["text"], "Lost", "lost"
+        if again and again["result"] == "won":
+            res, cls = "Won again", "won"
+        elif again:
+            why, text, res = again["why"], again["text"], "Still lost"
+        quote = f'<p class="out" dir="auto">"{h(text)}"</p>' if text else ""
+        fix = correct_this(ctx, agent) if tok and text and cls == "lost" else ""
+        tiles.append(f'<article class="tile {cls}"><div class="t-h"><span class="pav">{icon("chat")}</span><div>'
+                     f'<b>Practice case</b><small>Made up for the Arena</small></div><span class="res">{res}</span>'
+                     f'</div><p class="persona" dir="auto">{h(_cap(why))}.</p>{quote}{fix}</article>')
     if not tiles:
         tiles.append('<div class="ghost"><span class="pav" aria-hidden="true"></span>No saved practice run yet.</div>')
+    retry = try_again(m, agent, run, ctx) if (run or {}).get("lost") else ""
     when = f'Newest run, {mo._when(run["at"])}.' if run else "No saved run yet."
     return (f'<div class="qs"><section class="top"><div><h1>{h(title)}</h1><p class="num">{h(when)}</p></div></section>'
             '<div class="s2"><section class="a-climb" aria-label="How close it is"><article class="glow sq">'
@@ -794,4 +811,30 @@ def build(m, agent, ctx):
             f'cases</span></div>{CLIMB}<div class="climb-l"><span>Started</span><span>Ready to go live</span></div>'
             '<p class="calm">Nothing to do here. You get one note when it is ready to go live.</p></article></section>'
             '<section class="a-matches" aria-labelledby="m-h"><div class="sec-h"><h2 id="m-h">Practice matches</h2>'
-            f'<small>Where it slipped</small></div><div class="tiles">{"".join(tiles)}</div></section></div></div>')
+            f'<small>Where it slipped</small></div><div class="tiles">{"".join(tiles)}</div>{retry}</section></div></div>')
+
+
+TRY_SAID = "Plays only the matches it lost again, with your corrections. A few minutes."
+
+
+def try_again(m, agent, run, ctx):
+    """Try again under the practice matches (Morning.try_again, arena/retry.py): the button while no try
+    runs and the page has a token, "Trying again..." while one runs, and a line when the last one could
+    not run or stopped early. The Sales agent only; any other agent shows it greyed out, like Pull."""
+    if agent != mo.SALES.agent or agent not in m.lessons:
+        return (f'<div class="act"><button class="gb" type="button" disabled title="Not built for this agent yet">'
+                f'{icon("loop")}Try again</button></div>') if ctx["token"] else ""
+    trying = getattr(m, "trying", None)
+    if trying is not None and trying(agent):
+        return '<div class="act"><p class="no-yet" role="status">Trying again...</p></div>'
+    out = []
+    note = getattr(m, "try_note", lambda a: None)(agent)
+    if note:
+        out.append(f'<p class="no-yet" role="status">{h(note)}</p>')
+    elif ((run or {}).get("retry") or {}).get("stopped"):
+        out.append('<p class="no-yet">The last try stopped before it played every match; the rest show as they were.</p>')
+    if ctx["token"]:
+        back = f"/new/build?agent={agent}" + (f"&{ctx['q'][1:]}" if ctx["q"] else "")
+        out.append(f'<p class="quiet">{TRY_SAID}</p>'
+                   + _post(ctx, "tryagain", f'{icon("loop")}Try again', "yes", agent=agent, back=back))
+    return f'<div class="act">{"".join(out)}</div>' if out else ""

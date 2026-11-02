@@ -528,6 +528,7 @@ CSP = ("default-src 'none'; style-src 'sha256-" + base64.b64encode(hashlib.sha25
 
 
 STALE_PLAN = "Not rolled back: the lessons changed after the plan was shown. Look at the plan again."
+TRY_NOT_BUILT = "Try again is not built for this agent yet, so nothing was started."
 NO_EXAM = "A correction takes a short exam first, and this agent has no exam here yet, so nothing was added."
 
 
@@ -621,6 +622,12 @@ class Morning:
         # made here, not in an answer: making Lessons, Log or the marks table runs a script, which commits
         self.trials = {a: trial_mod.Trials(self.page, p, lessons=self.lessons[a]) for a, p in self.plugs.items()}
         self.facts = facts_mod.Facts(self.page)  # the fact cards' answers table, made here for the same reason
+        # Try again (try_again): the agents with a try running, what went wrong with the last one, the
+        # models it plays with (None: kit.model.Model, once a key is set; a test hands fakes) and how it
+        # starts in the background (a test runs it at once)
+        self._trying, self._try_note, self._try_lock = set(), {}, threading.Lock()
+        self.retry_models = None
+        self.retry_start = lambda work, name: threading.Thread(target=work, name=name, daemon=True).start()
 
     def add_built(self):
         """Wire each agent Quick start built since the page started into the running page, as
@@ -719,6 +726,75 @@ class Morning:
             return getattr(examiner, "correction", examiner)(text, lessons.plug.stage_tags([plug_mod.ALL]))
         except Exception as e:
             return exam_mod.could_not_run(e)
+
+    def trying(self, agent):
+        """True while a Try again runs for the agent (try_again)."""
+        with self._try_lock:
+            return agent in self._trying
+
+    def try_note(self, agent):
+        """Why the agent's last Try again could not run, or None (try_again)."""
+        with self._try_lock:
+            return self._try_note.get(agent)
+
+    def try_again(self, agent, now=None):
+        """Try again on the Arena screen (arena/retry.py): the practice matches the agent's latest Arena
+        run lost, played once more against the same practice customers with its kept lessons and the
+        corrections that passed, in a background thread, so the page returns at once. The Sales agent
+        only for now. Refused when the latest run lost no match, when a try runs already for the agent,
+        when the day's model call cap has no room, or with no database folder or model key. It writes
+        an arena_retry item, which never counts for the gate (gate)."""
+        from arena import retry as retry_mod, rounds as rounds_mod, run as run_mod
+        if agent != SALES.agent or agent not in self.lessons:
+            raise Refused(TRY_NOT_BUILT)
+        if self.db_path is None or self.reports is None:
+            raise Refused("Try again needs the database folder. Start the page with --db.")
+        item = self.read_arena()[0].get(agent)
+        cards = retry_mod.lost_cards(item["lost"]) if item else []
+        if not cards:
+            raise Refused("Its latest Arena run lost no practice match, so there is nothing to try again.")
+        state = run_mod.state_dir(self.db_path)
+        if not retry_mod.has_room(state):
+            raise Refused("The day's model call cap has no room left, so nothing was started. Try again "
+                          "tomorrow, Cairo time.")
+        if self.retry_models is None:
+            from kit import model as model_mod
+            if not model_mod.has_key():
+                raise Refused("No model key is set, so Try again cannot play. Put META_API_KEY or "
+                              "BASETEN_API_KEY in .env and start the page again.")
+        with self._try_lock:
+            if agent in self._trying:
+                raise Refused("A try is running for this agent already. Its results show here when it ends.")
+            self._trying.add(agent)
+            self._try_note.pop(agent, None)
+        lessons, db_path = self.lessons[agent], self.db_path
+
+        def work():  # the thread's work: never raises, a failure becomes the screen's one line
+            note = None
+            try:
+                if self.retry_models is None:
+                    from kit import model as model_mod
+                    models = (model_mod.Model(), model_mod.Model())
+                else:
+                    models = self.retry_models()
+                pool = rounds_mod.Pool(lessons, hotfixes=lambda: rounds_mod.live_hotfixes(db_path, agent))
+                retry_mod.retry(agent=agent, run=item.get("run"), cards=cards, state=state, reports=self.reports,
+                                pool=pool, agent_model=models[0], customer_model=models[1],
+                                facts=item.get("facts", True) is not False,
+                                now=(lambda: now) if now is not None else time.time)
+            except Exception as e:
+                note = f"The last try could not run ({' '.join(str(e).split())[:200] or type(e).__name__})."
+            with self._try_lock:
+                self._trying.discard(agent)
+                if note:
+                    self._try_note[agent] = note
+        try:
+            self.retry_start(work, f"tryagain-{agent}")
+        except Exception:
+            with self._try_lock:
+                self._trying.discard(agent)
+            raise
+        return retry_mod.STARTED
 
     def paused(self, agent):
         """True while the agent's pause switch is on (kit/switch.py). Reads only: a database with no
@@ -1536,9 +1612,12 @@ class Morning:
     def read_arena(self):
         """The newest Arena item of each agent saved next to the database (arena/run.py stuck_item
         or rounds_item, arena/practice.py for an agent Quick start built): ({agent: {file, at, line, lost,
-        rounds, kind, gate_won, gate_played, needs, practice}}, the names that could not be read). The
-        gate counts are whole counts, or None when the item has none (Morning.gate)."""
-        out, problems = {}, []
+        rounds, kind, gate_won, gate_played, needs, practice, quick, run, facts, retry}}, the names that
+        could not be read). The gate counts are whole counts, or None when the item has none (Morning.gate).
+        retry: the newest Try again item (arena/retry.py, kind arena_retry) of that run, for the screen
+        only, as {file, at, results, stopped}, each result {card, result, why, text}; None when there is
+        none. A retry item is never the agent's item, so it never counts for the gate."""
+        out, problems, retries = {}, [], {}
         if self.reports is None or not self.reports.is_dir():
             return out, problems
         for path in sorted(self.reports.glob("arena-*-*.json")):
@@ -1546,12 +1625,17 @@ class Morning:
                 if path.stat().st_size > MAX_REPORT:
                     raise ValueError("too big")
                 item = json.loads(path.read_text(encoding="utf-8"))
-                if not isinstance(item, dict) or item.get("kind") not in ("arena_stuck", "arena_rounds") or \
+                if not isinstance(item, dict) or item.get("kind") not in ("arena_stuck", "arena_rounds", RETRY_KIND) or \
                         not isinstance(item.get("agent"), str) or not isinstance(item.get("line"), str) or \
                         not isinstance(item.get("at"), (int, float)) or path.name != f"arena-{item['agent']}-{item.get('run')}.json":
                     raise ValueError("not an Arena stuck item")
             except (OSError, ValueError, UnicodeDecodeError):
                 problems.append(f"A saved Arena item could not be read: {path.name}")
+                continue
+            if item["kind"] == RETRY_KIND:
+                seen = retries.get(item["agent"])
+                if seen is None or (item["at"], path.name) > (seen["at"], seen["file"]):
+                    retries[item["agent"]] = _retry_item(path.name, item)
                 continue
             lost = []
             for x in item.get("lost") if isinstance(item.get("lost"), list) else []:
@@ -1566,7 +1650,11 @@ class Morning:
                                       "gate_won": _count(item.get("gate_won")),
                                       "gate_played": _count(item.get("gate_played")),
                                       "needs": _count(item.get("needs")), "practice": item.get("practice") is True,
-                                      "quick": item.get("quick") is True}
+                                      "quick": item.get("quick") is True, "run": str(item.get("run")),
+                                      "facts": item.get("fact_checks") is not False, "retry": None}
+        for agent, got in retries.items():  # only a retry of the run on screen; a newer run hides an older try
+            if agent in out and got["retried"] == out[agent]["run"]:
+                out[agent]["retry"] = got
         return out, problems
 
     def read_mode_cards(self):
@@ -2874,7 +2962,9 @@ def _sheet(form):
 # The A3 page's own answers the two tab page never sends: they run no hold and no exam of the two tab kind
 # (Modify and the correction box do), so its server does not take them.
 A3_ONLY = ("/idea", "/edit")
-TWO_TAB_ACTIONS = {k: v for k, v in ACTIONS.items() if k not in A3_ONLY}
+TWO_TAB_ACTIONS = {**{k: v for k, v in ACTIONS.items() if k not in A3_ONLY},
+                   # Try again on the Arena screen (Morning.try_again): the two tab page only
+                   "/tryagain": lambda m, f, now=None: m.try_again(_field(f, "agent"), now=now)}
 
 
 def make_server(morning, *, port=int(PORT_DEFAULT), token=None, pages=None):
@@ -3232,6 +3322,22 @@ def _dicts(v):
 
 def _dict(v):
     return v if isinstance(v, dict) else {}
+
+
+RETRY_KIND = "arena_retry"  # arena/retry.py KIND, the Try again item
+RETRY_RESULTS = ("won", "lost", "not_played")  # arena/retry.py WON_AGAIN, STILL_LOST, NOT_PLAYED
+
+
+def _retry_item(name, item):
+    """A Try again item as read_arena hands it: what each retried card did, plain strings only."""
+    results = []
+    for x in item.get("results") if isinstance(item.get("results"), list) else []:
+        x, q = _dict(x), _dict(_dict(x).get("quote"))
+        if x.get("result") in RETRY_RESULTS and isinstance(x.get("card"), str):
+            results.append({"card": x["card"], "result": x["result"], "why": str(x.get("why") or ""),
+                            "text": str(q.get("text") or "")})
+    return {"file": name, "at": float(item["at"]), "retried": str(item.get("retried")), "results": results[:20],
+            "stopped": item.get("stopped") if isinstance(item.get("stopped"), str) else None}
 
 
 def _count(v):

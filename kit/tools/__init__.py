@@ -78,4 +78,4 @@ def run(name, args, ctx):
         return mod.run(args, ctx)
     except Exception:  # a tool failure must not end the turn
         log.exception("tool %s failed", name)
-        return {"ok": False, "feedback": f"The tool {name} failed. Say you will check with the team."}
+        return {"ok": False, "feedback": f"The tool {name} failed."}

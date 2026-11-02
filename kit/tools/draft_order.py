@@ -395,7 +395,7 @@ def _variant(catalogue, product, size, tier=None):
         what = " ".join(x for x in (v.get("tier"), v.get("size")) if x) or "this size"
         return None, None, f"{item['title']} in {what} is out of stock. Tell the customer."
     if "price" not in v:
-        return None, None, "This product has no price in the store data. Say you will check with the team."
+        return None, None, "This product has no price in the store data."
     return item, v, None
 
 

@@ -165,9 +165,9 @@ class Turns(unittest.TestCase):
 
     def test_voice_transcript_adds_no_amount(self):
         model = FakeModel(call("voice_note"), say('{"price": 5}'), say("The Vapor 17 Elite is 5 EGP."),
-                          say("I will check the price with the team."))
+                          say("That price is not in the store data."))
         r = self.turn(model, "", audio=b"RIFF fake", audio_mime="audio/wav")
-        self.assertEqual(self.out.sent, [(CUSTOMER, "I will check the price with the team.")])
+        self.assertEqual(self.out.sent, [(CUSTOMER, "That price is not in the store data.")])
         self.assertEqual(self.outcomes(r.chat_id), ["check_failed", "replied"])
 
     def test_three_calls_per_step_and_one_transcription(self):
@@ -202,9 +202,9 @@ class Turns(unittest.TestCase):
         stage = stages.STAGES["asking"]
         wider = dataclasses.replace(stage, tools=stage.tools + ("fake",))
         with mock.patch.dict(tools.TOOLS, {"fake": fake}), mock.patch.dict(stages.STAGES, {"asking": wider}):
-            r = self.turn(FakeModel(call("fake"), say("It costs 5 EGP."), say("I will check with the team.")),
+            r = self.turn(FakeModel(call("fake"), say("It costs 5 EGP."), say("That price is not in the store data.")),
                           "how much?")
-        self.assertEqual((r.outcome, self.out.sent), ("replied", [(CUSTOMER, "I will check with the team.")]))
+        self.assertEqual((r.outcome, self.out.sent), ("replied", [(CUSTOMER, "That price is not in the store data.")]))
         self.assertEqual(self.outcomes(r.chat_id), ["check_failed", "replied"])
 
     def test_one_model_error_keeps_the_stage_and_asks_again(self):
@@ -266,7 +266,7 @@ class Turns(unittest.TestCase):
         def answer(messages, tools_sent):
             self.assertEqual(tool_names(tools_sent), ["voice_note", "find_order", "switch_stage"])
             self.assertIn("stage my_order", messages[0]["content"])
-            return say("I will check your order with the team and reply here.")
+            return say("Which governorate is it going to?")
 
         model = FakeModel(call("switch_stage", to="my_order", reason="asks about an order"), answer)
         r = self.turn(model, "Where is my order?")

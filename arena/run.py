@@ -374,7 +374,7 @@ class Arena:
         pool: the owner's practice pool (arena/grow.py), which counts each training match's result.
         before_match: called before every match (arena/rounds.py Pool.refresh: the live corrections).
         notes: the run's quick notes (arena/notes.py RunNotes): one written after each lost training
-        match, handed in the next matches, dropped once the step between rounds has run."""
+        match, every one of them handed in the next matches, dropped once the step between rounds has run."""
         if pool is None:
             self.train, self.held = split(cards, held_out, seed=seed)
             self.gate_cards = [c for c in self.held if can_buy(c)]  # a card that will not buy is no test of the agent
@@ -444,8 +444,8 @@ class Arena:
                     rounds[-1]["reflection"] = got
                 if self.notes is not None:  # the study has read the lost matches its notes came from
                     dropped = self.notes.clear(r - 1)
-                    if dropped is not None:
-                        rounds[-1]["training"].setdefault("notes", []).append(dropped)
+                    if dropped:
+                        rounds[-1]["training"].setdefault("notes", []).extend(dropped)
                 if self.calls.reached:  # the cap came during the night study: stop here, nothing unchecked goes on
                     self.halt = CAP
                     return self._report(rounds, CAP)

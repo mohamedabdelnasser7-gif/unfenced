@@ -71,7 +71,7 @@ def quote(place):
     gov = found[0]
     zone = next((z for z in store.delivery().get("zones", []) if z.get("area") == gov["zone"]), None)
     if zone is None or not all(k in zone for k in ("fee", "days_min", "days_max")):
-        return {"ok": False, "note": "The delivery data has no fee for this governorate. Say you will check with the team."}
+        return {"ok": False, "note": "The delivery data has no fee for this governorate."}
     return {"ok": True, "governorate": gov["name"], "governorate_ar": gov["name_ar"], "area": zone["area"],
             "fee": zone["fee"], "days_min": zone["days_min"], "days_max": zone["days_max"]}
 

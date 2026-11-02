@@ -1,5 +1,5 @@
 # For judges
-*Created: 2026-10-31. Last updated: 2026-11-01.*
+*Created: 2026-10-31. Last updated: 2026-11-02.*
 
 Every model this project calls is a Meta model: Muse Spark on the Meta Model API, or Muse Spark Open on Baseten. You do not need to connect any other account. The store name is made up; the products and prices are real; the practice customers are built from real chats with names, numbers and addresses removed.
 
@@ -34,6 +34,14 @@ python3 -I arena/run.py --quick
 The Arena plays practice customers against the Sales agent and then runs a small gate. By default they are the cards built from cleaned real chats in `arena/real/cards` (names, numbers and addresses removed); `--cards demo/personas/cards` plays the made-up set instead. The quick run is one round with one training match and a gate of one match, and it stops at 40 model calls at most. Its files go to `data/arena-quick`, which git ignores. It ends with a short report: what each match ended on, the gate result and the calls used. Exit code 0 means the gate passed, 1 means it did not, 2 means it did not run (the line above it says why).
 
 The full run drops `--quick` and names a folder for its files with `--state` (options at the top of `arena/run.py`).
+
+## Agents of one kind learning together
+
+```
+python3 -I demo/make_loop_state.py
+```
+
+This writes a made-up owner to `data/demo-loop`: two Sales style agents of one kind, a support agent, a few made-up chats and one lesson the first agent kept. It prints three night commands. With a key, run them in order: the first two grow practice customers from their lost chats, each of its own kind, and the last finds its sibling's kept lesson, adapts it and holds it for a yes, since it has no exam to try it through yet.
 
 ## No key: the recorded replay
 

@@ -2993,7 +2993,7 @@ def page_exams(plugs, morning, db=None):
     the Arena wins next to db or in the agent's folder; none for an agent whose plug names no exam."""
     out = {}
     for p in plugs:
-        make = night_mod.agent_exam(p, db)
+        make = night_mod.agent_exam(p, db, scope=True)  # a correction on the page answers in about a minute
         if make is not None and p.agent in morning.lessons:
             out[p.agent] = make(morning.lessons[p.agent])
     return out

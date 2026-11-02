@@ -225,7 +225,7 @@ class Pages:
 # ---- Today -------------------------------------------------------------------------------------
 
 def _hidden(ctx, **kv):
-    kv = dict(token=ctx["token"], back=ctx["path"] + ctx["q"], **kv)
+    kv = {"token": ctx["token"], "back": ctx["path"] + ctx["q"], **kv}  # back may be given
     return "".join(f'<input type="hidden" name="{h(k)}" value="{h(v)}">' for k, v in kv.items())
 
 
@@ -756,6 +756,17 @@ def _cap(t):
     return t[:1].upper() + t[1:]
 
 
+def correct_this(ctx, agent):
+    """Correct this, under a reply the agent lost a practice match on: the same correction as the box on
+    the agent's page (Morning.correct, a hotfix through the short exam), sent from beside the reply it
+    is about; the answer shows on the agent's page."""
+    return (f'<details class="fix"><summary>{icon("loop")}Correct this</summary><form method="post" action="/correct">'
+            f'{_hidden(ctx, agent=agent, back=f"/agents/{agent}")}<div class="box"><textarea name="line" '
+            f'aria-label="What it should do here" placeholder="What should it do here?" maxlength="{mo.MAX_LEN}" '
+            f'dir="auto" required></textarea></div><div class="say-f"><p class="quiet">{SAY_NOTE}</p>'
+            f'<button class="send" type="submit">Send{icon("arrow")}</button></div></form></details>')
+
+
 def build(m, agent, ctx):
     """Screen 2: the newest Arena run saved next to the database for this agent: the climb as a
     path, the matches it lost as tiles with why. No total of won and lost (the trust level stays
@@ -763,15 +774,17 @@ def build(m, agent, ctx):
     arena, _ = m.read_arena()
     run = arena.get(agent) if agent else None
     title = f"Building your {name(agent).lower()}" if agent else "Building your agent"
+    tok = ctx["token"] if agent and agent in m.lessons else None
     tiles, seen = [], set()
     for x in (run or {}).get("lost") or []:  # one tile a practice case and line; the card's id is never shown
         if (x["card"], x["text"]) in seen:
             continue
         seen.add((x["card"], x["text"]))
         quote = f'<p class="out" dir="auto">"{h(x["text"])}"</p>' if x["text"] else ""
+        fix = correct_this(ctx, agent) if tok and x["text"] else ""
         tiles.append(f'<article class="tile lost"><div class="t-h"><span class="pav">{icon("chat")}</span><div>'
                      '<b>Practice case</b><small>Made up for the Arena</small></div><span class="res">Lost</span>'
-                     f'</div><p class="persona" dir="auto">{h(_cap(x["why"]))}.</p>{quote}</article>')
+                     f'</div><p class="persona" dir="auto">{h(_cap(x["why"]))}.</p>{quote}{fix}</article>')
     if not tiles:
         tiles.append('<div class="ghost"><span class="pav" aria-hidden="true"></span>No saved practice run yet.</div>')
     when = f'Newest run, {mo._when(run["at"])}.' if run else "No saved run yet."

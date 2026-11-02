@@ -317,6 +317,12 @@ svg.i{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.6;
 .persona{margin:12px 0 0; font:400 19px/25px var(--font); letter-spacing:-.012em; text-wrap:pretty}
 .tags{display:flex; flex-wrap:wrap; gap:6px; margin-top:10px}
 .tags span{font:500 12px/16px var(--font); padding:3px 9px; border-radius:999px; background:var(--card-3); color:var(--ink-2); box-shadow:inset 0 0 0 1px var(--line)}
+.fix{margin-top:12px}
+.fix summary{display:inline-flex; align-items:center; gap:6px; cursor:pointer; list-style:none; font:600 14px/20px var(--font); color:var(--ink-2)}
+.fix summary::-webkit-details-marker{display:none}
+.fix summary svg.i{width:16px; height:16px}
+.fix .box{background:var(--card-3); box-shadow:inset 0 0 0 1px var(--line)}
+.fix textarea{min-height:72px; font-size:16px; line-height:22px}
 .out{margin:12px 0 0; padding-top:12px; border-top:1px solid var(--line); font:400 14px/20px var(--font); color:var(--ink-2); text-wrap:pretty}
 .out b{font-weight:500; color:var(--ink)}
 .live{box-shadow:var(--shadow-card), inset 0 0 0 1.5px rgba(42,51,50,.22)}

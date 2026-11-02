@@ -73,6 +73,7 @@ import logging
 import threading
 import time
 import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -379,6 +380,52 @@ def make_handler(secret, accept, timeout=SOCKET_TIMEOUT, deadline=REQUEST_DEADLI
     Handler.timeout = timeout
     Handler.slots = threading.BoundedSemaphore(max_open)
     return Handler
+
+
+# ---- the API status check (reflection/late.py runs it on the night run, DECISIONS item 66)
+# From Bosta's API spec (https://docs.bosta.co/api/api.yaml, read 2 Nov 2026): GET
+# /api/v2/deliveries/business/{trackingNumber} on app.bosta.co, the API key in the Authorization
+# header, answers {success, message, data: {state: {code, value}, type: {code, value}, ...}}.
+# The view carries no exceptionCode, so a refusal at the door (47 with code 8) cannot be told from
+# another failed attempt there: the API path records only delivered (45 on a send) and returned
+# to the business (46 on a send or its return leg), which this repo already counts as refused
+# (call 14A). A refusal still comes from the webhook or a person. No rate limit is documented, so
+# the night asks at most reflection/late.py MAX_ASKS a run, one at a time. Search by
+# businessReference (POST /deliveries/search) lists only a Bearer login in the spec, so the check
+# reads by tracking number alone.
+API_BASE = "https://app.bosta.co/api/v2/deliveries/business/"
+API_KEY = "BOSTA_API_KEY"
+MAX_API_BODY = 256 * 1024
+API_TIMEOUT = 15
+
+
+def api_outcome(tracking, key, *, opener=None, timeout=API_TIMEOUT):
+    """(delivered or refused or None, the state code) for one tracking number, from Bosta's API.
+    Raises on a failed call, so the caller counts it and moves on. The key is sent only to
+    app.bosta.co, with no redirect followed, and never logged."""
+    from kit import net
+    tracking = _text(tracking)
+    if not tracking or len(tracking) > 64 or not tracking.isalnum():
+        raise ValueError("not a tracking number")
+    if not key:
+        raise ValueError(f"{API_KEY} is not set")
+    req = urllib.request.Request(API_BASE + urllib.parse.quote(tracking, safe=""),
+                                 headers={"Authorization": key, "Accept": "application/json"})
+    with (opener or net.open_once)(req, timeout) as r:
+        raw = r.read(MAX_API_BODY + 1)
+    if len(raw) > MAX_API_BODY:
+        raise ValueError("the answer was too large")
+    data = json.loads(raw)
+    view = data.get("data") if isinstance(data, dict) else None
+    view = view if isinstance(view, dict) else {}
+    state = view.get("state") if isinstance(view.get("state"), dict) else {}
+    kind = view.get("type") if isinstance(view.get("type"), dict) else {}
+    code, kind = _number(state.get("code")), _text(kind.get("value")).upper()
+    if code == DELIVERED and kind in FORWARD:
+        return "delivered", code
+    if code == RETURNED and (kind in FORWARD or kind == RETURN_LEG):
+        return "refused", code
+    return None, code
 
 
 def team_sender():

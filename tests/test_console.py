@@ -19,6 +19,7 @@ from pathlib import Path
 
 from arena import run
 from engine import exam as exam_mod
+from engine import lessons as lessons_mod
 from engine import plug as plug_mod
 from engine import risk
 from kit.chats import Chats
@@ -38,10 +39,13 @@ FAILED = exam_mod.Result(False, [exam_mod.Row(3, "late", "guard", False, "late_o
 
 
 def lesson(db, text, state, *, source="seed", at=NOW, yes_by=None):
+    """A lesson row with its stage and field tags in the form the engine saves them (",all,"), so
+    Lessons.live and pick find it like one the plug added."""
     with db.tx() as c:
         cur = c.execute("INSERT INTO lessons (agent, text, stages, fields, risk, state, ends_at, source, origin, kind, "
-                        "yes_by, yes_at, added_at) VALUES ('sales', ?, '[\"all\"]', '[]', 'low', ?, ?, ?, 'agent', "
-                        "'pattern', ?, ?, ?)", (text, state, at + 86400 if state == "trying" else None, source, yes_by,
+                        "yes_by, yes_at, added_at) VALUES ('sales', ?, ?, ?, 'low', ?, ?, ?, 'agent', "
+                        "'pattern', ?, ?, ?)", (text, lessons_mod.tag_text(["all"]), lessons_mod.tag_text([]), state,
+                                                 at + 86400 if state == "trying" else None, source, yes_by,
                                                  at if yes_by else None, at))
         return cur.lastrowid
 

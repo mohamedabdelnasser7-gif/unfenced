@@ -43,6 +43,7 @@ from reflection import console as console_mod
 from reflection import morning as mo
 from reflection import quickstart as qs_mod
 from reflection import snapshots
+from reflection import try_sales as try_mod
 from reflection.page_css import CSS
 
 CSP = ("default-src 'none'; style-src 'sha256-" + base64.b64encode(hashlib.sha256(CSS.encode("utf-8")).digest()).decode()
@@ -106,9 +107,10 @@ class Pages:
 
     LIVE = "live"
 
-    def __init__(self, morning=None, *, days=None, at=None, live=None, model=None):
+    def __init__(self, morning=None, *, days=None, at=None, live=None, model=None, try_model=None):
         """at: {day: the time that day's page shows}, a sample's own clock; the real clock otherwise
-        and always on Live. model: Quick start's model (a fake in tests); None uses kit.model."""
+        and always on Live. model: Quick start's model (a fake in tests); None uses kit.model.
+        try_model: Try Sales's model (a fake in tests); None uses kit.model once a key is set."""
         self.days = dict(days or {})
         self.at = dict(at or {})
         self.live = live if self.days else None  # with no sample days the page has no switch
@@ -116,10 +118,14 @@ class Pages:
         self.morning = morning if morning is not None else (self.days[min(self.days)] if self.days else None)
         self.csp = CSP
         self.quick = qs_mod.QuickStart(model)
+        self.try_sales = try_mod.TrySales(try_model)  # its own database in memory, never the page's
         # the page's own answers, taken by the server next to morning.TWO_TAB_ACTIONS
         self.actions = {"/quickstart": lambda m, f, now=None: self._quick(self.quick.say, m, now, mo._field(f, "text")),
                         "/quickstart/build": lambda m, f, now=None: self._build(m, now),
                         "/quickstart/clear": lambda m, f, now=None: self._quick(self.quick.clear, m, now),
+                        # Try Sales on the Sales agent's page (reflection/try_sales.py): the demo store, never counts
+                        "/try/sales": lambda m, f, now=None: self._try(self.try_sales.say, m, now, mo._field(f, "text")),
+                        "/try/sales/clear": lambda m, f, now=None: self._try(self.try_sales.clear, m, now),
                         # the console's Operator correction: the same path as the agent page's (Morning.correct)
                         "/console/correct": lambda m, f, now=None: m.correct(mo._field(f, "agent"), mo._field(f, "line"),
                                                                              now=now, by=console_mod.OPERATOR)}
@@ -171,6 +177,13 @@ class Pages:
         except qs_mod.Refused as e:
             raise mo.Refused(str(e)) from None
 
+    @staticmethod
+    def _try(step, m, now, *args):
+        try:
+            return step(m, *args, now=now)
+        except try_mod.Refused as e:
+            raise mo.Refused(str(e)) from None
+
     def _build(self, m, now):
         """Build, then the new agent joins the running page (Morning.add_built): its plug, Pull and exam
         with no restart. The agent is built already when that fails, so the flash says so and asks for a
@@ -203,7 +216,7 @@ class Pages:
         m = self._m(day) if self.demo else self.morning
         q = f"?day={day}" if self.demo else ""
         now = self.at.get(day) if self.demo else None
-        ctx = {"token": token, "q": q, "day": day, "path": path, "m": m, "now": now}
+        ctx = {"token": token, "q": q, "day": day, "path": path, "m": m, "now": now, "try": self.try_html}
         if path == "/":
             return self.shell(today(m.view(now=now), ctx), "today", ctx, flash)
         if path == "/agents":
@@ -225,6 +238,31 @@ class Pages:
                 return None
             return console_mod.page(m, agent, query, token=token, flash=flash, now=now, day=day if self.demo else None)
         return None
+
+    def try_html(self, ctx):
+        """Try Sales on the Sales agent's page: the thread (the customer's lines and the agent's replies,
+        as written), the box, Send and Start over, and what it runs on."""
+        t = self.try_sales
+        rows = []
+        for turn in t.thread():
+            rows.append(f'<p class="said me" dir="auto">{h(turn["said"])}</p>')
+            rows += [f'<p class="said ag" dir="auto">{h(r)}</p>' for r in turn["replies"]]
+            if not turn["replies"]:
+                rows.append(f'<p class="said no">No reply ({h(turn["outcome"].replace("_", " "))}).</p>')
+        thread = f'<div class="thread">{"".join(rows)}</div>' if rows else ""
+        ready = t.ready()
+        form = ""
+        if ctx["token"] and ready:
+            over = _post(ctx, "try/sales/clear", "Start over", "over") if rows else ""
+            form = (f'<form id="try-say" method="post" action="/try/sales">{_hidden(ctx)}<div class="box"><textarea '
+                    f'name="text" aria-label="Your message to the Sales agent" maxlength="{try_mod.MAX_TEXT}" dir="auto" '
+                    'required placeholder="Ask about a product, a size or delivery, like a customer would."></textarea>'
+                    f'</div></form><div class="say-f"><p class="quiet">{icon("chat")}{try_mod.NOTE}</p>{over}'
+                    f'<button class="send" type="submit" form="try-say">Send{icon("arrow")}</button></div>')
+        elif not ready:
+            form = f'<p class="quiet">{try_mod.NO_KEY}</p>'
+        return (f'<section class="say try sq" aria-label="Try Sales"><span class="lab">Try Sales</span>{thread}{form}'
+                '</section>')
 
     def shell(self, body, on, ctx, flash):
         q = ctx["q"]
@@ -578,6 +616,8 @@ def agent_page(m, view, agent, ctx):
            f'</small></div><div class="st-r">{roll}{pull}</div></section>']
     if conns:
         out.append(connections_html(agent, conns, ctx, tok))
+    if tok and agent == mo.SALES.agent and ctx.get("try") is not None:
+        out.append(ctx["try"](ctx))
     if tok:
         out.append(f'<section class="say sq" aria-label="Send an idea or a correction"><form method="post" action="/correct">'
                    f'{_hidden(ctx, agent=agent)}<span class="lab">Send an idea or a correction</span><div class="box">'

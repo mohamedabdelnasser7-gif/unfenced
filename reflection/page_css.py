@@ -486,5 +486,12 @@ textarea.typed{width:100%; border:0; background:transparent; resize:none; outlin
 }
 .conn .act{margin:2px 0 14px}
 .conn .yes[disabled]{opacity:.45; cursor:not-allowed; filter:none; transform:none}
+.try .thread{display:flex; flex-direction:column; gap:6px; margin-top:12px}
+.try .said{max-width:86%; margin:0; padding:8px 12px; border-radius:16px; font:400 14px/20px var(--font); white-space:pre-line; overflow-wrap:anywhere}
+.try .said.me{align-self:flex-end; border-bottom-right-radius:6px; background:#e3e9e6}
+.try .said.ag{align-self:flex-start; border-bottom-left-radius:6px; background:var(--card-3); box-shadow:inset 0 0 0 1px var(--line)}
+.try .said.no{align-self:flex-start; color:var(--ink-2); font-style:italic}
+.try .say-f form{margin:0}
+.try .over{height:44px; padding:0 14px; border:0; border-radius:22px; background:none; font:500 14px/44px var(--font); color:var(--ink-2); cursor:pointer}
 
 """

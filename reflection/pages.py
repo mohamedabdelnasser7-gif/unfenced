@@ -8,10 +8,13 @@ Morning methods only, so no engine rule lives here.
                    cards, the cases waiting on a result only a person can bring, with a button per
                    result and a sheet upload (reflection/morning.py, Late results; DECISIONS 66).
     /agents        the agents (the plugs in the repo and the agents in the database) and New agent.
-                   An agent shows Live when it works on real chats or cases (Morning._live), else
-                   Training: only Arena practice.
-    /agents/<name> one agent: its status with Pull (the pause switch, Resume when paused) and Roll
-                   back, the box for an idea or a correction (Morning.correct, a hotfix), then its
+                   An agent shows Live while the user has it connected on a channel (Morning._live,
+                   DECISIONS item 77), else Training; real chats are history, never the switch.
+    /agents/<name> one agent: its status with Pull and Roll back, then Connections: each channel it
+                   asks for with one line, and Connect to WhatsApp, greyed out with the reason until
+                   its latest Arena gate passed (Morning.gate). Pull takes a live agent off its
+                   channels; an agent no channel runs keeps Pull as the pause switch, Resume when
+                   paused. Then the box for an idea or a correction (Morning.correct, a hotfix), its
                    lessons and Reflection notes as rows.
     /agents/<name>/rollback  what Roll back would do, lesson by lesson, and its one button.
     /new           New agent, Quick start B screen 1: the Quick start chat (reflection/quickstart.py), its
@@ -526,9 +529,14 @@ def agent_page(m, view, agent, ctx):
         roll = f'<a class="gb" href="/agents/{h(agent)}{ROLLBACK}{ctx["q"]}">{icon("undo")}Roll back</a>'
     elif a["buttons"]:
         roll = f'<button class="gb" type="button" disabled>{icon("undo")}Roll back</button>'
-    if tok and m.pausable(agent):  # the real pause switch (DECISIONS 54, Morning.pause and resume)
-        pull = (_post(ctx, "resume", f'{icon("loop")}Resume', "gb", agent=agent) if st == "Paused"
-                else _post(ctx, "pause", f'{icon("pause")}Pull', "gb", agent=agent))
+    conns = m.connection_view(agent) if agent in m.plugs else []
+    if tok and st == "Paused" and m.pausable(agent):
+        pull = _post(ctx, "resume", f'{icon("loop")}Resume', "gb", agent=agent)
+    elif tok and any(c["works"] for c in conns):  # live on a channel: Pull takes it off (DECISIONS 77)
+        pull = (_post(ctx, "disconnect", f'{icon("pause")}Pull', "gb", agent=agent) if any(c["live"] for c in conns)
+                else f'<button class="gb" type="button" disabled title="{NOT_LIVE}">{icon("pause")}Pull</button>')
+    elif tok and m.pausable(agent):  # the real pause switch (DECISIONS 54, Morning.pause and resume)
+        pull = _post(ctx, "pause", f'{icon("pause")}Pull', "gb", agent=agent)
     else:
         pull = f'<button class="gb" type="button" disabled title="Not built for this agent yet">{icon("pause")}Pull</button>'
     out = [f'<div class="colhead"><a class="back" href="/agents{ctx["q"]}">{icon("back")}Agents</a>'
@@ -536,6 +544,8 @@ def agent_page(m, view, agent, ctx):
            f'<section class="status sq" aria-label="Status"><div class="st-l"><span class="states" role="img" '
            f'aria-label="Status: {st}">{states}</span><small>{STATUS_SAID[st]}'
            f'</small></div><div class="st-r">{roll}{pull}</div></section>']
+    if conns:
+        out.append(connections_html(agent, conns, ctx, tok))
     if tok:
         out.append(f'<section class="say sq" aria-label="Send an idea or a correction"><form method="post" action="/correct">'
                    f'{_hidden(ctx, agent=agent)}<span class="lab">Send an idea or a correction</span><div class="box">'
@@ -565,6 +575,49 @@ def agent_page(m, view, agent, ctx):
     out.append('<section class="grp sq" aria-labelledby="r-h"><h3 id="r-h">Reflection notes</h3>'
                + ("".join(notes) or '<div class="nr"><p>Nothing yet.</p></div>') + "</section></div>")
     return "".join(out)
+
+
+# Deploy on an agent's page (DECISIONS item 77, Morning.connect and disconnect): page text, never a model's.
+NOT_LIVE = "Not live on any channel"
+LOCKED = "Locked until its latest Arena gate passes."
+QUICK_NEXT = "Connecting an agent made in Quick start to {name} is next."
+
+
+def connection_line(c):
+    """The one line under a channel the agent asks for: live since when and the gate result that
+    unlocked it, or why Connect waits, or not connected yet."""
+    if c["live"]:
+        return f'Live on {c["name"]} since {mo._when(c["at"])}. {c["why"]}'
+    if not c["works"]:
+        if c["channel"] == "whatsapp":
+            return f'{QUICK_NEXT.format(name=c["name"])} {c["gate"]["said"]}'
+        return "Not connected yet."
+    pulled = f'Pulled {mo._when(c["at"])}. ' if c["at"] is not None else ""
+    if c["gate"]["passed"]:
+        return f'{pulled}{c["gate"]["said"]} Connect it when you are ready.'
+    return f'{pulled}{LOCKED} {c["gate"]["said"]}'
+
+
+def connections_html(agent, conns, ctx, tok):
+    """Each channel the agent asks for, with its line, and Connect for WhatsApp: a button only after
+    the latest Arena gate passed, greyed out with the reason before."""
+    rows = []
+    for c in conns:
+        line = connection_line(c)
+        chip = '<span class="vchip trial">Live</span>' if c["live"] else '<span class="vchip">Not connected</span>'
+        rows.append(f'<div class="lr"><b>{h(c["name"])}</b>{chip}<small>{h(line)}</small></div>')
+        if c["channel"] != "whatsapp" or c["live"]:
+            continue
+        label = f'Connect to {h(c["name"])}{icon("arrow")}'
+        if tok and c["works"] and c["gate"]["passed"]:
+            rows.append('<div class="act">' + _post(ctx, "connect", label, "yes", agent=agent, channel=c["channel"])
+                        + "</div>")
+        else:
+            why = LOCKED if c["works"] else QUICK_NEXT.format(name=c["name"])
+            rows.append(f'<div class="act"><button class="yes" type="button" disabled title="{h(why)}">{label}'
+                        "</button></div>")
+    return ('<section class="grp sq conn" aria-labelledby="k-h"><h3 id="k-h">Connections</h3>'
+            + "".join(rows) + "</section>")
 
 
 # What a rollback does to each lesson the plan names (reflection/snapshots.py plan), in plain words:

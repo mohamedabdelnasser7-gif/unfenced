@@ -332,7 +332,7 @@ class MediaMarkTest(TurnBase):
     def test_over_a_limit_a_photo_with_a_yes_caption_is_marked(self):
         from channels.whatsapp import App, Incoming
         self.summary()
-        app = App(self.chats, None, Lessons(self.db), self.results, NoGraph(), limits=Limits(self.db))
+        app = App(self.chats, None, Lessons(self.db), self.results, NoGraph(), limits=Limits(self.db), connected=True)
         self.chats.first_seen("wamid.p1")
         r = app.work_one(("customer", Incoming("wamid.p1", ME, 1, "image", text="تمام", media_id="111",
                                                media_mime="image/jpeg")))

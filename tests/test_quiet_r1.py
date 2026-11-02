@@ -189,7 +189,7 @@ class Queued(Base):
 
     def app(self):
         graph = TypingGraph(b"", "audio/ogg")
-        return wa.App(self.chats, FakeModel(say(ANSWER), say(ANSWER)), self.lessons, self.results, graph), graph
+        return wa.App(self.chats, FakeModel(say(ANSWER), say(ANSWER)), self.lessons, self.results, graph, connected=True), graph
 
     def test_a_queued_yes_before_the_close_keeps_the_chat_and_lands_in_it(self):
         app, graph = self.app()

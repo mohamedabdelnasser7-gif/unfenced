@@ -304,7 +304,7 @@ class ThePauseSwitch(Base):
 class TheRunningAgent(Base):
     def test_the_sweep_thread_ticks_first_then_sweeps(self):
         order = []
-        app = wa.App(self.chats, None, None, self.results, SendingGraph(b"", "audio/ogg"))
+        app = wa.App(self.chats, None, None, self.results, SendingGraph(b"", "audio/ogg"), connected=True)
         app.quiet_once = lambda: order.append("tick")
         app.sweep_once = lambda: order.append("sweep")
         stop = threading.Event()
@@ -322,7 +322,7 @@ class TheRunningAgent(Base):
 
     def test_the_app_ticks_on_its_clock_and_sends_through_graph(self):
         graph = TypingGraph(b"", "audio/ogg")
-        app = wa.App(self.chats, FakeModel(say(ANSWER)), self.lessons, self.results, graph)
+        app = wa.App(self.chats, FakeModel(say(ANSWER)), self.lessons, self.results, graph, connected=True)
         app.accept(wa.parse(payload(text_msg("wamid.m1", "التوصيل بكام؟", frm=WHO))))
         chat_id = app.work_one(app.q.get_nowait()).chat_id
         self.later(quiet.NOTICE_AFTER)
@@ -342,7 +342,7 @@ class TheRunningAgent(Base):
         broken = Broken()
         broken.db = self.db
         with self.assertLogs("channels.whatsapp", "ERROR"):
-            self.assertEqual(wa.App(broken, None, None, self.results, SendingGraph(b"", "audio/ogg")).quiet_once(), [])
+            self.assertEqual(wa.App(broken, None, None, self.results, SendingGraph(b"", "audio/ogg"), connected=True).quiet_once(), [])
 
 
 if __name__ == "__main__":

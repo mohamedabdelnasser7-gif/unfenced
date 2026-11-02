@@ -80,13 +80,15 @@ class TheSwitchSaysWho(unittest.TestCase):
 
 
 class PullIsThePauseSwitch(Base):
-    """Finding 10: Pull pauses the agent for real, signed by the page's person; Resume when paused."""
+    """Finding 10: the pause switch pauses the agent for real, signed by the page's person; Resume when
+    paused. On the Sales agent's page Pull takes it off WhatsApp (DECISIONS item 77, test_connect.py), so
+    while it is not live Pull is greyed out, and a pause left from before still shows Resume."""
 
     def test_pull_then_resume(self):
         page = self.page()
-        self.assertIn('action="/pause"', page)
+        self.assertNotIn('action="/pause"', page)
         self.assertNotIn('action="/resume"', page)
-        self.assertNotIn("disabled title=\"Not built", page.split('class="st-r"')[1].split("</section>")[0])
+        self.assertIn('disabled title="Not live on any channel"', page.split('class="st-r"')[1].split("</section>")[0])
         said = mo.TWO_TAB_ACTIONS["/pause"](self.m, {"agent": ["sales"]}, now=NOW)
         self.assertIn("Paused", said)
         self.assertTrue(switch.is_paused("sales", db=self.db))
@@ -102,7 +104,7 @@ class PullIsThePauseSwitch(Base):
         self.assertIn("Resumed", said)
         self.assertFalse(switch.is_paused("sales", db=self.db))
         self.assertEqual(switch.resumed_at("sales", db=self.db), NOW + 60)  # quiet counts from here
-        self.assertIn('action="/pause"', self.page())
+        self.assertNotIn('action="/resume"', self.page())
         self.assertIn("already", self.m.resume("sales", now=NOW + 61))
         self.assertEqual(switch.resumed_at("sales", db=self.db), NOW + 60)  # a second Resume moves nothing
 
@@ -173,7 +175,8 @@ class OverTheServer(Base):
         self.assertIn('action="/resume"', page)
         status, page = self.post("/resume", [("agent", "sales")])
         self.assertFalse(switch.is_paused("sales", db=self.db))
-        self.assertIn('action="/pause"', page)
+        self.assertNotIn('action="/resume"', page)
+        self.assertIn('aria-label="Status: Training"', page)
 
     def test_no_origin_a_wrong_host_or_a_wrong_token_changes_nothing(self):
         self.assertEqual(self.post("/pause", [("agent", "sales")], origin=False)[0], 403)

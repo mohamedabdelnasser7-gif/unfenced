@@ -754,7 +754,7 @@ class Sales(unittest.TestCase):
     def test_the_running_agent_hands_the_note_to_the_turn_and_sweeps(self):
         graph = SendingGraph(b"", "audio/ogg")
         model = FakeModel(say(self.ANSWER))
-        app = wa.App(self.chats, model, self.lessons, self.results, graph, fast=self.fast)
+        app = wa.App(self.chats, model, self.lessons, self.results, graph, fast=self.fast, connected=True)
         app.accept(wa.parse(payload(text_msg("m1", self.ASK, frm=self.CUSTOMER))))
         first = app.work_one(app.q.get_nowait()).chat_id
         self.later(quiet.NOTICE_AFTER)
@@ -777,7 +777,7 @@ class Sales(unittest.TestCase):
             release.wait(5)
             return TONE
         app = wa.App(self.chats, FakeModel(say(self.ANSWER)), self.lessons, self.results, SendingGraph(b"", "audio/ogg"),
-                     fast=sales_fast.FastNotes(self.db, self.chats, writer=slow))
+                     fast=sales_fast.FastNotes(self.db, self.chats, writer=slow), connected=True)
         app.accept(wa.parse(payload(text_msg("m1", self.ASK, frm=self.CUSTOMER))))
         app.work_one(app.q.get_nowait())
         self.close_quiet()
@@ -804,8 +804,8 @@ class Sales(unittest.TestCase):
         class Broken:
             def sweep(self):
                 raise RuntimeError("down")
-        self.assertEqual(wa.App(self.chats, None, None, None, None, fast=Broken()).sweep_once(), [])
-        self.assertEqual(wa.App(self.chats, None, None, None, None).sweep_once(), [])
+        self.assertEqual(wa.App(self.chats, None, None, None, None, fast=Broken(), connected=True).sweep_once(), [])
+        self.assertEqual(wa.App(self.chats, None, None, None, None, connected=True).sweep_once(), [])
 
 
 if __name__ == "__main__":

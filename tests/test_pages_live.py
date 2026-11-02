@@ -1,7 +1,8 @@
 """The two tab page on a live database where an agent answers real chats and no night has run yet
 (root's check at 390, 2026-11-01): Today lists the agents the Agents tab lists, an agent with real
-chats shows Live and says it answered chats today, Training only with Arena practice alone, and the
-day switch with the Sample chip keeps every label on one line. Temp databases only, no model call."""
+chats says it answered chats today, Live only while the user has it connected on a channel (DECISIONS
+item 77: real chats are history, never the switch), and the day switch with the Sample chip keeps every
+label on one line. Temp databases only, no model call."""
 import json
 import re
 import tempfile
@@ -10,6 +11,7 @@ import unittest
 from pathlib import Path
 
 from engine import log as log_mod
+from kit import connections
 from kit.chats import Chats
 from kit.db import Db
 from reflection import morning as mo
@@ -39,6 +41,9 @@ class LiveDatabase(unittest.TestCase):
         with self.db.tx() as c:
             c.execute("INSERT INTO trace (agent, case_id, action, detail, at) VALUES (?, ?, ?, ?, ?)",
                       (agent, "c1", "reply", None if detail is None else json.dumps(detail), time.time()))
+
+    def connect(self):
+        connections.connect(self.db, "sales", "whatsapp", why="The gate passed.", by=mo.BY)
 
     def status(self, page, agent):
         return re.search(rf'<b>{re.escape(pages.name(agent))}</b><span class="st(?: live)?">(\w+)</span>', page).group(1)
@@ -84,10 +89,13 @@ class LiveDatabase(unittest.TestCase):
         self.assertNotIn("No agents yet", today)
         self.assertEqual(today.count("No night yet."), len(self.m.plugs))
 
-    # 3. Live when it answers real chats, Training with Arena practice only
+    # 3. Live while connected on a channel; real chats alone stay Training
 
-    def test_real_chats_show_live_on_both_tabs_and_the_agent_page(self):
+    def test_connected_shows_live_on_both_tabs_and_the_agent_page(self):
         self.chat()
+        self.assertEqual(self.status(self.p.get("/agents", {}, "t"), "sales"), "Training")  # chats are history
+        self.assertIn('aria-label="Status: Training"', self.p.get("/agents/sales", {}, "t"))
+        self.connect()
         self.assertEqual(self.status(self.p.get("/agents", {}, "t"), "sales"), "Live")
         self.assertIn(f'<b>{pages.name("sales")} <span class="st live">Live</span>', self.last_night())
         page = self.p.get("/agents/sales", {}, "t")
@@ -102,13 +110,17 @@ class LiveDatabase(unittest.TestCase):
         self.assertEqual(self.m._live(), set())
         self.assertIn("Practising in the Arena", self.p.get("/agents/sales", {}, "t"))
 
-    def test_a_real_log_row_shows_live(self):
+    def test_a_real_log_row_is_history_not_live(self):
         self.trace("marketing")
         self.trace("sales", {"history": False})
-        self.assertEqual(self.m._live(), {"marketing", "sales"})
+        self.assertEqual(self.m._live(), set())
+        self.assertEqual(self.m._worked(), {"marketing", "sales"})
+        self.connect()
+        self.assertEqual(self.m._live(), {"sales"})
 
     def test_live_tab_next_to_sample_days(self):
         self.chat()
+        self.connect()
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         day = Db(str(Path(tmp.name) / "day1.db"))

@@ -478,5 +478,7 @@ textarea.typed{width:100%; border:0; background:transparent; resize:none; outlin
   .qs .uq{font-size:20px; line-height:28px}
   .qs textarea.typed.sm{font-size:20px; line-height:28px}
 }
+.conn .act{margin:2px 0 14px}
+.conn .yes[disabled]{opacity:.45; cursor:not-allowed; filter:none; transform:none}
 
 """

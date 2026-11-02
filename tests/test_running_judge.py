@@ -140,7 +140,7 @@ class EachReplyKeepsItsLessons(unittest.TestCase):
         self.assertEqual((les["state"], les["share"]), ("trying", PLUG.level("careful").share))
         model = FakeModel(*[say("Ask me anything.")] * self.CHATS)
         results = Results(self.db)
-        app = wa.App(Chats(self.db), model, lessons, results, Graph(), limits=Limits(self.db))
+        app = wa.App(Chats(self.db), model, lessons, results, Graph(), limits=Limits(self.db), connected=True)
         for n in range(self.CHATS):
             app.accept(wa.parse(payload(text_msg(f"m{n}", "hello there, a question", frm=f"2011111111{n:02d}"))))
             self.assertEqual(app.work_one(app.q.get_nowait()).outcome, "replied")

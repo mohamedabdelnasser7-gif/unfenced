@@ -21,6 +21,12 @@ It listens on 127.0.0.1:PORT (default 8080). Meta must reach it through a public
   closed, so idle connections cannot hold a thread each without end. Meta retries.
 - Media: only from Meta's media host over https, with no redirects, so the token is
   never sent anywhere else.
+- Live only when connected (DECISIONS item 77, kit/connections.py): the channel answers only while
+  the user has the Sales agent connected on WhatsApp from its page, after its Arena gate passed. When it
+  is not, a message is marked done and not saved, nothing is sent, the quiet tick sends no notice and
+  closes no chat, and the log says so in one line. A notice that fell due before the latest Connect is
+  never sent. WHATSAPP_LIVE=on or off fixes it for a demo; unset, it follows Connect and Pull. The
+  webhook's signature check runs the same either way.
 - No hand-off to a person (DECISIONS item 53): every message is a customer message and the
   agent answers it. A reply is a plain text message: it never quotes the customer's message
   (no context, no reply-to). Statuses are not read.
@@ -64,6 +70,7 @@ from dataclasses import asdict, dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from channels.base import Channel, Image, Message
+from kit import connections
 from kit import limits as limits_mod
 from kit import media
 from kit.net import NoRedirects, no_redirect_opener  # noqa: F401 (the tests read NoRedirects here)
@@ -91,6 +98,9 @@ MAX_ERROR_BODY = 64 * 1024
 TYPING_TIMEOUT = 3  # seconds at most for the typing dots: a slow Graph never holds the worker long
 FAST_EVERY = 30  # seconds between quiet ticks and fast reflection sweeps, so a note is written within seconds of a chat ending
 OLD_FIELDS = ("context_id", "error_code")  # Incoming fields before DECISIONS item 53
+AGENT = "sales"  # the one agent this channel runs (kit/connections.py WORKS)
+LIVE_SETTING = "WHATSAPP_LIVE"  # unset: follow Connect and Pull; "on" or "off" fixes it, for the demo
+NOT_LIVE_LOG = "the Sales agent is not live on WhatsApp: a message came in and nothing was sent"
 
 
 # signature
@@ -452,8 +462,13 @@ class App:
     limit the customer was already at when the message came in.
     """
 
-    def __init__(self, chats, model, lessons, results, graph, limits=None, maxsize=MAX_QUEUE, fast=None, clock=None):
+    def __init__(self, chats, model, lessons, results, graph, limits=None, maxsize=MAX_QUEUE, fast=None, clock=None,
+                 connected=None):
+        """connected: None follows the user's Connect and Pull on the agent page (kit/connections.py,
+        read from the chats' database before every turn and tick); True or False fixes it, for tests
+        and the demo (main reads WHATSAPP_LIVE)."""
         self.chats, self.model, self.lessons, self.results, self.graph = chats, model, lessons, results, graph
+        self.connected = connected
         self.limits = limits
         self.clock = clock or getattr(chats, "clock", time.time)  # the quiet tick's clock; tests set it
         self.started = self.clock()  # a quiet notice already due by now is never sent (sales/quiet.py)
@@ -486,11 +501,26 @@ class App:
                 log.warning("could not re-queue a pending message")
         return n
 
+    def live(self):
+        """Is the Sales agent live on WhatsApp now? The fixed setting when one was given, else its latest
+        Connect or Pull. A state that cannot be read counts as not live, so nothing goes out."""
+        if self.connected is not None:
+            return bool(self.connected)
+        try:
+            return connections.live(self.chats.db, AGENT, connections.WHATSAPP)
+        except Exception:
+            log.exception("the live state could not be read; answering nothing")
+            return False
+
     def work_one(self, item):
         from sales import loop
         over, inc = item
         if inc.kind == "failed":  # a status queued before item 53: statuses are not read
             self.chats.mark_done(inc.message_id)
+            return None
+        if not self.live():  # not connected: nothing goes out, and the message is not answered later
+            self.chats.mark_done(inc.message_id)
+            log.info(NOT_LIVE_LOG)
             return None
         if over:
             # Over a limit: nothing is downloaded and no model is called. The text is saved,
@@ -517,12 +547,25 @@ class App:
         """One quiet tick (sales/quiet.py): the notice and the close, no model call. Returns what
         it did; never raises."""
         from sales import quiet
+        if not self.live():  # not connected: no notice and no close until it is
+            return []
         try:
             return quiet.tick(chats=self.chats, results=self.results, send=self.graph.send, channel="whatsapp",
-                              now=self.clock(), limits=self.limits, started=self.started)
+                              now=self.clock(), limits=self.limits, started=self._since())
         except Exception:
             log.exception("the quiet tick failed")
             return []
+
+    def _since(self):
+        """The quiet tick's start: the later of this process's start and the latest Connect, so a notice
+        that fell due while the agent was not live is never sent; that chat closes silently."""
+        if self.connected is not None:
+            return self.started
+        try:
+            at = (connections.state(self.chats.db, AGENT).get(connections.WHATSAPP) or {}).get("at")
+        except Exception:
+            at = None
+        return self.started if at is None else max(self.started, at)
 
     def sweep_once(self):
         """One fast reflection sweep. Returns what it wrote; never raises."""
@@ -554,7 +597,7 @@ class App:
         """
         from sales import loop
         _, inc = item
-        if inc.kind == "failed":
+        if inc.kind == "failed" or not self.live():
             return
         reached = []
 
@@ -578,6 +621,17 @@ class App:
                 log.warning("sent the model down line directly")
             except Exception:
                 log.exception("could not send the model down line")
+
+
+def live_setting(value):
+    """WHATSAPP_LIVE as App's connected: unset or empty follows Connect and Pull on the agent page (None);
+    "on" is True and "off" is False. Anything else stops the server, so a typo never answers by itself."""
+    value = (value or "").strip().lower()
+    if not value:
+        return None
+    if value not in ("on", "off"):
+        raise SystemExit(f"{LIVE_SETTING} is on or off, or unset to follow Connect and Pull on the agent page")
+    return value == "on"
 
 
 def missing_env():
@@ -631,7 +685,8 @@ def main():
     except Exception:
         log.exception("fast reflection is off: its notes could not be set up")
         fast = None
-    app = App(chats, Model(), Lessons(db, judge=Judge()), Results(db), graph, limits=limits, fast=fast)
+    app = App(chats, Model(), Lessons(db, judge=Judge()), Results(db), graph, limits=limits, fast=fast,
+              connected=live_setting(env.get(LIVE_SETTING)))
     handler = make_handler(env.get("WHATSAPP_APP_SECRET"), env.get("WHATSAPP_VERIFY_TOKEN"), app.accept, pnid)
     port = int(env.get("PORT", "8080"))
     server = ThreadingHTTPServer(("127.0.0.1", port), handler)

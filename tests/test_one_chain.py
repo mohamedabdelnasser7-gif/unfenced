@@ -69,7 +69,7 @@ class OneChain(unittest.TestCase):
         kept = kept_lesson(lessons, TONE, ["all"])
         results = Results(self.db)
         app = wa.App(Chats(self.db), FakeModel(*[say("Ask me anything.")] * CHATS), lessons, results,
-                     SimpleNamespace(send=Outbox()), limits=Limits(self.db))
+                     SimpleNamespace(send=Outbox()), limits=Limits(self.db), connected=True)
         chats = []
         for n in range(1, CHATS + 1):
             app.accept(wa.parse(payload(text_msg(f"m{n}", "hello there, a question", frm=f"2011111111{n:02d}"))))

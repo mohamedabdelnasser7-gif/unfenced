@@ -2599,11 +2599,12 @@ def write_html(morning, out):
 
 
 def page_exams(plugs, morning, db=None):
-    """The examiners main() gives the page: the Sales agent's (reflection/night.py sales_exam), on
-    the page's own lessons and the Arena wins next to db; none for an agent whose plug names no exam."""
+    """The examiners main() gives the page: the Sales agent's (reflection/night.py sales_exam) and each
+    built agent's with an exam (night agent_exam, reflection/turn_exam.py), on the page's own lessons and
+    the Arena wins next to db or in the agent's folder; none for an agent whose plug names no exam."""
     out = {}
     for p in plugs:
-        make = night_mod.sales_exam(p, db)
+        make = night_mod.agent_exam(p, db)
         if make is not None and p.agent in morning.lessons:
             out[p.agent] = make(morning.lessons[p.agent])
     return out

@@ -228,6 +228,7 @@ class TurnResult:
     outcome: str                  # replied, no_safe_reply, model_error or paused
     reply: str | None = None
     failed: list = field(default_factory=list)  # [{check, why}] when the turn ended on failed checks
+    retried: list = field(default_factory=list)  # [{check, why}] of the drafts that failed before the reply went out
 
 
 def system_prompt(agent, lessons=()):
@@ -275,7 +276,7 @@ def turn(agent, text, *, chats, chat_id, model, send, customer_id, lessons=(), m
             if passed and reply:
                 send(customer_id, reply)
                 chats.add_step(chat_id, "assistant", content=reply)
-                return TurnResult("replied", reply)
+                return TurnResult("replied", reply, retried=list(failed))
             feedback = feedback or "The reply was empty. Write one."
             failed.append({"check": "send_check", "why": " ".join(feedback.split())[:300]})
             if len(failed) >= MAX_FAILED_CHECKS:  # no safe reply: nothing goes out (sales/loop.py)

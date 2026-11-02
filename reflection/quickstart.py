@@ -11,9 +11,12 @@ page adds only its frame and buttons. Each answer in the same box sends the chat
 model writes the whole card again.
 
 Build turns the card into a plug folder, <database folder>/agents/<name>/, with plug.json (it must
-pass engine/plug.py from_dict), instructions.md (the agent's prompt) and card.json (the card, its
-"good" line in plain words, and the tools that are connected). The practice side reads exactly
-those three names. Tools come only from what the repo has (TOOLS); anything else the card names is
+pass engine/plug.py from_dict), instructions.md (the agent's prompt), card.json (the card, its
+"good" line in plain words, and the tools that are connected) and exam.json, the agent's short exam
+(reflection/turn_exam.py, DECISIONS items 56 and 59): one more model call writes its situations from
+the card once, the plug's exam key names them with every check, and they never change after. A
+correction on the agent's page and a lesson from the night take that exam first. The practice side
+reads the first three names. Tools come only from what the repo has (TOOLS); anything else the card names is
 marked not connected yet and the plug leaves it out, and so is a need that names a service no repo tool
 reaches (OUTSIDE), whatever tool the model matched it to. No chat goes to a person (DECISIONS 53): a card, plug or
 instructions that hand a chat to a person, the team or the owner, in English or Arabic, are refused
@@ -45,7 +48,7 @@ from kit import model as model_mod
 
 DRAFT_FILE = "quickstart.json"
 AGENTS = "agents"
-FILES = ("plug.json", "instructions.md", "card.json")  # the practice side reads these three names
+FILES = ("plug.json", "instructions.md", "card.json", "exam.json")  # the practice side reads the first three
 
 MAX_TEXT = 1000          # characters in one message from the user
 MAX_TURNS = 12           # answers in one chat
@@ -81,7 +84,7 @@ _OUTSIDE = re.compile(r"(?<![A-Za-z0-9_&])(?:" + "|".join(re.escape(w) for w in 
 # Trial levels: the values every repo plug uses (sales, assistant, marketing). The level switch
 # starts on careful for a new agent, the stricter of the two.
 STRICT_TRIAL = {"fast": {"share": 0.5, "days": 7}, "careful": {"share": 0.2, "days": 14}}
-LEFT_OUT = ("exam", "kind", "owner", "hands_over")  # need files or other agents a new plug does not have
+LEFT_OUT = ("exam", "kind", "owner", "hands_over")  # the model never writes these; Build sets the exam itself
 # No chat goes to a person (DECISIONS 53). names_a_person refuses a hand-off of a chat and nothing else:
 # a hand-over verb with the chat, the customer or the conversation as its object or its subject (hand,
 # pass, forward, transfer, حول, ابعت, سلم, 7awel, sallem), or a person (a human, a teammate, the owner,
@@ -488,12 +491,14 @@ class QuickStart:
             if again is not None:
                 raise Refused(f"Not built. The plug check said: {again}. Nothing was written; press Build to try again.")
             fixed_why = why
+        exam = self._exam(card, plug)
         at = time.time() if now is None else now
         record = {"agent": agent, "name": card["name"], "does": card["does"], "good": card["good"],
                   "never": card["never"], "needs": card["needs"], "tools": tools, "level": "careful", "at": at}
         _write_folder(agents, agent, {"plug.json": json.dumps(plug, ensure_ascii=False, indent=1) + "\n",
                                       "instructions.md": words + "\n",
-                                      "card.json": json.dumps(record, ensure_ascii=False, indent=1) + "\n"})
+                                      "card.json": json.dumps(record, ensure_ascii=False, indent=1) + "\n",
+                                      "exam.json": json.dumps(exam, ensure_ascii=False, indent=1) + "\n"})
         d["built"] = agent
         self._save(folder, d)
         if fixed_why:
@@ -502,6 +507,26 @@ class QuickStart:
         return f"Built {card['name']}, in agents/{agent}."
 
     # ---- inside ----
+
+    def _exam(self, card, plug):
+        """The agent's exam, written once from the card (reflection/turn_exam.py), and the plug's exam key
+        set to it. Refused when it cannot be read or the plug with it fails the checker: nothing is written."""
+        from kit import turn as turn_mod
+        from reflection import turn_exam
+        offered, _ = turn_mod.tools_of(plug_mod.from_dict(plug))
+        stage = plug["stages"][0] if plug.get("stages") else plug_mod.ALL
+        seen = {k: card[k] for k in ("name", "does", "good", "never")}
+        try:
+            exam = turn_exam.situations_from(self._chat(turn_exam.ask(seen, offered), turn_exam.MAX_TOKENS),
+                                             seen, offered, stage)
+        except turn_exam.Unreadable as e:
+            raise Refused(f"Not built. Unfenced could not write the agent's exam ({e}). Nothing was written; "
+                          "press Build to try again.") from None
+        plug["exam"] = turn_exam.plug_exam()
+        why = check_plug(plug)
+        if why is not None:
+            raise Refused(f"Not built. The plug check said: {why}. Nothing was written; press Build to try again.")
+        return exam
 
     def _folder_or_refuse(self, m):
         folder = self.folder(m)

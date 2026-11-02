@@ -21,7 +21,7 @@ from kit.model import ModelError
 from reflection import morning
 from reflection import quickstart as qs
 from tests.fake_model import FakeModel, clean_env, say, tool_call
-from tests.test_quickstart import card_reply, plug_reply
+from tests.test_quickstart import card_reply, exam_reply, plug_reply
 
 REPO = Path(run.__file__).resolve().parent.parent
 FIXTURE = REPO / "tests" / "agents" / "stock_watch"
@@ -449,11 +449,11 @@ class QuickStartFit(unittest.TestCase):
         needs = [{"what": "Your store's stock", "tool": "store"}, {"what": "Customer chats", "tool": "whatsapp"},
                  {"what": "Bosta stock levels", "tool": "store"}]
         page = types.SimpleNamespace(reports=self.root, plugs={})
-        quick = qs.QuickStart(FakeModel(card_reply(needs=needs), plug_reply()))
+        quick = qs.QuickStart(FakeModel(card_reply(needs=needs), plug_reply(), exam_reply()))
         quick.say(page, "an agent that tells my customers what is in stock")
         self.assertIn("agents/stock_watcher", quick.build(page))
         folder = self.root / qs.AGENTS / "stock_watcher"
-        self.assertEqual(sorted(p.name for p in folder.iterdir()), sorted(turn.FILES))
+        self.assertEqual(sorted(p.name for p in folder.iterdir()), sorted(qs.FILES))  # the three, and its exam
         agent = turn.load(folder)
         self.assertEqual((agent.name, agent.tools, agent.missing, agent.full_check), ("stock_watcher", ("store",), (),
                                                                                        True))  # it connects whatsapp
@@ -478,7 +478,7 @@ class QuickStartFit(unittest.TestCase):
 
     def test_a_built_card_that_names_another_agent_is_refused(self):
         page = types.SimpleNamespace(reports=self.root, plugs={})
-        quick = qs.QuickStart(FakeModel(card_reply(), plug_reply()))
+        quick = qs.QuickStart(FakeModel(card_reply(), plug_reply(), exam_reply()))
         quick.say(page, "an agent for my stock")
         quick.build(page)
         folder = self.root / qs.AGENTS / "stock_watcher"
@@ -502,7 +502,7 @@ class StackReviewRound1(unittest.TestCase):
 
     def built(self, needs):
         page = types.SimpleNamespace(reports=self.root, plugs={})
-        quick = qs.QuickStart(FakeModel(card_reply(needs=needs), plug_reply()))
+        quick = qs.QuickStart(FakeModel(card_reply(needs=needs), plug_reply(), exam_reply()))
         quick.say(page, "an agent that tells my customers what is in stock")
         quick.build(page)
         return self.root / qs.AGENTS / "stock_watcher"

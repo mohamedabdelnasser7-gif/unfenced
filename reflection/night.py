@@ -18,8 +18,8 @@ results take to show, so a case acted on early in the window has had time to set
 Before the study it runs the night's trial check (engine/trial.py): each lesson on trial is
 kept, pulled or paused on its own cases, serious results ping, and lessons waiting their turn
 start on the stages that came free. The study then writes the night's new lessons. For the
-Sales agent, whose plug names an exam (reflection/exam.py), each new lesson that would start its
-trial takes the exam first, on Muse Spark Open: a fail holds it, waiting for a yes, and its card
+Sales agent, whose plug names an exam (reflection/exam.py), and any agent Quick start built with an
+exam (reflection/turn_exam.py, agent_exam), each new lesson that would start its trial takes the exam first, on Muse Spark Open: a fail holds it, waiting for a yes, and its card
 names the first fail; the report counts the exam's runs, model calls and held lessons. Each card
 whose lesson took the gate with its counts names, under it, the cases it fixed and broke and
 McNemar's p-value (engine/exam.py; reported only, pass or fail stays the gate's). Last, it
@@ -300,6 +300,18 @@ def sales_exam(plug, db=None):
                                      lessons, db=db)
 
 
+def agent_exam(plug, db=None, folder=None):
+    """The exam the night and the Morning page give an agent: the Sales agent's (sales_exam), else the
+    exam of an agent Quick start built (reflection/turn_exam.py binding: its folder, or
+    <db folder>/agents/<agent>, wrapped in the Arena rerun of its past practice wins); None for an agent
+    with no exam."""
+    made = sales_exam(plug, db)
+    if made is not None:
+        return made
+    from reflection import turn_exam
+    return turn_exam.binding(plug, folder=folder, db=db)
+
+
 def _judge_label(judge):
     try:
         m = judge.model
@@ -572,7 +584,8 @@ def main(argv=None, *, until=None):
         return 2
     db = Db(args.db)
     try:
-        rep = night(db, plug, days=args.days, until=until, ideas=parts.Ideas(), exam=sales_exam(plug, args.db),
+        exam = agent_exam(plug, args.db, folder=Path(args.plug).resolve().parent)
+        rep = night(db, plug, days=args.days, until=until, ideas=parts.Ideas(), exam=exam,
                     spotter=parts.Spotter(), note_writer=parts.NoteWriter(), others=other_plugs(plug, db=args.db))
     except Refused as e:
         print(f"Not run: {e}.", file=sys.stderr)

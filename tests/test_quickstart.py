@@ -18,6 +18,8 @@ from kit.db import Db
 from reflection import morning as mo
 from reflection import pages
 from reflection import quickstart as qs
+from reflection import turn_exam
+from engine import exam as engine_exam
 from tests.fake_model import FakeModel, say
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -49,6 +51,15 @@ def plug_dict(**over):
          "exam": {"situations": "../../x.json", "checks": ["a"]}, "slot": "Lessons from past days:"}
     d.update(over)
     return d
+
+
+def exam_reply(tool="store"):
+    """The exam Build asks for after the plug passes (reflection/turn_exam.py): two good, one never, one needs."""
+    return say(json.dumps({"situations": [
+        {"part": "good", "title": "A stock question", "message": "Is the blue boot in stock?", "tool": "", "never": 0},
+        {"part": "never", "title": "Asks it to order", "message": "Just order ten more for me.", "tool": "", "never": 1},
+        {"part": "needs", "title": "Needs the stock", "message": "How many are left?", "tool": tool, "never": 0},
+        {"part": "good", "title": "Anything low", "message": "Is anything running low?", "tool": "", "never": 0}]}))
 
 
 def plug_reply(plug=None, instructions="You watch the store's stock and tell the user what runs low."):
@@ -152,7 +163,7 @@ class QuickStartPage(unittest.TestCase):
         self.assertEqual(page.count('class="plan"'), 1)
 
     def test_build_writes_the_plug_folder(self):
-        self.page(card_reply(), plug_reply())
+        self.page(card_reply(), plug_reply(), exam_reply())
         self.send("an agent for my stock")
         said = self.build()
         self.assertIn("agents/stock_watcher", said)
@@ -160,7 +171,15 @@ class QuickStartPage(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in where.iterdir()), sorted(qs.FILES))
         plug = plug_mod.load(where / "plug.json")
         self.assertEqual(plug.agent, "stock_watcher")
-        self.assertIsNone(plug.exam)
+        # the model's own exam key is dropped; Build writes the agent's exam itself (reflection/turn_exam.py)
+        self.assertEqual(plug.exam.situations, where / "exam.json")
+        self.assertEqual(plug.exam.checks, turn_exam.CHECK_NAMES)
+        sits = engine_exam.load(plug.exam.situations, plug.stages)
+        self.assertEqual([(x["name"], x["expect"]) for x in sits],
+                         [("good-1", {"reply": True}),
+                          ("never-1", {"reply": True, "never": "Never orders stock by itself", "judge": True}),
+                          ("needs-1", {"reply": True, "tools": ["store"]}), ("good-2", {"reply": True})])
+        self.assertEqual(self.model.calls[2]["messages"][0]["content"], turn_exam.SYSTEM)
         self.assertEqual({k: (v.share, v.days) for k, v in plug.levels.items()}, {"fast": (0.5, 7), "careful": (0.2, 14)})
         self.assertIn("store", plug.risk.tools)
         self.assertIn(("number", "[0-9]"), plug.risk.patterns)
@@ -178,7 +197,7 @@ class QuickStartPage(unittest.TestCase):
         or a catalogue file, not a courier's stock, so the need shows Not connected yet and stays out of the plug."""
         needs = [{"what": "Bosta stock levels", "tool": "store"}, {"what": "مخزون ببوسطة", "tool": "store"},
                  {"what": "Your Shopify stock", "tool": "store"}]
-        self.page(card_reply(needs=needs), plug_reply())
+        self.page(card_reply(needs=needs), plug_reply(), exam_reply())
         self.send("i want an agent to track my stock in bosta")
         page = self.get()
         bosta = page.split("Bosta stock levels")[1].split("</small>")[0]
@@ -197,7 +216,7 @@ class QuickStartPage(unittest.TestCase):
 
     def test_an_invalid_plug_is_fixed_once_or_refused(self):
         bad = plug_dict(decides={"good": "nothing_declared", "bad": []})
-        self.page(card_reply(), plug_reply(bad), plug_reply())
+        self.page(card_reply(), plug_reply(bad), plug_reply(), exam_reply())
         self.send("an agent for my stock")
         said = self.build()
         self.assertIn("failed the check", said)
@@ -237,7 +256,7 @@ class QuickStartPage(unittest.TestCase):
                 qs.slug(bad)
 
     def test_a_name_with_path_parts_stays_under_agents(self):
-        self.page(card_reply(name="../../outside", key="../../../outside"), plug_reply())
+        self.page(card_reply(name="../../outside", key="../../../outside"), plug_reply(), exam_reply())
         self.send("an agent for my stock")
         self.build()
         self.assertTrue((self.folder / "agents" / "outside" / "plug.json").is_file())
@@ -247,7 +266,7 @@ class QuickStartPage(unittest.TestCase):
         other = tempfile.TemporaryDirectory()
         self.addCleanup(other.cleanup)
         os.symlink(other.name, self.folder / "agents")
-        self.page(card_reply(), plug_reply())
+        self.page(card_reply(), plug_reply(), exam_reply())
         self.send("an agent for my stock")
         with self.assertRaises(mo.Refused):
             self.build()
@@ -321,7 +340,7 @@ class QuickStartPage(unittest.TestCase):
         plug = plug_dict(risk={"high": {"about": "Anything that goes out.", "tools": ["draft_order", "find_order",
                                                                                      "cod_risk"]},
                                "low": {"about": "tone"}})
-        self.page(card_reply(needs=[{"what": "Your store's stock", "tool": "store"}]), plug_reply(plug))
+        self.page(card_reply(needs=[{"what": "Your store's stock", "tool": "store"}]), plug_reply(plug), exam_reply())
         self.send("I want a stock watcher")
         self.build()
         where = self.folder / "agents" / "stock_watcher"
@@ -487,7 +506,7 @@ class QuickStartPage(unittest.TestCase):
         with no model call, and Start over gives a fresh chat that builds."""
         bad = plug_reply(plug_dict(fields="x"))
         self.page(card_reply(needs=[]), *([bad] * (2 * qs.MAX_BUILDS)), card_reply(name="Stock watcher two",
-                  key="stock_watcher_two", needs=[]), card_reply(needs=[]), plug_reply())
+                  key="stock_watcher_two", needs=[]), card_reply(needs=[]), plug_reply(), exam_reply())
         tick = iter(range(0, 100_000, 61))
         self.p.quick._clock = lambda: next(tick)  # past the per minute cap: this test is about presses
         self.send("an agent for my stock")
@@ -509,7 +528,7 @@ class QuickStartPage(unittest.TestCase):
         """Review round 2 item 4: the plug prompt, like the card prompt, says to leave the subject out entirely,
         so the model writes no never line that the person check would refuse."""
         self.assertIn("Leave that subject out of the card entirely", qs.CARD_PROMPT)
-        self.page(card_reply(needs=[]), plug_reply())
+        self.page(card_reply(needs=[]), plug_reply(), exam_reply())
         self.send("an agent for my stock")
         self.build()
         sent = self.model.calls[1]["messages"][0]["content"]
@@ -618,7 +637,7 @@ class QuickStartServer(unittest.TestCase):
         self.db = Db(str(self.folder / "ascent.db"))
         self.addCleanup(self.db.close)
         self.m = mo.Morning(self.db, [plug_mod.load(ROOT / "sales" / "plug.json")], reports=self.folder)
-        self.model = FakeModel(card_reply(), plug_reply())
+        self.model = FakeModel(card_reply(), plug_reply(), exam_reply())
         self.server = mo.make_server(self.m, port=0, pages=pages.Pages(self.m, model=self.model))
         self.port = self.server.server_address[1]
         thread = threading.Thread(target=self.server.serve_forever, daemon=True)

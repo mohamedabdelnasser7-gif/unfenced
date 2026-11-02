@@ -34,6 +34,12 @@ agent's level switch starts on careful (engine/switches.py), the stricter one; a
 starts off. A plug that fails the checker goes back to the model
 once with the checker's reason; a second failure writes nothing and says why.
 
+After a successful Build with the real model, the new agent plays one short practice in the background
+(arena/practice.py practise, the --quick shape: one training match, a gate of one, at most arena/run.py
+QUICK_CALLS model calls), one at a time; the page says it is practising and then how it went. With no
+key it says so in one line; a test's model starts none. Each lost match becomes a case for the night
+when arena/learn_built.py is there.
+
 Safety. The user's text and the model's output are both untrusted: every field is capped and made
 one plain line, the folder name is a safe slug (letters, digits and _, no path parts) and the folder
 must sit right under agents/, which may not be a link. The draft chat sits in quickstart.json next
@@ -47,6 +53,7 @@ import os
 import re
 import secrets
 import shutil
+import threading
 import time
 import unicodedata
 from pathlib import Path
@@ -68,6 +75,13 @@ MAX_INSTRUCTIONS = 8_000
 MAX_DRAFT = 256_000      # bytes of quickstart.json read back
 CALLS_PER_MINUTE = 10
 MAX_BUILDS = 3           # Build presses that reach the model in one chat
+PRACTICES_AT_ONCE = 1    # short practices Build runs at the same time (arena/practice.py practise, quick)
+# The page's lines for the short practice Build starts (frame, not model words).
+PRACTISING = "It is practising one short case in the Arena now."
+PRACTICE_NO_KEY = "No model key is set, so it did not start a practice."
+PRACTICE_BUSY = "Another agent is practising now, so it did not start one. Run arena/practice.py --quick for it later."
+PRACTICE_DONE = "Its first short practice is done, and the report is with the Arena reports."
+PRACTICE_NOT_RUN = "Its first short practice did not run: {why}"
 CAPS = {"name": 60, "key": 41, "does": 280, "good": 220, "bad": 220, "never": 160, "what": 120, "question": 240,
         "follow": 400, "input": 300, "output": 220, "ends": 220}
 CASE_KEYS = ("input", "starts", "output", "ends")  # card.json "case" (kit/turn.py read_case)
@@ -433,6 +447,9 @@ class QuickStart:
         self._model = model
         self._clock = clock
         self._calls = collections.deque()
+        self._practice = {}  # agent: the page's line for the short practice Build started
+        self._running = set()
+        self._practice_lock = threading.Lock()
 
     # ---- what the page reads ----
 
@@ -556,10 +573,71 @@ class QuickStart:
                                       "exam.json": json.dumps(exam, ensure_ascii=False, indent=1) + "\n"})
         d["built"] = agent
         self._save(folder, d)
+        said = f"Built {card['name']}, in agents/{agent}."
         if fixed_why:
-            return (f"Built {card['name']}, in agents/{agent}. Its first plug failed the check ({fixed_why}), "
+            said = (f"Built {card['name']}, in agents/{agent}. Its first plug failed the check ({fixed_why}), "
                     "and Unfenced fixed it.")
-        return f"Built {card['name']}, in agents/{agent}."
+        practice = self.start_practice(m, agent)
+        return said if practice is None else f"{said} {practice}"
+
+    # ---- the short practice after Build (C8) ----
+
+    def practice_line(self, agent):
+        """The page's line for the short practice Build started for agent, or None."""
+        with self._practice_lock:
+            return self._practice.get(agent)
+
+    def start_practice(self, m, agent):
+        """After a successful Build: one short practice of the new agent (arena/practice.py practise, the
+        --quick shape, at most arena/run.py QUICK_CALLS model calls and the day's cap) in a background
+        thread, so the page never waits. Only with the real model: Quick start with a model handed in (a
+        test's) starts none and returns None. No key, or a practice already running, returns its one line
+        and starts nothing."""
+        if self._model is not None:
+            return None
+        if not model_mod.has_key():
+            return PRACTICE_NO_KEY
+        folder = self.folder(m)
+        if folder is None:
+            return None
+        with self._practice_lock:
+            if len(self._running) >= PRACTICES_AT_ONCE:
+                return PRACTICE_BUSY
+            self._running.add(agent)
+            self._practice[agent] = PRACTISING
+        threading.Thread(target=self._practise, args=(folder / AGENTS / agent, agent, getattr(m, "db_path", None)),
+                         name=f"practice-{agent}", daemon=True).start()
+        return PRACTISING
+
+    def _practise(self, agent_folder, agent, db_path):
+        """The thread's work: the practice, then the agent's line says how it went. Never raises."""
+        db = None
+        try:
+            from arena import practice
+            learn = None
+            try:  # each lost practice match becomes a case the night studies (arena/learn_built.py), when it is here
+                from arena import learn_built
+            except ImportError:
+                learn_built = None
+            if learn_built is not None and db_path is not None:
+                from kit import turn as turn_mod
+                from kit.db import Db
+                db = Db(db_path)  # its own connection: the page's answers keep theirs
+                learn = learn_built.learner(db, turn_mod.load(agent_folder).plug)
+            practice.practise(agent_folder, agent_model=model_mod.Model(), customer_model=model_mod.Model(),
+                              judge_model=model_mod.Model(), quick=True, learn=learn)
+            line = PRACTICE_DONE
+        except Exception as e:  # a thread nobody waits on: what went wrong becomes the agent's line
+            line = PRACTICE_NOT_RUN.format(why=" ".join(str(e).split())[:200] or type(e).__name__)
+        finally:
+            if db is not None:
+                try:
+                    db.close()
+                except Exception:
+                    pass
+        with self._practice_lock:
+            self._practice[agent] = line
+            self._running.discard(agent)
 
     # ---- inside ----
 

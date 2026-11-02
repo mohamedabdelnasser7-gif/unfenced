@@ -394,5 +394,109 @@ class BuildWritesTheCase(Base):
         self.assertIn("no case yet", str(e.exception))
 
 
+class BuildStartsAShortPractice(Base):
+    """C8: after a successful Build, one short practice in the background, only with the real model."""
+
+    def setUp(self):
+        super().setUp()
+        from reflection import morning as mo
+        self.m = mo.Morning(Db(str(self.root / "ascent.db")), [], reports=self.root)
+        self.addCleanup(self.m.db.close)
+
+    def real(self, practise, key=True):
+        """QuickStart with no model handed in (the real one), with practise and the model faked."""
+        from unittest import mock
+        for p in (mock.patch.object(qs.model_mod, "has_key", return_value=key),
+                  mock.patch.object(qs.model_mod, "Model", lambda *a, **k: FakeModel()),
+                  mock.patch.object(practice, "practise", practise)):
+            p.start()
+            self.addCleanup(p.stop)
+        return qs.QuickStart()
+
+    @staticmethod
+    def wait(agent):
+        import threading
+        for t in threading.enumerate():
+            if t.name == f"practice-{agent}":
+                t.join(5)
+
+    def test_build_with_a_test_model_starts_no_practice(self):
+        from engine import plug as plug_mod
+        from reflection import morning as mo
+        from tests.test_quickstart import card_reply, exam_reply, plug_reply
+        m = mo.Morning(Db(str(self.root / "ascent.db")), [plug_mod.load(REPO / "sales" / "plug.json")], reports=self.root)
+        self.addCleanup(m.db.close)
+        quick = qs.QuickStart(FakeModel(card_reply(case=TICKET_CASE), plug_reply(), exam_reply()))
+        quick.say(m, "an agent for my support tickets")
+        said = quick.build(m)
+        self.assertNotIn(qs.PRACTISING, said)
+        self.assertIsNone(quick.practice_line("stock_watcher"))
+
+    def test_the_real_model_practises_the_new_agent_quick_in_the_background(self):
+        got = []
+        quick = self.real(lambda folder, **kw: got.append((folder, kw)))
+        self.assertEqual(quick.start_practice(self.m, "ticket_desk"), qs.PRACTISING)
+        self.wait("ticket_desk")
+        (folder, kw), = got
+        self.assertEqual(folder, self.root / "agents" / "ticket_desk")
+        self.assertIs(kw["quick"], True)
+        self.assertIsNone(kw["learn"])  # no database path on this page, so no case is written
+        self.assertEqual(quick.practice_line("ticket_desk"), qs.PRACTICE_DONE)
+
+    def test_the_page_never_waits_and_one_practice_runs_at_a_time(self):
+        import threading
+        go = threading.Event()
+        quick = self.real(lambda folder, **kw: go.wait(5))
+        self.assertEqual(quick.start_practice(self.m, "ticket_desk"), qs.PRACTISING)
+        self.assertEqual(quick.practice_line("ticket_desk"), qs.PRACTISING)  # returned while it still runs
+        self.assertEqual(quick.start_practice(self.m, "lead_follow"), qs.PRACTICE_BUSY)
+        self.assertIsNone(quick.practice_line("lead_follow"))
+        go.set()
+        self.wait("ticket_desk")
+        self.assertEqual(quick.practice_line("ticket_desk"), qs.PRACTICE_DONE)
+
+    def test_no_key_is_one_plain_line_and_starts_nothing(self):
+        got = []
+        quick = self.real(lambda folder, **kw: got.append(folder), key=False)
+        self.assertEqual(quick.start_practice(self.m, "ticket_desk"), qs.PRACTICE_NO_KEY)
+        self.assertEqual(got, [])
+
+    def test_a_practice_that_cannot_run_says_why_and_frees_the_slot(self):
+        def refuse(folder, **kw):
+            raise run.Refused("the day's model calls are used up")
+        quick = self.real(refuse)
+        quick.start_practice(self.m, "ticket_desk")
+        self.wait("ticket_desk")
+        self.assertEqual(quick.practice_line("ticket_desk"),
+                         qs.PRACTICE_NOT_RUN.format(why="the day's model calls are used up"))
+        self.assertEqual(quick.start_practice(self.m, "lead_follow"), qs.PRACTISING)
+        self.wait("lead_follow")
+
+    def test_with_a_database_each_lost_match_goes_to_the_learn_hook(self):
+        import sys
+        import types
+        from unittest import mock
+        write_agent(self.root, "ticket_desk", case=TICKET_CASE, actions=TICKET_ACTIONS)
+        fake = types.ModuleType("arena.learn_built")
+        fake.learner = lambda db, plug: ("learner", plug.agent)
+        got = []
+        quick = self.real(lambda folder, **kw: got.append(kw["learn"]))
+        self.m.db_path = str(self.root / "ascent.db")
+        with mock.patch.dict(sys.modules, {"arena.learn_built": fake}):
+            quick.start_practice(self.m, "ticket_desk")
+            self.wait("ticket_desk")
+        self.assertEqual(got, [("learner", "ticket_desk")])
+
+    def test_the_new_agent_page_shows_it_is_practising(self):
+        from reflection import pages
+        from tests.test_quickstart import card_reply, exam_reply, plug_reply
+        p = pages.Pages(self.m, model=FakeModel(card_reply(case=TICKET_CASE), plug_reply(), exam_reply()))
+        p.actions["/quickstart"](self.m, {"text": ["an agent for my support tickets"]})
+        p.actions["/quickstart/build"](self.m, {})
+        self.assertNotIn(qs.PRACTISING, p.get("/new", {}, "t"))
+        p.quick._practice["stock_watcher"] = qs.PRACTISING
+        self.assertIn(qs.PRACTISING, p.get("/new", {}, "t"))
+
+
 if __name__ == "__main__":
     unittest.main()

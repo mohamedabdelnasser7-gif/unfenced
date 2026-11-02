@@ -592,6 +592,9 @@ def new_agent(m, quick, ctx):
             out.append(f'<p class="uf" dir="auto">{h(last["follow"])}</p>')
     if built:
         out.append(f'<p class="no-yet">Built. Its files are in agents/{h(built)}, ready for the Arena.</p>')
+        practice = quick.practice_line(built)
+        if practice:
+            out.append(f'<p class="no-yet" role="status">{h(practice)}</p>')
     if not quick.ready():
         out.append('<p class="no-yet">No model key is set, so Quick start cannot write the card yet. Put '
                    'META_API_KEY or BASETEN_API_KEY in .env and start the page again.</p>')

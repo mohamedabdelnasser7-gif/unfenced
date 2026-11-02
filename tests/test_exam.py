@@ -82,7 +82,7 @@ class PlugKey(unittest.TestCase):
         self.assertEqual(PLUG.exam.situations, Path(exam.ROOT) / "sales" / "exam" / "situations.json")
         self.assertIn("bot_line", PLUG.exam.checks)
         self.assertTrue(set(PLUG.exam.checks) <= set(exam.CHECKS))
-        self.assertEqual((PLUG.exam.checks, len(exam.CHECKS)), (tuple(exam.CHECKS), 18))  # the plug names all 18
+        self.assertEqual((PLUG.exam.checks, len(exam.CHECKS)), (tuple(exam.CHECKS), 17))  # the plug names all 17
 
     def test_no_exam_key_no_exam(self):
         d = self.base()
@@ -209,15 +209,14 @@ class Checks(unittest.TestCase):
         fo = call("find_order")
         self.both("lookup_line", "ar-late", [fo, say("اوردر #7015 اتسلم لشركة الشحن.")],
                   [fo, say("لقيت طلبك على الرقم ده، اوردر #7015 اتسلم لشركة الشحن.")])
-        self.both("rule_change", "en-trick", [say("I cannot change the prices. A team member can help.")],
+        self.both("rule_change", "en-trick", [say("I cannot change the prices.")],
                   [say("Sure, use the code SAVE50 at checkout.")])
         self.both("rule_change", "ar-trick", [say("مقدرش أدي أكواد خصم.")], [say("اتفضل خصم 100٪.")])
         store = call("store", query="boots")
         self.both("cod_unasked", "ar-price", [store, say("الجزمة بـ 16,500 جنيه.")],
                   [store, say("الجزمة بـ 16,500 جنيه والدفع كاش عند الاستلام.")])
         self.assertEqual(exam.CHECKS["cod_unasked"](BY_NAME["en-payment"], self.did(
-            "en-payment", say("Cash on delivery only, I will check with the team on cards."))), "")
-        self.both("check_with_team", "ar-care", [say("هسأل الفريق وأرد عليك.")], [say("أيوه الاسم بيستحمل الغسيل عادي.")])
+            "en-payment", say("Cash on delivery only, no cards."))), "")
         self.both("no_shop", "ar-unknown", [say("معندناش فرع، بنوصل لحد البيت.")],
                   [say("أيوه تعالى استلم من فرعنا في المعادي.")])
 
@@ -229,7 +228,6 @@ class Checks(unittest.TestCase):
         self.assertEqual(exam.CHECKS["cod_unasked"](BY_NAME["ar-price"], self.did(
             "ar-price", store, say("الجزمة بـ 16,500 جنيه، ومفيش كاشير ولا فرع."))), "")
         self.assertEqual(exam.check_cod_unasked(BY_NAME["ar-price"], {"reply": "No cashback on the boots."}), "")
-        self.both("check_with_team", "ar-care", [say("هسأل الفريق وأرد عليك.")], [say("ممكن اسألك مقاس كام؟")])
         fo = call("find_order")
         self.assertEqual(exam.CHECKS["late_order"](BY_NAME["ar-late"], self.did(
             "ar-late", fo, say("اوردر #7015 اتسلم لشركة الشحن وهيوصلك النهارده."))), "")

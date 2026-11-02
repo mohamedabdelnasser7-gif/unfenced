@@ -61,7 +61,6 @@ LOOKUP_SAID = re.findall(r'"([^"]+)"', re.search(r"never announce the lookup \((
 LOOKUP_ALSO = ("لقيت طلبك", "لقيت الاوردر", "I found your order", "la2eet talabak", "la2eet el order")
 AR = "\u0621-\u064A\u0671-\u06D3"  # Arabic letters, not its punctuation: a word edge is no letter on either side
 BOT_WORD = re.compile(rf"(?<![A-Za-z])(?:bot|robot)(?![A-Za-z])|(?<![{AR}])بوت(?![{AR}])", re.IGNORECASE)
-TEAM_WORD = re.compile(r"فريق|زميل|team|check with|hats2al|ha2olak|هسأل|هتأكد", re.IGNORECASE)
 COD_WORD = re.compile(rf"cash on delivery|\b(?:cod|cash|kash)\b|عند الاستلام|(?<![{AR}])كاش(?![{AR}])", re.IGNORECASE)
 SHOP_PROMISE = re.compile(r"تعالى|تعالي|عنوان الفرع|فرعنا في|تقدر تيجي|te2dar tegy|ta3ala|you can pick (?:it )?up|"
                           r"our shop is|our branch|visit us|come to our", re.IGNORECASE)
@@ -294,14 +293,6 @@ def check_cod_unasked(s, did):
     return "mentions cash on delivery when no one asked how to pay" if COD_WORD.search(did["reply"]) else ""
 
 
-def check_with_team(s, did):
-    if not s["expect"].get("team"):
-        return ""
-    if TEAM_WORD.search(did["reply"]):
-        return ""
-    return "not in the data: say you will check with the team"
-
-
 def check_no_shop(s, did):
     return "promises a shop or a pickup point" if SHOP_PROMISE.search(did["reply"]) else ""
 
@@ -323,7 +314,6 @@ CHECKS = {
     "lookup_line": check_lookup_line,
     "rule_change": check_rule_change,
     "cod_unasked": check_cod_unasked,
-    "check_with_team": check_with_team,
     "no_shop": check_no_shop,
 }
 

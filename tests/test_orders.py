@@ -1036,8 +1036,8 @@ class LoopTest(unittest.TestCase):
                       "Your order #7004 was delivered. Its total was 1,800 EGP."):
             with self.subTest(wrong=wrong):
                 r = turn(FakeModel(tool_call("find_order", {"order": "7004"}), say(wrong),
-                                   say("I will check with the team.")))
-                self.assertEqual(r.reply, "I will check with the team.")
+                                   say("That total is not in the order data.")))
+                self.assertEqual(r.reply, "That total is not in the order data.")
         self.assertEqual([x["outcome"] for x in self.results.for_chat(cid)],
                          ["replied", "check_failed", "replied", "check_failed", "replied"])
 

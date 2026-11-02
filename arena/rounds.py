@@ -279,8 +279,8 @@ class _Only:
     def __init__(self, log, ids):
         self.log, self.ids = log, set(ids)
 
-    def window(self, since, until, *, agent=None):
-        return {k: v for k, v in self.log.window(since, until, agent=agent).items() if k in self.ids}
+    def window(self, since, until, *, agent=None, plug=None):
+        return {k: v for k, v in self.log.window(since, until, agent=agent, plug=plug).items() if k in self.ids}
 
     def __getattr__(self, name):
         return getattr(self.log, name)

@@ -542,7 +542,7 @@ class Study:
         for other in sorted(others, key=lambda o: (-len(fields & set(o.fields)), o.agent)):
             theirs = Lessons(self.db, other)
             texts = _Texts(theirs)
-            cases = _read(other, self.log.window(since, until, agent=other.agent), until)
+            cases = _read(other, self.log.window(since, until, agent=other.agent, plug=other), until)
             counts = _counts(other, cases)
             entry = {"agent": other.agent, "shared_fields": sorted(fields & set(other.fields)),
                      "read": {"cases": counts["read"]["cases"], "good": counts["decided"]["good"],

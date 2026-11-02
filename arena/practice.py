@@ -44,10 +44,11 @@ after max_turns customer lines. No chat goes to a person (DECISIONS items 53 and
 judge; a judge that does not answer voids the match too.
 
 The trust level. The gate is arena/run.py's: the trust file outside the repo (--trust), with this
-agent's level under its own name, else the public placeholder that asks every gate match won.
-While the customers are made up the level is stricter, as the plug's trial reads: every gate match
-must be won, fact checks on, and the report names the plug's careful trial level ({level, share,
-days}), the one a lesson it earns starts on until real chats exist and a person flips the switch.
+agent's level under its own name, else the public placeholder (7 of 10). While the customers are
+made up the level is set by the practice gate (GATE, 7 of 10 by default, --gate W/N; DECISIONS item
+75: a share of the gate matches, never every one), fact checks on, and the report names the plug's
+careful trial level ({level, share, days}), the one a lesson it earns starts on until real chats
+exist and a person flips the switch.
 
 What it writes, the files a Sales run writes, so screen 2 of Quick start B and the console read
 them unchanged: each judged match in arena-matches.jsonl in the agent's folder (its own wins
@@ -69,6 +70,7 @@ caller with a database wires it (arena/learn_built.py).
 """
 import argparse
 import json
+import math
 import re
 import string
 import sys
@@ -90,6 +92,7 @@ DONE_MARK = re.compile(re.escape(DONE), re.IGNORECASE)
 MAX_TURNS = match_mod.MAX_TURNS
 DEFAULT_MATCHES = 4
 DEFAULT_ROUNDS = 1  # no study between rounds yet for a new agent, so one round says it all
+GATE = (7, 10)  # the practice gate with made-up customers: wins of matches, as a share (DECISIONS item 75)
 AGENT_SILENT = "the agent's model did not answer"
 PROMPT = (
     "You are a person writing on WhatsApp to an agent that $does. You want $want. Your worry is $worry. You "
@@ -291,12 +294,25 @@ def check_cards(given, folder):
     return where
 
 
-def stricter(trust, plug):
-    """The trust level while the customers are made up: every gate match won, fact checks on, and the
-    plug's careful trial level named."""
+def stricter(trust, plug, gate=GATE):
+    """The trust level while the customers are made up: the gate's share of the matches won (rounded
+    up, at least one; 7 of 10 by default), fact checks on, and the plug's careful trial level named."""
     careful = plug.levels["careful"]
-    return {"matches": trust["matches"], "wins": trust["matches"], "zero_failed_checks": True, "made_up": True,
-            "trial": {"level": "careful", "share": careful.share, "days": careful.days}}
+    wins, of = gate
+    need = max(1, math.ceil(trust["matches"] * wins / of))
+    return {"matches": trust["matches"], "wins": min(need, trust["matches"]), "zero_failed_checks": True,
+            "made_up": True, "trial": {"level": "careful", "share": careful.share, "days": careful.days}}
+
+
+def read_gate(text):
+    """--gate W/N: W wins of N matches, 1 <= W <= N. ValueError otherwise."""
+    try:
+        wins, of = (int(x) for x in str(text).split("/"))
+    except ValueError:
+        raise ValueError("--gate is wins/matches, for example 7/10") from None
+    if not 1 <= wins <= of:
+        raise ValueError("--gate is wins/matches with 1 <= wins <= matches")
+    return wins, of
 
 
 class Practice(run.Arena):
@@ -373,10 +389,12 @@ NOT_RUN = (run.Refused, turn_mod.Refused, run.CapReached, ModelError, OSError, V
 
 
 def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=DEFAULT_MATCHES,
-             rounds=DEFAULT_ROUNDS, cards=None, trust=None, cap=run.DEFAULT_CAP, seed=0, quick=False, learn=None):
+             rounds=DEFAULT_ROUNDS, cards=None, trust=None, cap=run.DEFAULT_CAP, seed=0, quick=False, learn=None,
+             gate=GATE):
     """One practice run of the agent in agent_folder: the report (arena/run.py Arena run). quick: the
     --quick shape (one training match, a gate of one, at most QUICK_CALLS model calls). learn: handed
-    each lost training match (Practice). Raises one of NOT_RUN when it cannot run."""
+    each lost training match (Practice). gate: (wins, matches), the practice gate with made-up
+    customers. Raises one of NOT_RUN when it cannot run."""
     if quick:
         matches, rounds = 1, 1
     folder = Path(agent_folder).expanduser().resolve()
@@ -398,7 +416,7 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
         made_up, behaviour_from = True, len(profiles or ())
     level = dict(run.QUICK_TRUST) if quick else run.load_trust(trust, agent=agent.name)
     if made_up:
-        level = stricter(level, agent.plug)
+        level = stricter(level, agent.plug, gate)
     arena = Practice(agent, played, judge_model=judge_model, made_up=made_up, behaviour_from=behaviour_from,
                      agent_model=agent_model, customer_model=customer_model, calls=calls, trust=level,
                      matches=matches, rounds=rounds, seed=seed, state=folder, reports=reports, learn=learn)
@@ -413,11 +431,17 @@ def main(argv=None, *, agent_model=None, customer_model=None, judge_model=None):
     ap.add_argument("--cards", default=None, help="cleaned real cards to play instead of made-up customers")
     ap.add_argument("--trust", default=None, help="the trust levels file, outside the repo")
     ap.add_argument("--cap", type=int, default=run.DEFAULT_CAP, help="model calls a day")
+    ap.add_argument("--gate", default=f"{GATE[0]}/{GATE[1]}", help="with made-up customers, the gate matches to win: W/N")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--quick", action="store_true", help="one training match, a gate of one match, at most "
                     f"{run.QUICK_CALLS} model calls")
     args = ap.parse_args(argv)
+    try:
+        gate = read_gate(args.gate)
+    except ValueError as e:
+        print(f"Not run: {e}", file=sys.stderr)
+        return 2
     made = agent_model is None or customer_model is None or judge_model is None
     if made:
         from kit import env, model as model_mod
@@ -431,7 +455,7 @@ def main(argv=None, *, agent_model=None, customer_model=None, judge_model=None):
     try:
         rep = practise(args.agent, agent_model=agent_model, customer_model=customer_model, judge_model=judge_model,
                        matches=args.matches, rounds=args.rounds, cards=args.cards, trust=args.trust, cap=args.cap,
-                       seed=args.seed, quick=args.quick)
+                       seed=args.seed, quick=args.quick, gate=gate)
     except NOT_RUN as e:
         print(f"Not run: {e}", file=sys.stderr)
         return 2

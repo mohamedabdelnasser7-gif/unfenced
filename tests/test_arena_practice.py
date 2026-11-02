@@ -305,19 +305,39 @@ class MadeUp(Base):
         trust.write_text(json.dumps({"stock_watch": {"matches": 4, "wins": 3, "zero_failed_checks": False}}))
         code, rep = self.main("--matches", "1", "--trust", str(trust), "--json")
         self.assertEqual(code, 0, self.err)
-        self.assertEqual(rep["trust"], {"matches": 4, "wins": 4, "zero_failed_checks": True, "made_up": True,
-                                        "trial": {"level": "careful", "share": 0.2, "days": 14}})
+        self.assertEqual(rep["trust"], {"matches": 4, "wins": 3, "zero_failed_checks": True, "made_up": True,
+                                        "trial": {"level": "careful", "share": 0.2, "days": 14}})  # 7 of 10, rounded up
         self.assertTrue(rep["fact_checks"])
         cards = {c["id"]: c for c in madeup.read(self.folder / madeup.FOLDER, "stock_watch",
                                                   turn.load(self.folder).card)}
         self.assertTrue(rep["held_out_cards"])
         self.assertFalse(any(cards[i]["unwinnable"] for i in rep["held_out_cards"]))
-        # one lost gate match fails the stricter level
+        # one lost gate match of four still passes the practice gate (DECISIONS item 75), two do not
         judge = iter([True, True, True, False] * 3)
         world = World(judge=lambda m: say(json.dumps({"reached": next(judge), "broke_never": False, "turn": 1})))
         code, rep = self.main("--matches", "1", "--trust", str(trust), "--json", world=world)
+        self.assertEqual((code, rep["stopped"]), (0, run.PASSED), self.err)
+        judge2 = iter([True, False] * 6)
+        world = World(judge=lambda m: say(json.dumps({"reached": next(judge2), "broke_never": False, "turn": 1})))
+        code, rep = self.main("--matches", "1", "--trust", str(trust), "--json", world=world)
         self.assertEqual((code, rep["stopped"]), (1, run.ROUNDS))
         self.assertTrue(rep["item"]["lost"])
+
+    def test_the_practice_gate_setting(self):
+        plug = turn.load(self.folder).plug
+        self.assertEqual(practice.stricter({"matches": 10, "wins": 10}, plug)["wins"], 7)
+        self.assertEqual(practice.stricter({"matches": 1, "wins": 1}, plug)["wins"], 1)
+        self.assertEqual(practice.stricter({"matches": 10, "wins": 10}, plug, (1, 2))["wins"], 5)
+        self.assertEqual(practice.read_gate("9/10"), (9, 10))
+        for bad in ("10/9", "0/4", "7", "a/b"):
+            with self.assertRaises(ValueError):
+                practice.read_gate(bad)
+        code, _ = self.main("--gate", "11/10", "--json")
+        self.assertEqual(code, 2)
+        self.assertIn("--gate", self.err)
+
+    def test_quick_calls(self):
+        self.assertEqual(run.QUICK_CALLS, 80)
 
     def test_real_cards_given_keep_the_level_as_it_is(self):
         outside = tempfile.TemporaryDirectory()

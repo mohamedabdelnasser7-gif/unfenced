@@ -500,7 +500,7 @@ class Quick(unittest.TestCase):
         out = io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
             run.main(["--quick", "--state", str(self.dir)], agent_model=Seller(), customer_model=Buyer())
-        self.assertRegex(out.getvalue(), r"quick run: \d+ of at most 40 model calls in this run")
+        self.assertRegex(out.getvalue(), r"quick run: \d+ of at most 80 model calls in this run")
 
 
 if __name__ == "__main__":

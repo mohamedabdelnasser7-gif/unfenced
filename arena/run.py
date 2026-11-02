@@ -27,7 +27,7 @@ refused: see history_lessons.
 
 Trust levels are per agent and stay out of the repo (DECISIONS item 17): --trust names a JSON file
 outside it, shaped like {"sales": {"matches": 4, "wins": 3, "zero_failed_checks": true}} (stand-in
-numbers, not a real level). With none, the public placeholder below asks every gate match won. zero_failed_checks (on unless the level says
+numbers, not a real level). With none, the public placeholder below asks 7 of 10 gate matches won. zero_failed_checks (on unless the level says
 false; --fact-checks overrides it): a match with any failed fact check is lost (arena/verdict.py).
 
 The loop stops on a pass, at the model call cap, at a model that does not answer (that match is
@@ -123,7 +123,7 @@ PASSED, CAP, STUCK, ROUNDS, MODEL_ERROR = "passed", "cap", "stuck", "rounds", "m
 # --quick, the short run for judges (docs/judges.md): one round of one training match and a gate of
 # one match, at most QUICK_CALLS model calls in the run, its files under the ignored data/ folder.
 QUICK_TRUST = {"matches": 1, "wins": 1, "zero_failed_checks": True}
-QUICK_CALLS = 40
+QUICK_CALLS = 80
 QUICK_STATE = ROOT / "data" / "arena-quick"
 
 

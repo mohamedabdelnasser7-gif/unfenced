@@ -8,8 +8,12 @@ DIR is the agent's folder, <db folder>/agents/<name>/, with plug.json, instructi
 
 Who it plays. With no real chats yet there are no real customers, so the model writes made-up ones
 from card.json (arena/madeup.py): easy, unsure, hard, and one that never reaches the good result,
-each marked "made_up": true. --cards names a folder of cleaned real cards to play instead, once
-the agent has real chats behind them. The customer is a model (Muse Spark Open through
+each marked "made_up": true. When the agent's owner has cleaned real cards (arena/madeup.py
+owner_cards: <owner folder>/real-cards, the owner folder found as the shared pool's is), the
+practice customers take their behaviour from those cards and their want from card.json instead
+(arena/madeup.py blend), still marked made up, and the report says how many real cards lent their
+behaviour. --cards names a folder of cleaned real cards to play instead, once the agent has real
+chats behind them. The customer is a model (Muse Spark Open through
 kit/model.py), told who it is by the card the way arena/match.py tells a Sales customer, with a
 prompt for any agent: it ends its line with [done] once it has what it came for, or leaves with
 [leave] when the agent dodges it too often.
@@ -175,8 +179,9 @@ def stricter(trust, plug):
 class Practice(run.Arena):
     """arena/run.py Arena with a new agent's match and verdict, and a Morning page item every run."""
 
-    def __init__(self, agent, cards, *, judge_model, made_up, **kw):
+    def __init__(self, agent, cards, *, judge_model, made_up, behaviour_from=0, **kw):
         self.agent, self.who, self.made_up, self.lost = agent.name, agent, bool(made_up), []
+        self.behaviour_from = behaviour_from  # the owner's real cards that lent the customers their behaviour
         super().__init__(cards, **kw)
         self.judge_model = self.calls.model(judge_model)
         self.prompt_sha, self.prompt_file = PROMPT_SHA, None
@@ -208,7 +213,8 @@ class Practice(run.Arena):
 
     def _report(self, rounds, stopped):
         rep = super()._report(rounds, stopped)
-        rep.update(made_up=self.made_up, tools=list(self.who.tools), tools_left_out=list(self.who.missing))
+        rep.update(made_up=self.made_up, behaviour_from=self.behaviour_from, tools=list(self.who.tools),
+                   tools_left_out=list(self.who.missing))
         if "stuck" not in rep and "item" not in rep:
             rep["item"] = self.rounds_item(rounds, stopped)
         return rep
@@ -229,8 +235,12 @@ def reports_of(folder):
 
 def text(rep):
     lines = [run.text(rep)]
-    lines.append("  practice customers: " + ("made up from the agent's card, no real chats yet" if rep["made_up"]
-                                             else "real cards"))
+    if rep.get("behaviour_from"):
+        who = (f"made up, behaving like {rep['behaviour_from']} of the owner's real customers, wanting what the "
+               "agent's card names")
+    else:
+        who = "made up from the agent's card, no real chats yet" if rep["made_up"] else "real cards"
+    lines.append("  practice customers: " + who)
     lines.append("  tools: " + (", ".join(rep["tools"]) or "none")
                  + (f"; named in the plug but not built: {', '.join(rep['tools_left_out'])}" if rep["tools_left_out"] else ""))
     return "\n".join(lines)
@@ -275,15 +285,17 @@ def main(argv=None, *, agent_model=None, customer_model=None, judge_model=None):
             judge_model = judge_model or model_mod.Model()
         if args.cards:
             cards = run.load_cards(args.cards)
-            made_up = any(c.get("made_up") is True for c in cards)
+            made_up, behaviour_from = any(c.get("made_up") is True for c in cards), 0
         else:
-            cards, _ = madeup.for_agent(folder, agent.name, agent.card, calls.model(customer_model))
-            made_up = True
+            profiles = madeup.owner_cards(folder)
+            cards, _ = madeup.for_agent(folder, agent.name, agent.card, calls.model(customer_model), profiles)
+            made_up, behaviour_from = True, len(profiles or ())
         trust = dict(run.QUICK_TRUST) if args.quick else run.load_trust(args.trust, agent=agent.name)
         if made_up:
             trust = stricter(trust, agent.plug)
-        arena = Practice(agent, cards, judge_model=judge_model, made_up=made_up, agent_model=agent_model,
-                         customer_model=customer_model, calls=calls, trust=trust, matches=args.matches,
+        arena = Practice(agent, cards, judge_model=judge_model, made_up=made_up, behaviour_from=behaviour_from,
+                         agent_model=agent_model, customer_model=customer_model, calls=calls, trust=trust,
+                         matches=args.matches,
                          rounds=args.rounds, seed=args.seed, state=folder, reports=reports)
         rep = arena.run()
     except (run.Refused, turn_mod.Refused, run.CapReached, ModelError, OSError, ValueError) as e:

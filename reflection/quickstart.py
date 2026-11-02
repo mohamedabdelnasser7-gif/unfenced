@@ -16,7 +16,9 @@ pass engine/plug.py from_dict), instructions.md (the agent's prompt), card.json 
 (reflection/turn_exam.py, DECISIONS items 56 and 59): one more model call writes its situations from
 the card once, the plug's exam key names them with every check, and they never change after. A
 correction on the agent's page and a lesson from the night take that exam first. The practice side
-reads the first three names. Tools come only from what the repo has (TOOLS); anything else the card names is
+reads the first three names. When <database folder>/agents/owner.json names an owner, the plug names
+that owner too (owner_of), so the new agent's practice customers take their behaviour from that
+owner's cleaned real cards (arena/madeup.py blend) and never from another owner's. Tools come only from what the repo has (TOOLS); anything else the card names is
 marked not connected yet and the plug leaves it out, and so is a need that names a service no repo tool
 reaches (OUTSIDE), whatever tool the model matched it to. No chat goes to a person (DECISIONS 53): a card, plug or
 instructions that hand a chat to a person, the team or the owner, in English or Arabic, are refused
@@ -84,7 +86,7 @@ _OUTSIDE = re.compile(r"(?<![A-Za-z0-9_&])(?:" + "|".join(re.escape(w) for w in 
 # Trial levels: the values every repo plug uses (sales, assistant, marketing). The level switch
 # starts on careful for a new agent, the stricter of the two.
 STRICT_TRIAL = {"fast": {"share": 0.5, "days": 7}, "careful": {"share": 0.2, "days": 14}}
-LEFT_OUT = ("exam", "kind", "owner", "hands_over")  # the model never writes these; Build sets the exam itself
+LEFT_OUT = ("exam", "kind", "owner", "hands_over")  # the model never writes these; Build sets the exam and the owner itself
 # No chat goes to a person (DECISIONS 53). names_a_person refuses a hand-off of a chat and nothing else:
 # a hand-over verb with the chat, the customer or the conversation as its object or its subject (hand,
 # pass, forward, transfer, حول, ابعت, سلم, 7awel, sallem), or a person (a human, a teammate, the owner,
@@ -491,6 +493,9 @@ class QuickStart:
             if again is not None:
                 raise Refused(f"Not built. The plug check said: {again}. Nothing was written; press Build to try again.")
             fixed_why = why
+        owner = owner_of(agents)
+        if owner is not None:  # the agent shares its owner's practice customers (arena/grow.py owner_of)
+            plug["owner"] = owner
         exam = self._exam(card, plug)
         at = time.time() if now is None else now
         record = {"agent": agent, "name": card["name"], "does": card["does"], "good": card["good"],
@@ -611,6 +616,14 @@ def _agents_dir(folder):
     if agents.resolve() != base / AGENTS:
         raise Refused("The agents folder next to the database is not a plain folder. Nothing was written.")
     return agents
+
+
+def owner_of(agents):
+    """The owner's name from <db folder>/agents/owner.json ({"owner": a name}, arena/grow.py
+    owner_name), or None when there is none: then the plug names no owner and the agent's own folder
+    is its owner's."""
+    from arena import grow
+    return grow.owner_name(agents)
 
 
 def _write_folder(agents, agent, files):

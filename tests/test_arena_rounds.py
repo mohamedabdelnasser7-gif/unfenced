@@ -589,6 +589,99 @@ class LiveStaysLive(Base):
         self.assertEqual(len(rep["rounds"]), 2)  # the run went on to its next round
 
 
+WHOLESALE = "Answer a wholesale question warmly."
+BULK = "Answer a bulk order question kindly."
+
+
+class WholesaleExam:
+    """The real exam's model (reflection/exam.py through rounds.full_examiner, no stand-in): a plain
+    greeting, except with a line in breaks in the prompt on a wholesale situation, where it quotes a
+    made up price, so the amounts check (a safety check) fails there and nowhere else."""
+
+    def __init__(self, breaks=()):
+        self.breaks, self.calls = tuple(breaks), 0
+
+    def chat(self, messages, tools=None, effort="medium", max_tokens=1500, whole=False):
+        self.calls += 1
+        system = messages[0]["content"] if isinstance(messages[0].get("content"), str) else ""
+        last = messages[-1].get("content")
+        text = last if isinstance(last, str) else json.dumps(last, ensure_ascii=False)
+        if any(b in system for b in self.breaks) and "جملة" in (text or ""):
+            return say("ايوه بنبيع جملة، الجوز بـ 999 جنيه.")
+        return say("أهلا بيك، تحت أمرك.")
+
+
+class RealFullExam(Base):
+    """Review simplify round 2, the blocker: the full exam before hand_live (rounds.full_examiner, the
+    real one) runs on the live agent's kept lessons, before the lesson is handed on in the Arena, so a
+    lesson is never on both sides of its own full exam, and one held there never hides a later one."""
+
+    def run_real(self, ideas, breaks):
+        db = self.db()
+        self.agent, self.customer = Agent(), Customer(())
+        self.night = Night(ideas, self.agent, run.state_dir(db) / run.CALLS_FILE)
+        self.exam_model = WholesaleExam(breaks)
+        made = []
+        real = rounds.full_examiner
+
+        def spy(plug, kept, model):  # each full exam made, with the kept lessons it saw at each lesson
+            seen = {"kept": kept, "at": []}
+            made.append(seen)
+            ex = real(plug, kept, model)
+
+            def examine(text, tags):
+                seen["at"].append((text, [p["text"] for p in kept.live()]))
+                return ex(text, tags)
+            return examine
+        argv = ["--cards", str(self.cards), "--matches", "2", "--rounds", "2", "--held-out", "persona-02",
+                "--trust", str(self.trust), "--cap", "5000", "--json", "--db", str(db)]
+        from unittest import mock
+        with mock.patch.object(rounds, "full_examiner", spy), contextlib.redirect_stdout(io.StringIO()) as out:
+            run.main(argv, agent_model=self.agent, customer_model=self.customer,
+                     reflection={"study": self.night, "open": self.night, "exam": self.exam_model})
+        rep = json.loads(out.getvalue())
+        return db, rep["rounds"][0]["reflection"], made
+
+    def test_a_lesson_whose_break_only_the_full_exam_reaches_is_held(self):
+        """Probe p1: the scoped exam does not reach the wholesale situation, the full one does."""
+        db, got, made = self.run_real([WHOLESALE], [WHOLESALE])
+        one = got["lessons"][0]
+        self.assertTrue(one["passed"])  # the scoped exam passed it
+        self.assertTrue(one["full_exam"].startswith("held"), one)
+        self.assertIn("amounts", one["full_exam"])
+        self.assertFalse(one["handed"])  # not handed on in the Arena either
+        self.assertIsNone(one["live_id"])
+        self.assertEqual(self.lessons(db)[0], {})
+        self.assertEqual(len(made), 1)
+
+    def test_a_lesson_held_by_the_full_exam_never_hides_a_later_ones_break(self):
+        """Probe p2: two lessons that break the same situation; neither is on the kept side of the
+        other's full exam, so both are held."""
+        db, got, made = self.run_real([WHOLESALE, BULK], [WHOLESALE, BULK])
+        self.assertEqual([one["text"] for one in got["lessons"]], [WHOLESALE, BULK])
+        for one in got["lessons"]:
+            with self.subTest(lesson=one["text"]):
+                self.assertTrue(one["passed"])
+                self.assertTrue(one["full_exam"].startswith("held"), one)
+                self.assertFalse(one["handed"])
+                self.assertIsNone(one["live_id"])
+        self.assertEqual(self.lessons(db)[0], {})
+        self.assertEqual(len(made), 1)  # one full exam a run
+
+    def test_lessons_that_break_nothing_pass_on_one_full_exam_and_its_kept_run_is_reused(self):
+        db, got, made = self.run_real([GOOD, WHOLESALE], [])
+        for one in got["lessons"]:
+            with self.subTest(lesson=one["text"]):
+                self.assertEqual(one["full_exam"], "passed")
+                self.assertTrue(one["handed"])
+                self.assertIsNotNone(one["live_id"])
+        self.assertEqual(sorted(self.lessons(db)[0]), sorted([GOOD, WHOLESALE]))
+        self.assertEqual(len(made), 1)
+        self.assertIsInstance(made[0]["kept"], rounds.LiveKept)
+        # the first lesson, handed on before the second's full exam, is never on its kept side
+        self.assertEqual(made[0]["at"], [(GOOD, []), (WHOLESALE, [])])
+
+
 class HandLive(unittest.TestCase):
     """arena/rounds.py hand_live on its own (review round 1, finding 2): the live risk and yes rules."""
 

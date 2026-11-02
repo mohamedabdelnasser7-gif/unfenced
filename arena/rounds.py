@@ -31,7 +31,10 @@ calling it with a round's number then:
 3. Hands on (Pool) only a lesson that passed and that the lessons' own rules let go ahead with no
    further yes: on trial or kept, or low risk and waiting its turn. A high risk lesson goes ahead
    only on a person's yes, or under Accept high risk as the engine already allows; a lesson that
-   failed the gate is never handed, whatever its state.
+   failed the gate is never handed, whatever its state. With a live database, a lesson that passed
+   first takes the full exam (full_examiner, DECISIONS item 80) against the live agent's kept
+   lessons, without any lesson this run handed on; one that fails it, or whose full exam cannot
+   run, is handed neither to the next round nor live.
 
 4. Hands a lesson that passed the gate to the live agent's database (hand_live; DECISIONS item 46).
    arena/run.py gives Between the Arena's own copy of the database as db, and the live one as
@@ -159,6 +162,26 @@ class Pool:
         return (self._fixes(stage) + kept + self._passed(stage))[:min(limit, MAX_PICK)]
 
 
+class LiveKept:
+    """The kept lessons the live agent holds, for the full exam before hand_live (review simplify round
+    2): the Pool's corrections from the live page, then the copy's kept lessons, without any lesson
+    this run passed between rounds and handed on in the Arena. The live agent holds none of those as
+    kept, so a lesson's full exam never counts it, or an earlier lesson of the same run, on both sides."""
+
+    def __init__(self, pool):
+        self.pool = pool
+
+    def _kept(self, lessons):
+        return [les for les in lessons if les["state"] == KEPT and les["id"] not in self.pool.handed]
+
+    def live(self, stage=None, now=None):
+        return self.pool._fixes(stage) + self._kept(self.pool.lessons.live(stage, now))
+
+    def pick(self, stage, text, limit=MAX_PICK, *, case=None, now=None, every_share=False):
+        kept = self._kept(self.pool.lessons.pick(stage, text, limit, now=now, every_share=True))
+        return (self.pool._fixes(stage) + kept)[:min(limit, MAX_PICK)]
+
+
 def goes_ahead(les, trial, passed):
     """May a lesson that took the gate be handed to the next round? Only when it passed and its own
     rules let it go ahead with no further yes: on trial or kept, or low risk and waiting its turn."""
@@ -257,12 +280,13 @@ class Between:
     Arena's own copy of the agent's database; live: a callable giving the live agent's Lessons,
     called at the first lesson that passes, which hand_live writes it to (None: db is the agent's
     own database, and there is nothing to hand). full(plug, kept, model): the full exam a passed lesson
-    takes before it is handed live (full_examiner); a lesson that fails it, or whose full exam cannot
-    run, stays in the Arena and is not handed. None hands on the scoped pass (tests with a fake exam)."""
+    takes before it is handed on and live (full_examiner), made once a run with the live agent's kept
+    lessons (LiveKept); a lesson that fails it, or whose full exam cannot run, stays in the Arena and
+    is handed neither to the next round nor live. None hands on the scoped pass (tests with a fake exam)."""
 
     def __init__(self, db, plug, *, calls, state, pool, agent_model, customer_model, models, examiner=real_examiner,
                  now=time.time, live=None, full=None):
-        self.full = full
+        self.full, self._full = full, None  # the run's one full exam (_full_exam)
         self.db, self.plug, self.calls, self.state, self.pool = db, plug, calls, state, pool
         self.agent_model, self.customer_model = agent_model, customer_model
         self.models, self.examiner, self.now = dict(models), examiner, now
@@ -399,22 +423,21 @@ class Between:
             row = lessons.exam_of(lesson_id)
         passed = bool(row and row["passed"])
         les = lessons.get(lesson_id)  # read again: the exam can change nothing, but a trial may have started
-        handed = goes_ahead(les, lessons.trial(lesson_id), passed)
-        if handed:
-            self.pool.hand_on(lesson_id)
         out = {"lesson_id": lesson_id, "text": les["text"], "risk": les["risk"], "state": les["state"],
-               "passed": passed, "handed": handed, "waits_for_yes": passed and not handed and les["state"] == WAITING,
+               "passed": passed, "handed": False, "waits_for_yes": passed and les["state"] == WAITING,
                "why": exam_mod.held_line(row), "gate": exam_mod.effect_of(row)}
         if passed and self.live is not None and self.full is not None:  # the full exam before real customers
-            try:
-                full = self.full(self.plug, self.pool, self.calls.model(self.models["exam"]))(les["text"], les["stages"])
-            except Exception as e:  # fail closed: a full exam that cannot run hands nothing
-                full = exam_mod.could_not_run(e)
+            full = self._full_exam(les)
             out["full_exam"] = "passed" if full.passed else f"held: {full.line()}"
-            if not full.passed:
+            if not full.passed:  # it stays in the Arena: not handed live, nor to the next round
                 out["live_id"] = None
                 out["live"] = f"{FULL_HELD} ({full.line()})"
                 return out
+        handed = goes_ahead(les, lessons.trial(lesson_id), passed)
+        if handed:
+            self.pool.hand_on(lesson_id)
+        out["handed"] = handed
+        out["waits_for_yes"] = passed and not handed and les["state"] == WAITING
         if passed and self.live is not None:  # only a lesson that passed reaches the live database
             try:
                 if self._live is None:
@@ -424,6 +447,17 @@ class Between:
                 out["live_id"] = None
                 out["live"] = f"{LIVE_BUSY} ({e})"
         return out
+
+    def _full_exam(self, les):
+        """The full exam of one lesson that passed the Arena's exam, before it is handed on: against the
+        live agent's kept lessons (LiveKept), on one examiner a run, so its run on those kept lessons is
+        made once and reused. An exam that raises is held as could not run (fail closed)."""
+        try:
+            if self._full is None:
+                self._full = self.full(self.plug, LiveKept(self.pool), self.calls.model(self.models["exam"]))
+            return self._full(les["text"], les["stages"])
+        except Exception as e:  # fail closed: a full exam that cannot run hands nothing
+            return exam_mod.could_not_run(e)
 
 
 FULL_HELD = "passed the Arena's exam but not the full exam, so it stays in the Arena and is not handed live"

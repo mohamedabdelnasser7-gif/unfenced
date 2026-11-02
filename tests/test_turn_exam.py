@@ -300,11 +300,23 @@ class Binding(Base):
         self.assertIsNone(night.agent_exam(self.agent.plug, None))
         self.assertIsNone(night.agent_exam(self.agent.plug, ":memory:"))
 
-    def test_a_plug_whose_exam_is_not_in_the_agents_folder_gets_none(self):
+    def test_a_plug_whose_exam_is_not_in_the_agents_folder_is_held(self):
         other = self.root / "other"
         shutil.copytree(self.folder, other / "stock_watch")
         stranger = plug_mod.load(other / "stock_watch" / "plug.json")
-        self.assertIsNone(night.agent_exam(stranger, self.root / "ascent.db"))
+        got = night.agent_exam(stranger, self.root / "ascent.db")(None)("Say the stock.", (plug_mod.ALL,))
+        self.assertFalse(got.passed)
+        self.assertEqual(got.rows[0].check, engine_exam.NOT_RUN)
+
+    def test_a_built_folder_that_does_not_load_holds_every_lesson(self):
+        # red team wireall r1 item 2: a broken card.json once left the night with no exam at all
+        card = json.loads((self.folder / "card.json").read_text())
+        (self.folder / "card.json").write_text(json.dumps(dict(card, never=["x" * 700])))
+        make = night.agent_exam(self.agent.plug, self.root / "ascent.db")
+        self.assertIsNotNone(make)
+        got = make(None)("Say the stock in one short line.", (plug_mod.ALL,))
+        self.assertFalse(got.passed)
+        self.assertIn("does not load", got.rows[0].why)
 
     def test_the_sales_agent_keeps_its_own_binding(self):
         with mock.patch.object(night, "sales_exam", return_value="sales binding") as made:

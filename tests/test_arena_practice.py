@@ -424,6 +424,39 @@ class Refusals(Base):
                 self.assertEqual(code, 2)
                 self.assertIn(why, self.err)
 
+    def test_cards_from_outside_the_owner_folder_are_refused(self):
+        # red team wireall r1 item 1: another owner's real cards, or the repo's, never play this agent
+        other = tempfile.TemporaryDirectory()
+        self.addCleanup(other.cleanup)
+        for cards, why in ((Path(other.name), "outside the agent's owner folder"),
+                           (run.ROOT / "arena" / "real" / "cards", "outside the agent's owner folder")):
+            with self.subTest(cards=str(cards)):
+                code, _ = self.main("--quick", "--cards", str(cards), world=World())
+                self.assertEqual(code, 2)
+                self.assertIn(why, self.err)
+        code, _ = self.main("--quick", "--cards", str(run.DEMO_CARDS), world=World())
+        self.assertEqual(code, 0, self.err)
+
+    def test_deeply_nested_json_is_left_out(self):
+        # red team wireall r1 item 3: JSON too deep for the parser is left out, never a crash. How deep
+        # json.loads goes depends on the Python build, so the parser's RecursionError is made here.
+        from arena import grow
+        deep, loads = "[[[deep]]]", json.loads
+
+        def parse(text, *a, **k):
+            if text == deep:
+                raise RecursionError("maximum recursion depth exceeded")
+            return loads(text, *a, **k)
+        bad = self.root / "agents" / "deep"
+        bad.mkdir()
+        (bad / "plug.json").write_text(deep)
+        real = grow.owner_of(self.folder) / madeup.REAL_FOLDER
+        real.mkdir()
+        (real / "persona-01.json").write_text(deep)
+        with mock.patch("json.loads", side_effect=parse):
+            self.assertEqual([a.name for a in turn.built(self.root)], ["stock_watch"])
+            self.assertIsNone(madeup.owner_cards(self.folder))
+
     def test_the_sales_agent_practises_through_its_own_run(self):
         sales = self.root / "agents" / "sales"
         shutil.copytree(FIXTURE, sales)

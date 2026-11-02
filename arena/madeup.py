@@ -273,7 +273,7 @@ def owner_cards(agent_folder):
             continue
         try:
             b = behaviour(json.loads(p.read_text(encoding="utf-8")), p.stem)
-        except (OSError, ValueError, UnicodeDecodeError):
+        except (OSError, ValueError, UnicodeDecodeError, RecursionError):
             continue
         if b is not None:
             got.append(b)

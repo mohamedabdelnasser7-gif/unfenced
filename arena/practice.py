@@ -13,7 +13,7 @@ owner_cards: <owner folder>/real-cards, the owner folder found as the shared poo
 practice customers take their behaviour from those cards and their want from card.json instead
 (arena/madeup.py blend), still marked made up, and the report says how many real cards lent their
 behaviour. --cards names a folder of cleaned real cards to play instead, once the agent has real
-chats behind them. The customer is a model (Muse Spark Open through
+chats behind them; it must sit inside the owner folder (or be the made-up demo set). The customer is a model (Muse Spark Open through
 kit/model.py), told who it is by the card the way arena/match.py tells a Sales customer, with a
 prompt for any agent: it ends its line with [done] once it has what it came for, or leaves with
 [leave] when the agent dodges it too often.
@@ -168,6 +168,21 @@ def play(agent, card, *, agent_model, customer_model, seed=0, max_turns=MAX_TURN
     return m
 
 
+def check_cards(given, folder):
+    """--cards must be the made-up demo set or sit inside the agent's owner folder (arena/grow.py
+    owner_of), as the shared pool does: one owner's real cards never play against another owner's agent."""
+    from arena import grow
+    where = Path(given).expanduser()
+    if where.is_symlink():
+        raise run.Refused("the cards folder is a link")
+    where = where.resolve()
+    if where == run.DEMO_CARDS.resolve():
+        return
+    owner = grow.owner_of(folder)
+    if paths.inside_repo(where) or not paths.within(where, owner):
+        raise run.Refused("the cards folder sits outside the agent's owner folder; real cards never cross owners")
+
+
 def stricter(trust, plug):
     """The trust level while the customers are made up: every gate match won, fact checks on, and the
     plug's careful trial level named."""
@@ -284,6 +299,7 @@ def main(argv=None, *, agent_model=None, customer_model=None, judge_model=None):
             customer_model = customer_model or model_mod.Model()
             judge_model = judge_model or model_mod.Model()
         if args.cards:
+            check_cards(args.cards, folder)
             cards = run.load_cards(args.cards)
             made_up, behaviour_from = any(c.get("made_up") is True for c in cards), 0
         else:

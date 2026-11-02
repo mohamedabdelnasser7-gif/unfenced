@@ -181,7 +181,7 @@ def load(folder):
     try:
         raw = json.loads(_read(folder, "plug.json"))
         p = plug_mod.from_dict(raw, folder)
-    except ValueError as e:
+    except (ValueError, RecursionError) as e:
         raise Refused(f"plug.json: {e}") from None
     if p.agent != folder.name:
         raise Refused(f"plug.json names the agent {p.agent}, but its folder is {folder.name}")

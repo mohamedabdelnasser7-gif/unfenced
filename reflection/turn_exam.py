@@ -301,10 +301,16 @@ def folder_of(plug, folder=None, db=None):
     return Path(db).resolve().parent / turn_mod.AGENTS / plug.agent
 
 
+def held(why):
+    """make(lessons) -> an examiner that fails every lesson as could not run: a built agent whose plug
+    names an exam that cannot be bound holds its lessons (fail closed), as the Morning page does."""
+    return lambda lessons: (lambda text, tags: engine_exam.could_not_run(why))
+
+
 def binding(plug, folder=None, db=None, *, model=None, judge_model=None):
-    """make(lessons) -> examiner for a built agent whose plug names an exam, or None: no exam, no
-    folder, a folder that does not load as this agent, or a plug whose exam file is not in that folder
-    (a repo agent never takes a built agent's exam). The examiner counts (count=True) and is wrapped in
+    """make(lessons) -> examiner for a built agent whose plug names an exam, or None: no exam or no
+    folder. A folder that does not load as this agent, or a plug whose exam file is not in that folder
+    (a repo agent never takes a built agent's exam), gets held(): every lesson fails as could not run. The examiner counts (count=True) and is wrapped in
     the Arena rerun of the agent's past practice wins (arena/gate.py wrap_turn)."""
     if plug.exam is None:
         return None
@@ -312,14 +318,16 @@ def binding(plug, folder=None, db=None, *, model=None, judge_model=None):
     if where is None:
         return None
     from kit import turn as turn_mod
+    if not Path(where).is_dir():
+        return None
     try:
         agent = turn_mod.load(where)
-    except turn_mod.Refused:
-        return None
+    except turn_mod.Refused as e:
+        return held(f"the agent folder does not load: {e}")
     if agent.name != plug.agent or agent.plug.exam is None or \
             Path(agent.plug.exam.situations).resolve().parent != Path(where).resolve() or \
             Path(plug.exam.situations).resolve() != Path(agent.plug.exam.situations).resolve():
-        return None
+        return held("the exam named in plug.json is not this agent's own exam file")
     from arena import gate, practice
 
     def make(lessons):

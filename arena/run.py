@@ -746,7 +746,7 @@ def past_wins(state):
     for line in lines:
         try:
             m = json.loads(line)
-        except ValueError:
+        except (ValueError, RecursionError):
             continue
         if isinstance(m, dict) and m.get("won") is True and m.get("turns"):
             out.append(m)

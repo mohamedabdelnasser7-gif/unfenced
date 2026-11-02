@@ -171,8 +171,8 @@ class ATagIsNotAHandOver(unittest.TestCase):
 
 
 class TheFullSendCheck(Base):
-    """B4: the full check only when the card connects whatsapp or store; a folder written by hand keeps
-    the reply rule."""
+    """B4: the full check only when the card connects whatsapp, store, orders or delivery (the tools
+    that give amounts); a folder written by hand keeps the reply rule."""
 
     def test_a_ticket_agent_with_a_reply_action_and_no_store_names_a_refund(self):
         agent = turn.load(write_agent(self.root, "ticket_desk", case=TICKET_CASE, actions=TICKET_ACTIONS))
@@ -181,7 +181,7 @@ class TheFullSendCheck(Base):
         self.assertEqual((out.outcome, sent), ("replied", ["Your 250 EGP refund was sent today."]))
 
     def test_a_card_that_connects_store_or_whatsapp_keeps_every_check(self):
-        for tools in (["store"], ["whatsapp"], ["store", "whatsapp"]):
+        for tools in (["store"], ["whatsapp"], ["store", "whatsapp"], ["orders"], ["delivery"]):
             with self.subTest(tools=tools):
                 agent = turn.load(write_agent(self.root, "shop_" + "_".join(tools), case=TICKET_CASE,
                                               actions={"answer": "One answer."}, tools=tools))

@@ -325,6 +325,8 @@ def _exam(e, folder):
     safety = None
     if "safety" in e:
         safety = tuple(_name(c, "exam safety check") for c in _list(e["safety"], "exam safety"))
+        if not safety:  # an empty list would block nothing: a lesson could break any check and pass
+            raise ValueError("exam safety: name at least one check, or leave the key out for the default list")
         if len(set(safety)) != len(safety):
             raise ValueError("exam safety: a check named twice")
         if set(safety) - set(checks):

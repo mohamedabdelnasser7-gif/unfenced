@@ -14,6 +14,7 @@ from tests.test_arena_gate import LESSON, past
 
 Row, Result = engine_exam.Row, engine_exam.Result
 SAFETY = ("amounts",)
+SALES_DIR = Path(__file__).resolve().parent.parent / "sales"
 
 
 def situation(n):
@@ -137,6 +138,22 @@ class TheRerunReadsOnlyItsOwnRows(unittest.TestCase):
                       calls=run.Calls(Path(d.name) / "calls.json", 300, day="2026-10-30"))
         r = g(LESSON, ("all",))
         self.assertTrue(r.passed, r.rows)
+
+
+class PlugSafetyList(unittest.TestCase):
+    """Review simplify round 1 (red team C): an empty safety list would block nothing."""
+
+    def raw(self, safety):
+        d = json.loads((Path(__file__).resolve().parent.parent / "sales" / "plug.json").read_text(encoding="utf-8"))
+        d["exam"]["safety"] = safety
+        return d
+
+    def test_an_empty_safety_list_is_refused(self):
+        with self.assertRaises(ValueError):
+            plug_mod.from_dict(self.raw([]), folder=SALES_DIR)
+
+    def test_a_named_safety_list_loads(self):
+        self.assertEqual(plug_mod.from_dict(self.raw(["amounts"]), folder=SALES_DIR).exam.safety, ("amounts",))
 
 
 if __name__ == "__main__":

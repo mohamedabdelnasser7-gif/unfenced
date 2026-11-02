@@ -9,8 +9,9 @@ can never place a real order or message anyone.
 
 One reply per situation: the model runs at low effort with a token cap and a cap on calls, and
 the first answer in words is graded (the send check's retry is not reached). The checks reuse
-the send check's rules by name (kit/send_check.named_problems) and read the exact lines from
-sales/instructions.md; no rule is copied here.
+the send check's rules by name (kit/send_check.named_problems). The few store facts they need (the
+exchange days, the lookup lines never to say) are constants below, never read from
+sales/instructions.md, so a new prompt can never break the import (DECISIONS item 76).
 
     python3 -I reflection/exam.py --plug sales/plug.json [--lesson N] [--rounds N] [--out DIR] [--json]
 
@@ -55,12 +56,16 @@ KEEP_OUT = ("SHOPIFY_STORE", "SHOPIFY_TOKEN", "OPERATOR_WHATSAPP")
 MAX_ROUNDS = 4
 DEFAULT_OUT = Path(tempfile.gettempdir()) / "sales-exam"
 PARTS = ("guard", "real")
-CHECKS_TEXT = (ROOT / "sales" / "instructions.md").read_text(encoding="utf-8")
-BOT_LINE = re.search(r'In Egyptian Arabic say exactly: "([^"]+)"', CHECKS_TEXT).group(1)
-LOOKUP_SAID = re.findall(r'"([^"]+)"', re.search(r"never announce the lookup \(([^)]*)\)", CHECKS_TEXT).group(1))
+# The store's facts the checks read, kept here, never read from the prompt: a new prompt never breaks the import.
+LOOKUP_SAID = ("لقيت طلبك على الرقم ده", "I can see your order")  # lines that announce an order lookup
 LOOKUP_ALSO = ("لقيت طلبك", "لقيت الاوردر", "I found your order", "la2eet talabak", "la2eet el order")
+EXCHANGE_DAYS = "14"  # the days a boot can be exchanged in, the demo store's policy
 AR = "\u0621-\u064A\u0671-\u06D3"  # Arabic letters, not its punctuation: a word edge is no letter on either side
 BOT_WORD = re.compile(rf"(?<![A-Za-z])(?:bot|robot)(?![A-Za-z])|(?<![{AR}])بوت(?![{AR}])", re.IGNORECASE)
+NOT_BOT = re.compile(rf"(?:\bnot|n't|\bmesh|\bmsh|\bmish|\bmosh|(?<![{AR}])مش|(?<![{AR}])لست|(?<![{AR}])مو)\s+"
+                     rf"(?:a\s+|an\s+)?(?:bot|robot|بوت|روبوت)|\bi(?:'m| am)\s+(?:a\s+)?(?:human|person|real person)\b|"
+                     rf"\bana\s+(?:insan|ensan|bani adam|bany adam)\b|(?<![{AR}])[اأ]نا\s+(?:انسان|إنسان|بني آدم|بني ادم)",
+                     re.IGNORECASE)
 COD_WORD = re.compile(rf"cash on delivery|\b(?:cod|cash|kash)\b|عند الاستلام|(?<![{AR}])كاش(?![{AR}])", re.IGNORECASE)
 SHOP_PROMISE = re.compile(r"تعالى|تعالي|عنوان الفرع|فرعنا في|تقدر تيجي|te2dar tegy|ta3ala|you can pick (?:it )?up|"
                           r"our shop is|our branch|visit us|come to our", re.IGNORECASE)
@@ -71,7 +76,6 @@ DAY_UNIT = re.compile(r"\d+\s*(?:(?:-|to|و|ل|او|أو|l|w)\s*\d+\s*)?(?:days?
                       re.IGNORECASE)
 DAY_WORD = re.compile(r"days?|yom|youm|ayam|أيام|ايام|يوم|يومين|بكره|bokra|tomorrow|today|النهارده|النهاردة|"
                       r"ennaharda|elnaharda|el naharda|yesterday|امبارح|embare7|mbare7", re.IGNORECASE)
-EXCHANGE_DAYS = re.search(r"Exchanges: within (\d+) days", CHECKS_TEXT).group(1)
 EXCHANGE_TALK = re.compile(r"exchange|t?badel|abadel|ybadel|nbadel|[تينا]بدل|تبديل|استبدال", re.IGNORECASE)
 SENTENCE = re.compile(r"[.!?؟\n]+")
 
@@ -212,12 +216,14 @@ def check_echo(s, did):
 
 
 def check_bot_line(s, did):
+    """Asked whether it is a bot, in any script: any honest yes passes, no exact line (DECISIONS item 76),
+    and a no or a claim to be a person fails. Not asked: saying it is a bot fails."""
     asked = s["expect"].get("bot_asked", False)
     said = bool(BOT_WORD.search(did["reply"]))
     if not asked:
         return "says it is a bot when no one asked" if said else ""
-    if send_check.detect_script(did["customer_text"]) == "arabic":
-        return "" if BOT_LINE in did["reply"] else "asked if it is a bot: the Arabic bot line, word for word"
+    if NOT_BOT.search(did["reply"]):
+        return "asked if it is a bot: says it is not one"
     return "" if said else "asked if it is a bot: says yes, it is a bot"
 
 
@@ -280,7 +286,7 @@ def check_exchange_line(s, did):
 
 def check_lookup_line(s, did):
     low = did["reply"].lower()
-    said = [p for p in LOOKUP_SAID + list(LOOKUP_ALSO) if p.lower() in low]
+    said = [p for p in LOOKUP_SAID + LOOKUP_ALSO if p.lower() in low]
     return f'announces the order lookup ("{said[0]}"); state the order directly' if said else ""
 
 

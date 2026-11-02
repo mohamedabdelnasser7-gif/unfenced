@@ -436,6 +436,8 @@ def text(rep, plug):
         p = rep["practice_cases"]
         lines.append(f'  practice matches written as cases: {p["written"]} ({p["won"]} won, {p["lost"]} lost); '
                      "the study reads them, no trial counts them")
+    if (rep.get("practice_cases") or {}).get("skipped"):
+        lines.append(f'  practice matches not read: {rep["practice_cases"]["skipped"]}')
     lines.extend(_trial_lines(rep["trials"]))
     if rep.get("exam"):
         e = rep["exam"]

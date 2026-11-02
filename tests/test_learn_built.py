@@ -165,7 +165,9 @@ class FromFolder(Base):
         (folder / "arena-matches.jsonl").symlink_to(real / "arena-matches.jsonl")
         self.assertEqual(learn_built.from_folder(self.db, self.plug, folder), none)
         with mock.patch.object(learn_built, "MAX_MATCHES_BYTES", 10):
-            self.assertEqual(learn_built.from_folder(self.db, self.plug, real), none)
+            big = learn_built.from_folder(self.db, self.plug, real)
+        self.assertEqual({k: big[k] for k in none}, none)
+        self.assertIn("no practice was read", big["skipped"])  # review merge r1 finding 8
 
 
 class ACase(unittest.TestCase):
@@ -205,6 +207,16 @@ class ACase(unittest.TestCase):
         self.assertEqual(rows[1]["detail"]["verdict"], judged["why"])
         self.assertTrue(all(is_history(r) for r in rows))
         self.assertLess(rows[-1]["at"], NOW)
+        self.assertEqual(settle(plug, rows, NOW)[:2], (BAD, "reopened"))
+
+    def test_a_bad_result_that_ends_an_action_closes_on_that_action(self):
+        """Review merge r1 finding 6: the bad result has after set, so the closing row is its action."""
+        d = ticket_plug()
+        d["results"]["reopened"].update(after="tag", speed="fast", shows_in_days=[0, 0])
+        plug = plugs.load(d, self)
+        m, judged = lost(TWO_TURNS)
+        rows = Log(self.db, plug).case(learn_built.to_case(self.db, plug, m, judged, "act-1", now=NOW))
+        self.assertEqual((rows[-1]["action"], rows[-1]["result"]), ("tag", "reopened"))
         self.assertEqual(settle(plug, rows, NOW)[:2], (BAD, "reopened"))
 
     def test_an_agent_first_case_with_no_answer(self):

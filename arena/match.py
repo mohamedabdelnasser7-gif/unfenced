@@ -34,6 +34,7 @@ import hashlib
 import json
 import logging
 import os
+import threading
 import random
 import re
 import string
@@ -171,19 +172,25 @@ class Customer:
         return text
 
 
+_DEMO = threading.RLock()  # the environment and logging are the whole process's: one demo store at a time
+
+
 @contextmanager
 def demo_store():
-    """The demo store with no Shopify keys and no operator number, its cache fresh, warnings quiet."""
-    env = {k: v for k, v in os.environ.items() if k not in KEEP_OUT}
-    store._cache.update(at=0.0, items=None)
-    was = logging.root.manager.disable
-    logging.disable(logging.WARNING)
-    try:
-        with mock.patch.dict(os.environ, env, clear=True):
-            yield
-    finally:
-        logging.disable(was)
+    """The demo store with no Shopify keys and no operator number, its cache fresh, warnings quiet.
+    One thread at a time (Build's practice in the background and a correction round on the page
+    would otherwise each restore what the other changed; review merge r1 finding 5)."""
+    with _DEMO:
+        env = {k: v for k, v in os.environ.items() if k not in KEEP_OUT}
         store._cache.update(at=0.0, items=None)
+        was = logging.root.manager.disable
+        logging.disable(logging.WARNING)
+        try:
+            with mock.patch.dict(os.environ, env, clear=True):
+                yield
+        finally:
+            logging.disable(was)
+            store._cache.update(at=0.0, items=None)
 
 
 def _tool_results(chats, chat_id, start):

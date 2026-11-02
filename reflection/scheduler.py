@@ -51,6 +51,7 @@ import math
 import os
 import re
 import signal
+import stat
 import socket
 import subprocess
 import sys
@@ -190,10 +191,16 @@ def guard(limit, fd=0):
     it is; and a watcher thread on the pipe from the server (stdin's descriptor, read raw, so the
     thread never holds a lock the interpreter needs at exit), which ends the child once the pipe
     closes. The server never writes to it, so it closes only when the server's end does: the server
-    stopped, however it stopped. Call it from the main thread."""
+    stopped, however it stopped. Only a pipe is watched: a night run by hand with --limit and stdin
+    from a file or /dev/null keeps the alarm alone. Call it from the main thread."""
     signal.signal(signal.SIGALRM, signal.SIG_DFL)
     signal.alarm(max(1, math.ceil(float(limit))))
-    threading.Thread(target=_watch, args=(fd,), daemon=True, name="server-pipe").start()
+    try:
+        piped = stat.S_ISFIFO(os.fstat(fd).st_mode)
+    except OSError:
+        piped = False
+    if piped:
+        threading.Thread(target=_watch, args=(fd,), daemon=True, name="server-pipe").start()
 
 
 def _watch(fd):

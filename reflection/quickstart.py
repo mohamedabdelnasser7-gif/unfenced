@@ -183,7 +183,10 @@ _EN_TAKES = _EN_HAND_OFF[-1]  # a person taking over, answering or handling: the
 # A tag is the agent's own action (DECISIONS 72): a ticket tagged "needs the team" ends the case with the
 # agent's result, and a person sees the tag and acts. A clause that tags may say a person handles what was
 # tagged; a hand verb (hand, pass, transfer, escalate) still refuses, and so does a person answering the
-# customer or going on with the chat.
+# customer or going on with the chat, and so does a person taking over, answering, replying,
+# responding or continuing, even with no customer named (review merge r1 finding 3).
+_TAKES_CHAT = re.compile(r"(?<![a-z])(?:take|takes|taking|took|taken|answer\w*|repl\w*|respond\w*|continu\w*|"
+                         r"carr(?:y|ies|ied)\s+on|go(?:es)?\s+on|follow\w*\s+up)(?![a-z])", re.IGNORECASE)
 _TAG = re.compile(r"(?<![a-z])(?:tag(?:s|ged|ging)?|label(?:s|led|ling)?|flag(?:s|ged|ging)?)(?![a-z])", re.IGNORECASE)
 _AT_PERSON = re.compile(r"\s+(?:(?:to|with|on|for|from)\s+)?(?:you|ya|u|your|yours|them|him|her|(?:the\s+|this\s+|"
                         r"that\s+|every\s+|each\s+)?(?:customers?|clients?|buyers?|callers?|requesters?|chats?|"
@@ -245,7 +248,8 @@ def names_a_person(text):
     for clause in (*_CLAUSES.split(plain), *joined):
         for rx in (*_EN_HAND_OFF, *_AR_HAND_OFF, *_F_HAND_OFF):
             for m in rx.finditer(clause):
-                if rx is _EN_TAKES and _TAG.search(clause) and not _AT_PERSON.match(clause, m.end()):
+                if rx is _EN_TAKES and _TAG.search(clause) and not _AT_PERSON.match(clause, m.end()) \
+                        and not _TAKES_CHAT.search(m.group(0)):
                     continue  # a person acts on the agent's tag; nobody takes the chat
                 near = _NEAR.search(clause[:m.start()])
                 if not _NEGATED.search((near.group(0) if near else "") + clause[m.start():m.end()]):

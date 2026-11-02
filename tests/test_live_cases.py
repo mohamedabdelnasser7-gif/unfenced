@@ -165,7 +165,11 @@ class ATagIsNotAHandOver(unittest.TestCase):
         for text in ("escalate the ticket to the support team", "hand the ticket to the support team",
                      "Tag the chat and the team will answer the customer", "tag it and hand the ticket to the team",
                      "flag the case and transfer it to a human", "Tag the ticket, then the team will answer you",
-                     "The team will answer the customer"):
+                     "The team will answer the customer",
+                     # review merge r1 finding 3: a person taking the chat, no customer named
+                     "Tag the chat urgent and the owner will take over.", "Flag it and a team member will reply shortly.",
+                     "Tag the ticket and someone from the team will respond.", "Tag it and the owner will answer.",
+                     "Flag the chat so the team takes over.", "Tag the conversation and a person will continue."):
             with self.subTest(text=text):
                 self.assertIsNotNone(qs.names_a_person(text))
 
@@ -498,6 +502,40 @@ class BuildStartsAShortPractice(Base):
         self.assertNotIn(qs.PRACTISING, p.get("/new", {}, "t"))
         p.quick._practice["stock_watcher"] = qs.PRACTISING
         self.assertIn(qs.PRACTISING, p.get("/new", {}, "t"))
+
+
+
+class OneDemoStoreAtATime(unittest.TestCase):
+    """Review merge r1 finding 5: Build's practice in a thread and a correction round on the page each
+    enter the demo store; the second waits, and the process gets its keys and logging back."""
+
+    def test_the_second_waits_and_the_process_is_restored(self):
+        import logging
+        import os
+        import threading
+        from unittest import mock
+        from arena import match as match_mod
+        key = sorted(match_mod.KEEP_OUT)[0]
+        with mock.patch.dict(os.environ, {key: "fake-value-not-real"}):
+            was = logging.root.manager.disable
+            inside, release, order = threading.Event(), threading.Event(), []
+
+            def practice():
+                with match_mod.demo_store():
+                    order.append("practice in")
+                    inside.set()
+                    release.wait(5)
+                    order.append("practice out")
+            t = threading.Thread(target=practice)
+            t.start()
+            inside.wait(5)
+            threading.Timer(0.2, release.set).start()
+            with match_mod.demo_store():
+                order.append("round in")
+            t.join(5)
+            self.assertEqual(order, ["practice in", "practice out", "round in"])
+            self.assertEqual(os.environ.get(key), "fake-value-not-real")
+            self.assertEqual(logging.root.manager.disable, was)
 
 
 if __name__ == "__main__":

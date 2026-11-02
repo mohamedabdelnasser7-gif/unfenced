@@ -586,6 +586,14 @@ class OwnEnd(Base):
         server.wait()
         self.assertTrue(self.ended(pid), "the night outlived its server")
 
+    def test_a_night_by_hand_with_stdin_from_devnull_is_not_killed(self):
+        """Review merge r1 finding 7: only a pipe from the server is watched."""
+        import subprocess
+        root = str(Path(sc.__file__).resolve().parent.parent)
+        code = "import sys, time; sys.path.insert(0, sys.argv[1]); from reflection import scheduler; scheduler.guard(30); time.sleep(0.5)"
+        done = subprocess.run([sys.executable, "-c", code, root], stdin=subprocess.DEVNULL, timeout=20)
+        self.assertEqual(done.returncode, 0)
+
     def test_the_real_night_calls_guard_first_when_given_a_limit(self):
         from reflection import night
         with mock.patch.object(sc, "guard") as guard, mock.patch.object(night.env, "load"), \

@@ -173,8 +173,11 @@ def from_folder(db, plug, folder, *, until=None):
     out = {"written": 0, "won": 0, "lost": 0}
     path = Path(folder) / run_mod.MATCHES_FILE
     try:
-        if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_MATCHES_BYTES:
+        if path.is_symlink() or not path.is_file():
             return out
+        if path.stat().st_size > MAX_MATCHES_BYTES:  # said in the night's report, never silent
+            return dict(out, skipped=f"{run_mod.MATCHES_FILE} is over {MAX_MATCHES_BYTES // 1_000_000} MB, "
+                                     "so no practice was read")
         lines = path.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeDecodeError):
         return out

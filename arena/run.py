@@ -106,6 +106,7 @@ if __name__ == "__main__" and str(ROOT) not in sys.path:  # run by its path unde
     sys.path.insert(0, str(ROOT))
 
 from arena import factcheck, match as match_mod, paths, replay as replay_mod, verdict  # noqa: E402
+from kit import seal  # noqa: E402
 from reflection import history as hist  # noqa: E402
 
 AGENT = "sales"
@@ -565,7 +566,10 @@ class Arena:
         return self._write_item(item)
 
     def _write_item(self, item):
+        """Write the item with the run's seal (kit/seal.py), keyed in the same folder, so Morning.gate
+        can tell it from one written by hand."""
         self.reports.mkdir(parents=True, exist_ok=True)
+        seal.sign(item, self.reports)
         path = self.reports / f"arena-{self.agent}-{self.run_id}.json"
         path.write_text(json.dumps(item, ensure_ascii=False, indent=1), encoding="utf-8")
         item["file"] = path.name

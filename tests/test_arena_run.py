@@ -307,9 +307,10 @@ class Parts(Base):
         items = [n for n in names if n.startswith("arena-sales-")]  # a pass writes its Morning item too
         self.assertEqual(len(items), 1)
         self.assertIs(json.loads((folder / items[0]).read_text(encoding="utf-8"))["quick"], False)
-        self.assertEqual([n for n in names if n not in items], [run.CALLS_FILE, "arena-calls.lock", run.MATCHES_FILE])
+        self.assertEqual([n for n in names if n not in items],
+                         [run.CALLS_FILE, "arena-calls.lock", run.MATCHES_FILE, run.seal.KEY_FILE])
         ignored = (REPO / ".gitignore").read_text(encoding="utf-8").split()
-        for name in names + [run.CALLS_FILE + ".tmp"]:  # the temp file a crash could leave
+        for name in names + [run.CALLS_FILE + ".tmp", run.seal.KEY_FILE + ".1.ab"]:  # temp files a crash could leave
             self.assertTrue(any(fnmatch.fnmatchcase(name, pat) for pat in ignored), name)
         self.assertTrue(run.past_wins(run.state_dir(db)))
         for argv in ([], ["--db", str(db), "--state", str(self.dir)]):  # neither, or both

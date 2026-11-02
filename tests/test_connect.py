@@ -21,7 +21,7 @@ from pathlib import Path
 
 from channels import whatsapp as wa
 from engine import plug as plug_mod
-from kit import connections, switch
+from kit import connections, seal, switch
 from kit.chats import Chats
 from kit.db import Db
 from reflection import morning as mo
@@ -52,6 +52,7 @@ class Base(unittest.TestCase):
         item = dict({"agent": "sales", "kind": kind, "at": at, "run": run, "rounds": 2, "gate_won": won,
                      "gate_played": played, "needs": needs, "lost": [], "line": "made up for the test",
                      "quick": False}, **extra)  # a full run says so, as arena/run.py writes it
+        seal.sign(item, self.folder)  # and carries its run's seal (kit/seal.py)
         (self.folder / f"arena-sales-{run}.json").write_text(json.dumps(item), encoding="utf-8")
 
     def page(self, token="t"):
@@ -184,6 +185,63 @@ class TheGate(Base):
         with self.assertRaises(mo.Refused):
             self.m.connect("nobody", "whatsapp")
         self.assertEqual(connections.live_agents(self.db), set())
+
+
+class TheSeal(Base):
+    """Review simplify round 3, red team B: an Arena item counts only with the seal its run made with the
+    folder's key (kit/seal.py), so one written or changed by hand never unlocks Connect."""
+
+    def item(self, **extra):
+        return dict({"agent": "sales", "kind": "arena_rounds", "at": NOW, "run": "r1", "rounds": 2, "gate_won": 4,
+                     "gate_played": 4, "needs": 4, "lost": [], "line": "made up for the test", "quick": False}, **extra)
+
+    def write(self, item):
+        (self.folder / "arena-sales-r1.json").write_text(json.dumps(item), encoding="utf-8")
+
+    def refused(self):
+        gate = self.m.gate("sales")
+        self.assertFalse(gate["passed"])
+        self.assertIn("carries no seal from an Arena run", gate["said"])
+        with self.assertRaises(mo.Refused):
+            self.m.connect("sales", "whatsapp", now=NOW)
+        self.assertFalse(connections.live(self.db, "sales", "whatsapp"))
+
+    def test_an_item_the_run_wrote_passes(self):
+        from arena import run
+        run.Arena._write_item(type("Run", (), {"reports": self.folder, "agent": "sales", "run_id": "r1"})(),
+                              self.item())
+        self.assertTrue(self.m.gate("sales")["passed"])
+        self.assertEqual((self.folder / seal.KEY_FILE).stat().st_mode & 0o777, 0o600)
+        self.assertEqual(len((self.folder / seal.KEY_FILE).read_bytes()), seal.KEY_BYTES)
+
+    def test_a_hand_written_full_pass_with_no_seal_stays_locked(self):
+        seal.key(self.folder, make=True)  # the folder has a key; the item carries no seal
+        self.write(self.item())
+        self.refused()
+
+    def test_a_sealed_item_changed_by_hand_stays_locked(self):
+        for change in ({"quick": False}, {"gate_won": 9}, {"needs": 1}, {"run": "r1", "at": NOW + 1}):
+            with self.subTest(change=change):
+                item = seal.sign(self.item(quick=True) if change == {"quick": False} else self.item(), self.folder)
+                self.write(dict(item, **change))
+                self.refused()
+
+    def test_a_seal_from_another_folder_or_a_bad_seal_stays_locked(self):
+        with tempfile.TemporaryDirectory() as other:
+            item = seal.sign(self.item(), other)
+        seal.key(self.folder, make=True)
+        for bad in (item, dict(item, seal=""), dict(item, seal=None), dict(item, seal=["x"])):
+            with self.subTest(seal=bad.get("seal")):
+                self.write(bad)
+                self.refused()
+
+    def test_with_no_key_nothing_passes_and_the_page_never_makes_one(self):
+        item = seal.sign(self.item(), self.folder)
+        (self.folder / seal.KEY_FILE).unlink()
+        self.write(item)
+        self.refused()
+        self.page()
+        self.assertFalse((self.folder / seal.KEY_FILE).exists())
 
 
 class Pull(Base):
@@ -456,9 +514,9 @@ class AQuickStartAgent(unittest.TestCase):
         plugs, built = mo.with_built([plug_mod.load(ROOT / "sales" / "plug.json")], db_path)
         self.m = mo.Morning(self.db, plugs, reports=folder, built=built, db_path=db_path)
         self.p = pages.Pages(self.m)
-        (folder / "arena-stock_watch-r1.json").write_text(json.dumps(
+        (folder / "arena-stock_watch-r1.json").write_text(json.dumps(seal.sign(
             {"agent": "stock_watch", "kind": "arena_rounds", "at": NOW, "run": "r1", "gate_won": 4, "gate_played": 4,
-             "needs": 4, "lost": [], "line": "x", "practice": True, "quick": False}), encoding="utf-8")
+             "needs": 4, "lost": [], "line": "x", "practice": True, "quick": False}, folder)), encoding="utf-8")
 
     def test_whatsapp_is_next_and_other_channels_are_not_connected_yet(self):
         self.assertEqual(self.m.channels_of("stock_watch"), ["whatsapp", "email"])

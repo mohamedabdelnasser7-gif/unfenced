@@ -8,6 +8,8 @@ tests/probes/out/
 arena-calls.json
 arena-calls.json.tmp
 arena-calls.lock
+arena-seal.key
+arena-seal.key.*
 arena-matches.jsonl
 arena-*-*.json
 *.arena

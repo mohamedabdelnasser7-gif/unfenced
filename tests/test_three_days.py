@@ -46,7 +46,10 @@ class ThreeDays(unittest.TestCase):
             self.assertEqual(sorted(p.name for p in a.iterdir()), sorted(p.name for p in b.iterdir()))
             self.assertEqual(dump(a / "ascent.db"), dump(b / "ascent.db"))
             for f in list(a.glob("*.json")) + list((a / "assistant").glob("*")):
-                self.assertEqual(f.read_bytes(), (b / f.relative_to(a)).read_bytes(), f.name)
+                mine, theirs = f.read_bytes(), (b / f.relative_to(a)).read_bytes()
+                if f.name.startswith("arena-"):  # each folder's run seals with its own random key (kit/seal.py)
+                    mine, theirs = (json.dumps({k: v for k, v in json.loads(x).items() if k != "seal"}) for x in (mine, theirs))
+                self.assertEqual(mine, theirs, f.name)
 
     def test_refuses_a_folder_with_days(self):
         with self.assertRaises(ValueError):

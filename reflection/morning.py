@@ -192,6 +192,7 @@ from engine import switches as switches_mod
 from engine import trial as trial_mod
 from engine.lessons import KEPT, MAX_LEN, PULLED, TRYING, WAITING, Lessons
 from kit import env
+from kit import seal as seal_mod
 from kit import switch as switch_mod
 from kit.db import DEFAULT_PATH, Db
 from reflection import PLUG as SALES
@@ -853,8 +854,9 @@ class Morning:
 
     def gate(self, agent):
         """Did the agent's latest Arena gate pass? From the newest Arena item saved next to the database
-        (read_arena): a rounds item whose last gate won at least the wins its level needs; a stuck item
-        never did. {passed, said, at}: said is the page's one line about it, with when and no count, since
+        (read_arena): a rounds item whose last gate won at least the wins its level needs, that says it was
+        a full run and carries its run's seal (kit/seal.py), so one written or changed by hand never counts;
+        a stuck item never did. {passed, said, at}: said is the page's one line about it, with when and no count, since
         the wins a level needs stay private (DECISIONS item 17)."""
         item = self.read_arena()[0].get(agent)
         if item is None:
@@ -864,8 +866,10 @@ class Morning:
             return {"passed": False, "said": "Its latest Arena run has no gate result.", "at": item["at"]}
         passed = item["kind"] == "arena_rounds" and won >= needs
         quick = item.get("quick")
-        if quick is True or (passed and quick is not False):  # a gate of one match, or a pass that does not say
-            what = "was the quick one" if quick is True else "does not say it was a full run"  # it was a full run
+        # a gate of one match, a pass that does not say it was a full run, or one its run did not seal
+        if quick is True or (passed and (quick is not False or not item["sealed"])):
+            what = ("was the quick one" if quick is True else "does not say it was a full run" if quick is not False
+                    else "carries no seal from an Arena run")
             return {"passed": False, "said": f"Its latest Arena run, on {_when(item['at'])}, {what}; "
                     "a full run has to pass the gate first.", "at": item["at"]}
         run = "Its practice in the Arena" if item["practice"] else "Its latest Arena run"
@@ -1623,14 +1627,17 @@ class Morning:
     def read_arena(self):
         """The newest Arena item of each agent saved next to the database (arena/run.py stuck_item
         or rounds_item, arena/practice.py for an agent Quick start built): ({agent: {file, at, line, lost,
-        rounds, kind, gate_won, gate_played, needs, practice, quick, run, facts, retry}}, the names that
-        could not be read). The gate counts are whole counts, or None when the item has none (Morning.gate).
+        rounds, kind, gate_won, gate_played, needs, practice, quick, run, facts, sealed, retry}}, the names
+        that could not be read). The gate counts are whole counts, or None when the item has none (Morning.gate).
+        sealed: the item carries the seal its run made with the folder's key (kit/seal.py), so it was not
+        written or changed by hand.
         retry: the newest Try again item (arena/retry.py, kind arena_retry) of that run, for the screen
         only, as {file, at, results, stopped}, each result {card, result, why, text}; None when there is
         none. A retry item is never the agent's item, so it never counts for the gate."""
         out, problems, retries = {}, [], {}
         if self.reports is None or not self.reports.is_dir():
             return out, problems
+        k = seal_mod.key(self.reports)  # read only: a page never makes the key
         for path in sorted(self.reports.glob("arena-*-*.json")):
             try:
                 if path.stat().st_size > MAX_REPORT:
@@ -1662,7 +1669,8 @@ class Morning:
                                       "gate_played": _count(item.get("gate_played")),
                                       "needs": _count(item.get("needs")), "practice": item.get("practice") is True,
                                       "quick": item["quick"] if isinstance(item.get("quick"), bool) else None, "run": str(item.get("run")),
-                                      "facts": item.get("fact_checks") is not False, "retry": None}
+                                      "facts": item.get("fact_checks") is not False,
+                                      "sealed": seal_mod.holds(item, k), "retry": None}
         for agent, got in retries.items():  # only a retry of the run on screen; a newer run hides an older try
             if agent in out and got["retried"] == out[agent]["run"]:
                 out[agent]["retry"] = got

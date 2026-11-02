@@ -223,7 +223,7 @@ class TurnGate(Gate):
 
     def _judge(self, m):
         from arena import good
-        return good.judge(m, self.agent.card, self.judge_model, facts=self.facts)
+        return good.judge(m, self.agent.card, self.judge_model, facts=self.facts, plug=self.agent.plug)
 
 
 class FreshTurn(Fresh):

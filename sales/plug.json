@@ -51,57 +51,83 @@
   "second_signal": {"good": "delivered", "bad": ["refused"]},
   "risk": {
     "high": {
-      "about": "High risk in this store: any number (a price, a total, a fee, delivery days), any promise (a refund, an exchange, a delivery date), store policy, and a customer's personal data.",
+      "about": "High risk in this store: a lesson that states an amount (a price, a fee, a total or a percent with its number), offers a discount or anything free, promises a date, a delivery time or an outcome, changes how customers pay (anything other than cash on delivery), changes store policy (returns, exchanges, cancelling, stock promises), or asks for or keeps a customer's data for anything but their order.",
       "words": {
-        "number": [
-          "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-          "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen",
-          "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
-          "hundred", "thousand", "million", "half", "quarter", "dozen", "double", "twice", "triple", "percent",
-          "price", "cost", "total", "subtotal", "fee", "charge", "shipping", "delivery", "discount", "offer",
-          "sale", "coupon", "promo", "free", "cheap", "expensive", "money", "amount",
-          "egp", "le", "pound", "dollar", "usd", "euro", "riyal", "dirham", "sar", "aed", "kwd", "qar",
-          "wa7ed", "etnen", "itnen", "talata", "tlata", "khamsa", "sitta", "tamanya", "meya", "alf", "nos",
-          "bkam", "bekam", "taman", "shahn", "tawseel", "khasm", "felous", "fulus", "geneh", "gneh", "guineh",
-          "واحد", "اتنين", "اثنين", "تلات", "ثلاث", "اربع", "خمس", "سته", "ستين", "سبع", "تمان", "ثمان", "تسع",
-          "عشر", "ميه", "ميت", "الف", "مليون", "نص", "ضعف", "مرتين",
-          "سعر", "اسعار", "بكام", "تمن", "ثمن", "جنيه", "ج.م", "مصاريف", "رسوم", "شحن", "توصيل", "خصم", "تخفيض",
-          "عرض", "اوفر", "ببلاش", "مجان", "فلوس", "كوبون", "اجمالي", "مجموع"
+        "discount": [
+          "discount", "coupon", "promo", "promo code", "voucher", "freebie", "rebate", "cashback", "markdown",
+          "complimentary", "negotiable", "negotiate", "haggle", "khasm", "خصم", "تخفيض", "ببلاش", "مجان", "كوبون",
+          "اوفر"
         ],
         "promise": [
-          "promise", "promising", "guarantee", "warranty", "refund", "return", "exchange", "exchanging",
-          "replace", "replacing", "swap", "money back", "deliver", "arrive", "arrival", "tomorrow", "today",
-          "tonight", "within", "deadline", "on time", "date", "day", "week", "hour",
-          "saturday", "sunday", "monday", "tuesday", "wednesday", "thursday", "friday",
-          "bokra", "bukra", "naharda", "enaharda", "estebdal", "tabdeel", "badal", "daman", "madmoun", "madmoon",
-          "وعد", "ضمان", "مضمون", "ضامن", "استرجاع", "ترجيع", "مرتجع", "استرداد", "استبدال", "تبديل", "بدل",
-          "يوصل", "توصل", "وصول", "هيجي", "بكره", "النهارده", "انهارده", "الليله", "خلال", "ميعاد", "موعد",
-          "تاريخ", "يوم", "ايام", "اسبوع", "ساعه"
+          "promise", "promising", "guarantee", "assure", "pledge", "on time", "deadline", "same day", "next day",
+          "tomorrow", "today", "tonight", "saturday", "sunday", "monday", "tuesday", "wednesday", "thursday",
+          "friday", "bokra", "bukra", "naharda", "enaharda", "daman", "madmoun", "madmoon", "وعد", "ضمان", "مضمون",
+          "ضامن", "بكره", "النهارده", "انهارده", "الليله", "ميعاد", "موعد", "تاريخ", "يومين"
+        ],
+        "payment": [
+          "deposit", "prepay", "prepaid", "prepayment", "upfront", "up front", "in advance", "transfer", "instapay",
+          "wallet", "vodafone cash", "fawry", "meeza", "visa", "mastercard", "paypal", "iban", "installment",
+          "instalment", "عربون", "تحويل", "انستاباي", "فيزا", "كارت", "محفظه", "قسط", "تقسيط", "فودافون كاش"
         ],
         "policy": [
-          "policy", "policies", "terms", "condition", "cash on delivery", "cod", "cash", "pay", "payment",
-          "instapay", "visa", "card", "wallet", "invoice", "receipt", "stock", "sold out", "restock",
-          "cancel", "cancellation", "available", "availability",
-          "siasa", "shorot", "kash",
-          "سياسه", "شروط", "دفع", "كاش", "فيزا", "كارت", "انستاباي", "محفظه", "فاتوره", "ايصال", "مخزون",
-          "ستوك", "متاح", "متوفر", "نفد", "خلصان", "الغاء", "لغي"
+          "refund", "money back", "warranty", "replacement", "restock", "estebdal", "tabdeel", "استرجاع", "ترجيع",
+          "مرتجع", "استرداد", "استبدال", "تبديل"
         ],
         "personal_data": [
-          "name", "phone", "mobile", "number", "address", "email", "location", "national id", "id card",
-          "birthday", "age", "password", "account", "instagram", "facebook",
-          "esm", "rakam", "telefon", "mobil",
-          "اسم", "رقم", "ارقام", "تليفون", "تلفون", "موبايل", "عنوان", "ايميل", "لوكيشن", "بطاقه", "قومي",
-          "عمر", "حساب"
+          "password", "national id", "id card", "id number", "passport", "birthday", "date of birth", "age", "email",
+          "instagram", "facebook", "tiktok", "otp", "cvv", "verification code", "card number", "باسورد", "كلمه السر",
+          "قومي", "بطاقه", "ايميل", "انستا", "فيسبوك"
         ]
       },
       "patterns": {
-        "number": ["[0-9]", "[%$£€¥]"],
-        "personal_data": ["@"]
+        "amount": [
+          "(?#a number with a currency or percent)(?:[0-9][0-9,.]*|(?<![a-z])(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|half|dozen|wa7ed|wahed|etnen|itnen|etneen|talata|tlata|arba3a|arbaa|khamsa|sitta|setta|sab3a|sabaa|tamanya|tes3a|tesaa|ashara|ashra|meya|mia|miten|meyten|alf|alfen|nos)(?:[\\s-]+(?:and[\\s-]+)?(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|half|dozen|wa7ed|wahed|etnen|itnen|etneen|talata|tlata|arba3a|arbaa|khamsa|sitta|setta|sab3a|sabaa|tamanya|tes3a|tesaa|ashara|ashra|meya|mia|miten|meyten|alf|alfen|nos))*(?![a-z]))\\s*(?:[a-z]+\\s+)?(?:egp|l\\.?e\\.?|pounds?|dollars?|usd|euros?|riyals?|dirhams?|sar|aed|kwd|qar|bucks|k|geneh|gneh|guineh|gnih|percent|per\\s*cent)(?![a-z])",
+          "(?#a currency before a number)(?<![a-z])(?:egp|usd|sar|aed|le)\\s*[0-9]",
+          "(?#a number with a money or percent sign)[0-9]\\s*[%$£€¥٪]|[$£€¥]\\s*[0-9]",
+          "(?#a price, fee or total with its number)(?<![a-z])(?:prices?|costs?|totals?|subtotals?|fees?|charges?|shipping|delivery|discounts?)(?:\\s+(?:is|are|was|were|will|would|be|of|at|to|for|from|only|just|about|around|stays?|becomes?|comes?|now|the|a|an|its|their|our)(?![a-z]))*\\s*:?\\s*(?:[0-9][0-9,.]*|(?<![a-z])(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|half|dozen|wa7ed|wahed|etnen|itnen|etneen|talata|tlata|arba3a|arbaa|khamsa|sitta|setta|sab3a|sabaa|tamanya|tes3a|tesaa|ashara|ashra|meya|mia|miten|meyten|alf|alfen|nos)(?:[\\s-]+(?:and[\\s-]+)?(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|half|dozen|wa7ed|wahed|etnen|itnen|etneen|talata|tlata|arba3a|arbaa|khamsa|sitta|setta|sab3a|sabaa|tamanya|tes3a|tesaa|ashara|ashra|meya|mia|miten|meyten|alf|alfen|nos))*(?![a-z]))",
+          "(?#a number before a price, fee or total)(?:[0-9][0-9,.]*|(?<![a-z])(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|half|dozen|wa7ed|wahed|etnen|itnen|etneen|talata|tlata|arba3a|arbaa|khamsa|sitta|setta|sab3a|sabaa|tamanya|tes3a|tesaa|ashara|ashra|meya|mia|miten|meyten|alf|alfen|nos)(?:[\\s-]+(?:and[\\s-]+)?(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|half|dozen|wa7ed|wahed|etnen|itnen|etneen|talata|tlata|arba3a|arbaa|khamsa|sitta|setta|sab3a|sabaa|tamanya|tes3a|tesaa|ashara|ashra|meya|mia|miten|meyten|alf|alfen|nos))*(?![a-z]))\\s+(?:of\\s+)?(?:the\\s+|a\\s+|its\\s+|their\\s+)?(?:prices?|costs?|totals?|subtotals?|fees?|charges?)(?![a-z])",
+          "(?#a number of three or more digits)[0-9]{3,}",
+          "(?#a number in the hundreds or more)(?<![a-z])(?:hundreds?|thousands?|millions?|alf|alfen|alfein|meya|meyten|miten|mitin)(?![a-z])|(?<![\\u0621-\\u064a])[وب]?(?:ميه|مايه|ميتين|تلتميه|تلاتميه|ثلاثمايه|ربعميه|اربعمايه|خمسميه|خمسمايه|ستميه|ستمايه|سبعميه|سبعمايه|تمنميه|ثمانمايه|تسعميه|تسعمايه|الف|الفين|الاف|مليون)(?![\\u0621-\\u064a])",
+          "(?#a number with a currency, Arabic)(?:[0-9][0-9,.]*|واحد|اتنين|اثنين|تلات|ثلاث|اربع|خمس|سته|سبع|تمان|ثمان|تسع|عشر|عشرين|ميه|ميت|مايه|الف|الفين|مليون|نص|ربع)\\w*\\s*(?:جنيه|ج\\.?م|دولار|ريال|درهم)",
+          "(?#a price, fee or total with its number, Arabic)(?:سعر|بكام|تمن|ثمن|مصاريف|رسوم|اجمالي|شحن|توصيل)\\s*(?:\\S+\\s*){0,2}?(?:[0-9][0-9,.]*|واحد|اتنين|اثنين|تلات|ثلاث|اربع|خمس|سته|سبع|تمان|ثمان|تسع|عشر|عشرين|ميه|ميت|مايه|الف|الفين|مليون|نص|ربع)"
+        ],
+        "discount": [
+          "(?#free)(?<!feel )(?<![a-z])free(?:bies?)?(?![a-z])",
+          "(?#on sale)(?<![a-z])on\\s+sale(?![a-z])",
+          "(?#a lower or special price)(?<![a-z])(?:lower|lowest|reduce|reduced|cut|drop|special|best|better|knock|match)\\s+(?:the\\s+|a\\s+|an\\s+|its\\s+|their\\s+|our\\s+)?(?:prices?|costs?|rates?|fees?|deals?|offers?)(?![a-z])|(?<![a-z])(?:of|off|below|under)\\s+(?:the\\s+)?(?:usual|normal|list|regular|original)(?![a-z])",
+          "(?#money off)(?<![a-z])off\\s+(?:the\\s+)?(?:price|total|cost|order)(?![a-z])|[0-9]\\s*%?\\s*off(?![a-z])",
+          "(?#a price that drops)(?<![a-z])(?:price|cost|total|fee)s?\\s+(?:[a-z]+\\s+){0,2}?(?:drops?|dropped|go(?:es)?\\s+down|come(?:s)?\\s+down)(?![a-z])",
+          "(?#no fee)(?<![a-z])no\\s+(?:delivery\\s+|shipping\\s+|extra\\s+)?(?:fee|charge|cost)s?(?![a-z])",
+          "(?#a fee waived or a gift)(?<![a-z])(?:waive|waived|waiving|throw\\s+in|on\\s+the\\s+house|money\\s+off)(?![a-z])"
+        ],
+        "promise": [
+          "(?#a number of days or hours)(?:[0-9][0-9,.]*|(?<![a-z])(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|half|dozen|wa7ed|wahed|etnen|itnen|etneen|talata|tlata|arba3a|arbaa|khamsa|sitta|setta|sab3a|sabaa|tamanya|tes3a|tesaa|ashara|ashra|meya|mia|miten|meyten|alf|alfen|nos)(?:[\\s-]+(?:and[\\s-]+)?(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|half|dozen|wa7ed|wahed|etnen|itnen|etneen|talata|tlata|arba3a|arbaa|khamsa|sitta|setta|sab3a|sabaa|tamanya|tes3a|tesaa|ashara|ashra|meya|mia|miten|meyten|alf|alfen|nos))*(?![a-z]))(?:\\s*(?:-|to|or|and)\\s*(?:[0-9][0-9,.]*|(?<![a-z])(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|half|dozen|wa7ed|wahed|etnen|itnen|etneen|talata|tlata|arba3a|arbaa|khamsa|sitta|setta|sab3a|sabaa|tamanya|tes3a|tesaa|ashara|ashra|meya|mia|miten|meyten|alf|alfen|nos)(?:[\\s-]+(?:and[\\s-]+)?(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|half|dozen|wa7ed|wahed|etnen|itnen|etneen|talata|tlata|arba3a|arbaa|khamsa|sitta|setta|sab3a|sabaa|tamanya|tes3a|tesaa|ashara|ashra|meya|mia|miten|meyten|alf|alfen|nos))*(?![a-z])))?\\s*(?:business\\s+|working\\s+)?(?:days?|hours?|hrs?|weeks?|minutes?|mins?)(?![a-z])",
+          "(?#a number of days or hours, Arabic)(?:[0-9][0-9,.]*|واحد|اتنين|اثنين|تلات|ثلاث|اربع|خمس|سته|سبع|تمان|ثمان|تسع|عشر|عشرين|ميه|ميت|مايه|الف|الفين|مليون|نص|ربع)\\s*(?:يوم|ايام|اسبوع|اسابيع|ساعه|ساعات)|خلال\\s*(?:[0-9]|يوم|ايام|اسبوع|ساعه)",
+          "(?#a delivery by a time)(?<![a-z])(?:deliver(?:ed|s|y)?|arriv(?:e|es|ed|al)|reach(?:es)?|ship(?:s|ped)?)\\s+(?:by|within|before|on\\s+(?:time|[a-z]+day)|tomorrow|today|tonight|in\\s+(?:[0-9][0-9,.]*|(?<![a-z])(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|half|dozen|wa7ed|wahed|etnen|itnen|etneen|talata|tlata|arba3a|arbaa|khamsa|sitta|setta|sab3a|sabaa|tamanya|tes3a|tesaa|ashara|ashra|meya|mia|miten|meyten|alf|alfen|nos)(?:[\\s-]+(?:and[\\s-]+)?(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|half|dozen|wa7ed|wahed|etnen|itnen|etneen|talata|tlata|arba3a|arbaa|khamsa|sitta|setta|sab3a|sabaa|tamanya|tes3a|tesaa|ashara|ashra|meya|mia|miten|meyten|alf|alfen|nos))*(?![a-z])))(?![a-z])",
+          "(?#a promise that it will arrive or fit)(?<![a-z])(?:say|tell|promise|assure|confirm|reassure)\\s+(?:them\\s+|him\\s+|her\\s+|the\\s+customer\\s+)?(?:that\\s+)?(?:it|the\\s+order|their\\s+order|the\\s+pair|the\\s+boots?|delivery)\\s+(?:will|'ll|is\\s+going\\s+to)\\s+(?:arrive|reach|come|be\\s+(?:there|delivered|shipped)|ship|fit)(?![a-z])|(?<![a-z])(?:will|'ll)\\s+(?:definitely|surely|certainly|always)\\s+(?:arrive|fit|reach|come|work)(?![a-z])"
+        ],
+        "payment": [
+          "(?#another way to pay)(?<![a-z])(?:other|another|different|alternative|new|online)\\s+(?:payment|ways?\\s+to\\s+pay)|(?<![a-z])payment\\s+(?:methods?|options?|links?)(?![a-z])",
+          "(?#paying before delivery or not in cash)(?<![a-z])pay(?:s|ing)?\\s+(?:before|first|now|ahead|in\\s+full|online|upfront|up\\s+front|in\\s+advance|by\\s+(?!cash)[a-z]+|with\\s+(?!cash)[a-z]+)",
+          "(?#a card)(?<![a-z])(?:credit|debit|bank)\\s+cards?(?![a-z])|(?<![a-z])by\\s+card(?![a-z])"
+        ],
+        "policy": [
+          "(?#returns or exchanges allowed)(?<![a-z])(?:can|may|could|will|always|gladly|happy\\s+to|free\\s+to|allowed\\s+to|able\\s+to)\\s+(?:\\w+\\s+){0,2}?(?:return|exchange|swap|replace|refund|cancel)|(?<![a-z])(?:accept|allow|take|free|easy|no)\\s+(?:returns?|exchanges?|cancell?ations?)(?![a-z])|(?<![a-z])(?:returnable|exchangeable)(?![a-z])",
+          "(?#a return or exchange of the item)(?<![a-z])(?:return|exchange|swap|replace)(?:s|d|ed|ing)?\\s+(?:it|them|the\\s+(?:pair|boots?|item|order|shoes?|size))(?![a-z])|(?<![a-z])(?:return|exchange|refund)\\s+(?:policy|window|period)(?![a-z])|(?<![a-z])(?:send|take|bring)\\s+(?:it|them)\\s+back(?![a-z])|(?<![a-z])(?:offer|give|promise)\\s+(?:a\\s+|an\\s+)?(?:return|exchange|swap|replacement)s?(?![a-z])",
+          "(?#returns or exchanges allowed, Arabic)ستبدل|(?:نقدر|تقدر|ممكن|ينفع|يمكن)\\s*(?:\\S+\\s*)?[نتي]?(?:بدل|رجع|غير)",
+          "(?#stock promised)(?<![a-z])(?:always|guaranteed?|definitely|surely|plenty)\\s+(?:\\w+\\s+){0,2}?(?:in\\s+stock|available)(?![a-z])|(?<![a-z])(?:back\\s+in\\s+stock|never\\s+runs?\\s+out|last\\s+(?:pair|piece|item|unit)s?)(?![a-z])",
+          "(?#a pair held)(?<![a-z])(?:reserve|hold)\\s+(?:it|them|a\\s+pair|the\\s+pair|one|their\\s+size)(?![a-z])"
+        ],
+        "personal_data": [
+          "@",
+          "(?#data kept for more than the order)(?<![a-z])(?:phones?|numbers?|names?|address(?:es)?|contacts?|details|data|info\\w*|emails?)\\s+(?:\\w+\\s+){0,6}?(?:for|to|in|on|into)\\s+(?:the\\s+|a\\s+|our\\s+|their\\s+)?(?:marketing|newsletters?|promotions?|ads|mailing|broadcasts?|lists?|groups?|crm|database|offers|later)(?![a-z])",
+          "(?#a social or bank account)(?<![a-z])(?:instagram|facebook|bank|social(?:\\s+media)?|tiktok|snapchat)\\s+(?:accounts?|handles?|pages?|profiles?)(?![a-z])|حساب\\s*(?:بنكي|البنك|انستا|فيس)"
+        ]
       },
       "tools": ["store", "delivery", "draft_order", "cod_risk", "find_order", "switch_stage", "voice_note"]
     },
     "low": {
-      "about": "Low risk: tone, wording, the order of questions, when to ask for the size, greetings."
+      "about": "Low risk: tone, wording, the order of questions, when to ask for the size, greetings, asking for the order details (name, governorate, address, phone), which tool to call and when, and bringing up the price, delivery or stock in general without an amount, a date or a promise."
     }
   },
   "trial": {"fast": {"share": 0.5, "days": 7}, "careful": {"share": 0.2, "days": 14}},

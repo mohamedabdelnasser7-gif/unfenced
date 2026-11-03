@@ -520,7 +520,8 @@ class Lessons:
             if copy is not None:
                 raise ValueError(f"lesson {old['id']} is back already as lesson {copy} ({_STATE_WORDS[states[copy]]})")
             stages = self.plug.stage_tags(old["stages"])
-            found = [] if old["risk"] == risk_mod.HIGH else risk_mod.code_check(old["text"], self.plug.risk)
+            found = [] if old["risk"] == risk_mod.HIGH else risk_mod.code_check(old["text"], self.plug.risk,
+                                                                                    tools=False)
             level = risk_mod.HIGH if found else old["risk"]
             cur = c.execute(
                 "INSERT INTO lessons (agent, text, stages, fields, risk, risk_why, state, share, ends_at, score, source, "

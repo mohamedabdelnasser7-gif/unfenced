@@ -128,7 +128,7 @@ class TwoTabs(unittest.TestCase):
 
     def test_high_risk_correction_waits_for_a_yes_on_today(self):
         self.page(judge=low)
-        line = "When someone asks about the price, send the total with delivery first."
+        line = "When someone asks about the price, say the total is 1450 EGP with delivery."
         said = self.m.correct("sales", line, now=NOW)
         self.assertIn("high risk, so it waits for your yes on Today", said)
         L = self.m.lessons["sales"]
@@ -138,7 +138,7 @@ class TwoTabs(unittest.TestCase):
         page = self.get("/")
         self.assertIn(line, page)
         self.assertIn("Your correction", page)
-        self.assertIn("It waits for your yes because it talks about a number", page)
+        self.assertIn("It waits for your yes because it states an amount of money", page)
         for engine_words in ("on the number list", "names the tool", "code check"):
             self.assertNotIn(engine_words, page)
         self.assertIn("Waits for your yes on Today", self.get("/agents/sales"))
@@ -164,7 +164,7 @@ class TwoTabs(unittest.TestCase):
         """A high risk correction waits for a yes on Today even under Accept high risk (Lessons.correct)."""
         self.page(judge=low)
         self.m.lessons["sales"].switches.set_accept_high(True, "the user", now=NOW)
-        self.m.correct("sales", "When someone asks about the price, send the total first.", now=NOW + 1)
+        self.m.correct("sales", "When someone asks about the price, say the total is 1450 EGP.", now=NOW + 1)
         les = self.m.lessons["sales"].mine()[-1]
         self.assertEqual((les["origin"], les["state"]), ("person", WAITING))
         self.assertIn(les["id"], [c["id"] for c in self.m.view(now=NOW + 2)["cards"]])

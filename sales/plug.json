@@ -1,7 +1,7 @@
 {
   "agent": "sales",
   "about": "Answers a store's customers on WhatsApp and takes orders after a plain yes.",
-  "case": "One customer on WhatsApp; the case id is the id of their first chat. A chat closes after an hour of quiet; the customer's next message starts a new chat, the next talk of the same case (talk 2, talk 3), and each talk has its own result.",
+  "case": "One customer on WhatsApp; the case id is the id of the chat that opened the case. A chat closes after an hour of quiet; the customer's next message starts a new chat, the next talk of the same case (talk 2, talk 3), and each talk has its own result.",
   "fields": ["retail"],
   "stages": ["asking", "ordering", "my_order"],
   "actions": {

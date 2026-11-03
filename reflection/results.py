@@ -22,9 +22,10 @@ deciding result, or a second signal).
 
 Rows live in the engine's log (engine/log.py) under the Sales agent plug
 (sales/plug.json); a case is one customer on a channel and an outcome is a result. Each chat is
-one talk of its case (DECISIONS item 65, kit/chats.py talk): the customer's first chat names the
-case, and a chat they open after one closed is saved under the same case id as talk 2, talk 3,
-each talk with its own result, read by the night study and the fast notes as a case of its own.
+one talk of its case (DECISIONS item 65, kit/chats.py talk): the case id is the id of the chat that
+opened the case, and a chat they open after one closed is saved under the same case id as talk 2,
+talk 3, each talk with its own result, read by the night study and the fast notes as a case of its
+own.
 Every method here takes a chat id and saves or reads that chat's talk; a chat id the chats table
 does not hold (or a database made before talks) is its own case, talk 1. A row's source is the
 customer, so the log keeps the case id as it. The engine keeps no

@@ -210,6 +210,15 @@ class TheKey(unittest.TestCase):
             with self.subTest(talk=bad), self.assertRaises(ValueError):
                 self.log.act("bed-1", "water", result="soaked", at=T0, talk=bad)
 
+    def test_a_window_with_only_talk_two_in_it_reads_talk_two(self):
+        """Round 1 review, finding 3: the window picks talks by case id and talk, so talk 1 rows
+        from before it never stand in for the talk 2 rows inside it."""
+        self.log.act("bed-1", "water", result="soaked", at=T0)
+        self.log.act("bed-1", "water", result="soaked", at=T0 + 10, talk=2)
+        win = self.log.window(T0 + 5, T0 + 20)
+        self.assertEqual(list(win), [talk_key("bed-1", 2)])
+        self.assertEqual([r["talk"] for r in win[talk_key("bed-1", 2)]], [2])
+
     def test_an_agent_without_talks_reads_as_before(self):
         self.log.act("bed-1", "water", result="soaked", at=T0)
         self.log.result("bed-1", "wilted", at=T0 + 1)

@@ -59,7 +59,8 @@ ICON = dict(mo.ICONS, pen='<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5
             undo='<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>', pause='<path d="M9 6v12M15 6v12"/>',
             check='<path d="M5 12.5l4.5 4.5L19 7.5"/>', arrow='<path d="M5 12h14M13 6l6 6-6 6"/>',
             back='<path d="M15 6l-6 6 6 6"/>', note='<path d="M6 4h12v16H6z"/><path d="M9 9h6M9 13h6M9 17h3"/>',
-            plus='<path d="M12 6v12M6 12h12"/>')
+            plus='<path d="M12 6v12M6 12h12"/>', code='<path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/>',
+            up='<path d="M12 19V5M6 11l6-6 6 6"/>')
 
 
 # The high risk reasons in plain words, by the risk list group the code check saved (engine/risk.py):
@@ -216,7 +217,8 @@ class Pages:
         m = self._m(day) if self.demo else self.morning
         q = f"?day={day}" if self.demo else ""
         now = self.at.get(day) if self.demo else None
-        ctx = {"token": token, "q": q, "day": day, "path": path, "m": m, "now": now, "try": self.try_html}
+        ctx = {"token": token, "q": q, "day": day, "path": path, "m": m, "now": now, "try": self.try_html,
+               "look": looked_at(m, path, query), "query": query}
         if path == "/":
             return self.shell(today(m.view(now=now), ctx), "today", ctx, flash)
         if path == "/agents":
@@ -236,7 +238,8 @@ class Pages:
             agent = (query.get("agent") or [""])[0] or mo.SALES.agent
             if not _AGENT.match(agent):
                 return None
-            return console_mod.page(m, agent, query, token=token, flash=flash, now=now, day=day if self.demo else None)
+            return console_mod.page(m, agent, query, token=token, flash=flash, now=now, day=day if self.demo else None,
+                                    agents=agent_names(m, m.view(now=now)))
         return None
 
     def try_html(self, ctx):
@@ -266,10 +269,12 @@ class Pages:
 
     def shell(self, body, on, ctx, flash):
         q = ctx["q"]
-        tabs = (("today", "/", "sun", "Today"), ("agents", "/agents", "sliders", "Agents"))
-        top = "".join(f'<a class="titem{" on" if t == on else ""}" href="{u}{q}"'
+        console = f'/console?agent={h(ctx["look"])}' + (f'&amp;day={h(ctx["day"])}' if self.demo else "")
+        tabs = (("today", "/" + q, "sun", "Today"), ("agents", "/agents" + q, "sliders", "Agents"),
+                ("console", console, "code", "Console"))
+        top = "".join(f'<a class="titem{" on" if t == on else ""}" href="{u}"'
                       f'{" aria-current=page" if t == on else ""}>{icon(i)}{w}</a>' for t, u, i, w in tabs)
-        bar = "".join(f'<a class="tab{" on" if t == on else ""}" href="{u}{q}"'
+        bar = "".join(f'<a class="tab{" on" if t == on else ""}" href="{u}"'
                       f'{" aria-current=page" if t == on else ""}>{icon(i)}{w}</a>' for t, u, i, w in tabs)
         sample = self.demo and ctx["day"] != self.LIVE  # the phone bar says Sample, so the switch fits on one line
         right = '<span class="sample">Sample data</span>' if sample else ""
@@ -290,6 +295,18 @@ class Pages:
             f'<header class="bar"><div class="brand">{logo}</div><div class="bar-r">{days}{short}</div></header>',
             flash_html(flash, ctx),
             body, "</div>", f'<nav class="isl" aria-label="Main">{bar}</nav></body></html>'])
+
+
+def looked_at(m, path, query):
+    """The agent the Console item in the top menu opens on: the one this page is about (its page, its
+    rollback, its Arena screen, the console's own), else the Sales agent. Read from the address only,
+    no cookie."""
+    got = ""
+    if path.startswith("/agents/"):
+        got = path[8:].split("/")[0]
+    elif path in ("/new/build", "/console"):
+        got = (query.get("agent") or [""])[0]
+    return got if _AGENT.match(got or "") and got in getattr(m, "plugs", {}) else mo.SALES.agent
 
 
 _TAKEN = re.compile(r"^There is an agent called ([a-z][a-z0-9_]*) already\.")

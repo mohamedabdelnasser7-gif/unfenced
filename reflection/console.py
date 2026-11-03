@@ -409,6 +409,14 @@ button,textarea{font:inherit;color:inherit}
 .loop a.run .dot{background:var(--green);box-shadow:0 0 0 3px #3ecf7a33}
 .loop a.sel{color:var(--white);border-color:var(--dim);background:var(--panel2)}
 .bar .r{margin-left:auto;color:var(--dim)}
+.menu{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+.menu nav{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
+.menu a{padding:4px 10px;border-radius:4px;color:var(--dim)}
+.menu a:hover{color:var(--white)}
+.menu a.sel{color:var(--white);background:var(--panel2);border:1px solid var(--line)}
+.menu .tm a{font-size:14px}
+.menu .pick span{color:var(--dim);font-size:11px;letter-spacing:.06em;text-transform:uppercase;margin-right:4px}
+.menu .pick a{font-family:ui-monospace,Menlo,monospace;font-size:12px}
 .flash{margin:0 0 12px;padding:8px 12px;border:1px solid var(--blue);border-radius:6px;color:var(--white);background:var(--bluebg)}
 .flash a{text-decoration:underline}
 .shell{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:12px;align-items:start}
@@ -556,7 +564,20 @@ def back_of(st, day=None):
     return href(st, day).replace("&amp;", "&")
 
 
-def render(data, st, *, token=None, flash=None, day=None, name=None, flash_html=None):
+def menu_html(agent, agents, day=None):
+    """The app's top menu (Today, Agents, Console, LOCKS "App pages") and the agent picker: one link
+    per agent, the one shown marked. Links only, so the page keeps its one script."""
+    q = f"?day={h(day)}" if day is not None else ""
+    d = f"&amp;day={h(day)}" if day is not None else ""
+    items = (f'<a href="/{q}">Today</a><a href="/agents{q}">Agents</a>'
+             f'<a class="sel" href="/console?agent={h(agent)}{d}" aria-current="page">Console</a>')
+    picks = "".join(f'<a class="sel" href="/console?agent={h(a)}{d}" aria-current="true">{h(a)}</a>' if a == agent
+                    else f'<a href="/console?agent={h(a)}{d}">{h(a)}</a>' for a in (agents or [agent]))
+    return (f'<div class="menu"><nav class="tm" aria-label="Main">{items}</nav>'
+            f'<nav class="pick" aria-label="Agent"><span>agent</span>{picks}</nav></div>')
+
+
+def render(data, st, *, token=None, flash=None, day=None, name=None, flash_html=None, agents=None):
     """The whole console page. data: collect(); st: state_of(); token: the page token (None: no form)."""
     from reflection import morning as mo
     agent = st["agent"]
@@ -581,7 +602,7 @@ def render(data, st, *, token=None, flash=None, day=None, name=None, flash_html=
         '<!doctype html><html lang="en"><head><meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">',
         f'<title>{h(title)} console</title><style>{CSS}</style></head><body>',
-        f'<header class="bar" data-live="bar">{bar}</header>', flash_part,
+        menu_html(agent, agents, day), f'<header class="bar" data-live="bar">{bar}</header>', flash_part,
         '<div class="shell"><div class="main">',
         f'<div class="cards" data-live="cards">{cards_html(data)}</div>',
         f'<section class="panel" data-live="view">{view_html(data, st, day)}</section>',
@@ -1037,9 +1058,10 @@ def _sit_panel(x):
             (customer, "", why), {"saw": saw, "dec": dec, "raw": raw})
 
 
-def page(m, agent, query, *, token=None, flash=None, now=None, day=None, flash_html=None):
+def page(m, agent, query, *, token=None, flash=None, now=None, day=None, flash_html=None, agents=None):
     """The console for one agent, or None when the agent is not on the page."""
     if agent not in m.plugs:
         return None
     data = collect(m, agent, now)
-    return render(data, state_of(query, agent), token=token, flash=flash, day=day, flash_html=flash_html)
+    agents = [a for a in (agents or []) if a in m.plugs] or sorted(m.plugs)
+    return render(data, state_of(query, agent), token=token, flash=flash, day=day, flash_html=flash_html, agents=agents)

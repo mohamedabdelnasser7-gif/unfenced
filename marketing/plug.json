@@ -71,7 +71,8 @@
           "home", "building", "national id", "password", "account number",
           "رقم", "تليفون", "موبايل", "عنوان", "شارع", "ايميل"
         ],
-        "spend": ["ads", "advert", "advertising", "boost", "sponsor", "sponsored", "budget", "spend", "paid", "influencer"]
+        "spend": ["ads", "advert", "advertising", "boost", "sponsor", "sponsored", "budget", "spend", "paid", "influencer", "ads_manager"],
+        "goes_out": ["publish_post", "publish"]
       },
       "patterns": {
         "number": ["[0-9]", "[%$£€]"],

@@ -185,7 +185,9 @@ class Examiner(unittest.TestCase):
         kept.ids.append(7)  # a lesson kept since: the run without is made again
         ex("Fix both.", ("asking",))
         self.assertEqual([(x["lesson"] is None, x["stop"], x["sits"]) for x in self.runs],
-                         [(True, False, 4), (False, False, 4), (False, False, 4), (True, False, 4), (False, False, 4)])
+                         [(True, False, 4), (False, False, 4), (False, False, 4),
+                          (False, False, 1), (False, False, 1), (True, False, 1), (True, False, 1),  # the recheck of 2
+                          (True, False, 4), (False, False, 4)])
         self.assertEqual(ex._kept_ids(), (1, 3, 7))
         e1, e2 = engine_exam.effect(r1.pairs), engine_exam.effect(r2.pairs)
         self.assertEqual((r1.passed, e1["fixed"], e1["broke"], r1.calls), (True, 2, 0, 6 + 4))

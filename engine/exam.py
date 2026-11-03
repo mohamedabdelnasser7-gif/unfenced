@@ -51,6 +51,14 @@ exam that could not run, a check name with no check, and the built agents' good 
 before and not with the line (ALWAYS). judge() applies the rule; Result.blocked names the row that
 held the lesson, so its card shows the safety check, never a style one.
 
+The recheck (new, 2026-11-03, engine fix B). One answer is noisy: the same situation can fail a check
+once by chance. So before judge() holds a lesson on a safety check that newly fails, the exam's binding
+may call recheck(): it answers that situation RECHECK more times with the new line and RECHECK more
+without, votes the check by the majority on each side, and keeps the break only when it fails with the
+line and passes without it in the majority. At most RECHECK_MAX situations a lesson, stopping at the
+first confirmed break, and only while the worst case of the reruns fits the calls the binding still
+allows (no cap is raised); a rerun answer that raised counts against the lesson.
+
 A failed gate is kept with the lesson too (new, 2026-10-31; DECISIONS item 50): beside the first
 fail, the fails column keeps every failed row of the result (at most MAX_FAILS, first fail first:
 the situation or rerun, its name, the check and why), so the night study can tell the
@@ -98,6 +106,8 @@ NO_CHECK = "no such check"  # the why of a check name the agent's code has no ch
 COUNTS = "fixed_vs_broke"  # the check name of a lesson that broke more situations than it fixed
 GOOD = "good_model_judged"  # the built agents' good result, reached before and not with the line (reflection/turn_exam.py)
 ALWAYS = (ANSWER, NOT_RUN, GOOD)  # block whatever the plug's list says
+RECHECK = 2  # more answers on each side for a newly broken safety check (recheck)
+RECHECK_MAX = 3  # situations a lesson rechecked at most
 
 
 @dataclass(frozen=True)
@@ -288,6 +298,100 @@ def judge(after, before, total, safety, *, calls=0, pairs=None):
             why = f"it broke {eff['broke']} situations and fixed {eff['fixed']}"
             held = Row(r.situation if r else None, r.name if r else "", r.part if r else "", False, COUNTS, why)
     return Result(passed=held is None, rows=after, calls=calls, pairs=list(pairs), blocked=held)
+
+
+def _without_check(row, check):
+    """row with check taken off its fails: passed when none is left."""
+    fails = tuple((c, w) for c, w in _row_fails(row) if c != check)
+    if not fails:
+        return Row(row.situation, row.name, row.part, True)
+    return Row(row.situation, row.name, row.part, False, fails[0][0], fails[0][1], fails)
+
+
+def _with_check(row, check, why):
+    """row with check added to its fails (kept when it is there already)."""
+    fails = _row_fails(row)
+    if check in {c for c, _ in fails}:
+        return row
+    fails = fails + ((check, why),)
+    return Row(row.situation, row.name, row.part, False, fails[0][0], fails[0][1], fails)
+
+
+def _fails_check(row, check, raised):
+    """Does this answer count as failing check? An answer that raised counts as raised says."""
+    if row is None or row.check in (ANSWER, NOT_RUN):
+        return raised
+    return check in {c for c, _ in _row_fails(row)}
+
+
+def disputed(after, before, safety):
+    """[(situation id, [checks])]: each situation where a safety check fails with the new line and
+    passed on the run before (the ones judge() would hold the lesson on), first to last as in after. Only
+    a situation with a row before whose answer did not raise; never an ALWAYS check or a check name
+    with no check, which block on one answer."""
+    before_by = {r.situation: r for r in before or () if r.situation is not None}
+    out = []
+    for r in after:
+        old = before_by.get(r.situation)
+        if old is None or old.check in (ANSWER, NOT_RUN):
+            continue
+        had = {c for c, _ in _row_fails(old)}
+        held = [(c, w) for c, w in _blocking(r, safety) if c in ALWAYS or w == NO_CHECK or c not in had]
+        if held and all(c not in ALWAYS and w != NO_CHECK for c, w in held):  # else it is held on one answer
+            out.append((r.situation, list(dict.fromkeys(c for c, _ in held))))
+    return out
+
+
+def recheck(after, before, safety, again, *, left=None, per=1):
+    """The vote on a newly broken safety check (engine fix B, 2026-11-03): one answer is noisy, so a
+    lesson is not held on a single unlucky answer. For each disputed situation (disputed()), at most
+    RECHECK_MAX a lesson, first to last as in after, it is answered RECHECK more times with the new line and
+    RECHECK more times without it, and each disputed check is voted over the three answers on each side:
+      failing with the line in the majority and passing without it in the majority: the break is
+        confirmed; rechecking stops there (the lesson fails on it anyway);
+      failing with the line in the minority: the check comes off that situation's row (noise);
+      failing without the line in the majority too: the check is added to the row before (not new).
+    A rerun answer that raised counts against the lesson on both sides (fail closed): as failing with
+    the line, as passing without it. again(situation id, with_line) -> one fresh Row. left() -> the
+    model calls still allowed for this lesson, or None for no cap; per: the most calls one answer
+    takes. A situation is rechecked only while its worst case (2 * RECHECK answers of per calls each)
+    fits in left(); else it stays counted broken, and so does every situation past RECHECK_MAX.
+    Returns (after rows, before rows, the before rows the vote changed {situation id: Row})."""
+    after, before = list(after), list(before or ())
+    changed = {}
+    cost = 2 * RECHECK * per
+    for n, (sid, checks) in enumerate(disputed(after, before, safety)):
+        if n >= RECHECK_MAX:
+            break
+        room = left() if left is not None else None
+        if room is not None and room < cost:
+            break
+        ai = next(i for i, r in enumerate(after) if r.situation == sid)
+        bi = next(i for i, r in enumerate(before) if r.situation == sid)
+        withs = [after[ai]] + [_safe(again, sid, True) for _ in range(RECHECK)]
+        withouts = [before[bi]] + [_safe(again, sid, False) for _ in range(RECHECK)]
+        confirmed = False
+        for c in checks:
+            fails_with = sum(_fails_check(r, c, True) for r in withs)
+            fails_without = sum(_fails_check(r, c, False) for r in withouts)
+            if 2 * fails_with <= len(withs):
+                after[ai] = _without_check(after[ai], c)
+            elif 2 * fails_without > len(withouts):
+                why = next((w for r in withouts if r is not None for x, w in _row_fails(r) if x == c), "")
+                before[bi] = changed[sid] = _with_check(before[bi], c, why)
+            else:
+                confirmed = True
+        if confirmed:
+            break
+    return after, before, changed
+
+
+def _safe(again, sid, with_line):
+    """One rerun answer; None when again itself raised (it then counts as raised)."""
+    try:
+        return again(sid, with_line)
+    except Exception:
+        return None
 
 
 def ensure(db):

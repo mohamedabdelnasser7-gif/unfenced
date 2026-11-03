@@ -109,6 +109,20 @@ class ExamModel:
         return out
 
 
+class _Counted:
+    """A model that counts its calls (each one, also one that raises): the exam's reruns stay inside its cap."""
+
+    def __init__(self, inner):
+        self.inner, self.calls = inner, 0
+
+    def chat(self, *args, **kw):
+        self.calls += 1
+        return self.inner.chat(*args, **kw)
+
+    def __getattr__(self, name):  # the route and model id a part names in its label
+        return getattr(self.inner, name)
+
+
 class _Lessons:
     """The lessons the exam hands: the new line first (when it fits the stage), then the kept ones."""
 
@@ -371,7 +385,14 @@ class Examiner:
     fits. The run on the kept lessons is made only for those situations, once each for each set of
     kept lessons, and reused (one whose answer raised is not kept, so it is asked again). A lesson
     with no situation in scope, or a cap with room for none, is held as could not run. The night
-    keeps the full exam (scope off)."""
+    keeps the full exam (scope off).
+
+    Both count=True exams recheck (engine/exam.py recheck, engine fix B): a safety check that newly
+    fails on a situation is voted over that situation answered twice more with the line and twice more
+    without, so one noisy answer never holds a lesson alone. The reruns stay inside cap: a situation is
+    rechecked only while its worst case (four answers of CALL_CAP calls) fits the calls this lesson has
+    left, counted on every model call the exam makes; cap None (the night) bounds them by RECHECK_MAX
+    alone. A row before that the vote changed replaces the one kept for the next lessons."""
 
     def __init__(self, plug, kept=None, model=None, *, count=False, scope=False, cap=None):
         self.plug, self.kept, self.model, self.count = plug, kept, model, count
@@ -388,15 +409,34 @@ class Examiner:
         if not self.count:
             return run(self.plug, self.model, kept=self.kept, lesson=lesson, stop_at_first=True, safety=safety)
         sits = situations(self.plug)
+        model = _Counted(self.model)  # this lesson's model calls, for the reruns' room
         if self.scope:
-            return self._scoped(sits, lesson, safety)
+            return self._scoped(sits, lesson, safety, model)
         key = self._kept_ids()
         without, made = self._without.get(key), 0
         if without is None:
-            without = self._without[key] = run(self.plug, self.model, kept=self.kept, lesson=None, sits=sits)
+            without = self._without[key] = run(self.plug, model, kept=self.kept, lesson=None, sits=sits)
             made = int(without.calls)
-        got = run(self.plug, self.model, kept=self.kept, lesson=lesson, sits=sits)
-        return engine_exam.judge(got.rows, without.rows, len(sits), safety, calls=int(got.calls) + made)
+        got = run(self.plug, model, kept=self.kept, lesson=lesson, sits=sits)
+        after, before, extra = self._recheck(got.rows, without.rows, sits, lesson, safety, model)
+        if extra.get("changed"):
+            self._without[key] = engine_exam.Result(without.passed, before, without.calls)
+        return engine_exam.judge(after, before, len(sits), safety, calls=int(got.calls) + made + extra["calls"])
+
+    def _recheck(self, after, before, sits, lesson, safety, model):
+        """engine/exam.py recheck on these rows, the reruns on model (one situation each). Returns (after,
+        before, {"calls": the reruns' model calls, "changed": {situation id: the voted row before}})."""
+        by_id = {s["id"]: s for s in sits}
+        start = model.calls
+
+        def again(sid, with_line):  # no row for sid: raises, so it counts against the lesson
+            res = run(self.plug, model, kept=self.kept, lesson=lesson if with_line else None, sits=[by_id[sid]])
+            return next(r for r in res.rows if r.situation == sid)
+
+        def left():
+            return None if self.cap is None else self.cap - model.calls
+        after, before, changed = engine_exam.recheck(after, before, safety, again, left=left, per=CALL_CAP)
+        return after, before, {"calls": model.calls - start, "changed": changed}
 
     def pick(self, sits, tags, have=()):
         """The situations a lesson with these stage tags takes under scope: its source situations, then
@@ -415,7 +455,7 @@ class Examiner:
             left = None if left is None else left - cost
         return out
 
-    def _scoped(self, sits, lesson, safety):
+    def _scoped(self, sits, lesson, safety, model):
         key = self._kept_ids()
         cache = self._rows.setdefault(key, {})
         picked = self.pick(sits, lesson[1], have=set(cache))
@@ -424,15 +464,18 @@ class Examiner:
         need = [s for s in picked if s["id"] not in cache]
         made, before = 0, {}
         if need:
-            res = run(self.plug, self.model, kept=self.kept, lesson=None, sits=need)
+            res = run(self.plug, model, kept=self.kept, lesson=None, sits=need)
             made = int(res.calls)
             for r in res.rows:
                 before[r.situation] = r
                 if r.check != engine_exam.ANSWER:
                     cache[r.situation] = r
         before = [before.get(s["id"]) or cache[s["id"]] for s in picked if s["id"] in before or s["id"] in cache]
-        got = run(self.plug, self.model, kept=self.kept, lesson=lesson, sits=picked)
-        return engine_exam.judge(got.rows, before, len(picked), safety, calls=int(got.calls) + made)
+        got = run(self.plug, model, kept=self.kept, lesson=lesson, sits=picked)
+        after, before, extra = self._recheck(got.rows, before, picked, lesson, safety, model)
+        for sid, row in extra["changed"].items():
+            cache[sid] = row
+        return engine_exam.judge(after, before, len(picked), safety, calls=int(got.calls) + made + extra["calls"])
 
     def _kept_ids(self):
         """The ids of the kept lessons the exam hands now: the key of the run without a new line."""

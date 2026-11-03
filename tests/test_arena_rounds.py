@@ -569,7 +569,7 @@ class LiveStaysLive(Base):
         made = rounds.full_examiner(PLUG, None, None)
         self.assertIsInstance(made, exam_mod_sales.Examiner)
         self.assertFalse(made.scope)
-        self.assertIsNone(made.cap)
+        self.assertEqual(made.cap, rounds.FULL_CAP)  # engine fix B: its reruns stay inside the full cap
 
     def test_a_busy_live_database_is_noted_on_the_round_and_the_report_still_comes(self):
         """Review round 1, finding 4: sqlite3.Error from the live database leaves the run and its report."""

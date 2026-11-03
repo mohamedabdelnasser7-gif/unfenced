@@ -150,6 +150,18 @@ class Recheck(unittest.TestCase):
         self.assertEqual([c for c, _ in a[0].fails], ["order"])  # amounts came off as noise
         self.assertEqual(len(again.asked), 4)
 
+    def test_another_check_counts_raised_reruns_against_the_lesson(self):
+        # without the line, answers that raised count as passing there: held on order
+        again = Script(w1=[row(1, "order"), row(1, "order")], o1=[raised(1), RuntimeError("down")])
+        res = vote([row(1, "amounts")], [row(1)], again)[0]
+        self.assertFalse(res.passed)
+        self.assertEqual(res.blocked.check, "order")
+        # with the line, an answer that raised counts as failing order too, so the row names it
+        again = Script(w1=[row(1, "order"), raised(1)], o1=[row(1), row(1)])
+        res, a, _, _ = vote([row(1, "amounts")], [row(1)], again)
+        self.assertFalse(res.passed)
+        self.assertEqual([c for c, _ in a[0].fails], ["amounts", "order"])
+
     def test_another_check_is_not_held_when_it_is_not_new(self):
         cases = {
             "fails without in the majority too": Script(w1=[row(1, "order"), row(1, "order")],
@@ -162,9 +174,14 @@ class Recheck(unittest.TestCase):
                 res, a, _, _ = vote([row(1, "amounts")], [row(1)], again)
                 self.assertTrue(res.passed)
                 self.assertEqual(len(again.asked), 4)
-        # the row before fails order already: its verdict stands (not new)
-        again = Script(w1=[row(1, "order"), row(1, "order")], o1=[row(1), row(1)])
-        self.assertTrue(vote([row(1, "amounts")], [row(1, "order")], again)[0].passed)
+        # the row before fails order already: its verdict stands (not new), and it confirms no break, so the
+        # next disputed situation is still rechecked (noise there too)
+        again = Script(w1=[row(1, "order"), row(1, "order")], o1=[row(1), row(1)],
+                       w2=[row(2), row(2)], o2=[row(2), row(2)])
+        res, a, _, _ = vote([row(1, "amounts"), row(2, "amounts")], [row(1, "order"), row(2)], again)
+        self.assertTrue(res.passed)
+        self.assertEqual({sid for sid, _ in again.asked}, {1, 2})
+        self.assertTrue(a[0].passed)
 
     def test_only_a_newly_broken_safety_check_is_rechecked(self):
         again = Script()

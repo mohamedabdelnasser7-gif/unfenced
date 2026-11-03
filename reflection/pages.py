@@ -1160,6 +1160,20 @@ def new_agent(m, quick, ctx, run=None):
             f'aria-live="polite"{live}>{"".join(out)}</section>{dock}</div>')
 
 
+_LABEL_WORDS = {"It is over": re.compile(r"^(?:it\s+is\s+|it's\s+|the\s+case\s+is\s+)?over\s+", re.IGNORECASE),
+                "Comes in": re.compile(r"^(?:it\s+)?(?:arrives|comes\s+in)\s*:?\s+", re.IGNORECASE),
+                "It gives": re.compile(r"^it\s+gives\s*:?\s+", re.IGNORECASE)}
+
+
+def case_value(label, value):
+    """A case line under its label, with the label's own words cut from its start when the model wrote
+    them too ("over when the report is sent" under It is over), so no word shows twice."""
+    rx = _LABEL_WORDS.get(label)
+    v = str(value or "").strip()
+    cut = rx.sub("", v, count=1) if rx is not None else v
+    return cut or v
+
+
 def plan_card(card):
     """The model's card as one plain white card, then what it needs, each marked connected or not yet.
     One case is: what arrives, what the agent gives and when it is over, in the model's words under the
@@ -1169,10 +1183,10 @@ def plan_card(card):
     rows = [("What it does", f'<p dir="auto">{h(card["does"])}</p>')]
     case = card.get("case")
     if case:
-        parts = [("Arrives", case["input"]), ("It gives", case["output"]), ("Over when", case["ends"])]
-        lis = "".join(f'<li dir="auto"><b>{t}</b> {h(v)}</li>' for t, v in parts)
+        parts = [("Comes in", case["input"]), ("It gives", case["output"]), ("It is over", case["ends"])]
         if case.get("starts") == "agent":
-            lis += "<li><b>Starts</b> The agent writes first</li>"
+            parts.append(("Who starts", "The agent writes first"))
+        lis = "".join(f'<li dir="auto"><b>{t}:</b> {h(case_value(t, v))}</li>' for t, v in parts)
         rows.append(("One case is", f'<ul class="case">{lis}</ul>'))
     rows.append(("A good result", f'<p dir="auto">{h(card["good"])}</p>'))
     if card.get("bad"):

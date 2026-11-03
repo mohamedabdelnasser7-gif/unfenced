@@ -48,3 +48,35 @@ class UnreadableJudge(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CardWording(unittest.TestCase):
+    """The build page card: each case line has its label, then the model's words, never run together or
+    with the label's word twice."""
+
+    def card(self, **case):
+        base = {"input": "daily morning time trigger", "starts": "agent", "output": "a stock report",
+                "ends": "when the morning report is sent"}
+        return {"name": "Stock tracker", "does": "Reports stock.", "case": dict(base, **case), "good": "A clear report.",
+                "bad": "No report.", "never": [], "needs": []}
+
+    def test_labels_and_values_are_apart_and_no_word_shows_twice(self):
+        from reflection import pages
+        html = pages.plan_card(self.card())
+        self.assertIn("<b>It is over:</b> when the morning report is sent", html)
+        self.assertNotIn("when when", html.lower())
+        self.assertIn("<b>Who starts:</b> The agent writes first", html)
+        self.assertNotIn("Starts</b> The", html)
+        self.assertIn("<b>Comes in:</b> daily morning time trigger", html)
+        self.assertNotIn("Arrives daily", html)
+
+    def test_the_labels_own_words_are_cut_from_the_models_line(self):
+        from reflection import pages
+        html = pages.plan_card(self.card(ends="Over when the report is sent", input="Arrives: a ticket"))
+        self.assertIn("<b>It is over:</b> when the report is sent", html)
+        self.assertIn("<b>Comes in:</b> a ticket", html)
+
+    def test_the_card_writer_asks_for_parts_that_read_under_a_label(self):
+        from reflection import quickstart as qs
+        self.assertIn('starts with "when"', qs.CARD_PROMPT)
+        self.assertIn("never start it with the label's words", qs.CARD_PROMPT)

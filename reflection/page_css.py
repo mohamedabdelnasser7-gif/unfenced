@@ -557,6 +557,7 @@ textarea.typed{width:100%; border:0; background:transparent; resize:none; outlin
 .bp .bmode i{font-style:normal; font:500 10px/12px var(--font); letter-spacing:.04em; padding:2px 6px; border-radius:999px; background:rgba(255,255,255,.7); color:var(--ink-3); text-transform:uppercase}
 .bp .send{width:44px; height:44px; padding:0; border-radius:50%; display:grid; place-items:center; flex:none}
 .bp .send svg.i{stroke-width:2}
+.bp .send.pill{width:auto; padding:0 16px 0 18px; border-radius:22px; display:inline-flex; align-items:center; gap:6px; font:500 15px/1 var(--font); white-space:nowrap}
 .bthread{display:flex; flex-direction:column; gap:18px; padding:12px 0 210px}
 .bp .you{align-self:flex-end; max-width:84%; padding:12px 16px; border-radius:22px 22px 8px 22px; background:#e3e9e6; font:400 16px/23px var(--font); white-space:pre-line; overflow-wrap:anywhere}
 .bp .who{display:flex; align-items:center; gap:10px; margin-bottom:8px}

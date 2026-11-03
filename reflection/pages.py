@@ -1280,7 +1280,7 @@ def data_form(ctx, agent):
             f'<textarea name="text" aria-label="Rows or text to add" maxlength="{sample_mod.MAX_TEXT}" dir="auto" '
             'placeholder="name, price, stock"></textarea></div><div class="say-f"><label class="quiet pick">'
             f'{icon("plus")}<input type="file" name="file" aria-label="A CSV or JSON file" '
-            'accept=".csv,.json,.txt,text/csv,application/json,text/plain"></label><button class="send" type="submit">'
+            'accept=".csv,.json,.txt,text/csv,application/json,text/plain"></label><button class="send pill" type="submit">'
             f'Add{icon("arrow")}</button></div><p class="quiet">{DATA_NOTE}</p></form></section>')
 
 

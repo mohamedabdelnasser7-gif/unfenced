@@ -405,6 +405,8 @@ class EmptyReruns(unittest.TestCase):
                 seen["without"] += 1
                 if mode == "empty" and seen["without"] > 1:
                     return say("")
+                if mode == "blank" and seen["without"] > 1:  # whitespace only: no words either
+                    return say("  \n\t ")
                 return say(test.SAFE)
         return Fake()
 
@@ -413,11 +415,22 @@ class EmptyReruns(unittest.TestCase):
         return ex, ex(self.LINE, ("all",))
 
     def test_reruns_with_no_words_do_not_pass_it(self):
-        for mode in ("safe", "empty"):
+        for mode in ("safe", "empty", "blank"):
             with self.subTest(mode=mode):
                 _, r = self.go(mode)
                 self.assertFalse(r.passed)
                 self.assertEqual(r.blocked.check, "amounts")
+
+    def test_a_whitespace_reply_from_the_loop_is_empty(self):
+        # the model gave no words (every call a tool call), and the loop's own reply is only whitespace
+        from types import SimpleNamespace
+
+        class NoCall:
+            def chat(self_, *a, **kw):
+                raise AssertionError("not called")
+        self.enterContext(mock.patch.object(exam.loop, "turn", lambda *a, **kw: SimpleNamespace(reply=" \n\t ")))
+        did = exam.answer(exam.situations(PLUG)[0], None, model=NoCall())
+        self.assertTrue(did[engine_exam.EMPTY])
 
     def test_the_next_lesson_is_held_too(self):
         ex, r = self.go("empty")
@@ -426,6 +439,55 @@ class EmptyReruns(unittest.TestCase):
         r2 = ex(self.LINE + " Always.", ("all",))
         self.assertFalse(r2.passed)
         self.assertEqual(r2.blocked.check, "amounts")
+
+
+
+class EmptyFirstWithout(unittest.TestCase):
+    """Review engfix round 2, finding 1 (probe p4): the first run on the kept lessons gives no words on
+    a situation. It counts like an answer that raised, not as failing amounts there, so a lesson that
+    invents an amount on that situation is still new and held; and in the full exam that run is not
+    kept, so the next lesson asks again and is held too. Scoped and full."""
+
+    BAD, SAFE, LINE = EmptyReruns.BAD, EmptyReruns.SAFE, EmptyReruns.LINE
+
+    def setUp(self):
+        clean_env(self)
+        self.one = exam.situations(PLUG)[:1]
+        self.enterContext(mock.patch.object(exam, "situations", lambda plug: self.one))
+
+    def fake(self, first, log):
+        test, seen = self, {"without": 0}
+
+        class Fake:
+            def chat(self_, messages, tools=None, **kw):
+                if any(test.LINE in str(m.get("content") or "") for m in messages):
+                    if messages[-1].get("role") != "tool":
+                        return call("store", query="boots")
+                    log.append("with")
+                    return say(test.BAD)
+                seen["without"] += 1
+                log.append("without")
+                return say(first if seen["without"] == 1 else test.SAFE)
+        return Fake()
+
+    def test_both_lessons_held(self):
+        sid = self.one[0]["id"]
+        for scope in (False, True):
+            for first in ("", "   "):
+                with self.subTest(scope=scope, first=repr(first)):
+                    log = []
+                    ex = exam.Examiner(PLUG, model=self.fake(first, log), count=True, scope=scope, cap=400)
+                    r1 = ex(self.LINE, ("all",))
+                    self.assertFalse(r1.passed)
+                    self.assertEqual(r1.blocked.check, "amounts")
+                    kept = ex._rows.get((), {}) if scope else ex._without
+                    self.assertNotIn(sid if scope else (), kept)  # the empty run is not kept
+                    r2 = ex(self.LINE + " Always.", ("all",))
+                    self.assertFalse(r2.passed)
+                    self.assertEqual(r2.blocked.check, "amounts")
+                    before = ex._rows[()][sid] if scope else ex._without[()].rows[0]
+                    self.assertNotEqual(before.check, engine_exam.ANSWER)
+                    self.assertNotIn("amounts", [c for c, _ in before.fails])
 
 
 if __name__ == "__main__":

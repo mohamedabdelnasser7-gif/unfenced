@@ -395,7 +395,8 @@ class Examiner:
     without, so one noisy answer never holds a lesson alone. The reruns stay inside cap: a situation is
     rechecked only while its worst case (four answers of CALL_CAP calls) fits the calls this lesson has
     left, counted on every model call the exam makes; cap None (the night) bounds them by RECHECK_MAX
-    alone. A rerun whose reply has no words counts like one that raised, against the lesson. The vote
+    alone. A rerun whose reply has no words counts like one that raised, against the lesson; so does an
+    empty reply in the run on the kept lessons, and a full run with such a row is not kept. The vote
     applies to the lesson in hand only: the run on the kept lessons is kept as it was answered, never
     with a voted row, so a later lesson that breaks the same check there is voted again (red team engfix
     round 1, finding 5)."""
@@ -421,8 +422,13 @@ class Examiner:
         key = self._kept_ids()
         without, made = self._without.get(key), 0
         if without is None:
-            without = self._without[key] = run(self.plug, model, kept=self.kept, lesson=None, sits=sits)
+            # empty_raises: an empty reply here reads as a raised answer, not as failing the checks, so a
+            # lesson that breaks a check there is still new (review engfix round 2, finding 1). A run with a
+            # raised answer is not kept: the next lesson asks again, as the scoped run does.
+            without = run(self.plug, model, kept=self.kept, lesson=None, sits=sits, empty_raises=True)
             made = int(without.calls)
+            if not any(r.check == engine_exam.ANSWER for r in without.rows):
+                self._without[key] = without
         got = run(self.plug, model, kept=self.kept, lesson=lesson, sits=sits)
         after, before, extra = self._recheck(got.rows, without.rows, sits, lesson, safety, model)
         return engine_exam.judge(after, before, len(sits), safety, calls=int(got.calls) + made + extra["calls"])
@@ -469,7 +475,7 @@ class Examiner:
         need = [s for s in picked if s["id"] not in cache]
         made, before = 0, {}
         if need:
-            res = run(self.plug, model, kept=self.kept, lesson=None, sits=need)
+            res = run(self.plug, model, kept=self.kept, lesson=None, sits=need, empty_raises=True)
             made = int(res.calls)
             for r in res.rows:
                 before[r.situation] = r

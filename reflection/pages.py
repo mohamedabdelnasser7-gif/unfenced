@@ -20,7 +20,9 @@ Morning methods only, so no engine rule lives here.
     /new           New agent, the build page (LOCKS "App pages", 2A): a centred thread with the box pinned
                    at the bottom; the Quick start chat (reflection/quickstart.py), its card, at most one
                    question and the second message, Build; then the build's steps ticking off and Go to
-                   the Arena with a countdown that Stay here stops.
+                   the Arena with a countdown that Stay here stops. A message sent while it builds
+                   changes the card before its files are written, and is a correction through the exam
+                   after (Pages._say); it never starts a new agent.
     /new/build     screen 2: the newest Arena run saved next to the database, as tiles and a path. When
                    it lost matches, Try again plays only those again with the corrections that passed
                    (Morning.try_again, arena/retry.py); each retried tile then says Won again or Still lost.
@@ -105,6 +107,8 @@ class BuildRun:
         self.taken = []               # {"said", "kind": "card" or "correction", "answer"}
         self.error = self.said = self.agent = None
         self.joined = False
+        self.join_note = None         # the line when the built agent could not join the running page
+        self.base = 0                 # the chat's turns when Build was pressed; later ones came in during it
         self.ended = None
 
     def step(self, name, detail=""):
@@ -198,7 +202,7 @@ class Pages:
         self.run = None
         self.try_sales = try_mod.TrySales(try_model)  # its own database in memory, never the page's
         # the page's own answers, taken by the server next to morning.TWO_TAB_ACTIONS
-        self.actions = {"/quickstart": lambda m, f, now=None: self._quick(self.quick.say, m, now, mo._field(f, "text")),
+        self.actions = {"/quickstart": lambda m, f, now=None: self._say(m, mo._field(f, "text"), now),
                         "/quickstart/build": lambda m, f, now=None: self._build(m, now),
                         "/quickstart/clear": lambda m, f, now=None: self._clear(m, now),
                         # Try Sales on the Sales agent's page (reflection/try_sales.py): the demo store, never counts
@@ -274,6 +278,7 @@ class Pages:
             raise mo.Refused("It is building already. The steps tick off below.")
         self._quick(lambda mm, now=None: self.quick.check_build(mm), m, now)
         run = self.run = BuildRun(m)
+        run.base = len(self.quick.draft(m)["turns"])
         if self.background:
             threading.Thread(target=self._work, args=(run, now), name="quick-build", daemon=True).start()
             return None
@@ -281,7 +286,7 @@ class Pages:
         self.settle(m)
         if run.error:
             raise mo.Refused(run.error)
-        return run.said
+        return f"{run.said} {run.join_note}" if run.join_note else run.said
 
     def _work(self, run, now):
         """The build thread's work. Never raises: what went wrong becomes the run's error line."""
@@ -295,17 +300,50 @@ class Pages:
             run.ended = time.monotonic()
 
     def settle(self, m):
-        """A finished build joins the running page once, on the server's thread: its plug, Pull and exam
-        with no restart. When that fails the agent is built already, so the line asks for a restart."""
+        """A built agent joins the running page once, on the server's thread, as soon as its files are
+        written: its plug, Pull and exam with no restart, so a message sent then can be a correction.
+        When that fails the agent is built already, so the line asks for a restart."""
         run = self.run
-        if run is None or run.m is not m or run.running or not run.agent or run.joined:
+        if run is None or run.m is not m or not run.written or not run.agent or run.joined:
             return
         run.joined = True
         try:
             m.add_built()
             run.done["ready"] = ""
         except Exception as e:
-            run.said = f"{run.said} It could not join this page ({e}). Restart the page to see it."
+            run.join_note = f"It could not join this page ({e}). Restart the page to see it."
+
+    def _say(self, m, text, now):
+        """The box on the build page. Before the build writes its files, a message changes the card
+        (QuickStart.say: the model writes the card again; the build takes it in before its files are
+        written, at most MAX_CARD_CHANGES times). Once the agent is built, during the build or after it
+        until Start over, it is a correction through the exam, the same path as Correct this
+        (Morning.correct, by the user). A message sent during a build never starts a new agent."""
+        self.settle(m)
+        run = self.run if self.run is not None and self.run.m is m else None
+        if run is not None and run.running and not run.written:
+            with run.lock:  # the build waits for this change before it writes its files
+                if not run.written:
+                    if sum(t["kind"] == "card" for t in run.taken) >= qs_mod.MAX_CARD_CHANGES:
+                        raise mo.Refused(f"It took {qs_mod.MAX_CARD_CHANGES} changes to the card while it builds, the "
+                                         "most one build takes. Once it is built, send the rest here as corrections.")
+                    self._quick(self.quick.say, m, now, text)
+                    run.taken.append({"said": text, "kind": "card"})
+                    return None
+            self.settle(m)
+        built = self.quick.draft(m)["built"] or (run.agent if run is not None and run.written else None)
+        if run is not None and run.running and not built:
+            raise mo.Refused("It is saving its files. Send it again in a moment.")
+        if not built:
+            return self._quick(self.quick.say, m, now, text)  # no build yet: the chat that writes the card
+        if built not in m.plugs:
+            raise mo.Refused(f"It is built, in agents/{built}, but it is not on this page, so it takes no correction "
+                             "here yet. Restart the page to see it.")
+        said = m.correct(built, text, now=now, by=mo.BY)
+        if run is not None:
+            run.taken.append({"said": text, "kind": "correction", "answer": said})
+            return None  # the answer shows in the thread, under the message
+        return said
 
     def _clear(self, m, now):
         run = self.run
@@ -1017,9 +1055,17 @@ def steps_html(run, built):
     return "".join(rows)
 
 
+def took(tag, said, state):
+    """A message the build took in, under its answer: what it became and where it went."""
+    return (f'<div class="took"><span class="tag">{tag}</span><b dir="auto">{h(said)}</b><span class="st"><i></i>{state}'
+            '</span></div>')
+
+
 def ready_html(ctx, built, run):
     href = tab_href(ctx, built, "arena")
-    fresh = run is not None and run.ended is not None and time.monotonic() - run.ended < FRESH
+    # the countdown only right after the build, and never once the user stayed to send a correction
+    fresh = (run is not None and run.ended is not None and time.monotonic() - run.ended < FRESH
+             and not any(t["kind"] == "correction" for t in run.taken))
     auto = (f'<span class="auto"><svg class="ring" viewBox="0 0 22 22" aria-hidden="true"><circle class="bg" cx="11" '
             f'cy="11" r="9"/><circle class="fg" cx="11" cy="11" r="9"/></svg><span>Opening in <b class="num" '
             f'data-count>{COUNTDOWN}</b> seconds</span></span><button class="stay" type="button" data-stay>Stay here'
@@ -1058,8 +1104,11 @@ def new_agent(m, quick, ctx, run=None):
                 f'press Build. It starts from zero and earns every lesson in the Arena.</p>{form}{"".join(notes)}'
                 "</section></div>")
     out = []
-    last = len(turns) - 1
-    for n, t in enumerate(turns):
+    split = run is not None and run.error is None  # turns after Build was pressed show under its steps
+    head = turns[:min(run.base, len(turns))] if split else turns
+    later = iter(turns[len(head):])
+    last = len(head) - 1
+    for n, t in enumerate(head):
         out.append(f'<div class="you"><span dir="auto">{h(t["said"])}</span></div>')
         if n < last:
             out.append(f'<div class="bot">{_who()}<p class="uf" dir="auto">{h(t["follow"])}</p></div>')
@@ -1082,9 +1131,20 @@ def new_agent(m, quick, ctx, run=None):
         out.append(f'<div class="bot">{_who(small)}<div class="check sq">{body}</div></div>')
         if run is not None and run.error:
             out.append(f'<div class="bot">{_who()}<p class="err" role="status">{h(run.error)}</p></div>')
+        if run is not None and run.join_note:
+            out.append(f'<div class="bot">{_who()}<p class="err" role="status">{h(run.join_note)}</p></div>')
         practice = quick.practice_line(built) if built else None
         if practice:
             out.append(f'<div class="bot">{_who()}<p role="status">{h(practice)}</p></div>')
+    for t in run.taken if split else ():
+        out.append(f'<div class="you"><span dir="auto">{h(t["said"])}</span></div>')
+        if t["kind"] == "card":  # the model wrote the card again: its new follow line, as written
+            turn = next(later, None)
+            line = f'<p class="uf" dir="auto">{h(turn["follow"])}</p>' if turn else ""
+            out.append(f'<div class="bot">{_who()}{line}{took("Card change", t["said"], "Taken into the build")}</div>')
+        else:  # a correction: the exam's answer (Morning.correct)
+            out.append(f'<div class="bot">{_who()}<p role="status">{h(t["answer"])}</p>'
+                       f'{took("Correction", t["said"], "Took the exam")}</div>')
     out += notes
     ph = ("Add or change anything while it builds" if building else "Add anything before its next match" if built
           else "Change anything on the card, or press Build")

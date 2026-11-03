@@ -879,5 +879,106 @@ class BuildPage(unittest.TestCase):
         self.assertFalse((self.folder / "agents" / "stock_watcher").exists())
 
 
+    # ---- typing during the build (LOCKS "App pages", 2A) ----
+
+    def say(self, text, p=None):
+        return (p or self.p).actions["/quickstart"](self.m, {"text": [text]})
+
+    def test_a_message_before_the_files_changes_the_card_it_builds(self):
+        follow = "Shelf watcher it is. It keeps building with this card."
+        self.model.script[2:2] = [card_reply(name="Shelf watcher", key="shelf_watcher", question="", follow=follow)]
+        self.model.script += [plug_reply(), exam_reply()]  # the card changed: its plug and exam are written again
+        self.say("an agent for my stock")
+        self.p.actions["/quickstart/build"](self.m, {})
+        self.held()
+        self.assertIsNone(self.say("call it Shelf watcher"))
+        self.assertEqual(self.p.run.taken, [{"said": "call it Shelf watcher", "kind": "card"}])
+        page = self.get().split("<script>")[0]
+        self.assertIn('<div class="you"><span dir="auto">call it Shelf watcher</span></div>', page)
+        self.assertIn(f'<p class="uf" dir="auto">{follow}</p>', page)
+        self.assertIn('<span class="tag">Card change</span><b dir="auto">call it Shelf watcher</b>', page)
+        self.assertIn("Taken into the build", page)
+        self.assertLess(page.index("Writing the plug"), page.index("call it Shelf watcher"))  # under the steps
+        self.finish()
+        agents = self.folder / "agents"
+        self.assertEqual(sorted(p.name for p in agents.iterdir() if not p.name.startswith(".")), ["shelf_watcher"])
+        card = json.loads((agents / "shelf_watcher" / "card.json").read_text(encoding="utf-8"))
+        self.assertEqual(card["name"], "Shelf watcher")
+        d = self.p.quick.draft(self.m)
+        self.assertEqual((d["built"], len(d["turns"]), d["builds"]), ("shelf_watcher", 2, 1))
+        self.get()
+        self.assertIn("shelf_watcher", self.m.plugs)
+        self.assertEqual(self.model.script, [])
+
+    def test_card_changes_during_a_build_are_capped(self):
+        self.say("an agent for my stock")
+        self.p.actions["/quickstart/build"](self.m, {})
+        self.held()
+        self.p.run.taken += [{"said": f"change {n}", "kind": "card"} for n in range(qs.MAX_CARD_CHANGES)]
+        calls = len(self.model.calls)
+        with self.assertRaises(mo.Refused) as e:
+            self.say("one more change")
+        self.assertIn("as corrections", str(e.exception))
+        self.assertEqual(len(self.model.calls), calls)  # refused before any model call
+        self.assertEqual(len(self.p.quick.draft(self.m)["turns"]), 1)
+
+    def test_a_message_once_built_is_a_correction_through_the_exam_never_a_new_agent(self):
+        self.say("an agent for my stock")
+        self.p.actions["/quickstart/build"](self.m, {})
+        self.finish()
+        self.get()  # the page settles: the agent is on it
+        calls, before = len(self.model.calls), self.p.quick.draft(self.m)
+        self.assertIsNone(self.say("Say which item runs low first."))
+        self.assertEqual(len(self.model.calls), calls)  # no card model call: not a new chat
+        self.assertEqual(self.p.quick.draft(self.m), before)  # the draft stays built, no new agent
+        self.assertEqual(sorted(p.name for p in (self.folder / "agents").iterdir() if not p.name.startswith(".")),
+                         ["stock_watcher"])
+        les = self.m.lessons["stock_watcher"].mine()
+        self.assertEqual(len(les), 1)
+        self.assertEqual(les[0]["yes_by"], mo.BY)  # the same yes_by as Correct this on the agent's page
+        taken = self.p.run.taken[0]
+        self.assertEqual((taken["said"], taken["kind"]), ("Say which item runs low first.", "correction"))
+        self.assertIn("waits for your yes on Today", taken["answer"])  # its exam's model gave nothing: held
+        page = self.get().split("<script>")[0]
+        self.assertIn('<span class="tag">Correction</span><b dir="auto">Say which item runs low first.</b>', page)
+        self.assertIn("Took the exam", page)
+        self.assertNotIn("data-count>", page)  # it stayed to correct: no countdown takes the page away
+        self.assertIn('href="/agents/stock_watcher?tab=arena" data-go>Go to the Arena', page)
+        self.assertIn(taken["answer"].replace("'", "&#x27;"), page)
+
+    def test_a_message_after_the_files_while_it_still_runs_is_a_correction(self):
+        self.say("an agent for my stock")
+        self.p.actions["/quickstart/build"](self.m, {})
+        self.finish()
+        ended, self.p.run.ended = self.p.run.ended, None  # files written, the build not yet over (its last line)
+        self.addCleanup(setattr, self.p.run, "ended", ended)
+        self.assertIsNone(self.say("Say which item runs low first."))
+        self.assertIn("stock_watcher", self.m.plugs)  # joined as soon as its files were written
+        self.assertEqual(self.p.run.taken[0]["kind"], "correction")
+        self.assertEqual(len(self.m.lessons["stock_watcher"].mine()), 1)
+
+    def test_after_a_restart_a_built_chat_still_takes_corrections(self):
+        self.say("an agent for my stock")
+        self.p.actions["/quickstart/build"](self.m, {})
+        self.finish()
+        self.get()
+        again = pages.Pages(self.m, model=FakeModel())  # a new page on the same database, no run
+        said = self.say("Say which item runs low first.", again)
+        self.assertIn("waits for your yes on Today", said)
+        self.assertEqual(self.p.quick.draft(self.m)["built"], "stock_watcher")
+
+    def test_a_built_agent_off_the_page_takes_no_correction(self):
+        self.say("an agent for my stock")
+        self.p.actions["/quickstart/build"](self.m, {})
+        self.finish()
+        sample = mo.Morning(self.db, [plug_mod.load(ROOT / "sales" / "plug.json")], reports=self.folder)
+        other = pages.Pages(sample, model=FakeModel())
+        other.quick = self.p.quick
+        with mock.patch.object(other.quick, "draft", return_value={"turns": [], "built": "stock_watcher", "builds": 1}):
+            with self.assertRaises(mo.Refused) as e:
+                other.actions["/quickstart"](sample, {"text": ["Say which item runs low first."]})
+        self.assertIn("not on this page", str(e.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

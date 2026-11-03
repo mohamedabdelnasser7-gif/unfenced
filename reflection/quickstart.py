@@ -52,6 +52,7 @@ to the database, written whole each time. Model calls are capped per minute, and
 means one plain line, never a crash.
 """
 import collections
+import contextlib
 import json
 import os
 import re
@@ -79,6 +80,7 @@ MAX_INSTRUCTIONS = 8_000
 MAX_DRAFT = 256_000      # bytes of quickstart.json read back
 CALLS_PER_MINUTE = 10
 MAX_BUILDS = 3           # Build presses that reach the model in one chat
+MAX_CARD_CHANGES = 3     # card changes one build takes in before its files are written
 PRACTICES_AT_ONCE = 1    # short practices Build runs at the same time (arena/practice.py practise, quick)
 # The page's lines for the short practice Build starts (frame, not model words).
 PRACTISING = "It is practising one short case in the Arena now."
@@ -552,8 +554,9 @@ class QuickStart:
             pass
         return None
 
-    def build(self, m, now=None):
-        """The card becomes a plug folder. Returns the flash line; Refused writes nothing."""
+    def check_build(self, m):
+        """The refusals Build gives before any model call, so the page can say them at once:
+        (folder, draft, card, agent). Refused writes nothing."""
         folder = self._folder_or_refuse(m)
         d = self.draft(m)
         if not d["turns"]:
@@ -563,50 +566,85 @@ class QuickStart:
         card = d["turns"][-1]["card"]
         if not (card.get("case") and card.get("bad")):  # a draft saved before cases: the model writes it again
             raise Refused("This card has no case yet. Send any change, and Unfenced writes it again with one.")
+        agent = self._free_name(m, folder, card)
+        if d["builds"] >= MAX_BUILDS:
+            raise Refused(f"Build was tried {MAX_BUILDS} times in this chat, the most one chat may. Start over to try "
+                          "again; a change to the card does not reset it.")
+        return folder, d, card, agent
+
+    @staticmethod
+    def _free_name(m, folder, card):
         agent = slug(card["key"] or card["name"])
         if agent in getattr(m, "plugs", {}):
             raise Refused(f"There is an agent called {agent} already. Give this one another name in the box.")
         agents = _agents_dir(folder)
         if (agents / agent).exists() or (agents / agent).is_symlink():
             raise Refused(f"There is an agent called {agent} already. Give this one another name in the box.")
-        if d["builds"] >= MAX_BUILDS:
-            raise Refused(f"Build was tried {MAX_BUILDS} times in this chat, the most one chat may. Start over to try "
-                          "again; a change to the card does not reset it.")
+        return agent
+
+    def build(self, m, now=None, step=None, lock=None):
+        """The card becomes a plug folder. Returns the flash line; Refused writes nothing.
+        step(name, detail): told as each part is done ("card", "plug", "exam", "files"; "again" when the
+        card changed meanwhile), so the page can tick them off. lock: held while the files are written;
+        a card change made under it before then (QuickStart.say) is taken in: the plug and the exam are
+        written again from the new card, at most MAX_CARD_CHANGES times."""
+        step = step or (lambda name, detail="": None)
+        lock = lock if lock is not None else contextlib.nullcontext()
+        folder, d, card, agent = self.check_build(m)
         d["builds"] += 1  # counted before the model is called, so a failed press counts too
         self._save(folder, d)
-        tools = connected(card)
-        messages = [{"role": "system", "content": BUILD_PROMPT.format(
-                        rules=plug_mod.__doc__, example=_example(), agent=agent,
-                        tools=", ".join(f"{t} ({TOOLS[t]})" for t in tools) or "none")},
-                    {"role": "user", "content": json.dumps({"card": _model_card(card)}, ensure_ascii=False)}]
-        first = self._chat(messages, 8000)
-        plug, words, why = self._plug_from(first, agent, tools)
-        fixed_why = None
-        if why is not None:  # once: the model reads the checker's reason and fixes it
-            messages += [{"role": "assistant", "content": first[:MAX_PLUG_REPLY]},
-                         {"role": "user", "content": f"The plug check refused it: {why}. Send the whole JSON object "
-                                                     "again with that fixed."}]
-            plug, words, again = self._plug_from(self._chat(messages, 8000), agent, tools)
-            if again is not None:
-                raise Refused(f"Not built. The plug check said: {again}. Nothing was written; press Build to try again.")
-            fixed_why = why
-        owner = owner_of(agents)
-        if owner is not None:  # the agent shares its owner's practice customers (arena/grow.py owner_of)
-            plug["owner"] = owner
-        kind = kind_word(card.get("kind"))
-        if kind:  # its kind from the card: a second agent of a kind its owner runs is a sibling (arena/grow.py)
-            plug["kind"] = kind
-        exam = self._exam(card, plug)
-        at = time.time() if now is None else now
-        record = {"agent": agent, "name": card["name"], "does": card["does"], "good": card["good"],
-                  "bad": card["bad"], "case": card["case"], "never": card["never"], "needs": card["needs"],
-                  "tools": tools, "kind": kind or agent, "level": "careful", "at": at}
-        _write_folder(agents, agent, {"plug.json": json.dumps(plug, ensure_ascii=False, indent=1) + "\n",
-                                      "instructions.md": words + "\n",
-                                      "card.json": json.dumps(record, ensure_ascii=False, indent=1) + "\n",
-                                      "exam.json": json.dumps(exam, ensure_ascii=False, indent=1) + "\n"})
-        d["built"] = agent
-        self._save(folder, d)
+        step("card", card["name"])
+        agents = _agents_dir(folder)
+        changes = 0
+        while True:
+            tools = connected(card)
+            messages = [{"role": "system", "content": BUILD_PROMPT.format(
+                            rules=plug_mod.__doc__, example=_example(), agent=agent,
+                            tools=", ".join(f"{t} ({TOOLS[t]})" for t in tools) or "none")},
+                        {"role": "user", "content": json.dumps({"card": _model_card(card)}, ensure_ascii=False)}]
+            first = self._chat(messages, 8000)
+            plug, words, why = self._plug_from(first, agent, tools)
+            fixed_why = None
+            if why is not None:  # once: the model reads the checker's reason and fixes it
+                messages += [{"role": "assistant", "content": first[:MAX_PLUG_REPLY]},
+                             {"role": "user", "content": f"The plug check refused it: {why}. Send the whole JSON object "
+                                                         "again with that fixed."}]
+                plug, words, again = self._plug_from(self._chat(messages, 8000), agent, tools)
+                if again is not None:
+                    raise Refused(f"Not built. The plug check said: {again}. Nothing was written; press Build to try again.")
+                fixed_why = why
+            owner = owner_of(agents)
+            if owner is not None:  # the agent shares its owner's practice customers (arena/grow.py owner_of)
+                plug["owner"] = owner
+            kind = kind_word(card.get("kind"))
+            if kind:  # its kind from the card: a second agent of a kind its owner runs is a sibling (arena/grow.py)
+                plug["kind"] = kind
+            step("plug", fixed_why or "")
+            exam = self._exam(card, plug)
+            items = exam.get("situations") if isinstance(exam, dict) else None
+            step("exam", f"{len(items)} situations it must pass" if isinstance(items, list) and items else "")
+            with lock:
+                latest = self.draft(m)
+                newest = latest["turns"][-1]["card"] if latest["turns"] else card
+                if newest != card and changes < MAX_CARD_CHANGES and newest.get("case") and newest.get("bad"):
+                    changes += 1  # the user changed the card while it built: write its plug and exam again
+                    card = newest
+                    agent = self._free_name(m, folder, card)
+                    step("again", card["name"])
+                    continue
+                at = time.time() if now is None else now
+                record = {"agent": agent, "name": card["name"], "does": card["does"], "good": card["good"],
+                          "bad": card["bad"], "case": card["case"], "never": card["never"], "needs": card["needs"],
+                          "tools": tools, "kind": kind or agent, "level": "careful", "at": at}
+                _write_folder(agents, agent, {"plug.json": json.dumps(plug, ensure_ascii=False, indent=1) + "\n",
+                                              "instructions.md": words + "\n",
+                                              "card.json": json.dumps(record, ensure_ascii=False, indent=1) + "\n",
+                                              "exam.json": json.dumps(exam, ensure_ascii=False, indent=1) + "\n"})
+                latest["built"] = agent  # the newest draft: a message saved meanwhile stays in it
+                latest["builds"] = max(latest["builds"], d["builds"])
+                self._save(folder, latest)
+                step("files", agent)
+                break
         said = f"Built {card['name']}, in agents/{agent}."
         if fixed_why:
             said = (f"Built {card['name']}, in agents/{agent}. Its first plug failed the check ({fixed_why}), "

@@ -17,8 +17,10 @@ Morning methods only, so no engine rule lives here.
                    paused. Then the box for an idea or a correction (Morning.correct, a hotfix), its
                    lessons and Reflection notes as rows.
     /agents/<name>/rollback  what Roll back would do, lesson by lesson, and its one button.
-    /new           New agent, Quick start B screen 1: the Quick start chat (reflection/quickstart.py), its
-                   card, at most one question and the second message, the same box, Send and Build.
+    /new           New agent, the build page (LOCKS "App pages", 2A): a centred thread with the box pinned
+                   at the bottom; the Quick start chat (reflection/quickstart.py), its card, at most one
+                   question and the second message, Build; then the build's steps ticking off and Go to
+                   the Arena with a countdown that Stay here stops.
     /new/build     screen 2: the newest Arena run saved next to the database, as tiles and a path. When
                    it lost matches, Try again plays only those again with the corrections that passed
                    (Morning.try_again, arena/retry.py); each retried tile then says Won again or Still lost.
@@ -29,13 +31,16 @@ marks a correction that runs in the chats. With demo days each day shows its own
 serves the real database with real answers and the real clock, never marked Sample data.
 
 No count of what is left anywhere (item 35), no trust level and no won and lost total (item 17,
-LOCKS Quick start B). No script: Modify is a details element inside its card. Every field is
+LOCKS Quick start B). No script, except the build page's one hashed script (NEW_SCRIPT, its poll and
+countdown): Modify is a details element inside its card. Every field is
 escaped. With demo days (--demo-days) a Day 1, Day 2, Day 3 switch sits on top, marked Sample
 data (Sample on the phone bar, so every label stays on one line at 390); each day is its own throwaway copy, so answers there never touch the sample files.
 """
 import base64
 import hashlib
 import re
+import threading
+import time
 import urllib.parse
 
 from engine import lessons as lessons_mod
@@ -53,6 +58,74 @@ NAMES = mo.AGENT_NAMES
 CORRECTED = lessons_mod.HOTFIX_SOURCE  # the source line of a correction (Morning.correct, Lessons.correct)
 _AGENT = re.compile(r"^[a-z][a-z_]{0,30}$")
 ROLLBACK = "/rollback"  # /agents/<name>/rollback: the plan a rollback would carry out, and its one button
+# The build page's one script (LOCKS "App pages", 2A), allowed by its hash in the /new policy only: while a
+# build runs it fetches the page again with the X-Poll header (the console's way, so the one-time
+# message stays) and swaps the thread; when the build is done it runs the countdown to the Arena, which
+# Stay here stops; Enter sends the box.
+NEW_SCRIPT = """(function(){
+var T=1500;function q(d,s){return d.querySelector(s)}
+function count(){var g=q(document,'[data-count]'),go=q(document,'[data-go]');if(!g||!go)return;var n=+g.textContent||5,t,stay=q(document,'[data-stay]');
+function tick(){g.textContent=n;var fg=q(document,'.ring .fg');if(fg)fg.style.strokeDashoffset=(56.5*n/5).toFixed(1);if(n<=0){location.href=go.href;return}n--;t=setTimeout(tick,1000)}
+if(stay)stay.addEventListener('click',function(){clearTimeout(t);var a=q(document,'.auto');if(a)a.remove();stay.remove()});tick()}
+function poll(){var th=q(document,'[data-live="thread"]');if(!th||!th.hasAttribute('data-building'))return;
+fetch(location.href,{headers:{'X-Poll':'1'},credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.text():null}).then(function(t){if(!t)return;
+var d=new DOMParser().parseFromString(t,'text/html'),n=q(d,'[data-live="thread"]');if(!n)return;th.innerHTML=n.innerHTML;
+var a=q(d,'.dock textarea'),b=q(document,'.dock textarea');if(a&&b)b.placeholder=a.placeholder;
+if(!n.hasAttribute('data-building')){th.removeAttribute('data-building');var o=q(d,'.dock form[action="/quickstart/clear"]'),k=q(document,'.dock');if(o&&k&&!q(k,'form[action="/quickstart/clear"]'))k.appendChild(document.importNode(o,true));count()}window.scrollTo(0,document.body.scrollHeight)}).catch(function(){}).then(function(){
+var x=q(document,'[data-live="thread"]');if(x&&x.hasAttribute('data-building'))setTimeout(poll,T)})}
+var ta=q(document,'.dock textarea')||q(document,'.hero textarea');if(ta)ta.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&ta.value.trim()){e.preventDefault();ta.form.requestSubmit()}});
+if(q(document,'[data-live="thread"]'))window.scrollTo(0,document.body.scrollHeight);setTimeout(poll,T);count()})();"""
+
+
+def _sha(text):
+    return base64.b64encode(hashlib.sha256(text.encode("utf-8")).digest()).decode()
+
+
+NEW_CSP = (f"default-src 'none'; style-src 'sha256-{_sha(CSS)}'; script-src 'sha256-{_sha(NEW_SCRIPT)}'; "
+           "connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+
+# The build's steps as the thread ticks them off: (while it runs, once done). Page words.
+BUILD_STEPS = (("card", "Reading the card", "Card read"), ("plug", "Writing the plug", "Plug written and checked"),
+               ("exam", "Writing the exam", "Exam written"), ("files", "Saving its files", "Files saved"),
+               ("ready", "Getting ready", "Ready for the Arena"))
+COUNTDOWN = 5     # seconds before Go to the Arena opens by itself
+FRESH = 20        # seconds after a build ends that a page still starts the countdown
+
+
+class BuildRun:
+    """One Build on the page (Pages._build): which steps are done, what went wrong, the messages taken
+    in while it ran. The build thread writes only here and the agent's folder; the page's Morning is
+    touched on the server's own thread (Pages.settle)."""
+
+    def __init__(self, m):
+        self.m = m
+        self.lock = threading.Lock()  # held by a card change and by the files being written
+        self.done = {}                # step: its detail line
+        self.again = 0
+        self.taken = []               # {"said", "kind": "card" or "correction", "answer"}
+        self.error = self.said = self.agent = None
+        self.joined = False
+        self.ended = None
+
+    def step(self, name, detail=""):
+        if name == "again":  # the card changed meanwhile: its plug and exam are written again
+            self.again += 1
+            self.done.pop("plug", None)
+            self.done.pop("exam", None)
+            return
+        if name == "files":
+            self.agent = detail
+        self.done[name] = detail
+
+    @property
+    def running(self):
+        return self.ended is None
+
+    @property
+    def written(self):
+        return "files" in self.done
+
+
 _BACK = re.compile(r"^/(?:agents(?:/[a-z][a-z_]{0,30})?|new(?:/build)?|console)?$")
 ICON = dict(mo.ICONS, pen='<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
             loop='<path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3"/><path d="M18 3v4h-4M6 21v-4h4"/>',
@@ -108,7 +181,7 @@ class Pages:
 
     LIVE = "live"
 
-    def __init__(self, morning=None, *, days=None, at=None, live=None, model=None, try_model=None):
+    def __init__(self, morning=None, *, days=None, at=None, live=None, model=None, try_model=None, background=None):
         """at: {day: the time that day's page shows}, a sample's own clock; the real clock otherwise
         and always on Live. model: Quick start's model (a fake in tests); None uses kit.model.
         try_model: Try Sales's model (a fake in tests); None uses kit.model once a key is set."""
@@ -119,11 +192,15 @@ class Pages:
         self.morning = morning if morning is not None else (self.days[min(self.days)] if self.days else None)
         self.csp = CSP
         self.quick = qs_mod.QuickStart(model)
+        # Build runs in a thread so the thread can tick its steps off; with a model handed in (a test's) it
+        # runs inline unless background says otherwise
+        self.background = (model is None) if background is None else bool(background)
+        self.run = None
         self.try_sales = try_mod.TrySales(try_model)  # its own database in memory, never the page's
         # the page's own answers, taken by the server next to morning.TWO_TAB_ACTIONS
         self.actions = {"/quickstart": lambda m, f, now=None: self._quick(self.quick.say, m, now, mo._field(f, "text")),
                         "/quickstart/build": lambda m, f, now=None: self._build(m, now),
-                        "/quickstart/clear": lambda m, f, now=None: self._quick(self.quick.clear, m, now),
+                        "/quickstart/clear": lambda m, f, now=None: self._clear(m, now),
                         # Try Sales on the Sales agent's page (reflection/try_sales.py): the demo store, never counts
                         "/try/sales": lambda m, f, now=None: self._try(self.try_sales.say, m, now, mo._field(f, "text")),
                         "/try/sales/clear": lambda m, f, now=None: self._try(self.try_sales.clear, m, now),
@@ -160,7 +237,7 @@ class Pages:
 
     def csp_for(self, path):
         """The policy a page is sent with: the console's own (its one script by hash), else the page's."""
-        return console_mod.csp() if path == "/console" else self.csp
+        return console_mod.csp() if path == "/console" else NEW_CSP if path == "/new" else self.csp
 
     def morning_for(self, back):
         if not self.demo:
@@ -189,15 +266,54 @@ class Pages:
             raise mo.Refused(str(e)) from None
 
     def _build(self, m, now):
-        """Build, then the new agent joins the running page (Morning.add_built): its plug, Pull and exam
-        with no restart. The agent is built already when that fails, so the flash says so and asks for a
-        restart; an agent with no exam on the page takes no correction (Morning.correct)."""
-        said = self._quick(self.quick.build, m, now)
+        """Build (LOCKS "App pages", 2A): the cheap refusals at once, then the build in a thread whose
+        steps the thread on /new ticks off; inline with a test's model, returning the flash as before.
+        The new agent joins the running page (Morning.add_built) on the server's thread (settle)."""
+        run = self.run
+        if run is not None and run.m is m and run.running:
+            raise mo.Refused("It is building already. The steps tick off below.")
+        self._quick(lambda mm, now=None: self.quick.check_build(mm), m, now)
+        run = self.run = BuildRun(m)
+        if self.background:
+            threading.Thread(target=self._work, args=(run, now), name="quick-build", daemon=True).start()
+            return None
+        self._work(run, now)
+        self.settle(m)
+        if run.error:
+            raise mo.Refused(run.error)
+        return run.said
+
+    def _work(self, run, now):
+        """The build thread's work. Never raises: what went wrong becomes the run's error line."""
+        try:
+            run.said = self.quick.build(run.m, now, step=run.step, lock=run.lock)
+        except qs_mod.Refused as e:
+            run.error = str(e)
+        except Exception as e:
+            run.error = f"Not built: {' '.join(str(e).split())[:200] or type(e).__name__}. Press Build to try again."
+        finally:
+            run.ended = time.monotonic()
+
+    def settle(self, m):
+        """A finished build joins the running page once, on the server's thread: its plug, Pull and exam
+        with no restart. When that fails the agent is built already, so the line asks for a restart."""
+        run = self.run
+        if run is None or run.m is not m or run.running or not run.agent or run.joined:
+            return
+        run.joined = True
         try:
             m.add_built()
+            run.done["ready"] = ""
         except Exception as e:
-            return f"{said} It could not join this page ({e}). Restart the page to see it."
-        return said
+            run.said = f"{run.said} It could not join this page ({e}). Restart the page to see it."
+
+    def _clear(self, m, now):
+        run = self.run
+        if run is not None and run.m is m and run.running:
+            raise mo.Refused("It is building now. Start over once the build is done.")
+        if run is not None and run.m is m:
+            self.run = None
+        return self._quick(self.quick.clear, m, now)
 
     def _m(self, day):
         return self.live if day == self.LIVE else self.days[day]
@@ -220,6 +336,7 @@ class Pages:
         m = self._m(day) if self.demo else self.morning
         q = f"?day={day}" if self.demo else ""
         now = self.at.get(day) if self.demo else None
+        self.settle(m)
         ctx = {"token": token, "q": q, "day": day, "path": path, "m": m, "now": now, "try": self.try_html,
                "look": looked_at(m, path, query), "query": query}
         if path == "/":
@@ -233,7 +350,7 @@ class Pages:
             body = rollback_page(m, path[8:-len(ROLLBACK)], ctx)
             return None if body is None else self.shell(body, "agents", ctx, flash)
         if path == "/new":
-            return self.shell(new_agent(m, self.quick, ctx), "agents", ctx, flash)
+            return self.shell(new_agent(m, self.quick, ctx, self.run), "agents", ctx, flash, script=NEW_SCRIPT)
         if path == "/new/build":
             agent = (query.get("agent") or [""])[0]
             return self.shell(build(m, agent if agent in m.plugs else None, ctx), "agents", ctx, flash)
@@ -270,7 +387,7 @@ class Pages:
         return (f'<section class="say try sq" aria-label="Try Sales"><span class="lab">Try Sales</span>{thread}{form}'
                 '</section>')
 
-    def shell(self, body, on, ctx, flash):
+    def shell(self, body, on, ctx, flash, script=None):
         q = ctx["q"]
         console = f'/console?agent={h(ctx["look"])}' + (f'&amp;day={h(ctx["day"])}' if self.demo else "")
         tabs = (("today", "/" + q, "sun", "Today"), ("agents", "/agents" + q, "sliders", "Agents"),
@@ -297,7 +414,8 @@ class Pages:
             f'<div class="right">{days}{right}</div></nav>',
             f'<header class="bar"><div class="brand">{logo}</div><div class="bar-r">{days}{short}</div></header>',
             flash_html(flash, ctx),
-            body, "</div>", f'<nav class="isl" aria-label="Main">{bar}</nav></body></html>'])
+            body, "</div>", f'<nav class="isl" aria-label="Main">{bar}</nav>',
+            f"<script>{script}</script></body></html>" if script else "</body></html>"])
 
 
 def looked_at(m, path, query):
@@ -863,60 +981,123 @@ def rollback_page(m, agent, ctx):
     return "".join(out) + "</div>"
 
 
-# ---- New agent (Quick start B) -----------------------------------------------------------------
+# ---- New agent: the build page (LOCKS "App pages", 2A) ------------------------------------------
 
-def new_agent(m, quick, ctx):
-    """Screen 1, Quick start B: the light sage ask card holds the chat. The card, its one question and
-    the second message are the model's words, shown as written (DECISIONS items 58 and 38); the labels,
-    chips and buttons are the page's frame. The box sends the first ask, an answer or an edit, and the
-    model writes the whole card again; Build writes the plug folder (reflection/quickstart.py)."""
+def _greet(now):
+    t = mo._cairo(now if now is not None else time.time())
+    hour = t.hour if t is not None else 12
+    return "Good morning" if hour < 12 else "Good afternoon" if hour < 18 else "Good evening"
+
+
+MK = f'<span class="mk">{mo.LOGO}</span>'
+
+
+def _who(small=""):
+    return f'<div class="who">{MK}<b>Agent builder</b>' + (f"<small>{small}</small>" if small else "") + "</div>"
+
+
+def steps_html(run, built):
+    """The checklist message: each step done so far with its line, the one it is on, and the last one
+    big; then Go to the Arena with the countdown, or what went wrong."""
+    rows, working = [], run is not None and run.running and not run.error
+    done = run.done if run is not None else {k: "" for k, _, _ in BUILD_STEPS}
+    for key, doing, did in BUILD_STEPS:
+        big = " big" if key == "ready" else ""
+        if key in done:
+            detail = done[key] if key not in ("card", "files", "ready") else ""
+            if key == "files" and done[key]:
+                detail = f"agents/{done[key]}"
+            p = f'<p dir="auto">{h(detail)}</p>' if detail and not big else ""
+            rows.append(f'<div class="step done{big}"><span class="tick">{icon("check")}</span><div><b>{did}</b>{p}'
+                        "</div></div>")
+        elif working:
+            rows.append(f'<div class="step work{big}"><span class="tick">{icon("check")}</span><div><b>{doing}</b>'
+                        "</div></div>")
+            working = False
+    return "".join(rows)
+
+
+def ready_html(ctx, built, run):
+    href = tab_href(ctx, built, "arena")
+    fresh = run is not None and run.ended is not None and time.monotonic() - run.ended < FRESH
+    auto = (f'<span class="auto"><svg class="ring" viewBox="0 0 22 22" aria-hidden="true"><circle class="bg" cx="11" '
+            f'cy="11" r="9"/><circle class="fg" cx="11" cy="11" r="9"/></svg><span>Opening in <b class="num" '
+            f'data-count>{COUNTDOWN}</b> seconds</span></span><button class="stay" type="button" data-stay>Stay here'
+            "</button>") if fresh else ""
+    return (f'<div class="ready"><p>Watch its matches and correct any reply it loses.</p><div class="goto">'
+            f'<a class="yes" href="{href}" data-go>Go to the Arena{icon("arrow")}</a>{auto}</div></div>')
+
+
+def new_agent(m, quick, ctx, run=None):
+    """The build page: a centred thread, the box pinned at the bottom. The user's messages, the model's
+    card, its one question and its follow line, shown as written (DECISIONS items 58 and 38); then the
+    build's steps ticking off (BuildRun, the page polls while it runs) and, once done, Go to the Arena
+    with a countdown that Stay here stops. Labels, steps and buttons are the page's frame."""
     d = quick.draft(m)
     turns, built = d["turns"], d["built"]
-    last = turns[-1] if turns else None
-    out = ['<article class="ask sq" aria-label="Quick start"><span class="lab">What agent do you want?</span>']
-    if last:
-        out.append('<div class="thread">' + "".join(f'<p class="said" dir="auto">{h(t["said"])}</p>' for t in turns)
-                   + "</div>")
-        out.append(plan_card(last["card"]))
-        if last["question"] and not built:
-            out.append(f'<p class="uq" dir="auto">{h(last["question"])}</p>')
-        if not built:
-            out.append(f'<p class="uf" dir="auto">{h(last["follow"])}</p>')
-    if built:
-        out.append(f'<p class="no-yet">Built. Its files are in agents/{h(built)}, ready for the Arena. Changing it from '
-                   'this chat after Build is coming next; what you write below makes another agent.</p>')
-        practice = quick.practice_line(built)
-        if practice:
-            out.append(f'<p class="no-yet" role="status">{h(practice)}</p>')
+    run = run if run is not None and run.m is m else None
+    building = run is not None and run.running
+    tok = ctx["token"]
+    notes = []
     if not quick.ready():
-        out.append('<p class="no-yet">No model key is set, so Quick start cannot write the card yet. Put '
-                   'META_API_KEY or BASETEN_API_KEY in .env and start the page again.</p>')
+        notes.append('<p class="no-yet">No model key is set, so Quick start cannot write the card yet. Put '
+                     'META_API_KEY or BASETEN_API_KEY in .env and start the page again.</p>')
     elif quick.folder(m) is None:
-        out.append('<p class="no-yet">Quick start needs the database folder. Start the page with --db.</p>')
-    chat = bool(last) and not built
-    if ctx["token"]:
-        hint = "" if chat else ' placeholder="I want an agent that answers my support tickets and tags the ones that need the team."'
-        label = "Your answer, or anything to add or change" if chat else "What agent do you want?"
-        out.append(f'<form id="qs-say" method="post" action="/quickstart">{_hidden(ctx)}<div class="field">'
-                   f'<textarea class="typed{" sm" if chat else ""}" name="text" rows="{2 if chat else 3}" '
-                   f'maxlength="{qs_mod.MAX_TEXT}" aria-label="{label}" dir="auto" required{hint}></textarea></div></form>')
-        if chat:
-            act = (f'<button class="mod" type="submit" form="qs-say">{icon("chat")}Send</button>'
-                   + _post(ctx, "quickstart/build", f'Build{icon("arrow")}', "yes")
-                   + _post(ctx, "quickstart/clear", "Start over", "over"))
-        else:
-            act = ('<p>It starts from zero and earns every lesson in the <b>Arena</b>.</p>'
-                   f'<button class="yes" type="submit" form="qs-say">Start the build{icon("arrow")}</button>')
-        out.append(f'<div class="act">{act}</div>')
-    out.append("</article>")
-    return ('<div class="qs"><section class="top s1-top"><div><h1>New agent</h1><p>Say what you want it to do. It '
-            'practises in the Arena before it takes a real case.</p></div></section>'
-            '<div class="mode" role="tablist" aria-label="How to build"><span class="on" role="tab" aria-selected="true">'
-            'Quick start</span><span class="off" role="tab" aria-selected="false" aria-disabled="true">Brainstorm '
-            f'<i>Soon</i></span></div><div class="s1">{"".join(out)}<aside class="side1"><section class="bs" '
-            f'aria-label="Brainstorm, coming soon"><div class="bs-h"><b>{icon("chat")}Brainstorm</b><span class="vchip">'
-            'Coming soon</span></div><p>Talk the idea through with the AI and agree on the plan first. Then the build '
-            'starts.</p></section></aside></div></div>')
+        notes.append('<p class="no-yet">Quick start needs the database folder. Start the page with --db.</p>')
+    if not turns and not built:
+        form = ""
+        if tok:
+            form = (f'<form method="post" action="/quickstart">{_hidden(ctx)}<div class="comp sq"><textarea name="text" '
+                    f'rows="2" maxlength="{qs_mod.MAX_TEXT}" aria-label="What agent do you want?" dir="auto" required '
+                    'placeholder="I want an agent that answers my support tickets and tags the ones that need the '
+                    'team."></textarea><div class="crow"><span class="bmode"><span class="on">Build</span><span>'
+                    f'Brainstorm <i>Soon</i></span></span><span class="sp"></span><button class="send go" type="submit" '
+                    f'aria-label="Start the build" title="Start the build">{icon("up")}</button></div></div></form>')
+        return (f'<div class="bp"><section class="hero"><h1 class="hello"><span>{_greet(ctx.get("now"))}.</span><br>What '
+                'should your agent do?</h1><p class="sub">Say it in your own words. Its card comes back here, then you '
+                f'press Build. It starts from zero and earns every lesson in the Arena.</p>{form}{"".join(notes)}'
+                "</section></div>")
+    out = []
+    last = len(turns) - 1
+    for n, t in enumerate(turns):
+        out.append(f'<div class="you"><span dir="auto">{h(t["said"])}</span></div>')
+        if n < last:
+            out.append(f'<div class="bot">{_who()}<p class="uf" dir="auto">{h(t["follow"])}</p></div>')
+            continue
+        card = [f'<div class="bot">{_who()}<p class="uf" dir="auto">{h(t["follow"])}</p><div class="acard sq">'
+                f'<span class="lab">Agent card</span>{plan_card(t["card"])}']
+        if t["question"] and not built and not building:
+            card.append(f'<p class="uq" dir="auto">{h(t["question"])}</p>')
+        if built or building or run is not None and run.error is None:
+            card.append(f'<div class="cact"><span class="started">{icon("check")}Build started</span></div>')
+        elif tok:
+            card.append('<div class="cact">' + _post(ctx, "quickstart/build", f'Build{icon("arrow")}', "yes")
+                        + '<span class="cnote">You can keep typing while it builds.</span></div>')
+        out.append("".join(card) + "</div></div>")
+    if run is not None or built:
+        small = "building" if building else "done" if built else ""
+        body = steps_html(run, built)
+        if built and not building:
+            body += ready_html(ctx, built, run)
+        out.append(f'<div class="bot">{_who(small)}<div class="check sq">{body}</div></div>')
+        if run is not None and run.error:
+            out.append(f'<div class="bot">{_who()}<p class="err" role="status">{h(run.error)}</p></div>')
+        practice = quick.practice_line(built) if built else None
+        if practice:
+            out.append(f'<div class="bot">{_who()}<p role="status">{h(practice)}</p></div>')
+    out += notes
+    ph = ("Add or change anything while it builds" if building else "Add anything before its next match" if built
+          else "Change anything on the card, or press Build")
+    dock = ""
+    if tok:
+        dock = (f'<div class="dock"><form method="post" action="/quickstart">{_hidden(ctx)}<div class="comp sq"><textarea '
+                f'name="text" rows="1" maxlength="{qs_mod.MAX_TEXT}" aria-label="Your answer, or anything to add or change" '
+                f'dir="auto" required placeholder="{ph}"></textarea><div class="crow"><span class="sp"></span>'
+                f'<button class="send go" type="submit" aria-label="Send" title="Send">{icon("up")}</button></div></div>'
+                f'</form>{"" if building else _post(ctx, "quickstart/clear", "Start over", "over")}</div>')
+    live = ' data-building=""' if building else ""
+    return (f'<div class="bp"><section class="bthread" data-live="thread" aria-label="Build conversation" '
+            f'aria-live="polite"{live}>{"".join(out)}</section>{dock}</div>')
 
 
 def plan_card(card):

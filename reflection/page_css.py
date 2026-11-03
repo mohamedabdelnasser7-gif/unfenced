@@ -536,4 +536,110 @@ textarea.typed{width:100%; border:0; background:transparent; resize:none; outlin
   .lstab{max-width:880px}
 }
 
+/* the build page (design/boards/pages-r2/build-a.html): a centred thread, the box pinned at the bottom */
+.bp{display:flex; flex-direction:column}
+.bp .hero{min-height:calc(100vh - 260px); display:flex; flex-direction:column; justify-content:center; padding:24px 4px 0}
+.bp .hello{margin:0; font:300 40px/46px var(--font); letter-spacing:-.035em; text-wrap:balance}
+.bp .hello span{background:linear-gradient(100deg, var(--sage-a) 0%, var(--sage-b) 55%, var(--sage-c) 100%); -webkit-background-clip:text; background-clip:text; color:transparent}
+.bp .hero .sub{margin:12px 0 24px; font:400 15px/22px var(--font); color:var(--ink-2); text-wrap:pretty}
+.bp .comp{border-radius:26px; background:#fff; box-shadow:inset 0 0 0 1px rgba(42,51,50,.1), 0 1px 2px rgba(11,15,18,.04), 0 16px 32px -24px rgba(11,15,18,.3); padding:12px 10px 10px 18px}
+.bp .comp:focus-within{box-shadow:inset 0 0 0 1.5px rgba(42,51,50,.32), 0 1px 2px rgba(11,15,18,.04), 0 16px 32px -24px rgba(11,15,18,.3)}
+.bp .comp textarea{display:block; width:100%; margin:2px 0 0; padding:0; border:0; outline:0; resize:none; background:none; min-height:24px; max-height:156px; font:400 17px/24px var(--font); letter-spacing:-.01em; color:var(--ink); box-shadow:none}
+.bp .comp textarea::placeholder{color:var(--ink-3); opacity:1}
+.bp .crow{display:flex; align-items:center; gap:8px; margin-top:10px; min-width:0}
+.bp .crow .sp{flex:1}
+.bp .bmode{display:inline-flex; align-items:center; gap:2px; padding:3px; border-radius:18px; background:var(--chip); min-width:0}
+.bp .bmode span{display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 10px; border-radius:14px; font:500 13px/1 var(--font); color:var(--ink-2); white-space:nowrap}
+.bp .bmode .on{background:#fff; color:var(--ink); box-shadow:var(--shadow-soft)}
+.bp .bmode i{font-style:normal; font:500 10px/12px var(--font); letter-spacing:.04em; padding:2px 6px; border-radius:999px; background:rgba(255,255,255,.7); color:var(--ink-3); text-transform:uppercase}
+.bp .send{width:44px; height:44px; padding:0; border-radius:50%; display:grid; place-items:center; flex:none}
+.bp .send svg.i{stroke-width:2}
+.bthread{display:flex; flex-direction:column; gap:18px; padding:12px 0 210px}
+.bp .you{align-self:flex-end; max-width:84%; padding:12px 16px; border-radius:22px 22px 8px 22px; background:#e3e9e6; font:400 16px/23px var(--font); white-space:pre-line; overflow-wrap:anywhere}
+.bp .who{display:flex; align-items:center; gap:10px; margin-bottom:8px}
+.bp .who .mk{width:28px; height:28px; border-radius:50%; display:grid; place-items:center; background:var(--bubble); box-shadow:var(--bubble-shadow)}
+.bp .who .mk svg{width:15px; height:15px}
+.bp .who b{font:500 13px/16px var(--font)}
+.bp .who small{font:400 12px/16px var(--font); color:var(--ink-3)}
+.bp .bot > p{margin:0; font:400 16px/24px var(--font); text-wrap:pretty; overflow-wrap:anywhere}
+.bp .bot > p.err{color:var(--ink); padding:12px 14px; border-radius:18px; background:#fff; box-shadow:inset 0 0 0 1px var(--line)}
+.bp .acard{margin-top:12px; border-radius:var(--r-card); padding:20px; background:var(--mist); box-shadow:var(--shadow-card), inset 0 1px 0 rgba(255,255,255,.7), inset 0 0 0 1px rgba(42,51,50,.06)}
+.bp .acard .lab{color:#2f3433}
+.bp .plan{margin-top:10px; padding:16px 18px 6px; border-radius:var(--r-inner); background:rgba(255,255,255,.62); box-shadow:inset 0 0 0 1px rgba(42,51,50,.07)}
+.bp .plan h3{margin:0; font:400 24px/30px var(--font); letter-spacing:-.02em; overflow-wrap:anywhere}
+.bp .plan dl{margin:8px 0 0}
+.bp .plan dl>div{padding:10px 0; border-top:1px solid var(--line)}
+.bp .plan dt{font:500 11px/14px var(--font); letter-spacing:.08em; text-transform:uppercase; color:#2f3433}
+.bp .plan dd{margin:4px 0 0; font:400 15px/21px var(--font); overflow-wrap:anywhere}
+.bp .plan dd p{margin:0}
+.bp .plan ul{margin:0; padding-left:18px}
+.bp .needs{margin-top:12px}
+.bp .file{display:grid; grid-template-columns:40px minmax(0,1fr); align-items:center; gap:12px; margin-top:8px; padding:8px 12px 8px 8px; border-radius:20px; background:rgba(255,255,255,.62); box-shadow:inset 0 0 0 1px rgba(42,51,50,.07)}
+.bp .file .fi{width:40px; height:40px; border-radius:14px; display:grid; place-items:center; background:var(--card-4)}
+.bp .file .fi svg.i{width:18px; height:18px}
+.bp .file b{display:block; font:500 15px/20px var(--font); white-space:normal; overflow-wrap:anywhere}
+.bp .file small{display:block; font:400 13px/18px var(--font); color:var(--ink-2)}
+.bp .file > span:last-child:empty{display:none}
+.bp .file.on .fi{background:var(--sage); color:#fff}
+.bp .uq{margin:14px 2px 0; font:500 17px/24px var(--font); overflow-wrap:anywhere}
+.bp .cact{display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; margin-top:16px}
+.bp .cact form{margin:0}
+.bp .cact .cnote{font:400 13px/18px var(--font); color:var(--ink-2)}
+.bp .started{display:inline-flex; align-items:center; gap:8px; height:40px; padding:0 16px 0 12px; border-radius:20px; background:var(--ink); color:#fff; font:500 14px/1 var(--font)}
+.bp .started svg.i{width:16px; height:16px; stroke-width:2}
+.bp .check{margin-top:4px; border-radius:var(--r-card); background:var(--card); box-shadow:var(--shadow-soft); padding:8px 18px}
+.bp .check:empty{display:none}
+.bp .step{display:grid; grid-template-columns:28px minmax(0,1fr); gap:12px; align-items:start; padding:10px 0}
+.bp .step + .step{border-top:1px solid var(--line)}
+.bp .tick{width:28px; height:28px; border-radius:50%; display:grid; place-items:center; background:var(--card-3); box-shadow:inset 0 0 0 1.5px rgba(11,15,18,.12); color:transparent}
+.bp .tick svg.i{width:15px; height:15px; stroke-width:2.2}
+.bp .step.done .tick{background:var(--sage); color:#fff; box-shadow:none}
+.bp .step.work .tick{background:#fff; box-shadow:inset 0 0 0 1.5px rgba(42,51,50,.28)}
+.bp .step.work .tick svg{display:none}
+.bp .step.work .tick::after{content:""; width:8px; height:8px; border-radius:50%; background:var(--sage); animation:bbreath 1.6s var(--ease) infinite}
+@keyframes bbreath{0%,100%{transform:scale(.7); opacity:.55}50%{transform:scale(1); opacity:1}}
+.bp .step b{display:block; font:500 15px/20px var(--font); padding-top:4px}
+.bp .step p{margin:2px 0 0; font:400 14px/20px var(--font); color:var(--ink-2); overflow-wrap:anywhere}
+.bp .step.big b{font:400 22px/28px var(--font); letter-spacing:-.02em; padding-top:0}
+.bp .step.big.done .tick{background:var(--ink)}
+.bp .took{display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:12px; padding:12px 14px; border-radius:20px; background:var(--card-2); box-shadow:inset 0 0 0 1px var(--line)}
+.bp .took .tag{font:500 11px/14px var(--font); letter-spacing:.08em; text-transform:uppercase; padding:4px 9px; border-radius:999px; background:var(--ink); color:#fff}
+.bp .took b{flex:1 1 160px; font:400 15px/20px var(--font); overflow-wrap:anywhere}
+.bp .took .st{display:inline-flex; align-items:center; gap:6px; font:500 12px/16px var(--font); padding:4px 10px; border-radius:999px; background:rgba(42,51,50,.09)}
+.bp .took .st i{width:6px; height:6px; border-radius:50%; background:var(--sage)}
+.bp .ready{margin:6px 0 4px 40px}
+.bp .ready > p{margin:0; font:400 15px/22px var(--font); color:var(--ink-2)}
+.bp .goto{display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; margin-top:14px}
+.bp .goto .yes{text-decoration:none}
+.bp .auto{display:flex; align-items:center; gap:10px; font:400 13px/18px var(--font); color:var(--ink-2)}
+.bp .auto b{display:inline; font:inherit; padding:0}
+.bp .ring{width:22px; height:22px; flex:none}
+.bp .ring circle{fill:none; stroke-width:2.4}
+.bp .ring .bg{stroke:rgba(11,15,18,.1)}
+.bp .ring .fg{stroke:var(--sage); stroke-linecap:round; stroke-dasharray:56.5; stroke-dashoffset:56.5; transform:rotate(-90deg); transform-origin:50% 50%; transition:stroke-dashoffset 1s linear}
+.bp .stay{border:0; background:none; padding:0; cursor:pointer; font:500 13px/18px var(--font); color:var(--ink); text-decoration:underline; text-underline-offset:3px; text-decoration-color:rgba(11,15,18,.3)}
+.bp .dock{position:fixed; left:0; right:0; bottom:82px; z-index:39; padding:10px 12px 12px; background:linear-gradient(180deg, rgba(244,243,239,0) 0%, rgba(244,243,239,.92) 30%, var(--bone) 100%)}
+.bp .dock > *{max-width:760px; margin-left:auto; margin-right:auto}
+.bp .dock > form{display:block}
+.bp .dock .over{display:block; margin-top:6px; border:0; background:none; font:500 13px/18px var(--font); color:var(--ink-2); text-decoration:underline; text-underline-offset:3px; cursor:pointer}
+.bp .dock form + form{display:flex; justify-content:flex-end}
+@media (min-width: 1024px){
+  .bp .hero,.bthread{width:100%; max-width:760px; margin:0 auto}
+  .bp .hero{text-align:center; padding-bottom:64px}
+  .bp .hello{font-size:60px; line-height:66px; letter-spacing:-.04em}
+  .bp .hero .sub{font-size:17px; line-height:24px}
+  .bp .hero .comp{text-align:left}
+  .bp .comp{padding:16px 12px 12px 22px}
+  .bp .comp textarea{font-size:18px; line-height:26px; min-height:26px}
+  .bthread{gap:26px; padding-top:32px}
+  .bp .you{max-width:70%}
+  .bp .acard{padding:24px 26px}
+  .bp .plan dl{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:20px}
+  .bp .needs{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:0 12px; margin-top:16px}
+  .bp .needs .lab{grid-column:1 / -1}
+  .bp .check{padding:8px 22px}
+  .bp .step{padding:12px 0}
+  .bp .dock{bottom:0; padding:28px 0 28px}
+}
+
 """

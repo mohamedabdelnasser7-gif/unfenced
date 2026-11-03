@@ -120,7 +120,7 @@ class QuickStartPage(unittest.TestCase):
         page = self.get().split("</style>")[1]
         self.assertIn('<p class="uq" dir="auto">Which store do you use?</p>', page)
         self.assertNotIn("which city", page)
-        body = page.split('class="thread"')[1].split('<form id="qs-say"')[0]
+        body = page.split('data-live="thread"')[1].split('<div class="dock">')[0]
         self.assertLessEqual(body.count("?"), 1)
         self.assertEqual(qs.one_question("A? B? C?"), "A?")
         self.assertEqual(qs.one_question("هل عندك متجر؟ وفين؟"), "هل عندك متجر؟")
@@ -193,8 +193,12 @@ class QuickStartPage(unittest.TestCase):
         self.assertEqual(card["tools"], ["store"])  # Bosta is not in the repo: on the card, not connected, not in the plug
         self.assertEqual([n["connected"] for n in card["needs"]], [True, False])
         self.assertIn("watch the store", (where / "instructions.md").read_text(encoding="utf-8"))
-        self.assertIn("Built. Its files are in agents/stock_watcher", self.get())
-        self.assertIn("what you write below makes another agent", self.get())  # a change after Build is next
+        page = self.get()  # the build page's steps, all ticked, then Go to the Arena on the agent's Arena tab
+        for done in ("Card read", "Plug written and checked", "Exam written", "Files saved", "agents/stock_watcher",
+                     "Ready for the Arena"):
+            self.assertIn(done, page)
+        self.assertIn('href="/agents/stock_watcher?tab=arena" data-go>Go to the Arena', page)
+        self.assertNotIn('data-building=""', page)
         self.assertIn("level", card)
         self.assertNotIn("bosta", json.dumps(json.loads((where / "plug.json").read_text(encoding="utf-8"))["risk"]))
 
@@ -757,7 +761,122 @@ class QuickStartServer(unittest.TestCase):
             csp = r.headers["Content-Security-Policy"]
         self.assertIn("default-src 'none'", csp)
         self.assertIn("form-action 'self'", csp)
-        self.assertNotIn("script-src", csp)
+        # the build page's one script, by its hash, and fetch to itself only (its poll); no inline handlers
+        self.assertEqual(csp, pages.NEW_CSP)
+        self.assertIn(f"script-src 'sha256-{pages._sha(pages.NEW_SCRIPT)}'", csp)
+        self.assertNotIn("unsafe", csp)
+        self.assertIn("connect-src 'self'", csp)
+        self.assertEqual(csp.count("script-src"), 1)
+        with urllib.request.urlopen(self.url("/agents"), timeout=10) as r:  # every other page keeps no script
+            self.assertNotIn("script-src", r.headers["Content-Security-Policy"])
+        page = self.fetch("/new")
+        self.assertEqual(page.count("<script>"), 1)
+        self.assertIn(f"<script>{pages.NEW_SCRIPT}</script>", page)
+        self.assertNotRegex(page.split("<script>")[0], r"<[^>]*\son[a-z]+=")
+
+
+class BuildPage(unittest.TestCase):
+    """The build page (LOCKS "App pages", 2A): Build runs in a thread, its steps tick off in the thread
+    the page polls, and once done Go to the Arena with a countdown while the build is fresh."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.folder = Path(tmp.name).resolve()
+        db_path = str(self.folder / "ascent.db")
+        self.db = Db(db_path)
+        self.addCleanup(self.db.close)
+        with mock.patch("reflection.judge.Judge", return_value=lambda text, high, low: "low"):
+            self.m = mo.live_morning(self.db, db_path, [plug_mod.load(ROOT / "sales" / "plug.json")],
+                                     self.folder / "assistant")
+        model = mock.patch("kit.model.Model", return_value=FakeModel())  # the exam's model; it answers nothing here
+        model.start()
+        self.addCleanup(model.stop)
+        self.gate = threading.Event()
+        self.addCleanup(self.ended)  # runs after the gate opens: no build thread writes once the folder goes
+        self.addCleanup(self.gate.set)
+
+        def held_plug(messages, tools):  # the plug call waits until the test lets it go
+            self.gate.wait(10)
+            return plug_reply()
+        self.model = FakeModel(card_reply(), held_plug, exam_reply())
+        self.p = pages.Pages(self.m, model=self.model, background=True)
+
+    def get(self):
+        return self.p.get("/new", {}, "t")
+
+    @staticmethod
+    def until(done):
+        for _ in range(500):
+            if done():
+                return True
+            threading.Event().wait(0.01)
+        return False
+
+    def ended(self):
+        run = getattr(self, "p", None) and self.p.run
+        if run is not None:
+            self.until(lambda: not run.running)
+
+    def held(self):
+        """Wait until the build is in its plug call (the card step told, the plug not yet back)."""
+        self.assertTrue(self.until(lambda: len(self.model.calls) >= 2), "the build never reached its plug call")
+
+    def finish(self):
+        self.gate.set()
+        self.assertTrue(self.until(lambda: not self.p.run.running), "the build did not end")
+
+    def test_steps_tick_off_while_it_builds(self):
+        self.p.actions["/quickstart"](self.m, {"text": ["an agent for my stock"]})
+        self.assertIsNone(self.p.actions["/quickstart/build"](self.m, {}))  # no flash: the steps say it
+        self.held()
+        page = self.get().split("<script>")[0]  # the markup, not the page's script
+        self.assertIn('data-live="thread" aria-label="Build conversation" aria-live="polite" data-building=""', page)
+        self.assertIn('<div class="step done"><span class="tick">', page)
+        self.assertIn("Card read", page)
+        self.assertIn('<div class="step work"><span class="tick">', page)
+        self.assertIn("Writing the plug", page)
+        self.assertNotIn("Files saved", page)
+        self.assertNotIn('action="/quickstart/build"', page)  # Build started, no second Build button
+        self.assertNotIn('action="/quickstart/clear"', page)
+        with self.assertRaises(mo.Refused):
+            self.p.actions["/quickstart/build"](self.m, {})
+        with self.assertRaises(mo.Refused):
+            self.p.actions["/quickstart/clear"](self.m, {})
+        self.assertEqual(len(self.model.calls), 2)  # the card and the plug only: the refusals called no model
+        self.finish()
+        page = self.get().split("<script>")[0]
+        self.assertNotIn('data-building=""', page)
+        self.assertIn('action="/quickstart/clear"', page)  # Start over is back once it is built
+        for done in ("Plug written and checked", "Exam written", "Files saved", "agents/stock_watcher", "Ready for the Arena"):
+            self.assertIn(done, page)
+        self.assertIn('href="/agents/stock_watcher?tab=arena" data-go>Go to the Arena', page)
+        self.assertIn(f"data-count>{pages.COUNTDOWN}</b>", page)
+        self.assertIn("data-stay>Stay here</button>", page)
+        self.assertIn("stock_watcher", self.m.plugs)  # joined the running page on the server's thread
+        self.assertTrue((self.folder / "agents" / "stock_watcher" / "plug.json").is_file())
+
+    def test_no_countdown_once_the_build_is_old(self):
+        self.p.actions["/quickstart"](self.m, {"text": ["an agent for my stock"]})
+        self.p.actions["/quickstart/build"](self.m, {})
+        self.finish()
+        self.p.run.ended -= pages.FRESH + 1
+        page = self.get()
+        self.assertIn('href="/agents/stock_watcher?tab=arena" data-go>Go to the Arena', page)
+        self.assertNotIn("data-count>", page)
+        self.assertNotIn("data-stay>", page)
+
+    def test_a_failed_build_says_so_and_offers_build_again(self):
+        self.model.script[1] = lambda messages, tools: (_ for _ in ()).throw(RuntimeError("the line dropped"))
+        self.p.actions["/quickstart"](self.m, {"text": ["an agent for my stock"]})
+        self.p.actions["/quickstart/build"](self.m, {})
+        self.finish()
+        page = self.get()
+        self.assertIn('<p class="err" role="status">Not built: the line dropped. Press Build to try again.</p>', page)
+        self.assertIn('action="/quickstart/build"', page)
+        self.assertNotIn("data-go>", page)
+        self.assertNotIn("stock_watcher", self.m.plugs)
+        self.assertFalse((self.folder / "agents" / "stock_watcher").exists())
 
 
 if __name__ == "__main__":

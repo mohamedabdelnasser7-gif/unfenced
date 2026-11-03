@@ -27,6 +27,8 @@ Rules (from the store rules, the 27 Oct morning review and Mohamed's calls on 28
    count as written, so 16500.99 and 16500,99 are not 16500. An amount in words (next to a
    currency word, after a price word or ب, or 100 or more after any cue word), or with k or
    ألف after the digits (1k EGP, 1.5 ألف), is refused, so the model writes it in digits.
+   For any agent but Sales (priced_only, kit/turn.py), only a number next to a currency or after a
+   price word counts: an order number, a ticket id, a postal code, a date, a time or a count never does.
 5. No exact stock count. The store tool gives a level (in stock, few left, out), never a number.
 6. Links (2026-10-31): a reply may carry a link only when it is, exactly, an image link the store
    tool gave in this chat (links, from sales/loop.py store_links). Any other link is refused: a
@@ -970,8 +972,13 @@ def _mask_year(m):
     return m.group(0)[:m.start(g) - m.start()] + MASK + m.group(0)[m.end(g) - m.start():]
 
 
-def prices_in(reply, sizes=(), orders=(), names=()):
+def prices_in(reply, sizes=(), orders=(), names=(), priced_only=False):
     """Every number in the reply that reads as an amount: ints, or Decimals for fractions.
+
+    priced_only (any agent but Sales, kit/turn.py): only a number that reads as a price or a fee, next
+    to a currency or after a price word (PRICE_WORDS, never a weak word such as is or for), so an order
+    number, a ticket id, a postal code, a date, a time or a count is never read as one. The steps
+    below after the price words (a city, a bare number of 3 or more digits) are left out then.
 
     A number next to a currency word or sign always counts. A number after a price word, or
     right after a city or governorate (Cairo 70), counts unless it is a size, a date, an
@@ -996,8 +1003,12 @@ def prices_in(reply, sizes=(), orders=(), names=()):
     for m in CUE_AMOUNT.finditer(masked):
         if _unit_after(masked, m) or _weak_size(masked, m, size_numbers):
             continue
+        if priced_only and WEAK_CUE.fullmatch(m.group("cue")):
+            continue
         counted.add(m.start("n"))
         out.append(_number(m.group("n")))
+    if priced_only:
+        return out
     for m in PLACE_AMOUNT.finditer(masked):
         if m.start("n") in counted or _unit_after(masked, m):
             continue
@@ -1113,7 +1124,8 @@ def named_style(text):
     return problems
 
 
-def check(reply, customer_text="", amounts=(), vocabulary=frozenset(), sizes=(), orders=(), links=(), names=()):
+def check(reply, customer_text="", amounts=(), vocabulary=frozenset(), sizes=(), orders=(), links=(), names=(),
+          priced_only=False, stock=True):
     """(passed, feedback) for one reply.
 
     amounts: every price and fee in the store and delivery data, plus amounts from this turn's store tools.
@@ -1123,15 +1135,18 @@ def check(reply, customer_text="", amounts=(), vocabulary=frozenset(), sizes=(),
     the customer just placed or asked about is never read as an amount; any other #number still counts.
     links: image links the store tool gave in this chat; any other link in the reply is refused.
     names: the store's product titles, so a model number ("Phantom 6") is never read as an amount.
+    priced_only: only numbers that read as prices or fees are held to amounts (prices_in), for any
+    agent but Sales. stock: False leaves out the stock count rule, for an agent with no store.
     """
-    problems = named_problems(reply, customer_text, amounts, vocabulary, sizes, orders, links, names)
+    problems = named_problems(reply, customer_text, amounts, vocabulary, sizes, orders, links, names,
+                              priced_only=priced_only, stock=stock)
     if problems:
         return False, " ".join(dict.fromkeys(fb for _, fb in problems))
     return True, ""
 
 
 def named_problems(reply, customer_text="", amounts=(), vocabulary=frozenset(), sizes=(), orders=(), links=(),
-                   names=()):
+                   names=(), priced_only=False, stock=True):
     """Every rule the reply breaks, as (check name, feedback) pairs, in the order check() gives
     them; [] when it passes. The names: empty, links, script, banned, dashes, emoji, markdown, sympathy,
     amounts, digits and stock. check() is this list joined, so the exam (reflection/exam.py) reads
@@ -1153,7 +1168,7 @@ def named_problems(reply, customer_text="", amounts=(), vocabulary=frozenset(), 
             problems.append(("sympathy", f'Remove the sympathy line ("{line}"). No sympathy lines; just answer.'))
             break
     allowed = {n for n in (amount(a) for a in amounts) if n is not None}
-    wrong = sorted({p for p in prices_in(reply, sizes, orders, names) if p not in allowed})
+    wrong = sorted({p for p in prices_in(reply, sizes, orders, names, priced_only) if p not in allowed})
     if wrong:
         nums = ", ".join(s if len(s) <= MAX_INT_DIGITS else s[:MAX_INT_DIGITS] + "..." for s in map(str, wrong))
         problems.append(("amounts", f"These amounts are not in the store or delivery data: {nums}. "
@@ -1164,7 +1179,7 @@ def named_problems(reply, customer_text="", amounts=(), vocabulary=frozenset(), 
             or model_thousands(digits, names) or store_word_thousands(digits, vocabulary, names)):
         problems.append(("digits", "Write every amount in digits, the number then the currency in the customer's "
                          "script (جنيه in Arabic, EGP in English, geneh in Franco), so it can be checked."))
-    if stock_counts(reply, sizes, orders, names):
+    if stock and stock_counts(reply, sizes, orders, names):
         problems.append(("stock", "Never give the exact stock count. If the store says few left, say only a few are "
                          "left; otherwise say it is in stock or out of stock."))
     return problems

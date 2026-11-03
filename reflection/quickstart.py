@@ -88,6 +88,10 @@ MAX_INSTRUCTIONS = 8_000
 MAX_DRAFT = 256_000      # bytes of quickstart.json read back
 MAX_SAMPLE_REPLY = 40_000  # characters of the sample data reply read from the model
 NO_SAMPLE = "No sample data this time. Add some on its page."
+# The house style every agent's replies are checked for (kit/send_check.py named_style), said in its own
+# instructions, so its first reply does not fail on it. Build adds it after the model's words.
+HOUSE_STYLE = ("How you write every reply: plain text only, no markdown (no ** and no # headings), no em or en "
+               "dashes and no hyphen with spaces around it (use a comma or a full stop), and no emoji.")
 CALLS_PER_MINUTE = 10
 MAX_BUILDS = 3           # Build presses that reach the model in one chat
 MAX_CARD_CHANGES = 3     # card changes one build takes in before its files are written
@@ -976,6 +980,8 @@ class QuickStart:
             return None, None, "the instructions were empty"
         if names_a_person(words):
             return None, None, NO_PERSON_SAID
+        if HOUSE_STYLE not in words:  # the send check holds every agent to it (kit/send_check.py named_style)
+            words = f"{words}\n\n{HOUSE_STYLE}"
         if len(words) > MAX_INSTRUCTIONS:
             return None, None, f"the instructions are over {MAX_INSTRUCTIONS} characters"
         return plug, words, None

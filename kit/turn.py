@@ -29,9 +29,12 @@ writes first (a lead it follows up), and the input is saved under a frame line s
    and MAX_CALLS_PER_STEP calls a step, then the model must answer in words. A folder with sample data
    (kit/sample.py, sample-data.json: made up at Build, rows the user added) also offers the data tool
    (DATA_TOOL), and for one with the store tool and no Shopify keys the store reads its sample products.
-4. The send check: the full check (kit/send_check.py) when the card connects whatsapp or store (it
-   talks to customers or quotes the store), so script, style, amounts from tools only, stock counts
-   and links all hold; a folder written by hand, whose card names no tools, keeps the older rule: the
+4. The send check: the full check (kit/send_check.py) when the card connects whatsapp, store, orders
+   or delivery (it talks to customers or quotes the store), so script, style, amounts from tools only
+   and links all hold. For an agent Build made, the amounts rule reads only numbers that are prices or
+   fees (a currency next to it, or a price word before it), never an order number, a ticket id, a
+   postal code, a date, a time or a count, and the stock count rule holds only with the store tool;
+   the Sales agent (sales/loop.py) keeps the whole check. A folder written by hand, whose card names no tools, keeps the older rule: the
    full check when the plug declares a "reply" action, as the Sales plug does. The house style part
    only (banned words, dashes, emoji, markdown) for any other agent, whose replies are not a store's
    answers to a customer: a ticket agent that names a refund amount is not held to store prices. A failed reply is never sent: the model
@@ -116,6 +119,8 @@ class Agent:
     full_check: bool
     acts: tuple = ()      # the declared actions take_action offers (a card with a case only)
     data: dict | None = None  # its sample data (kit/sample.py), read by the data tool and the store tool
+    priced_only: bool = False  # the full check holds only prices and fees to the data (an agent Build made)
+    stock: bool = True    # the full check's stock count rule (an agent with the store tool, or written by hand)
 
 
 def _read(folder, name):
@@ -244,12 +249,13 @@ def load(folder):
         offered += (DATA_TOOL,)
     stage = Stage(p.stages[0] if p.stages else "all", card["name"], card["does"], offered, ())
     if connected is None:  # a folder written by hand: the older rule
-        talks = REPLY_ACTION in p.actions
-    else:
-        talks = bool(connected & set(FULL_CHECK_TOOLS))
+        talks, priced_only, stock = REPLY_ACTION in p.actions, False, True
+    else:  # an agent Build made: the amounts rule reads prices and fees only, the stock rule needs the store
+        talks, priced_only, stock = bool(connected & set(FULL_CHECK_TOOLS)), True, "store" in connected
     acts = tuple(a for a in p.actions if a != REPLY_ACTION) if "case" in card else ()
     return Agent(name=p.agent, folder=folder, plug=p, instructions=instructions, card=card, tools=offered,
-                 missing=missing, stage=stage, full_check=talks, acts=acts, data=data)
+                 missing=missing, stage=stage, full_check=talks, acts=acts, data=data, priced_only=priced_only,
+                 stock=stock)
 
 
 def built(db_folder, most=MAX_AGENTS):
@@ -295,7 +301,8 @@ def _check(agent, reply, customer_text, amounts, vocab, sizes, names, chats, cha
         problems = send_check.style_problems(reply)
         return (not problems), " ".join(dict.fromkeys(problems))
     return send_check.check(reply, customer_text, amounts, vocab, sizes, orders=loop.order_names(chats, chat_id),
-                            links=loop.store_links(chats, chat_id), names=names)
+                            links=loop.store_links(chats, chat_id), names=names, priced_only=agent.priced_only,
+                            stock=agent.stock)
 
 
 PRACTICE_CHANNEL = "practice"

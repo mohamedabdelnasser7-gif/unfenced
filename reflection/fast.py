@@ -110,7 +110,7 @@ _NEVER_WORDS = {
         "geneh", "gneh", "guineh", "جنيه", "ج.م", "دولار", "ريال", "درهم"),
     "discount": (
         "discount", "coupon", "promo", "voucher", "free", "freebie", "rebate", "cashback", "markdown",
-        "bargain", "cheaper", "money off", "complimentary", "gift", "on the house", "khasm",
+        "bargain", "cheaper", "money off", "complimentary", "gift", "gratis", "expense", "on the house", "khasm",
         "خصم", "تخفيض", "ببلاش", "مجان", "كوبون", "اوفر"),
     "promise": (
         "promise", "guarantee", "warranty", "refund", "money back", "exchange", "replacement", "assure",
@@ -210,6 +210,22 @@ _NEVER_PATTERNS = (
     ("policy", r"\blast\s+(?:pair|piece|item|unit)s?\b"),
     ("discount", r"\bthrow(?:s|ing|n)?\s+(?:it\s+|them\s+)?in\b|\broom\s+to\s+(?:move|negotiate)\b"
                  r"|\b(?:do|go)\s+better\s+than\b"),
+    # red team engfix round 1, finding 4: notes that give money away with no amount. Kept here as well as
+    # on the plug, so a narrower plug never opens the note guard. "deal" is no word ("deal with the size")
+    # and "a bit off" only after knock or take ("the fit is a bit off").
+    ("discount", r"\b(?:skip|skips|skipped|skipping|absorb|absorbs|absorbed|absorbing|waive|waives|waived|waiving)\s+"
+                 r"(?:the\s+|their\s+|its\s+|any\s+)?(?:(?:delivery|shipping)\s+)?(?:fee|charge|cost)s?\b"
+                 r"|\bleave\s+(?:the\s+|their\s+|its\s+)?(?:(?:delivery|shipping)\s+)?(?:fee|charge|cost)s?\s+(?:out|off)\b"),
+    ("discount", r"\bcosts?\s+(?:them\s+|you\s+)?nothing\b"
+                 r"|\bwithout\s+(?:a|any|the)\s+(?:(?:delivery|shipping)\s+)?(?:fee|charge|cost)\b"
+                 r"|\bat\s+(?:our|my|the\s+store['’]?s)\s+(?:own\s+)?(?:expense|cost)\b"
+                 r"|\bfor\s+less\b|\b(?:knock|take|takes|taking|took)\s+(?:a\s+(?:bit|little)|a\s+few\s+[a-z]+|something|some)\s+off\b"),
+    ("discount", r"\b(?:agree|agrees|agreed|agreeing)\s+(?:to|with|on)\s+(?:the\s+|their\s+|whatever\s+|any\s+|that\s+)?"
+                 r"(?:price|offer|amount|figure)\b"
+                 r"|\b(?:accept|accepts|accepted|accepting|match|matches|matched|matching)\s+(?:their|whatever|any)\s+"
+                 r"(?:[a-z]+\s+)?(?:price|offer|amount|figure)\b"),
+    ("discount", r"\bas\s+an?\s+(?:thank[\s-]*you|gift|bonus|present|treat|extra)\b"
+                 r"|\b(?:a|special|good|great|better|best|sweet|nice)\s+deal\b"),
 )
 
 

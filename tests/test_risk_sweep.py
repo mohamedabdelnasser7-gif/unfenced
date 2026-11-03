@@ -273,5 +273,45 @@ class MarketingTools(unittest.TestCase):
                 self.assertEqual(risk.classify(text, mk.risk, always_low)[0], risk.HIGH)
 
 
+class NoteGuardGivesNothingAway(unittest.TestCase):
+    """Red team engfix round 1, finding 4 (note_guard.py): fast notes that give money away with no amount.
+    The note guard (reflection/fast.py NEVER) refuses each, and keeps refusing them on its own words and
+    patterns if the plug's list were empty; plain notes about the order of questions still pass."""
+
+    GIVE = ("Skip the delivery fee for them.", "Leave the delivery fee out of the total.", "Waive the delivery fee.",
+            "Absorb the delivery cost.", "Tell them delivery costs nothing.", "Send it without a delivery fee.",
+            "Ship it at our expense.", "Sell it for less.", "Knock a bit off for them.",
+            "Agree to the price they ask for.", "Match whatever price they were quoted.", "Accept their offer.",
+            "Add a water bottle to the order as a thank you.", "Give them a deal on the second pair.",
+            "Send the second pair gratis.")
+    PLAIN = ("Deal with the size question first.", "Agree on the size first, then the price.",
+             "Leave the price out until they pick a model.", "Thank them for waiting, then ask the size.",
+             "Ask for the size before the price.")
+    THEIRS = ["التوصيل بكام؟", "el delivery bekam"]
+
+    def test_each_is_refused(self):
+        from engine import fast as engine_fast
+        from reflection import fast as sales_fast
+        for text in self.GIVE:
+            with self.subTest(text=text):
+                self.assertTrue(engine_fast.guard(text, PLUG, self.THEIRS, never=sales_fast.NEVER))
+
+    def test_refused_on_the_note_guard_s_own_list(self):
+        import dataclasses
+        from engine import fast as engine_fast
+        from reflection import fast as sales_fast
+        bare = sales_fast._never(dataclasses.replace(PLUG.risk, words=(), patterns=(), tools=()))
+        for text in self.GIVE:
+            with self.subTest(text=text):
+                self.assertTrue(engine_fast.guard(text, PLUG, self.THEIRS, never=bare))
+
+    def test_plain_notes_pass(self):
+        from engine import fast as engine_fast
+        from reflection import fast as sales_fast
+        for text in self.PLAIN:
+            with self.subTest(text=text):
+                self.assertEqual(engine_fast.guard(text, PLUG, self.THEIRS, never=sales_fast.NEVER), [])
+
+
 if __name__ == "__main__":
     unittest.main()

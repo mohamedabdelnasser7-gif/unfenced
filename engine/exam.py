@@ -4,7 +4,9 @@ Agent neutral. A plug names its exam (plug key "exam": the situations file and t
 names); a plug with no exam has none, and nothing here runs for it. The agent's own code gives
 two things:
   answer(situation, lesson) -> did: a dict of what the agent did, its own keys, plus
-      "calls" (model calls made); lesson is the new lesson's text, or None for the kept ones only.
+      "calls" (model calls made) and, when the answer gave no words to grade (an answer cut off, a
+      turn that spent its calls on tools), "empty": True (EMPTY); lesson is the new lesson's text,
+      or None for the kept ones only.
   checks: {name: check(situation, did) -> "" when it passes, else why, one plain line}.
 Every check the plug names runs on every situation; a check reads the situation's "expect"
 dict to know what applies there. An answer or a check that raises fails that situation, so a
@@ -57,7 +59,9 @@ may call recheck(): it answers that situation RECHECK more times with the new li
 without, votes the check by the majority on each side, and keeps the break only when it fails with the
 line and passes without it in the majority. At most RECHECK_MAX situations a lesson, stopping at the
 first confirmed break, and only while the worst case of the reruns fits the calls the binding still
-allows (no cap is raised); a rerun answer that raised counts against the lesson.
+allows (no cap is raised); a rerun answer that raised, or that gave no words (did["empty"]), counts
+against the lesson. The vote decides for the lesson in hand only: the binding never keeps a voted row
+before for the next lessons, so one lesson's vote never excuses another's break.
 
 A failed gate is kept with the lesson too (new, 2026-10-31; DECISIONS item 50): beside the first
 fail, the fails column keeps every failed row of the result (at most MAX_FAILS, first fail first:
@@ -108,6 +112,7 @@ GOOD = "good_model_judged"  # the built agents' good result, reached before and 
 ALWAYS = (ANSWER, NOT_RUN, GOOD)  # block whatever the plug's list says
 RECHECK = 2  # more answers on each side for a newly broken safety check (recheck)
 RECHECK_MAX = 3  # situations a lesson rechecked at most
+EMPTY = "empty"  # the did key of an answer that gave no words to grade (sit, empty_raises)
 
 
 @dataclass(frozen=True)
@@ -205,12 +210,14 @@ def load(path, stages):
     return sits
 
 
-def sit(situations, answer, checks, names, lesson=None, *, stop_at_first=False, safety=None):
+def sit(situations, answer, checks, names, lesson=None, *, stop_at_first=False, safety=None, empty_raises=False):
     """Run every situation once: answer it, then run each named check on what it did (every one, so
     Row.fails names them all). A name with no check fails every situation. safety: the checks that
     block (the pass rule above, with no run before); None: every check blocks. stop_at_first: stop at
-    the first situation that blocks (the gate before a trial). Returns a Result; calls sums each
-    did["calls"]."""
+    the first situation that blocks (the gate before a trial). empty_raises (the recheck's reruns): an
+    answer whose did says it gave no words (EMPTY) counts as an answer that raised, so a rerun cut off
+    or spent on tools never reads as the agent failing a check on its own. Returns a Result; calls sums
+    each did["calls"]."""
     rows, calls = [], 0
     for s in situations:
         try:
@@ -219,7 +226,10 @@ def sit(situations, answer, checks, names, lesson=None, *, stop_at_first=False, 
         except Exception as e:
             rows.append(Row(s["id"], s["name"], s["part"], False, ANSWER, _one_line(f"the answer raised: {e}")))
         else:
-            rows.append(_checked(s, did, checks, names))
+            if empty_raises and did.get(EMPTY):
+                rows.append(Row(s["id"], s["name"], s["part"], False, ANSWER, "the answer gave no words"))
+            else:
+                rows.append(_checked(s, did, checks, names))
         if stop_at_first and blocks(rows[-1], safety):
             break
     if safety is None:
@@ -352,11 +362,14 @@ def recheck(after, before, safety, again, *, left=None, per=1):
       failing with the line in the minority: the check comes off that situation's row (noise);
       failing without the line in the majority too: the check is added to the row before (not new).
     A rerun answer that raised counts against the lesson on both sides (fail closed): as failing with
-    the line, as passing without it. again(situation id, with_line) -> one fresh Row. left() -> the
+    the line, as passing without it. So does a rerun that gave no words: again runs its answer through
+    sit with empty_raises, so such a row comes back as one that raised. again(situation id, with_line)
+    -> one fresh Row. left() -> the
     model calls still allowed for this lesson, or None for no cap; per: the most calls one answer
     takes. A situation is rechecked only while its worst case (2 * RECHECK answers of per calls each)
     fits in left(); else it stays counted broken, and so does every situation past RECHECK_MAX.
-    Returns (after rows, before rows, the before rows the vote changed {situation id: Row})."""
+    Returns (after rows, before rows, the before rows the vote changed {situation id: Row}). The rows
+    before are for judge() on this lesson only; a binding never keeps them for the next lesson."""
     after, before = list(after), list(before or ())
     changed = {}
     cost = 2 * RECHECK * per

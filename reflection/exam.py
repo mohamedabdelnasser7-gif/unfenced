@@ -202,7 +202,8 @@ def _answer(s, lesson, *, model, kept=None):
             if name in tools.AMOUNT_TOOLS:
                 amounts |= send_check.amounts_in(res)
         orders = loop.order_names(chats, chat_id)
-        return {"reply": reply, "calls": m.calls, "customer_text": msg.text, "tools": ran, "amounts": amounts,
+        return {"reply": reply, "calls": m.calls, engine_exam.EMPTY: not reply.strip(),
+                "customer_text": msg.text, "tools": ran, "amounts": amounts,
                 "orders": orders, "order": loop.order_made(chats, chat_id),
                 "problems": dict(send_check.named_problems(reply, msg.text, amounts, store.vocabulary(),
                                                            store.size_strings(), orders=orders,
@@ -352,17 +353,19 @@ def situations(plug):
     return engine_exam.load(plug.exam.situations, plug.stages)
 
 
-def run(plug, model, *, kept=None, lesson=None, stop_at_first=False, sits=None, safety=None):
+def run(plug, model, *, kept=None, lesson=None, stop_at_first=False, sits=None, safety=None, empty_raises=False):
     """One exam run on the demo catalogue with no Shopify keys and no operator number. lesson: (text,
     stage tags) of a new line, or None. kept: a Lessons whose kept lessons are handed. safety: the
-    checks that block (engine/exam.py sit); None: every check does."""
+    checks that block (engine/exam.py sit); None: every check does. empty_raises: a reply with no
+    words counts as an answer that raised (the recheck's reruns, engine/exam.py sit)."""
     sits = situations(plug) if sits is None else sits
     from arena import match as match_mod  # the one demo store lock: a Try again or practice thread in the same
     # process swaps the same environment, so an exam outside the lock could restore the store keys inside
     # a match, or drop them from the page (review simplify round 3, finding 1)
     with match_mod.demo_store():  # no store keys or operator number, a fresh cache, a turn's warnings quiet
         return engine_exam.sit(sits, lambda s, les: answer(s, les, model=model, kept=kept), CHECKS,
-                               plug.exam.checks, lesson, stop_at_first=stop_at_first, safety=safety)
+                               plug.exam.checks, lesson, stop_at_first=stop_at_first, safety=safety,
+                               empty_raises=empty_raises)
 
 
 class Examiner:
@@ -392,7 +395,10 @@ class Examiner:
     without, so one noisy answer never holds a lesson alone. The reruns stay inside cap: a situation is
     rechecked only while its worst case (four answers of CALL_CAP calls) fits the calls this lesson has
     left, counted on every model call the exam makes; cap None (the night) bounds them by RECHECK_MAX
-    alone. A row before that the vote changed replaces the one kept for the next lessons."""
+    alone. A rerun whose reply has no words counts like one that raised, against the lesson. The vote
+    applies to the lesson in hand only: the run on the kept lessons is kept as it was answered, never
+    with a voted row, so a later lesson that breaks the same check there is voted again (red team engfix
+    round 1, finding 5)."""
 
     def __init__(self, plug, kept=None, model=None, *, count=False, scope=False, cap=None):
         self.plug, self.kept, self.model, self.count = plug, kept, model, count
@@ -419,8 +425,6 @@ class Examiner:
             made = int(without.calls)
         got = run(self.plug, model, kept=self.kept, lesson=lesson, sits=sits)
         after, before, extra = self._recheck(got.rows, without.rows, sits, lesson, safety, model)
-        if extra.get("changed"):
-            self._without[key] = engine_exam.Result(without.passed, before, without.calls)
         return engine_exam.judge(after, before, len(sits), safety, calls=int(got.calls) + made + extra["calls"])
 
     def _recheck(self, after, before, sits, lesson, safety, model):
@@ -430,7 +434,8 @@ class Examiner:
         start = model.calls
 
         def again(sid, with_line):  # no row for sid: raises, so it counts against the lesson
-            res = run(self.plug, model, kept=self.kept, lesson=lesson if with_line else None, sits=[by_id[sid]])
+            res = run(self.plug, model, kept=self.kept, lesson=lesson if with_line else None, sits=[by_id[sid]],
+                      empty_raises=True)
             return next(r for r in res.rows if r.situation == sid)
 
         def left():
@@ -473,8 +478,6 @@ class Examiner:
         before = [before.get(s["id"]) or cache[s["id"]] for s in picked if s["id"] in before or s["id"] in cache]
         got = run(self.plug, model, kept=self.kept, lesson=lesson, sits=picked)
         after, before, extra = self._recheck(got.rows, before, picked, lesson, safety, model)
-        for sid, row in extra["changed"].items():
-            cache[sid] = row
         return engine_exam.judge(after, before, len(picked), safety, calls=int(got.calls) + made + extra["calls"])
 
     def _kept_ids(self):

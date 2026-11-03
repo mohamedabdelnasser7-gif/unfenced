@@ -35,7 +35,8 @@ class Scoped(unittest.TestCase):
         self.enterContext(mock.patch.object(exam, "situations", lambda plug: sits()))
         self.enterContext(mock.patch.object(exam, "run", side_effect=self.fake_run))
 
-    def fake_run(self, plug, model, *, kept=None, lesson=None, stop_at_first=False, sits=None, safety=None):
+    def fake_run(self, plug, model, *, kept=None, lesson=None, stop_at_first=False, sits=None, safety=None,
+                 empty_raises=False):
         ids = [s["id"] for s in sits]
         self.runs.append((lesson is None, ids))
         rows = []

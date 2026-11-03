@@ -155,7 +155,8 @@ class Examiner(unittest.TestCase):
     def setUp(self):
         self.runs = []
 
-    def fake_run(self, plug, model, *, kept=None, lesson=None, stop_at_first=False, sits=None, safety=None):
+    def fake_run(self, plug, model, *, kept=None, lesson=None, stop_at_first=False, sits=None, safety=None,
+                 empty_raises=False):
         self.runs.append({"lesson": lesson, "stop": stop_at_first, "sits": None if sits is None else len(sits)})
         bad = lambda n, check: Row(n, "abcd"[n - 1], "guard", False, check, "why", ((check, "why"),))  # noqa: E731
         good = lambda n: Row(n, "abcd"[n - 1], "guard", True)  # noqa: E731

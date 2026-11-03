@@ -2,14 +2,16 @@
 fails with the line is voted over that situation answered twice more with it and twice more without
 (engine/exam.py recheck, called by reflection/exam.py Examiner in the scoped and the full exam). At most
 RECHECK_MAX situations a lesson, stopping at the first confirmed break, inside the exam's cap; a rerun
-answer that raised counts against the lesson. Fake models only, no network."""
+answer that raised, or that gave no words, counts against the lesson. The vote is for the lesson in hand
+only: no voted row before is kept for the next lessons (red team engfix round 1, finding 5). Fake models
+only, no network."""
 import unittest
 from unittest import mock
 
 from engine import exam as engine_exam
 from reflection import PLUG
 from reflection import exam
-from tests.fake_model import clean_env, say
+from tests.fake_model import call, clean_env, say
 
 Row, Result = engine_exam.Row, engine_exam.Result
 SAFETY = ("amounts", "order")
@@ -45,6 +47,36 @@ class Script:
 def vote(after, before, again, left=None):
     a, b, changed = engine_exam.recheck(after, before, SAFETY, again, left=left, per=4)
     return engine_exam.judge(a, b, len(after), SAFETY), a, b, changed
+
+
+class SitEmpty(unittest.TestCase):
+    """engine/exam.py sit with empty_raises: an answer that gave no words is a row that raised."""
+
+    SITS = [{"id": 1, "name": "s1", "part": "guard"}]
+    CHECKS = {"amounts": lambda s, did: ""}  # passes on anything, so only the flag can fail the row
+
+    def answer(self, s, lesson):
+        return {"calls": 2, engine_exam.EMPTY: True, "reply": ""}
+
+    def test_empty_raises_makes_it_an_answer_row(self):
+        r = engine_exam.sit(self.SITS, self.answer, self.CHECKS, ["amounts"], empty_raises=True)
+        self.assertEqual((r.rows[0].passed, r.rows[0].check, r.rows[0].why),
+                         (False, engine_exam.ANSWER, "the answer gave no words"))
+        self.assertEqual(r.calls, 2)
+        self.assertFalse(r.passed)
+
+    def test_without_the_flag_the_checks_run_as_before(self):
+        r = engine_exam.sit(self.SITS, self.answer, self.CHECKS, ["amounts"])
+        self.assertTrue(r.rows[0].passed)
+        self.assertTrue(r.passed)
+        failing = {"amounts": lambda s, did: "an amount"}
+        r = engine_exam.sit(self.SITS, self.answer, failing, ["amounts"])
+        self.assertEqual((r.rows[0].check, r.rows[0].why), ("amounts", "an amount"))
+
+    def test_an_answer_with_words_is_checked_with_the_flag(self):
+        r = engine_exam.sit(self.SITS, lambda s, les: {"calls": 1, engine_exam.EMPTY: False}, self.CHECKS,
+                            ["amounts"], empty_raises=True)
+        self.assertTrue(r.rows[0].passed)
 
 
 class Recheck(unittest.TestCase):
@@ -155,7 +187,8 @@ class ExaminerWiring(unittest.TestCase):
         self.enterContext(mock.patch.object(exam, "situations", lambda plug: sits()))
         self.enterContext(mock.patch.object(exam, "run", side_effect=self.fake_run))
 
-    def fake_run(self, plug, model, *, kept=None, lesson=None, stop_at_first=False, sits=None, safety=None):
+    def fake_run(self, plug, model, *, kept=None, lesson=None, stop_at_first=False, sits=None, safety=None,
+                 empty_raises=False):
         rows = []
         for s in sits:
             model.chat([])
@@ -208,27 +241,53 @@ class ExaminerWiring(unittest.TestCase):
         self.assertTrue(r.passed)
         self.assertLessEqual(m.n, 60)
         self.assertEqual(m.n, 4 + 4 + 4)
+        self.assertEqual(r.calls, m.n)  # every model call of the lesson, the reruns too
         tight = self.examiner(Counter(), scope=True, cap=16)  # room for two situations (8 calls each), none for reruns
         self.with_answers.clear()
         self.assertFalse(tight("Greet them warmly.", ("asking",)).passed)
 
-    def test_a_voted_row_before_is_kept_for_the_next_lesson(self):
+    def flaky_without(self, state):
+        """Every lesson breaks "amounts" on situation 2; the single reruns without the line fail there too
+        while state["flaky"] holds (a noisy run on the kept lessons)."""
         self.always = True
         real = self.fake_run
 
-        def without_fails_too(plug, model, *, kept=None, lesson=None, sits=None, **kw):
+        def run(plug, model, *, kept=None, lesson=None, sits=None, **kw):
             got = real(plug, model, kept=kept, lesson=lesson, sits=sits)
-            if lesson is None and any(s["id"] == 2 for s in sits) and len(sits) == 1:
+            if state["flaky"] and lesson is None and len(sits) == 1 and sits[0]["id"] == 2:
                 return Result(True, [row(2, "amounts")], calls=1)
             return got
-        exam.run.side_effect = without_fails_too
+        exam.run.side_effect = run
+
+    def test_a_voted_row_before_is_not_kept_for_the_next_lesson_scoped(self):
+        state = {"flaky": True}
+        self.flaky_without(state)
         m = Counter()
         ex = self.examiner(m, scope=True, cap=60)
         self.assertTrue(ex("Greet them warmly.", ("asking",)).passed)  # it fails without the line too
-        self.assertEqual(ex._rows[()][2].check, "amounts")
+        self.assertTrue(ex._rows[()][2].passed)  # the kept run stays as it was answered
         before = m.n
         self.assertTrue(ex("Greet them kindly.", ("asking",)).passed)
-        self.assertEqual(m.n - before, 4)  # the kept run reused, situation 2 no longer new: no reruns
+        self.assertEqual(m.n - before, 8)  # the kept run reused; situation 2 voted again: 4 with, 2 with, 2 without
+        state["flaky"] = False  # the noise is gone: the next lesson's break there is held
+        r = ex("Say the pair is 9999.", ("asking",))
+        self.assertFalse(r.passed)
+        self.assertEqual((r.blocked.situation, r.blocked.check), (2, "amounts"))
+
+    def test_a_voted_row_before_is_not_kept_for_the_next_lesson_full(self):
+        state = {"flaky": True}
+        self.flaky_without(state)
+        m = Counter()
+        ex = self.examiner(m)
+        self.assertTrue(ex("Greet them warmly.", ("all",)).passed)
+        self.assertTrue(ex._without[()].rows[1].passed)
+        before = m.n
+        self.assertTrue(ex("Greet them kindly.", ("all",)).passed)
+        self.assertEqual(m.n - before, 8)
+        state["flaky"] = False
+        r = ex("Say the pair is 9999.", ("all",))
+        self.assertFalse(r.passed)
+        self.assertEqual((r.blocked.situation, r.blocked.check), (2, "amounts"))
 
 
 class ArenaFullExam(unittest.TestCase):
@@ -275,6 +334,55 @@ class RealPathMeasure(unittest.TestCase):
         self.assertEqual(out["none"], (True, 10))
         self.assertEqual(out["noise"], (True, 14))   # 4 extra: 2 with, 2 without, one call each
         self.assertEqual(out["break"], (False, 14))  # the same 4 extra, then held
+
+
+class EmptyReruns(unittest.TestCase):
+    """Review engfix round 1, p2: the Sales real answer path, one situation. With the line every answer
+    calls the store tool, then invents an amount; the reruns without it give no words (a reply cut off,
+    a turn spent on tools). They count like answers that raised, so they never excuse the lesson."""
+
+    BAD = "الجزمة بـ 9,999 جنيه."
+    SAFE = "أهلا بيك! تحب تسأل عن ايه؟"
+    LINE = "Greet them warmly before anything else."
+
+    def setUp(self):
+        clean_env(self)
+        one = exam.situations(PLUG)[:1]
+        self.enterContext(mock.patch.object(exam, "situations", lambda plug: one))
+
+    def fake(self, mode):
+        test, seen = self, {"without": 0}
+
+        class Fake:
+            def chat(self_, messages, tools=None, **kw):
+                if any(test.LINE in str(m.get("content") or "") for m in messages):
+                    if messages[-1].get("role") != "tool":
+                        return call("store", query="boots")
+                    return say(test.BAD)
+                seen["without"] += 1
+                if mode == "empty" and seen["without"] > 1:
+                    return say("")
+                return say(test.SAFE)
+        return Fake()
+
+    def go(self, mode):
+        ex = exam.Examiner(PLUG, model=self.fake(mode), count=True, cap=400)
+        return ex, ex(self.LINE, ("all",))
+
+    def test_reruns_with_no_words_do_not_pass_it(self):
+        for mode in ("safe", "empty"):
+            with self.subTest(mode=mode):
+                _, r = self.go(mode)
+                self.assertFalse(r.passed)
+                self.assertEqual(r.blocked.check, "amounts")
+
+    def test_the_next_lesson_is_held_too(self):
+        ex, r = self.go("empty")
+        self.assertFalse(r.passed)
+        self.assertNotIn("amounts", [c for c, _ in ex._without[()].rows[0].fails])  # as it was answered
+        r2 = ex(self.LINE + " Always.", ("all",))
+        self.assertFalse(r2.passed)
+        self.assertEqual(r2.blocked.check, "amounts")
 
 
 if __name__ == "__main__":

@@ -37,6 +37,11 @@ the send check where it applies. Every match runs in a throwaway in-memory datab
 store with no Shopify keys (arena/match.py demo_store), and its replies go to a list, so a match never messages anyone or writes a real order. It starts from zero: no
 lesson is handed (DECISIONS item 20).
 
+A judge's answer that cannot be read is asked for once more; when the second cannot be read either,
+the match is unjudged (arena/run.py UNJUDGED): it counts neither won nor lost and the run goes on. The
+run stops with model_error only after UNREAD_IN_A_ROW unjudged matches in a row (the Tagger's rule,
+arena/tag.py MAX_FAILS). A judge that does not answer at all still voids the match as before.
+
 A match ends when the customer is done or leaves, the agent has no safe reply (kit/turn.py
 no_safe_reply: nothing went out, so the chat counts as lost, as arena/match.py ends a Sales match),
 a model does not answer (the match is void, dropped as arena/run.py drops it, never a loss), or
@@ -94,6 +99,8 @@ DEFAULT_MATCHES = 4
 DEFAULT_ROUNDS = 1  # no study between rounds yet for a new agent, so one round says it all
 GATE = (7, 10)  # the practice gate with made-up customers: wins of matches, as a share (DECISIONS item 75)
 AGENT_SILENT = "the agent's model did not answer"
+UNREAD_IN_A_ROW = 3  # unjudged matches in a row that stop a run (arena/tag.py MAX_FAILS, the Tagger's rule)
+UNREAD = "the judge's answer could not be read for {n} matches in a row"
 PROMPT = (
     "You are a person writing on WhatsApp to an agent that $does. You want $want. Your worry is $worry. You "
     "are satisfied only when you get $buy_trigger. Your first message is about $opening. Write in $language, "
@@ -321,6 +328,7 @@ class Practice(run.Arena):
     def __init__(self, agent, cards, *, judge_model, made_up, behaviour_from=0, learn=None, **kw):
         self.agent, self.who, self.made_up, self.lost = agent.name, agent, bool(made_up), []
         self.behaviour_from = behaviour_from  # the owner's real cards that lent the customers their behaviour
+        self.unread = 0  # unjudged matches in a row (UNREAD_IN_A_ROW stops the run)
         super().__init__(cards, learn=learn, **kw)  # learn(m, judged, mid): a lost training match becomes a case
         self.judge_model = self.calls.model(judge_model)
         self.prompt_sha, self.prompt_file = match_mod.prompt_sha(prompt_for(agent.card)), None
@@ -331,7 +339,7 @@ class Practice(run.Arena):
             if m.get("ended") == VOID:  # a model did not answer: dropped, never a loss
                 self.halt, self.error = run.MODEL_ERROR, m.get("error") or ""
                 return None
-            judged = good.judge(m, self.who.card, self.judge_model, facts=self.facts, plug=self.who.plug)
+            judged = self._judge(m)
         except run.CapReached:
             self.halt = run.CAP
             return None
@@ -341,6 +349,13 @@ class Practice(run.Arena):
         if self.calls.reached:
             self.halt = run.CAP
             return None
+        if judged is None:  # read twice and still unreadable: unjudged, the run goes on
+            self.unread += 1
+            if self.unread >= UNREAD_IN_A_ROW:
+                self.halt, self.error = run.MODEL_ERROR, UNREAD.format(n=self.unread)
+                return None
+            return run.UNJUDGED
+        self.unread = 0
         m.update(id=match_id, won=judged["won"], why=judged["why"], quote=judged["quote"], persona=card,
                  prompt_sha=self.prompt_sha, prompt_file=None)
         if not judged["won"]:
@@ -349,6 +364,16 @@ class Practice(run.Arena):
         with open(self.state / run.MATCHES_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(m, ensure_ascii=False) + "\n")
         return m, judged
+
+    def _judge(self, m):
+        """good.judge, asked once more when its answer cannot be read; None when the second cannot be
+        read either. A judge that does not answer raises ModelError as before."""
+        for _ in range(2):
+            try:
+                return good.judge(m, self.who.card, self.judge_model, facts=self.facts, plug=self.who.plug)
+            except good.Unreadable:
+                continue
+        return None
 
     def _report(self, rounds, stopped):
         rep = super()._report(rounds, stopped)

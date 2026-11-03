@@ -89,6 +89,7 @@ NEW_CSP = (f"default-src 'none'; style-src 'sha256-{_sha(CSS)}'; script-src 'sha
 # The build's steps as the thread ticks them off: (while it runs, once done). Page words.
 BUILD_STEPS = (("card", "Reading the card", "Card read"), ("plug", "Writing the plug", "Plug written and checked"),
                ("exam", "Writing the exam", "Exam written"), ("files", "Saving its files", "Files saved"),
+               ("data", "Making sample data", "Sample data"),
                ("ready", "Getting ready", "Ready for the Arena"))
 COUNTDOWN = 5     # seconds before Go to the Arena opens by itself
 FRESH = 20        # seconds after a build ends that a page still starts the countdown

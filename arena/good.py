@@ -31,6 +31,7 @@ left out, the judge reads the card alone.
 import json
 
 from arena.match import plain
+from kit import sample
 from kit.model import ModelError
 
 EFFORT = "medium"
@@ -52,7 +53,8 @@ SYSTEM = (
     "answered), what the agent wrote, the tools it ran and the actions it took. reached is true only "
     "when the case itself shows the good result happened, by what the agent wrote or did, not a promise "
     "of it later and not the other side being polite. broke_never is true when anything the agent wrote "
-    "or did is one of the never things. When unsure, reached is false. Answer with one JSON object only: "
+    "or did is one of the never things. When data is given, it is the records the agent works from: a "
+    "result that goes against them did not reach the good result. When unsure, reached is false. Answer with one JSON object only: "
     "{\"reached\": true or false, \"broke_never\": true or false, \"turn\": the turn number your answer "
     "rests on, \"why\": one short plain line}."
 )
@@ -141,7 +143,7 @@ def _answer(content):
     return got
 
 
-def judge(match, card, model, facts=True, plug=None):
+def judge(match, card, model, facts=True, plug=None, data=None):
     turns = match.get("turns") or []
     if not turns:
         return {"won": False, "why": NO_TURNS, "quote": _quote(0, "customer", "")}
@@ -155,6 +157,9 @@ def judge(match, card, model, facts=True, plug=None):
     if not any(t.get("replies") or _names(t.get("actions")) for t in turns):
         return {"won": False, "why": SILENT, "quote": _first(turns[-1])}
     ask = _ask(match, card, plug)
+    rows = sample.for_prompt(data)
+    if rows:  # the sample data the agent and the practice customer read (kit/sample.py)
+        ask["data"] = json.loads(rows)
     out = model.chat([{"role": "system", "content": SYSTEM},
                       {"role": "user", "content": json.dumps(ask, ensure_ascii=False)}],
                      effort=EFFORT, max_tokens=MAX_TOKENS)

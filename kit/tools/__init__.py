@@ -13,11 +13,11 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from kit.tools import cod_risk, delivery, draft_order, find_order, store, switch_stage, voice_note
+from kit.tools import cod_risk, data, delivery, draft_order, find_order, store, switch_stage, voice_note
 
 log = logging.getLogger("kit.tools")
 
-TOOLS = {m.NAME: m for m in (store, voice_note, delivery, draft_order, cod_risk, find_order, switch_stage)}
+TOOLS = {m.NAME: m for m in (store, voice_note, delivery, draft_order, cod_risk, find_order, switch_stage, data)}
 
 # Control tools are offered in every stage where the agent replies, on top of the stage's own list.
 CONTROL = ("switch_stage",)
@@ -47,6 +47,7 @@ class Context:
     stages: dict = field(default_factory=dict)
     cache: dict = field(default_factory=dict)  # per-turn results a tool keeps (the voice note, heard once)
     lesson_ids: set = field(default_factory=set)  # the lessons handed so far this turn; a tool's own rows keep them
+    data: Any = None                # a Quick start agent's sample data (kit/sample.py), read by the data tool
 
 
 def offered(stage):

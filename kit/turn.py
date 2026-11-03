@@ -26,7 +26,9 @@ writes first (a lead it follows up), and the input is saved under a frame line s
    what it connects by its own keys (reflection/quickstart.py TOOLS): QUICK_TOOLS reads those as the
    kit/tools files behind them, and whatsapp as the channel the chat is on, no tool. A name with no
    tool file is left out and listed in Agent.missing. At most MAX_TOOL_STEPS tool steps a turn
-   and MAX_CALLS_PER_STEP calls a step, then the model must answer in words.
+   and MAX_CALLS_PER_STEP calls a step, then the model must answer in words. A folder with sample data
+   (kit/sample.py, sample-data.json: made up at Build, rows the user added) also offers the data tool
+   (DATA_TOOL), and for one with the store tool and no Shopify keys the store reads its sample products.
 4. The send check: the full check (kit/send_check.py) when the card connects whatsapp or store (it
    talks to customers or quotes the store), so script, style, amounts from tools only, stock counts
    and links all hold; a folder written by hand, whose card names no tools, keeps the older rule: the
@@ -60,7 +62,7 @@ from pathlib import Path
 
 from engine import plug as plug_mod
 from engine.lessons import slot
-from kit import send_check, switch, tools
+from kit import sample as sample_mod, send_check, switch, tools
 from kit.model import ModelError
 from kit.tools import draft_order, store
 from sales import loop
@@ -89,6 +91,7 @@ FULL_CHECK_TOOLS = ("whatsapp", "store", "orders", "delivery")  # a card that co
 CHANNEL = "whatsapp"
 CASE_KEYS = ("input", "starts", "output", "ends")
 STARTS = ("person", "agent")  # who writes first in a case
+DATA_TOOL = "data"  # kit/tools/data.py: the agent's sample data, offered when its folder has some
 ACT_TOOL = "take_action"  # a case agent's declared actions (a tag, a close); runs nothing, is only recorded
 MAX_ACT_NOTE = 200
 FIRST = ("(A new case. You write first: nobody has written to you yet. The case you start from: {input}) "
@@ -112,6 +115,7 @@ class Agent:
     stage: Stage
     full_check: bool
     acts: tuple = ()      # the declared actions take_action offers (a card with a case only)
+    data: dict | None = None  # its sample data (kit/sample.py), read by the data tool and the store tool
 
 
 def _read(folder, name):
@@ -235,6 +239,9 @@ def load(folder):
         if extra:
             raise Refused(f"plug.json names tools the card does not connect: {', '.join(extra)}")
     offered, missing = tools_of(p)
+    data = sample_mod.read(folder)
+    if data is not None and DATA_TOOL not in offered:  # the rows it works from with no real connection
+        offered += (DATA_TOOL,)
     stage = Stage(p.stages[0] if p.stages else "all", card["name"], card["does"], offered, ())
     if connected is None:  # a folder written by hand: the older rule
         talks = REPLY_ACTION in p.actions
@@ -242,7 +249,7 @@ def load(folder):
         talks = bool(connected & set(FULL_CHECK_TOOLS))
     acts = tuple(a for a in p.actions if a != REPLY_ACTION) if "case" in card else ()
     return Agent(name=p.agent, folder=folder, plug=p, instructions=instructions, card=card, tools=offered,
-                 missing=missing, stage=stage, full_check=talks, acts=acts)
+                 missing=missing, stage=stage, full_check=talks, acts=acts, data=data)
 
 
 def built(db_folder, most=MAX_AGENTS):
@@ -333,7 +340,17 @@ def turn(agent, text, *, chats, chat_id, model, send, customer_id, lessons=(), m
     if switch.is_paused(agent.name, db=chats.db):  # saved above; nothing goes out while paused
         return TurnResult(PAUSED)
     ctx = tools.Context(chat_id=chat_id, stage=agent.stage, chats=chats, model=model, message=msg, send=send,
-                        stages={agent.stage.name: agent.stage})
+                        stages={agent.stage.name: agent.stage}, data=agent.data)
+    items = sample_mod.store_items(agent.data) if store.NAME in agent.tools else []
+    token = store.SAMPLE.set(items) if items else None  # its sample products when no Shopify keys are set
+    try:
+        return _turn(agent, text, ctx, history, chats, chat_id, send, customer_id, lessons, first)
+    finally:
+        if token is not None:
+            store.SAMPLE.reset(token)
+
+
+def _turn(agent, text, ctx, history, chats, chat_id, send, customer_id, lessons, first):
     amounts, vocab, sizes, names = set(), frozenset(), frozenset(), frozenset()
     if store.NAME in agent.tools:
         try:

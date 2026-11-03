@@ -530,6 +530,20 @@ CSP = ("default-src 'none'; style-src 'sha256-" + base64.b64encode(hashlib.sha25
 
 STALE_PLAN = "Not rolled back: the lessons changed after the plan was shown. Look at the plan again."
 TRY_NOT_BUILT = "Try again is not built for this agent yet, so nothing was started."
+ARENA_NOT_HERE = "Run the Arena is for an agent made here, so nothing was started."
+ARENA_STARTED = "The Arena is running. Its practice matches show here as it plays; it takes a few minutes."
+
+
+def _lines(folder):
+    """Lines in an agent's Arena matches file (arena/run.py MATCHES_FILE); 0 with none or no folder."""
+    from arena import run as run_mod
+    if folder is None:
+        return 0
+    try:
+        with open(Path(folder) / run_mod.MATCHES_FILE, "rb") as f:
+            return sum(1 for _ in f)
+    except OSError:
+        return 0
 NO_EXAM = "A correction takes a short exam first, and this agent has no exam here yet, so nothing was added."
 
 
@@ -629,6 +643,13 @@ class Morning:
         self._trying, self._try_note, self._try_lock = set(), {}, threading.Lock()
         self.retry_models = None
         self.retry_start = lambda work, name: threading.Thread(target=work, name=name, daemon=True).start()
+        # Run the Arena (run_arena), cloned from Try again: the agents with a run going, the matches file's
+        # length when each started, what went wrong with the last one, its models (None: kit.model.Model;
+        # a test hands (agent, customer, judge) fakes), how it starts, and the practice's shape (a test's)
+        self._arenas, self._arena_note, self._arena_from, self._arena_lock = set(), {}, {}, threading.Lock()
+        self.arena_models = None
+        self.arena_start = lambda work, name: threading.Thread(target=work, name=name, daemon=True).start()
+        self.arena_shape = {}
 
     def add_built(self):
         """Wire each agent Quick start built since the page started into the running page, as
@@ -798,6 +819,94 @@ class Morning:
                 self._trying.discard(agent)
             raise
         return retry_mod.STARTED
+
+    def arena_running(self, agent):
+        """True while a Run the Arena runs for the agent (run_arena)."""
+        with self._arena_lock:
+            return agent in self._arenas
+
+    def arena_note(self, agent):
+        """Why the agent's last Run the Arena could not run, or None (run_arena)."""
+        with self._arena_lock:
+            return self._arena_note.get(agent)
+
+    def arena_played(self, agent):
+        """The practice matches the running Run the Arena played so far: the lines its matches file gained
+        since it started (arena/run.py MATCHES_FILE, in the agent's folder); 0 when none runs."""
+        with self._arena_lock:
+            start = self._arena_from.get(agent) if agent in self._arenas else None
+        if start is None:
+            return 0
+        return max(0, _lines(self.agent_folder(agent)) - start)
+
+    def run_arena(self, agent, now=None):
+        """Run the Arena on an agent's page (arena/practice.py practise): a full practice run of an agent
+        made here against made-up customers, with its sample data, in a background thread, so the page
+        returns at once and its Arena tab polls the progress. Refused for any other agent (the Sales agent
+        runs through arena/run.py), when a run goes for the agent already, when the day's model call cap
+        has no room, or with no model key. Each lost match becomes a case the night studies, as after
+        Build (QuickStart._practise). Its item saves beside the database and shows on the Arena tab."""
+        from arena import retry as retry_mod, run as run_mod
+        folder = self.agent_folder(agent)
+        if agent == SALES.agent or folder is None or folder.is_symlink() or not folder.is_dir():
+            raise Refused(ARENA_NOT_HERE)
+        if not retry_mod.has_room(run_mod.state_dir(self.db_path)):
+            raise Refused("The day's model call cap has no room left, so nothing was started. Run it again "
+                          "tomorrow, Cairo time.")
+        if self.arena_models is None:
+            from kit import model as model_mod
+            if not model_mod.has_key():
+                raise Refused("No model key is set, so the Arena cannot play. Put META_API_KEY or "
+                              "BASETEN_API_KEY in .env and start the page again.")
+        with self._arena_lock:
+            if agent in self._arenas:
+                raise Refused("The Arena is running for this agent already. Its matches show here as it plays.")
+            self._arenas.add(agent)
+            self._arena_note.pop(agent, None)
+            self._arena_from[agent] = _lines(folder)
+        db_path, shape = self.db_path, dict(self.arena_shape)
+
+        def work():  # the thread's work: never raises, a failure becomes the tab's one line
+            note, db = None, None
+            try:
+                from arena import practice
+                if self.arena_models is None:
+                    from kit import model as model_mod
+                    models = (model_mod.Model(), model_mod.Model(), model_mod.Model())
+                else:
+                    models = self.arena_models()
+                learn = None
+                try:  # each lost match becomes a case the night studies (arena/learn_built.py), when it is here
+                    from arena import learn_built
+                except ImportError:
+                    learn_built = None
+                if learn_built is not None:
+                    from kit import turn as turn_mod
+                    db = Db(db_path)  # its own connection: the page's answers keep theirs
+                    learn = learn_built.learner(db, turn_mod.load(folder).plug)
+                practice.practise(folder, agent_model=models[0], customer_model=models[1], judge_model=models[2],
+                                  learn=learn, **shape)
+            except Exception as e:
+                note = f"The last run could not finish ({' '.join(str(e).split())[:200] or type(e).__name__})."
+            finally:
+                if db is not None:
+                    try:
+                        db.close()
+                    except Exception:
+                        pass
+            with self._arena_lock:
+                self._arenas.discard(agent)
+                self._arena_from.pop(agent, None)
+                if note:
+                    self._arena_note[agent] = note
+        try:
+            self.arena_start(work, f"arena-{agent}")
+        except Exception:
+            with self._arena_lock:
+                self._arenas.discard(agent)
+                self._arena_from.pop(agent, None)
+            raise
+        return ARENA_STARTED
 
     def paused(self, agent):
         """True while the agent's pause switch is on (kit/switch.py). Reads only: a database with no

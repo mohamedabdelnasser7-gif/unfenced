@@ -688,6 +688,11 @@ class QuickStart:
         with self._practice_lock:
             return self._practice.get(agent)
 
+    def practising(self, agent):
+        """True while the short practice Build started for agent runs (start_practice)."""
+        with self._practice_lock:
+            return agent in self._running
+
     def start_practice(self, m, agent):
         """After a successful Build: one short practice of the new agent (arena/practice.py practise, the
         --quick shape, at most arena/run.py QUICK_CALLS model calls and the day's cap) in a background

@@ -230,6 +230,7 @@ class PracticeSeesTheSameData(tap.Base):
 
 import dataclasses  # noqa: E402
 import http.client  # noqa: E402
+import urllib.parse  # noqa: E402
 import threading  # noqa: E402
 
 from channels import whatsapp  # noqa: E402
@@ -430,3 +431,157 @@ class DataAmountsPass(TheAgentReadsIt):
                         send=lambda to, text: sent.append(text), customer_id="c1")
         self.assertEqual(got.outcome, "replied", got)
         self.assertEqual(sent, ["The fee for the late parcel is 175 EGP."])
+
+
+# ---- Run the Arena on an agent's page (Morning.run_arena, Pages._arena, ARENA_SCRIPT) ----
+
+from arena import retry as retry_mod  # noqa: E402
+from tests.fake_model import clean_env  # noqa: E402
+
+ARENA_TAB = {"tab": ["arena"]}
+
+
+class RunTheArena(unittest.TestCase):
+    def setUp(self):
+        clean_env(self)
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.dir = Path(d.name).resolve()
+        self.folder = self.dir / "agents" / "stock_watch"
+        shutil.copytree(tap.FIXTURE, self.folder)
+        from engine import plug as plug_mod
+        from kit.db import Db
+        self.db = Db(str(self.dir / "ascent.db"))
+        self.addCleanup(self.db.close)
+        self.m = mo.Morning(self.db, [plug_mod.load(tq.ROOT / "sales" / "plug.json")], reports=self.dir,
+                            db_path=self.dir / "ascent.db")
+        self.assertEqual(self.m.add_built(), ["stock_watch"])
+        self.world = World()
+        self.m.arena_models = lambda: (self.world, self.world, self.world)
+        self.m.arena_shape = {"matches": 1, "rounds": 1}
+        self.starts = []
+        self.m.arena_start = lambda work, name: self.starts.append((work, name))
+        self.p = pages.Pages(self.m)
+
+    def tab(self, token="t"):
+        """The Arena tab's markup, without its style and its script."""
+        return self.p.get("/agents/stock_watch", ARENA_TAB, token).split("</style>")[1].split("<script>")[0]
+
+    def test_the_button_starts_a_full_practice_in_the_background_and_the_tab_follows_it(self):
+        page = self.tab()
+        self.assertIn(f'action="{pages.ARENA_PATH}"', page)
+        self.assertIn('value="/agents/stock_watch?tab=arena"', page)  # it comes back to the Arena tab
+        self.assertIn(pages.ARENA_SAID, page)
+        self.assertEqual(self.m.run_arena("stock_watch"), mo.ARENA_STARTED)
+        self.assertEqual([n for _, n in self.starts], ["arena-stock_watch"])
+        self.assertTrue(self.m.arena_running("stock_watch"))
+        page = self.tab()
+        self.assertIn('data-live="arena" data-running', page)
+        self.assertIn("Running the Arena: its first matches are starting.", page)
+        self.assertNotIn(f'action="{pages.ARENA_PATH}"', page)
+        with self.assertRaises(mo.Refused):  # one run at a time per agent
+            self.m.run_arena("stock_watch")
+        self.assertEqual(len(self.starts), 1)
+        self.starts[0][0]()  # the thread's work, here
+        self.assertFalse(self.m.arena_running("stock_watch"))
+        saved = self.m.read_arena()[0]["stock_watch"]
+        self.assertIsNot(saved.get("quick"), True)  # a full run, so its gate can count
+        self.assertGreater(self.world.calls["judge"], 0)
+        page = self.tab()
+        self.assertIn('data-live="arena"', page)
+        self.assertNotIn("data-running", page)
+        self.assertIn("Newest run", page)
+        self.assertIn(f'action="{pages.ARENA_PATH}"', page)  # it can run again
+
+    def test_progress_counts_the_matches_played_since_it_started(self):
+        matches = self.folder / "arena-matches.jsonl"
+        matches.write_text('{"old": 1}\n', encoding="utf-8")
+        self.m.run_arena("stock_watch")
+        self.assertEqual(self.m.arena_played("stock_watch"), 0)
+        with open(matches, "a", encoding="utf-8") as f:
+            f.write('{"a": 1}\n{"b": 2}\n')
+        self.assertEqual(self.m.arena_played("stock_watch"), 2)
+        self.assertIn("Running the Arena: 2 practice matches played so far.", self.tab())
+        self.assertIn('role="status">Running the Arena', self.p.get("/agents/stock_watch", {}, "t"))  # Overview too
+
+    def test_refusals_start_nothing(self):
+        for agent in ("sales", "nobody", "../agents"):
+            with self.subTest(agent=agent), self.assertRaises(mo.Refused) as e:
+                self.m.run_arena(agent)
+            self.assertEqual(str(e.exception), mo.ARENA_NOT_HERE)
+        with mock.patch.object(retry_mod, "has_room", return_value=False), self.assertRaises(mo.Refused) as e:
+            self.m.run_arena("stock_watch")
+        self.assertIn("model call cap", str(e.exception))
+        self.m.arena_models = None
+        with mock.patch("kit.model.has_key", return_value=False), self.assertRaises(mo.Refused) as e:
+            self.m.run_arena("stock_watch")
+        self.assertIn("No model key", str(e.exception))
+        self.assertEqual(self.starts, [])
+        self.assertFalse(self.m.arena_running("stock_watch"))
+        self.assertNotIn("Run the Arena", self.p.get("/agents/sales", ARENA_TAB, "t"))  # Sales has Try again
+
+    def test_a_run_that_fails_says_why_and_the_button_comes_back(self):
+        self.m.arena_models = lambda: (tap.raises, tap.raises, tap.raises)
+        self.m.arena_start = lambda work, name: work()
+        self.m.run_arena("stock_watch")
+        self.assertFalse(self.m.arena_running("stock_watch"))
+        page = self.tab()
+        self.assertIn("The last run could not finish (", page)
+        self.assertIn(f'action="{pages.ARENA_PATH}"', page)
+
+    def test_the_page_refuses_it_while_building_or_while_its_first_practice_runs(self):
+        go = self.p.actions[pages.ARENA_PATH]
+        self.p.run = pages.BuildRun(self.m)  # a build that has not written its files yet
+        with self.assertRaises(mo.Refused) as e:
+            go(self.m, {"agent": ["stock_watch"]})
+        self.assertIn("It is building", str(e.exception))
+        self.p.run.agent = "other_agent"  # a build of another agent leaves this one free
+        self.p.quick._running.add("stock_watch")
+        with self.assertRaises(mo.Refused) as e:
+            go(self.m, {"agent": ["stock_watch"]})
+        self.assertIn("first short practice", str(e.exception))
+        self.p.quick._running.discard("stock_watch")
+        self.assertEqual(go(self.m, {"agent": ["stock_watch"]}), mo.ARENA_STARTED)
+
+    def test_overview_shows_it_while_there_is_no_run(self):
+        page = self.p.get("/agents/stock_watch", {}, "t")
+        self.assertIn('<h3 id="ra-h">The Arena</h3>', page)
+        self.assertIn('value="/agents/stock_watch"', page.split(f'action="{pages.ARENA_PATH}"')[1].split("</form>")[0])
+        self.m.arena_start = lambda work, name: work()
+        self.m.run_arena("stock_watch")
+        self.assertNotIn('id="ra-h"', self.p.get("/agents/stock_watch", {}, "t"))  # a run is saved now
+        self.assertNotIn(f'action="{pages.ARENA_PATH}"', self.p.get("/agents/stock_watch", {}, ""))  # no token
+
+    def test_only_its_page_carries_the_hashed_script_and_the_policy_that_allows_it(self):
+        page = self.p.get("/agents/stock_watch", ARENA_TAB, "t")
+        self.assertIn(f"<script>{pages.ARENA_SCRIPT}</script>", page)
+        policy = self.p.csp_for("/agents/stock_watch")
+        self.assertEqual(policy, pages.AGENT_CSP)
+        self.assertIn(f"script-src 'sha256-{pages._sha(pages.ARENA_SCRIPT)}'", policy)
+        self.assertIn("connect-src 'self'", policy)
+        self.assertNotIn("script-src", self.p.csp_for("/agents/sales"))
+        self.assertNotIn("<script>", self.p.get("/agents/sales", ARENA_TAB, "t"))
+        self.assertNotIn("script-src", self.p.csp_for("/agents/stock_watch/rollback"))
+        self.assertIn("'X-Poll':'1'", pages.ARENA_SCRIPT)
+
+
+class ArenaPost(RunTheArena):
+    def test_the_post_needs_the_token(self):
+        server = DataPost.serve(self)
+        here = f"127.0.0.1:{server.server_address[1]}"
+
+        def post(token):
+            form = urllib.parse.urlencode({"token": token, "agent": "stock_watch", "back": "/agents/stock_watch"})
+            conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
+            try:
+                conn.request("POST", pages.ARENA_PATH, form, {"Host": here, "Origin": f"http://{here}",
+                                                             "Content-Type": "application/x-www-form-urlencoded"})
+                r = conn.getresponse()
+                r.read()
+                return r.status, r.getheader("Location")
+            finally:
+                conn.close()
+        self.assertEqual(post("guess")[0], 403)
+        self.assertEqual(self.starts, [])
+        self.assertEqual(post(server.token), (303, "/agents/stock_watch"))
+        self.assertEqual(len(self.starts), 1)

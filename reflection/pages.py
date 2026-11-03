@@ -34,7 +34,7 @@ serves the real database with real answers and the real clock, never marked Samp
 
 No count of what is left anywhere (item 35), no trust level and no won and lost total (item 17,
 LOCKS Quick start B). No script, except the build page's one hashed script (NEW_SCRIPT, its poll and
-countdown): Modify is a details element inside its card. Every field is
+countdown) and, on the page of an agent made here, Run the Arena's poll (ARENA_SCRIPT): Modify is a details element inside its card. Every field is
 escaped. With demo days (--demo-days) a Day 1, Day 2, Day 3 switch sits on top, marked Sample
 data (Sample on the phone bar, so every label stays on one line at 390); each day is its own throwaway copy, so answers there never touch the sample files.
 """
@@ -80,12 +80,28 @@ var ta=q(document,'.dock textarea')||q(document,'.hero textarea');if(ta)ta.addEv
 if(q(document,'[data-live="thread"]'))window.scrollTo(0,document.body.scrollHeight);setTimeout(poll,T);count()})();"""
 
 
+# The agent page's one script (Run the Arena), allowed by its hash in the /agents/<name> policy only: while
+# a run goes it fetches the page again with the X-Poll header, as the build page does, and swaps the part
+# marked data-live="arena" until the run is over; when that part is gone (Overview once a run is saved),
+# it loads the page again.
+ARENA_SCRIPT = """(function(){
+var T=2000;function q(d,s){return d.querySelector(s)}
+function poll(){var el=q(document,'[data-live="arena"][data-running]');if(!el)return;
+fetch(location.href,{headers:{'X-Poll':'1'},credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.text():null}).then(function(t){if(!t)return;
+var n=q(new DOMParser().parseFromString(t,'text/html'),'[data-live="arena"]');if(!n){location.reload();return}
+el.innerHTML=n.innerHTML;if(!n.hasAttribute('data-running'))el.removeAttribute('data-running')}).catch(function(){}).then(function(){
+if(q(document,'[data-live="arena"][data-running]'))setTimeout(poll,T)})}
+setTimeout(poll,T)})();"""
+
+
 def _sha(text):
     return base64.b64encode(hashlib.sha256(text.encode("utf-8")).digest()).decode()
 
 
 NEW_CSP = (f"default-src 'none'; style-src 'sha256-{_sha(CSS)}'; script-src 'sha256-{_sha(NEW_SCRIPT)}'; "
            "connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+AGENT_CSP = (f"default-src 'none'; style-src 'sha256-{_sha(CSS)}'; script-src 'sha256-{_sha(ARENA_SCRIPT)}'; "
+             "connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 
 # The build's steps as the thread ticks them off: (while it runs, once done). Page words.
 BUILD_STEPS = (("card", "Reading the card", "Card read"), ("plug", "Writing the plug", "Plug written and checked"),
@@ -212,7 +228,9 @@ class Pages:
                         "/try/sales/clear": lambda m, f, now=None: self._try(self.try_sales.clear, m, now),
                         # the console's Operator correction: the same path as the agent page's (Morning.correct)
                         "/console/correct": lambda m, f, now=None: m.correct(mo._field(f, "agent"), mo._field(f, "line"),
-                                                                             now=now, by=console_mod.OPERATOR)}
+                                                                             now=now, by=console_mod.OPERATOR),
+                        # Run the Arena on an agent's page (Morning.run_arena), refused while it builds
+                        ARENA_PATH: lambda m, f, now=None: self._arena(m, mo._field(f, "agent"), now)}
 
     def back(self, value):
         """Where an answer returns to: one of the page's own paths, with the demo day; else /."""
@@ -243,7 +261,18 @@ class Pages:
 
     def csp_for(self, path):
         """The policy a page is sent with: the console's own (its one script by hash), else the page's."""
+        if path.startswith("/agents/") and _AGENT.match(path[8:]) and self.made_here(path[8:]):
+            return AGENT_CSP  # the page of an agent made here: Run the Arena's poll
         return console_mod.csp() if path == "/console" else NEW_CSP if path == "/new" else self.csp
+
+    def made_here(self, agent):
+        """Is agent one Quick start made, on the page's own morning (its folder beside the database)? Only
+        its page carries Run the Arena, so only its page is sent the policy that allows ARENA_SCRIPT."""
+        for m in (self.morning, self.live):
+            folder = getattr(m, "agent_folder", None)
+            if folder is not None and folder(agent) is not None:
+                return True
+        return False
 
     def morning_for(self, back):
         if not self.demo:
@@ -315,6 +344,18 @@ class Pages:
         except Exception as e:
             run.join_note = f"It could not join this page ({e}). Restart the page to see it."
 
+    def _arena(self, m, agent, now):
+        """Run the Arena (Morning.run_arena), refused while a build on this page may be writing the agent
+        and while the short practice Build started for it still runs."""
+        run = self.run
+        if run is not None and run.m is m and run.running and run.agent in (None, agent):
+            raise mo.Refused("It is building. Run the Arena once the build is done.")
+        if self.quick.practising(agent):
+            raise mo.Refused("Its first short practice is still running. Run the Arena once it ends.")
+        if not hasattr(m, "run_arena"):
+            raise mo.Refused(mo.ARENA_NOT_HERE)
+        return m.run_arena(agent, now=now)
+
     def _say(self, m, text, now):
         """The box on the build page. Before the build writes its files, a message changes the card
         (QuickStart.say: the model writes the card again; the build takes it in before its files are
@@ -385,7 +426,9 @@ class Pages:
             return self.shell(agents(m, m.view(now=now), ctx), "agents", ctx, flash)
         if path.startswith("/agents/") and _AGENT.match(path[8:]):
             body = agent_page(m, m.view(now=now), path[8:], ctx)
-            return None if body is None else self.shell(body, "agents", ctx, flash)
+            return None if body is None else self.shell(body, "agents", ctx, flash,
+                                                        script=ARENA_SCRIPT if 'data-live="arena"' in body
+                                                        and self.made_here(path[8:]) else None)
         if path.startswith("/agents/") and path.endswith(ROLLBACK) and _AGENT.match(path[8:-len(ROLLBACK)]):
             body = rollback_page(m, path[8:-len(ROLLBACK)], ctx)
             return None if body is None else self.shell(body, "agents", ctx, flash)
@@ -866,6 +909,11 @@ def overview_tab(m, view, a, agent, st, ctx):
                     '</div></section>')
         if tok:
             left.append(data_form(ctx, agent))
+        if agent not in m.read_arena()[0]:  # no saved run yet: Run the Arena here too, polled the same way
+            go = run_arena(m, agent, ctx, ctx["path"] + ctx["q"])
+            if go:
+                left.append(f'<section class="grp sq" aria-labelledby="ra-h"{arena_live(m, agent)}><h3 id="ra-h">'
+                            f'The Arena</h3><small class="quiet">No practice run saved yet.</small>{go}</section>')
     if tok:
         left.append(f'<section class="say sq" aria-label="Send an idea or a correction"><form method="post" action="/correct">'
                     f'{_hidden(ctx, agent=agent)}<span class="lab">Send an idea or a correction</span><div class="box">'
@@ -888,9 +936,41 @@ def arena_tab(m, view, a, agent, st, ctx):
     c = tab_ctx(ctx, agent, "arena")
     glow, tiles, retry = arena_parts(m, agent if agent in m.plugs else None, c, back=c["path"] + c["q"],
                                      fix_ctx=c)
-    return (f'<div class="qs"><div class="ar"><section class="ar-l" aria-labelledby="m-h"><div class="sec-h"><h2 id="m-h">Practice '
-            f'matches</h2><small>Where it slipped</small></div><div class="tiles">{tiles}</div>{retry}</section>'
+    go = run_arena(m, agent, c, c["path"] + c["q"])
+    live = arena_live(m, agent) if go else ""
+    return (f'<div class="qs"{live}><div class="ar"><section class="ar-l" aria-labelledby="m-h"><div class="sec-h"><h2 id="m-h">Practice '
+            f'matches</h2><small>Where it slipped</small></div><div class="tiles">{tiles}</div>{retry}{go}</section>'
             f'<div class="ar-r">{glow}</div></div></div>')
+
+
+ARENA_PATH = "/arena/run"
+ARENA_SAID = "Plays its practice matches against made-up customers, with its sample data. A few minutes."
+
+
+def arena_live(m, agent):
+    """The marks the agent page's script polls (ARENA_SCRIPT): data-running while a run goes."""
+    return ' data-live="arena"' + (" data-running" if m.arena_running(agent) else "")
+
+
+def run_arena(m, agent, ctx, back):
+    """Run the Arena (Morning.run_arena) for an agent made here: the button while no run goes and the page
+    has a token, how many matches it played while one runs, and a line when the last one could not finish.
+    Empty for any other agent (the Sales agent has Try again)."""
+    if not hasattr(m, "run_arena") or m.agent_folder(agent) is None:
+        return ""
+    if m.arena_running(agent):
+        n = m.arena_played(agent)
+        said = (f"Running the Arena: {n} practice {'match' if n == 1 else 'matches'} played so far." if n
+                else "Running the Arena: its first matches are starting.")
+        return f'<div class="act"><p class="no-yet" role="status">{h(said)}</p></div>'
+    out = []
+    note = m.arena_note(agent)
+    if note:
+        out.append(f'<p class="no-yet" role="status">{h(note)}</p>')
+    if ctx["token"]:
+        out.append(f'<p class="quiet">{ARENA_SAID}</p>'
+                   + _post(ctx, ARENA_PATH[1:], f'{icon("flask")}Run the Arena', "yes", agent=agent, back=back))
+    return f'<div class="act">{"".join(out)}</div>' if out else ""
 
 
 def live_tab(m, view, a, agent, st, ctx):

@@ -326,7 +326,7 @@ Rules for this plug:
 - Leave out shows_in_days in results: no day count settles anything.
 - When the agent takes a step beyond writing (a tag such as "needs the team", a close), it is a declared action of its own.
 - No chat goes to a person: no handoff tool, no with_person stage, no action that passes a chat to a team. A tag the agent sets is its own action, never a hand over. Leave the subject of people taking chats out of the plug and the instructions entirely, never lines too.
-- risk high covers anything that goes out in the user's name, money, promises, dates and personal data. It starts strict.
+- risk high covers money (prices, amounts, discounts, fees, payment), refunds and replacements, personal data, promises to someone outside about dates or delivery, and anything that leaves the agent for the outside world beyond its normal work. Its normal work is never high: leave the nouns and verbs of the card's case output and of what it does (its reply, its caption, its booking, its next step) out of the high words, and leave out words that only name a time, a step or its own tools. Low covers how it does its own work.
 - instructions: the agent's own prompt in plain words, from the card: what it does and for whom, what a good result is, what it never does, and how it uses its connected tools. No dashes.
 Answer with one JSON object only: {{"plug": {{...}}, "instructions": "..."}}"""
 
@@ -449,10 +449,166 @@ def connected(card):
     return sorted({n["tool"] for n in card["needs"] if n.get("connected") and n.get("tool") in TOOLS})
 
 
-def clean_plug(raw, agent, tools):
+# High risk for a built agent (clean_risk). The code owns these, whatever the model wrote, so a lesson
+# that touches money, refunds, personal data or a promise to someone outside always waits for a yes, and
+# a lesson about the agent's own work does not. Words and patterns are read on engine/risk.py's normal form.
+CORE_WORDS = {
+    "money": ("price", "cost", "fee", "charge", "payment", "paid", "refund", "replacement", "discount", "coupon",
+              "promo code", "compensation", "deposit", "invoice", "cash back", "installment", "سعر", "خصم", "فلوس",
+              "استرجاع", "استبدال"),
+    "personal_data": ("phone number", "email address", "password", "national id", "id number", "card number",
+                      "date of birth", "home location"),
+    "promise": ("guarantee", "promise", "warranty", "arrive by", "deliver by", "delivered by", "delivery date"),
+}
+CORE_PATTERNS = {
+    # an amount: three or more digits (with or without thousands commas), a percent, or a digit beside a currency
+    "money": (r"(?<![0-9])[0-9]{3,}(?![0-9])", r"(?<![0-9])[0-9]{1,3}(?:[,.][0-9]{3})+(?![0-9])",
+              r"[0-9]\s*(?:%|٪)", r"[0-9]\s*(?:egp|le|l\.e|pounds?|usd|eur|sar|aed|[$€£]|جنيه|ج\.م)(?![a-z])",
+              r"(?<![a-z])(?:egp|usd|eur|[$€£])\s*[0-9]"),
+    # an address as a thing, not the verb ("address their concern")
+    "personal_data": (r"(?<![a-z])address(?:es)?(?![a-z])(?!\s+(?:the|their|his|her|its|this|that|these|those|your|"
+                      r"our|any|each|every|all|a|an|it|them|him|me|us)(?![a-z]))", r"عنوان"),
+    # a promise about a date or a delivery: will, guarantee or promise, then arriving, delivering or a day
+    "promise": (r"(?<![a-z])(?:will|guarantee\w*|promise\w*)\s(?:[^.!?\n]{0,40}?\s)?(?:arriv\w*|deliver\w*|ship\w*|"
+                r"reach\w*|today|tomorrow|tonight|by\s+\w+day)(?![a-z])",),
+}
+# Money and refund stems: a model word with one of them stays high even when the agent's own card names it
+# (a support agent that "answers tickets about refunds" still asks a yes before a lesson about refunds).
+MONEY_STEMS = ("price", "pric", "cost", "fee", "charg", "pay", "refund", "replacement", "discount", "coupon",
+               "compensat", "deposit", "invoice", "cash", "سعر", "خصم", "فلوس", "استرجاع", "استبدال")
+# Words that alone never show risk: a time, a step, a booking, a vague name for data, a generic offer. A
+# lesson about when or how the agent does its own work holds them all; a real date promise, an amount or a
+# phone number is caught by CORE_PATTERNS and the engine's core marks instead.
+VAGUE = frozenset((
+    "time", "times", "date", "dates", "day", "days", "today", "tomorrow", "tonight", "now", "soon", "later",
+    "next step", "step", "steps", "next", "book", "booking", "appointment", "confirm", "confirmation", "schedule",
+    "trial", "offer", "new", "details", "detail", "contact", "contacts", "info", "information", "name", "names",
+    "account", "private", "order", "orders", "order number", "order id", "ticket", "ticket number", "number",
+    "item", "items", "update", "status", "free", "limited", "special",
+))
+# The agent's normal channel: when its own work is a reply, a message or a chat, sending one is that work.
+CHAT_WORK = frozenset(("reply", "answer", "respond", "message", "conversation", "chat", "follow", "dm"))
+CHAT_WORDS = frozenset(("send", "reply", "answer", "respond", "message", "text", "chat", "follow up", "dm"))
+_STOP = frozenset(("a", "an", "the", "and", "or", "of", "to", "for", "in", "on", "with", "when", "is", "are", "be",
+                   "it", "its", "their", "your", "our", "them", "they", "who", "that", "this", "about", "by", "at",
+                   "as", "from", "will", "not", "each", "one", "two", "both", "ready", "so"))
+_TOKEN = re.compile(r"[^\W\d_]+")
+_READY_FOR = re.compile(r"(?<![a-z])(?:ready|for\s+you|for\s+someone)\s+to\s+[a-z]+", re.IGNORECASE)
+_SMALL = ("2", "3 days", "10 minutes", "1 reply")  # a model pattern that matches any of these marks every count
+
+
+def _stems(token):
+    """The forms one word can take, so booked, books and booking all meet book, and sent meets send."""
+    t = token.lower()
+    out = {t, {"sent": "send", "paid": "pay", "replies": "reply", "replied": "reply"}.get(t, t)}
+    for end, put in (("ies", "y"), ("ied", "y"), ("ing", ""), ("ing", "e"), ("ed", ""), ("ed", "e"), ("es", ""),
+                     ("s", ""), ("d", "")):
+        if t.endswith(end) and len(t) - len(end) >= 3:
+            base = t[:-len(end)] + put
+            out.add(base)
+            if len(base) > 3 and base[-1] == base[-2] and base[-1] not in "aeiouls":
+                out.add(base[:-1])  # tagged, tagging: tag
+    return out
+
+
+def _content(text):
+    return [t for t in _TOKEN.findall((text or "").lower()) if t not in _STOP]
+
+
+def own_work(card, tools=()):
+    """Every form of the words the agent's own work is made of: what it does, its case's output and end,
+    and its connected tools. A risk word made only of these is the agent's normal work, never high."""
+    case = card.get("case") if isinstance(card, dict) and isinstance(card.get("case"), dict) else {}
+    text = " ".join(str(v) for v in (card.get("does", "") if isinstance(card, dict) else "",
+                                     case.get("output", ""), case.get("ends", "")) if isinstance(v, str))
+    text = _READY_FOR.sub(" ", text)  # "ready to post": someone else posts it, so posting is not its own work
+    own = set()
+    for t in _content(text) + [str(x).lower() for x in tools]:
+        own |= _stems(t)
+    if own & CHAT_WORK or "whatsapp" in own:
+        own |= {s for w in CHAT_WORDS for s in _stems(w)} | {"follow", "up"}
+    return own
+
+
+def _money(word):
+    return any(t.startswith(MONEY_STEMS) for t in _TOKEN.findall(word.lower())) or any(
+        stem in word for stem in MONEY_STEMS if not stem.isascii())
+
+
+def keeps_high(word, own):
+    """True when a model's high risk word stays: money and refunds always, the code's own words always,
+    never a vague word alone, never a word made only of the agent's own work."""
+    w = " ".join(word.lower().split())
+    if not w:
+        return False
+    if _money(w) or any(w == c for words in CORE_WORDS.values() for c in words):
+        return True
+    if w in VAGUE or w in ("address", "addresses"):  # an address as a thing is CORE_PATTERNS', not the verb
+        return False
+    parts = _content(w)
+    return not (parts and all(_stems(p) & own for p in parts))
+
+
+def _counts_every_number(p):
+    try:
+        rx = re.compile(p, re.IGNORECASE)
+    except (re.error, TypeError):
+        return False  # engine/plug.py refuses it with its reason
+    return any(rx.search(s) for s in _SMALL)
+
+
+def clean_risk(risk, card, tools):
+    """The plug's risk, cleaned in code (the prompt asks the same, but the code decides): the model's
+    high words minus the agent's own work, vague words and its tool names; its patterns minus any that
+    mark every number; then the code's own money, personal data and promise words and patterns
+    (CORE_WORDS, CORE_PATTERNS) added. The two about lines the judge reads say what high is for every
+    built agent and that its own work is low. A shape that is not a dict is left for engine/plug.py."""
+    high = risk.get("high") if isinstance(risk, dict) else None
+    if not isinstance(high, dict):
+        return risk
+    own = own_work(card, tools)
+    tool_names = {str(t).lower() for t in tools}
+    words, patterns = {}, {}
+    raw_words = high.get("words", {})
+    for group, ws in (raw_words.items() if isinstance(raw_words, dict) else ()):
+        if not isinstance(ws, list):
+            words[group] = ws  # a wrong shape is left for engine/plug.py to refuse
+            continue
+        kept = [w for w in ws if not isinstance(w, str) or (w.strip().lower() not in tool_names and keeps_high(w, own))]
+        if kept:
+            words[group] = kept
+    raw_pats = high.get("patterns", {})
+    for group, ps in (raw_pats.items() if isinstance(raw_pats, dict) else ()):
+        if not isinstance(ps, list):
+            patterns[group] = ps
+            continue
+        kept = [p for p in ps if not isinstance(p, str) or not _counts_every_number(p)]
+        if kept:
+            patterns[group] = kept
+    for into, core in ((words, CORE_WORDS), (patterns, CORE_PATTERNS)):
+        for group, items in core.items():
+            have = into.get(group) if isinstance(into.get(group), list) else []
+            into[group] = [*have, *(x for x in items if x not in have)]
+    case = card.get("case") if isinstance(card, dict) and isinstance(card.get("case"), dict) else {}
+    low = risk.get("low") if isinstance(risk.get("low"), dict) else {}
+    theirs = line(low.get("about"), 300)
+    return {"high": {"about": HIGH_ABOUT, "words": words, "patterns": patterns, "tools": sorted(set(tools))},
+            "low": {"about": LOW_ABOUT.format(output=line(case.get("output"), CAPS["output"]) or "its normal work")
+                    + (f" {theirs}" if theirs else "")}}
+
+
+HIGH_ABOUT = ("Money (prices, amounts, discounts, fees, payment), refunds and replacements, personal data, a promise "
+              "to someone outside about a date or a delivery, and anything that leaves the agent for the outside "
+              "world beyond its own normal work.")
+LOW_ABOUT = ("The agent's own work ({output}): how it writes, words, orders, times and checks it, and what it asks, "
+             "with none of the high risk parts.")
+
+
+def clean_plug(raw, agent, tools, card=None):
     """The model's plug with what the code sets itself: the agent's name, the strict trial levels,
-    no keys that need files or other agents, its tools exactly the connected ones (each high risk), any
-    number marked high risk, and no shows_in_days on a result.
+    no keys that need files or other agents, its tools exactly the connected ones, its high risk cleaned
+    in code (clean_risk: money, refunds, personal data and outside promises high, its own work never),
+    and no shows_in_days on a result.
     Shapes the model got wrong are left for engine/plug.py to refuse."""
     if not isinstance(raw, dict):
         return raw
@@ -462,13 +618,8 @@ def clean_plug(raw, agent, tools):
         out["results"] = {n: ({k: v for k, v in r.items() if k != "shows_in_days"} if isinstance(r, dict) else r)
                           for n, r in out["results"].items()}
     out["trial"] = json.loads(json.dumps(STRICT_TRIAL))
-    risk = out.get("risk")
-    high = risk.get("high") if isinstance(risk, dict) else None
-    if isinstance(high, dict):
-        high["tools"] = sorted(set(tools))  # the connected tools only, whatever the model wrote
-        pats = high.get("patterns", {})
-        if isinstance(pats, dict) and isinstance(pats.get("number", []), list) and "[0-9]" not in pats.get("number", []):
-            high["patterns"] = dict(pats, number=[*pats.get("number", []), "[0-9]"])
+    if "risk" in out:  # tools: the connected ones only, whatever the model wrote
+        out["risk"] = clean_risk(out["risk"], card or {}, tools)
     return out
 
 
@@ -625,13 +776,13 @@ class QuickStart:
                             tools=", ".join(f"{t} ({TOOLS[t]})" for t in tools) or "none")},
                         {"role": "user", "content": json.dumps({"card": _model_card(card)}, ensure_ascii=False)}]
             first = self._chat(messages, 8000)
-            plug, words, why = self._plug_from(first, agent, tools)
+            plug, words, why = self._plug_from(first, agent, tools, card)
             fixed_why = None
             if why is not None:  # once: the model reads the checker's reason and fixes it
                 messages += [{"role": "assistant", "content": first[:MAX_PLUG_REPLY]},
                              {"role": "user", "content": f"The plug check refused it: {why}. Send the whole JSON object "
                                                          "again with that fixed."}]
-                plug, words, again = self._plug_from(self._chat(messages, 8000), agent, tools)
+                plug, words, again = self._plug_from(self._chat(messages, 8000), agent, tools, card)
                 if again is not None:
                     raise Refused(f"Not built. The plug check said: {again}. Nothing was written; press Build to try again.")
                 fixed_why = why
@@ -805,12 +956,12 @@ class QuickStart:
         return content if isinstance(content, str) else ""
 
     @staticmethod
-    def _plug_from(content, agent, tools):
+    def _plug_from(content, agent, tools, card=None):
         """(plug, instructions, None) when it passes the checker, else (None, None, the reason)."""
         raw = read_json(content, MAX_PLUG_REPLY)
         if raw is None:
             return None, None, "the answer was not one JSON object"
-        plug = clean_plug(raw.get("plug"), agent, tools)
+        plug = clean_plug(raw.get("plug"), agent, tools, card)
         why = check_plug(plug)
         if why is not None:
             return None, None, why

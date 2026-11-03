@@ -194,7 +194,8 @@ class QuickStartPage(unittest.TestCase):
         self.assertEqual(self.model.calls[2]["messages"][0]["content"], turn_exam.SYSTEM + turn_exam.CASE_PART)
         self.assertEqual({k: (v.share, v.days) for k, v in plug.levels.items()}, {"fast": (0.5, 7), "careful": (0.2, 14)})
         self.assertIn("store", plug.risk.tools)
-        self.assertIn(("number", "[0-9]"), plug.risk.patterns)
+        self.assertNotIn(("number", "[0-9]"), plug.risk.patterns)  # amounts are high, not every digit (clean_risk)
+        self.assertIn(("money", qs.CORE_PATTERNS["money"][0]), plug.risk.patterns)
         card = json.loads((where / "card.json").read_text(encoding="utf-8"))
         self.assertEqual(card["good"], "You hear about a low item a day before it runs out.")
         self.assertEqual(card["tools"], ["store"])  # Bosta is not in the repo: on the card, not connected, not in the plug

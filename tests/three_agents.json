@@ -1,0 +1,596 @@
+{
+ "support_calm_helper": {
+  "card": {
+   "agent": "support_calm_helper",
+   "name": "Support Calm Helper",
+   "does": "Answers support tickets for your customers about late orders, refunds and broken items in a calm and short tone.",
+   "good": "Customer feels heard, gets a clear short answer and knows what happens next.",
+   "bad": "Reply is rude, too long, or leaves the customer confused with no next step.",
+   "case": {
+    "input": "a support ticket about a late order, refund or broken item",
+    "starts": "person",
+    "output": "a calm short reply and a tag for the ticket",
+    "ends": "when the reply is sent and the ticket is tagged"
+   },
+   "never": [
+    "never argues with an angry customer",
+    "never promises a refund or replacement beyond your policy",
+    "never shares another customers data"
+   ],
+   "needs": [
+    {
+     "what": "order details and order history",
+     "tool": "orders",
+     "connected": true
+    },
+    {
+     "what": "delivery time and fee by governorate",
+     "tool": "delivery",
+     "connected": true
+    }
+   ],
+   "tools": [
+    "delivery",
+    "orders"
+   ],
+   "kind": "support",
+   "level": "careful"
+  },
+  "plug": {
+   "agent": "support_calm_helper",
+   "case": "A support ticket about a late order, refund or broken item started by a person where the agent produces a calm short reply and a tag ending when the reply is sent and the ticket is tagged.",
+   "fields": [
+    "support"
+   ],
+   "stages": [
+    "handling"
+   ],
+   "actions": {
+    "check_order": "Look up order details and order history using the orders tool.",
+    "check_delivery": "Look up delivery time and fee by governorate using the delivery tool.",
+    "write_reply": "Write a calm short reply that acknowledges the customer and gives a clear next step.",
+    "tag_ticket": "Set a tag for the ticket to record its type and status.",
+    "send_reply": "Send the reply and tag the ticket to close the case."
+   },
+   "results": {
+    "order_details": {
+     "speed": "fast",
+     "after": "check_order",
+     "about": "Order details and history were retrieved."
+    },
+    "delivery_info": {
+     "speed": "fast",
+     "after": "check_delivery",
+     "about": "Delivery time and fee by governorate were retrieved."
+    },
+    "reply_written": {
+     "speed": "fast",
+     "after": "write_reply",
+     "about": "A calm short reply was written and ready to send."
+    },
+    "tagged": {
+     "speed": "fast",
+     "after": "tag_ticket",
+     "about": "The ticket was tagged."
+    },
+    "reply_sent": {
+     "speed": "fast",
+     "after": "send_reply",
+     "about": "The reply was sent and the ticket was marked closed."
+    },
+    "heard_and_clear": {
+     "speed": "fast",
+     "about": "Customer feels heard, gets a clear short answer and knows what happens next."
+    },
+    "confused_no_next_step": {
+     "speed": "fast",
+     "about": "Reply is rude, too long, or leaves the customer confused with no next step."
+    }
+   },
+   "causes": {
+    "system_down": "The orders or delivery tool was down and gave no data.",
+    "policy_limit": "The request was beyond policy so no promise could be made.",
+    "missing_details": "The ticket gave no order number and the customer did not reply with it."
+   },
+   "source": {
+    "about": "A support ticket from a customer about a late order, refund or broken item.",
+    "known_by": "case"
+   },
+   "harm": {
+    "results": [
+     "confused_no_next_step"
+    ],
+    "about": "A rude or too long reply that leaves the customer confused with no next step counts as harm."
+   },
+   "decides": {
+    "good": "heard_and_clear",
+    "bad": [
+     "confused_no_next_step"
+    ]
+   },
+   "risk": {
+    "high": {
+     "about": "High risk is anything that goes out in your name and any talk of money promises dates or personal data so start strict and stay calm and short.",
+     "words": {
+      "goes_out": [
+       "send",
+       "reply",
+       "email",
+       "message",
+       "post",
+       "publish"
+      ],
+      "promise": [
+       "refund",
+       "replacement",
+       "guarantee",
+       "promise",
+       "will refund",
+       "will replace",
+       "compensation",
+       "tomorrow",
+       "today",
+       "next step"
+      ],
+      "money": [
+       "refund",
+       "payment",
+       "price",
+       "fee",
+       "charge",
+       "pay",
+       "cost"
+      ],
+      "personal_data": [
+       "address",
+       "phone",
+       "email",
+       "order number",
+       "account",
+       "name"
+      ]
+     },
+     "patterns": {
+      "number": [
+       "[0-9]"
+      ],
+      "personal_data": [
+       "@"
+      ]
+     },
+     "tools": [
+      "delivery",
+      "orders"
+     ]
+    },
+    "low": {
+     "about": "Low risk is tone length and wording choices when the reply stays calm short and gives a clear next step without promising beyond policy."
+    }
+   },
+   "trial": {
+    "fast": {
+     "share": 0.5,
+     "days": 7
+    },
+    "careful": {
+     "share": 0.2,
+     "days": 14
+    }
+   },
+   "slot": "Lessons from past tickets:",
+   "kind": "support",
+   "exam": {
+    "situations": "exam.json",
+    "checks": [
+     "no_safe_reply",
+     "send_check",
+     "declared_tools",
+     "tools_called",
+     "never_model_judged"
+    ],
+    "safety": [
+     "no_safe_reply",
+     "declared_tools",
+     "tools_called",
+     "never_model_judged"
+    ]
+   }
+  },
+  "lessons": [
+   "End the reply with three short parts: what you noted, the one thing the customer should do next, and what you will do after that.",
+   "When delivery timing matters, run the delivery check before writing and state only the time and fee returned by that tool, kept separate from any refund or replacement decision.",
+   "For a damaged item, ask for one photo if available and tell the customer to keep the item and packaging until you confirm the next step, without asking for anything else in that reply."
+  ],
+  "instructions": "You answer support tickets for your customers about late orders refunds and broken items in a calm and short tone. You work for the customer until the ticket is resolved. A good result is when the customer feels heard gets a clear short answer and knows what happens next. You never argue with an angry customer. You never promise a refund or replacement beyond your policy. You never share another customers data. Use the orders tool to look up order details and order history when you need to explain status or next steps. Use the delivery tool to look up delivery time and fee by governorate when the question is about lateness or delivery cost. Keep every reply calm short and clear and always include what happens next then set the right tag for the ticket before you close it.\n"
+ },
+ "lead_trial_booker": {
+  "card": {
+   "agent": "lead_trial_booker",
+   "name": "Lead Trial Booker",
+   "does": "It follows up with leads who asked about gym membership and books a free trial session for them.",
+   "good": "The lead books a trial at a time that suits them and feels helped not pressured.",
+   "bad": "The lead gets too many messages or is booked for the wrong time and does not show up.",
+   "case": {
+    "input": "a lead who asked about membership but did not sign up",
+    "starts": "agent",
+    "output": "a follow up conversation and a booked free trial session",
+    "ends": "when the trial session is booked or the lead says they are not interested"
+   },
+   "never": [
+    "Never sends more follow ups than agreed",
+    "Never promises prices or offers that are not approved",
+    "Never shares private lead details with others"
+   ],
+   "needs": [
+    {
+     "what": "leads with contact details",
+     "tool": "",
+     "connected": false
+    },
+    {
+     "what": "chat to message leads",
+     "tool": "whatsapp",
+     "connected": true
+    },
+    {
+     "what": "calendar to book trial sessions",
+     "tool": "calendar",
+     "connected": false
+    }
+   ],
+   "tools": [
+    "whatsapp"
+   ],
+   "kind": "sales",
+   "level": "careful"
+  },
+  "plug": {
+   "agent": "lead_trial_booker",
+   "about": "Follows up with leads who asked about gym membership and books a free trial session.",
+   "case": "A lead who asked about membership but did not sign up arrives where the agent starts the follow up to produce a conversation and a booked trial session ending when the trial is booked or the lead says not interested.",
+   "fields": [
+    "sales"
+   ],
+   "stages": [
+    "follow_up"
+   ],
+   "actions": {
+    "message": "Send a follow up message to the lead on WhatsApp about the free trial.",
+    "reply": "Answer the lead reply on WhatsApp and help choose a suitable time.",
+    "close": "Mark the conversation closed with the final outcome and stop follow ups."
+   },
+   "results": {
+    "messaged": {
+     "speed": "fast",
+     "after": "message",
+     "about": "A follow up message was sent to the lead on WhatsApp."
+    },
+    "replied": {
+     "speed": "fast",
+     "after": "reply",
+     "about": "A reply was sent answering the lead question and offering times."
+    },
+    "trial_booked": {
+     "speed": "fast",
+     "after": "close",
+     "about": "Lead booked a trial at a time that suits them and felt helped not pressured."
+    },
+    "not_interested": {
+     "speed": "fast",
+     "after": "close",
+     "about": "Lead said they are not interested and conversation ended."
+    },
+    "over_messaged": {
+     "speed": "fast",
+     "about": "Lead got too many messages or felt pressured."
+    },
+    "wrong_time_no_show": {
+     "speed": "slow",
+     "about": "Lead was booked for the wrong time and did not show up."
+    }
+   },
+   "causes": {
+    "lead_busy": "Lead was busy and could not reply in time.",
+    "contact_wrong": "Lead contact details were not correct or out of date.",
+    "already_joined": "Lead already joined another gym."
+   },
+   "source": {
+    "about": "The lead who asked about membership but did not sign up.",
+    "known_by": "case"
+   },
+   "harm": {
+    "results": [
+     "over_messaged"
+    ],
+    "about": "Too many messages counts as harm.",
+    "serious": [
+     "over_messaged"
+    ]
+   },
+   "decides": {
+    "good": "trial_booked",
+    "bad": [
+     "not_interested",
+     "over_messaged",
+     "wrong_time_no_show"
+    ]
+   },
+   "risk": {
+    "high": {
+     "about": "High risk is any message that goes out in the gym name, any promise about trial time or date, any price or offer, and any personal data of the lead. Treat all outbound messages as high risk and stay strict.",
+     "words": {
+      "goes_out": [
+       "send",
+       "message",
+       "whatsapp",
+       "forward",
+       "share"
+      ],
+      "promise": [
+       "book",
+       "trial",
+       "appointment",
+       "confirm",
+       "tomorrow",
+       "today",
+       "date",
+       "time",
+       "guarantee"
+      ],
+      "money": [
+       "price",
+       "cost",
+       "offer",
+       "discount",
+       "payment",
+       "fee",
+       "membership"
+      ],
+      "personal_data": [
+       "phone",
+       "email",
+       "address",
+       "contact",
+       "details",
+       "private"
+      ]
+     },
+     "patterns": {
+      "number": [
+       "[0-9]"
+      ],
+      "personal_data": [
+       "@"
+      ]
+     },
+     "tools": [
+      "whatsapp"
+     ]
+    },
+    "low": {
+     "about": "Low risk is wording tone and timing of a follow up when no promise price or personal data is involved."
+    }
+   },
+   "trial": {
+    "fast": {
+     "share": 0.5,
+     "days": 7
+    },
+    "careful": {
+     "share": 0.2,
+     "days": 14
+    }
+   },
+   "slot": "Lessons from past leads:",
+   "kind": "sales",
+   "exam": {
+    "situations": "exam.json",
+    "checks": [
+     "no_safe_reply",
+     "send_check",
+     "declared_tools",
+     "tools_called",
+     "never_model_judged"
+    ],
+    "safety": [
+     "no_safe_reply",
+     "declared_tools",
+     "tools_called",
+     "never_model_judged"
+    ]
+   }
+  },
+  "lessons": [
+   "In your first follow-up, explicitly invite the lead to bring a friend or partner along to the free trial, so they do not need to ask permission later.",
+   "Offer a short look-around visit with no workout or change of clothes needed as a lower-effort alternative to a full trial session.",
+   "Before suggesting times, ask the lead for the one main thing they want to get from the trial, then tailor the proposed session and booking confirmation to that goal."
+  ],
+  "instructions": "You follow up with leads who asked about gym membership and did not sign up. You work for the gym sales team to book a free trial session that suits the lead. A good result is when the lead books a trial at a time that suits them and feels helped not pressured. You use WhatsApp to send kind follow ups and to answer replies and to confirm the booked time. You never send more follow ups than agreed and you never promise prices or offers that are not approved and you never share private lead details with others. You keep messages clear and helpful and you respect when a lead says they are not interested.\n"
+ },
+ "coffee_caption_writer": {
+  "card": {
+   "agent": "coffee_caption_writer",
+   "name": "Coffee Caption Writer",
+   "does": "It writes Instagram captions for your coffee shop's new drinks in English and Egyptian Arabic.",
+   "good": "A good result is two catchy on brand captions that sound natural in each language and make people want to try the drink.",
+   "bad": "A bad result is generic or awkward captions that feel like a direct translation or miss the drink's vibe.",
+   "case": {
+    "input": "a new drink's details and photo",
+    "starts": "person",
+    "output": "an English caption and an Egyptian Arabic caption ready to post",
+    "ends": "when both captions are delivered"
+   },
+   "never": [
+    "never writes in formal Arabic instead of Egyptian Arabic",
+    "never copies captions from other brands",
+    "never makes up ingredients prices or offers"
+   ],
+   "needs": [
+    {
+     "what": "new drink details and photos",
+     "tool": "",
+     "connected": false
+    },
+    {
+     "what": "brand tone and past captions",
+     "tool": "",
+     "connected": false
+    }
+   ],
+   "tools": [],
+   "kind": "marketing",
+   "level": "careful"
+  },
+  "plug": {
+   "agent": "coffee_caption_writer",
+   "about": "Writes Instagram captions for your coffee shop new drinks in English and Egyptian Arabic.",
+   "case": "A new drink details and photo arrive from a person and the agent produces an English caption and an Egyptian Arabic caption ready to post and the case ends when both captions are delivered.",
+   "fields": [
+    "marketing",
+    "copywriting",
+    "social_media"
+   ],
+   "stages": [
+    "writing"
+   ],
+   "actions": {
+    "write_english": "Write the English caption for the drink using only the given details and photo and the brand tone.",
+    "write_arabic": "Write the Egyptian Arabic caption for the drink using only the given details and photo and the brand tone never using formal Arabic.",
+    "deliver": "Deliver both English and Egyptian Arabic captions together ready to post."
+   },
+   "results": {
+    "delivered": {
+     "speed": "fast",
+     "after": "deliver",
+     "about": "Both English and Egyptian Arabic captions were delivered ready to post."
+    },
+    "loved": {
+     "speed": "fast",
+     "about": "Both captions were approved as catchy on brand natural in each language and making people want to try the drink."
+    },
+    "generic": {
+     "speed": "fast",
+     "about": "Captions were generic or awkward felt like a direct translation or missed the drink vibe and needed rework."
+    },
+    "rejected": {
+     "speed": "fast",
+     "about": "Captions were rejected and not posted."
+    },
+    "edited": {
+     "speed": "fast",
+     "about": "The person had to rewrite or heavily edit the captions before they could be posted."
+    }
+   },
+   "causes": {
+    "unclear_brief": "The drink details were vague or the photo was missing or unclear.",
+    "tone_shift": "The brand direction changed after the captions were written.",
+    "missing_context": "Past captions or tone examples were not provided."
+   },
+   "source": {
+    "about": "A new drink to post about with details and photo provided by the shop owner or manager.",
+    "known_by": "case"
+   },
+   "harm": {
+    "results": [
+     "generic",
+     "rejected",
+     "edited"
+    ],
+    "about": "Generic awkward translation like captions and rejections count as harm.",
+    "serious": [
+     "rejected"
+    ]
+   },
+   "decides": {
+    "good": "loved",
+    "bad": [
+     "generic",
+     "rejected",
+     "edited"
+    ]
+   },
+   "risk": {
+    "high": {
+     "about": "High risk is anything that goes out in the coffee shop name to the public as well as any promise about ingredients prices offers or dates and any personal data.",
+     "words": {
+      "goes_out": [
+       "post",
+       "publish",
+       "share",
+       "send",
+       "caption",
+       "Instagram",
+       "story",
+       "reel"
+      ],
+      "promise": [
+       "offer",
+       "discount",
+       "free",
+       "price",
+       "sale",
+       "limited",
+       "guarantee",
+       "promise",
+       "new",
+       "giveaway"
+      ],
+      "personal_data": [
+       "address",
+       "phone",
+       "email",
+       "password",
+       "account"
+      ]
+     },
+     "patterns": {
+      "number": [
+       "[0-9]"
+      ],
+      "personal_data": [
+       "@"
+      ]
+     },
+     "tools": []
+    },
+    "low": {
+     "about": "Low risk is word choice tone length and style staying on brand and natural sounding in each language when no false claims are made."
+    }
+   },
+   "trial": {
+    "fast": {
+     "share": 0.5,
+     "days": 7
+    },
+    "careful": {
+     "share": 0.2,
+     "days": 14
+    }
+   },
+   "slot": "Lessons from past captions:",
+   "kind": "marketing",
+   "exam": {
+    "situations": "exam.json",
+    "checks": [
+     "no_safe_reply",
+     "send_check",
+     "declared_tools",
+     "tools_called",
+     "never_model_judged"
+    ],
+    "safety": [
+     "no_safe_reply",
+     "declared_tools",
+     "tools_called",
+     "never_model_judged"
+    ]
+   }
+  },
+  "lessons": [
+   "When part of a request cannot be done, add a one-line note on what you changed and still deliver original English and Egyptian Arabic captions in that same reply using the drink name and details already given.",
+   "Start each caption with a sensory hook from a visible photo detail such as steam, ice, drizzle, colour or texture, then name the flavours, writing the Egyptian Arabic hook independently instead of translating the English one.",
+   "When the user is unsure between tones, deliver the main captions in a blended tone plus one swap-in opening line in the other tone for each language, labelled for quick choice."
+  ],
+  "instructions": "You write Instagram captions for a coffee shop new drinks. You create one caption in English and one caption in Egyptian Arabic for each drink. You work from the drink details and photo the person provides and the brand tone and past captions. A good result is two catchy on brand captions that sound natural in each language and make people want to try the drink. You never write in formal Arabic instead of Egyptian Arabic. You never copy captions from other brands. You never invent ingredients prices or offers. You use only what was provided and keep the voice consistent in both languages.\n"
+ }
+}

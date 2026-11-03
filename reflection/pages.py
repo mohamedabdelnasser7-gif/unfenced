@@ -140,6 +140,9 @@ class Pages:
         agent = (query.get("agent") or [""])[0]
         if path == "/new/build" and _AGENT.match(agent):  # the Arena screen of that agent (Try again)
             keep.append(f"agent={agent}")
+        tab = (query.get("tab") or [""])[0]
+        if path.startswith("/agents/") and tab in TAB_KEYS and tab != "overview":  # the agent page's tab
+            keep.append(f"tab={tab}")
         if path == "/console" and _AGENT.match(agent):  # the console, its view and the row that was open
             st = console_mod.state_of(query, agent)
             keep += [f"{k}={st[k]}" for k in ("agent", "view", "sub", "f", "row", "pane") if st[k]]
@@ -618,12 +621,60 @@ def _chip(i, a=None):
     return "", "Pulled", f'{mo._date(i["pulled_at"])}'
 
 
+# The agent page's four tabs (LOCKS "App pages", 1B): links the server renders, ?tab=, no script.
+TABS = (("overview", "Overview"), ("arena", "Arena"), ("live", "Live"), ("lessons", "Lessons"))
+TAB_KEYS = tuple(k for k, _ in TABS)
+
+
+def tab_of(query):
+    got = ((query or {}).get("tab") or [""])[0]
+    return got if got in TAB_KEYS else "overview"
+
+
+def tab_ctx(ctx, agent, tab):
+    """ctx for the forms of one tab: an answer comes back to the same tab, on the same demo day."""
+    q = f"?tab={tab}" + (f'&day={ctx["day"]}' if ctx["day"] else "")
+    return dict(ctx, path=f"/agents/{agent}", q=q)
+
+
+def tab_href(ctx, agent, tab):
+    day = f'&amp;day={h(ctx["day"])}' if ctx["day"] else ""
+    return f"/agents/{h(agent)}?tab={tab}{day}" if tab != "overview" else f'/agents/{h(agent)}{ctx["q"]}'
+
+
+def lesson_rows(a, limit=None):
+    rows = []
+    for i in a["live"] + a["waiting"] + a["pulled"][:5]:
+        cls, chip, small = _chip(i, a)
+        rows.append(f'<div class="lr"><b dir="auto">{h(i["text"])}</b><span class="vchip {cls}">{chip}</span>'
+                    f'<small>{h(small)}</small></div>')
+    return rows[:limit] if limit else rows
+
+
 def agent_page(m, view, agent, ctx):
     a = next((x for x in view["agents"] if x["agent"] == agent), None)
     if a is None and agent not in m.plugs:
         return None
     a = a or {"agent": agent, "live": [], "waiting": [], "pulled": [], "night": None, "buttons": agent in m.plugs}
+    tab = tab_of(ctx.get("query"))
     st = status_of(m, agent)
+    tabs = "".join(f'<a class="on" href="{tab_href(ctx, agent, k)}" aria-current="page">{w}</a>' if k == tab
+                   else f'<a href="{tab_href(ctx, agent, k)}">{w}</a>' for k, w in TABS)
+    cons = ""
+    if agent in m.plugs:  # the technical view of its loop (reflection/console.py)
+        day = f'&amp;day={h(ctx["day"])}' if ctx["day"] else ""
+        cons = f'<a class="cons" href="/console?agent={h(agent)}{day}">{icon("code")}Open console</a>'
+    head = (f'<div class="ahead"><a class="back" href="/agents{ctx["q"]}">{icon("back")}Agents</a>'
+            f'<div class="ah-row"><div><h1>{h(name(agent))}</h1><p>{STATUS_SAID[st]}</p></div>{cons}</div></div>'
+            f'<nav class="atabs" aria-label="{h(name(agent))}">{tabs}</nav>')
+    body = {"overview": overview_tab, "arena": arena_tab, "live": live_tab, "lessons": lessons_tab}[tab](
+        m, view, a, agent, st, ctx)
+    return f'<div class="agp">{head}{body}</div>'
+
+
+def overview_tab(m, view, a, agent, st, ctx):
+    """Overview: the status with Roll back and Pull (or Resume), the channels and Connect, the box for an
+    idea or a correction; beside them since yesterday and the newest lessons."""
     states = "".join(f'<span class="on"><i></i>{s}</span>' if s == st else f"<span>{s}</span>"
                      for s in ("Training", "Live", "Paused"))
     tok = ctx["token"] if a["buttons"] else None
@@ -643,27 +694,77 @@ def agent_page(m, view, agent, ctx):
         pull = _post(ctx, "pause", f'{icon("pause")}Pull', "gb", agent=agent)
     else:
         pull = f'<button class="gb" type="button" disabled title="Not built for this agent yet">{icon("pause")}Pull</button>'
-    out = [f'<div class="colhead"><a class="back" href="/agents{ctx["q"]}">{icon("back")}Agents</a>'
-           f'<section class="top ag-top"><h1>{h(name(agent))}</h1></section></div><div class="col">',
-           f'<section class="status sq" aria-label="Status"><div class="st-l"><span class="states" role="img" '
-           f'aria-label="Status: {st}">{states}</span><small>{STATUS_SAID[st]}'
-           f'</small></div><div class="st-r">{roll}{pull}</div></section>']
+    left = [f'<section class="status sq" aria-label="Status"><div class="st-l"><span class="states" role="img" '
+            f'aria-label="Status: {st}">{states}</span><small>{STATUS_SAID[st]}'
+            f'</small></div><div class="st-r">{roll}{pull}</div></section>']
     if conns:
-        out.append(connections_html(agent, conns, ctx, tok))
-    if tok and agent == mo.SALES.agent and ctx.get("try") is not None:
-        out.append(ctx["try"](ctx))
+        left.append(connections_html(agent, conns, ctx, tok))
     if tok:
-        out.append(f'<section class="say sq" aria-label="Send an idea or a correction"><form method="post" action="/correct">'
-                   f'{_hidden(ctx, agent=agent)}<span class="lab">Send an idea or a correction</span><div class="box">'
-                   f'<textarea name="line" aria-label="Your idea or correction" maxlength="{mo.MAX_LEN}" dir="auto" required>'
-                   f'</textarea></div><div class="say-f"><p class="quiet">{icon("loop")}{SAY_NOTE}</p><button class="send" type="submit">Send{icon("arrow")}</button></div></form></section>')
+        left.append(f'<section class="say sq" aria-label="Send an idea or a correction"><form method="post" action="/correct">'
+                    f'{_hidden(ctx, agent=agent)}<span class="lab">Send an idea or a correction</span><div class="box">'
+                    f'<textarea name="line" aria-label="Your idea or correction" maxlength="{mo.MAX_LEN}" dir="auto" required>'
+                    f'</textarea></div><div class="say-f"><p class="quiet">{icon("loop")}{SAY_NOTE}</p><button class="send" type="submit">Send{icon("arrow")}</button></div></form></section>')
+    now = view["at"]
+    since = max(now - mo.DAY, (a.get("night") or {}).get("until") or 0)
+    full = dict({"new": [], "night": None}, **a)
+    night = "".join(f'<div class="nr"><p>{h(x)}</p></div>' for x in night_lines(full, now, m.answered_since(agent, since)))
+    newest = "".join(lesson_rows(a, 3)) or '<div class="lr"><b>No lessons yet.</b></div>'
+    right = (f'<section class="grp sq" aria-labelledby="y-h"><h3 id="y-h">Since yesterday</h3>{night}</section>'
+             f'<section class="grp sq" aria-labelledby="n-h"><div class="grp-h"><h3 id="n-h">Newest lessons</h3>'
+             f'<a class="lk" href="{tab_href(ctx, agent, "lessons")}">All lessons</a></div>{newest}</section>')
+    return f'<div class="ov"><div class="ov-l">{"".join(left)}</div><div class="ov-r">{right}</div></div>'
+
+
+def arena_tab(m, view, a, agent, st, ctx):
+    """Arena: the practice matches of its newest run, a lost one with Correct this (into the exam), and
+    Try again, beside the climb. Answers come back to this tab."""
+    c = tab_ctx(ctx, agent, "arena")
+    glow, tiles, retry = arena_parts(m, agent if agent in m.plugs else None, c, back=c["path"] + c["q"],
+                                     fix_ctx=c)
+    return (f'<div class="qs"><div class="ar"><section class="ar-l" aria-labelledby="m-h"><div class="sec-h"><h2 id="m-h">Practice '
+            f'matches</h2><small>Where it slipped</small></div><div class="tiles">{tiles}</div>{retry}</section>'
+            f'<div class="ar-r">{glow}</div></div></div>')
+
+
+def live_tab(m, view, a, agent, st, ctx):
+    """Live: the real chats once it is connected (the console's turns, newest first, each opening its
+    row in the console), Try Sales on the Sales agent's page, and a note while it is not live."""
     rows = []
-    for i in a["live"] + a["waiting"] + a["pulled"][:5]:
-        cls, chip, small = _chip(i, a)
-        rows.append(f'<div class="lr"><b dir="auto">{h(i["text"])}</b><span class="vchip {cls}">{chip}</span>'
-                    f'<small>{h(small)}</small></div>')
-    out.append('<section class="grp sq" aria-labelledby="l-h"><h3 id="l-h">Lessons</h3>'
-               + ("".join(rows) or '<div class="lr"><b>No lessons yet.</b></div>') + "</section>")
+    turns = []
+    if agent in m.plugs and agent == mo.SALES.agent:
+        try:
+            turns = console_mod.collect(m, agent, ctx.get("now"))["turns"]
+        except Exception:  # a database with no chats store yet: nothing to list
+            turns = []
+    day = f'&amp;day={h(ctx["day"])}' if ctx["day"] else ""
+    for t in list(reversed(turns))[:20]:
+        said = (t["replies"] or [""])[0]
+        chip = '<span class="vchip hot">Flagged</span>' if t["flagged"] else '<span class="vchip">Sent</span>'
+        rows.append(f'<a class="lrow" href="/console?agent={h(agent)}&amp;view=deploy&amp;row={h(t["key"])}{day}">'
+                    f'<span class="who"><b dir="auto">{h(t["customer"])}</b><span class="line" dir="auto">{h(said)}'
+                    f'</span></span><span class="meta">{chip}<small class="num">{h(mo._when(t["at"]))}</small></span></a>')
+    left = []
+    if rows:
+        left.append('<section aria-labelledby="lv-h"><div class="sec-h"><h2 id="lv-h">Live chats</h2><small>Newest '
+                    f'first</small></div><div class="lrows">{"".join(rows)}</div></section>')
+    else:
+        word = "It is live and has no chats yet." if st == "Live" else (
+            "Not live yet. It answers real customers once its Arena gate passes and you connect it on Overview.")
+        left.append(f'<div class="note sq">{icon("chat")}<div><b>No live chats</b><p>{word}</p></div></div>')
+    tok = ctx["token"] if a["buttons"] else None
+    if tok and agent == mo.SALES.agent and ctx.get("try") is not None:
+        left.append(ctx["try"](tab_ctx(ctx, agent, "live")))
+    right = ('<section class="grp sq" aria-labelledby="lt-h"><h3 id="lt-h">Every step</h3><div class="nr"><p>'
+             f'Each chat, each tool call and each check is in the console. <a class="lk" href="/console?agent='
+             f'{h(agent)}&amp;view=deploy{day}">Open console</a></p></div></section>') if agent in m.plugs else ""
+    return f'<div class="livetab"><div class="lv-l">{"".join(left)}</div><div class="lv-r">{right}</div></div>'
+
+
+def lessons_tab(m, view, a, agent, st, ctx):
+    """Lessons: every lesson with its chip, then the Reflection notes."""
+    rows = lesson_rows(a)
+    out = ['<div class="lstab"><section class="grp sq" aria-labelledby="l-h"><h3 id="l-h">Lessons</h3>'
+           + ("".join(rows) or '<div class="lr"><b>No lessons yet.</b></div>') + "</section>"]
     notes = []
     for n in ((a.get("night") or {}).get("handed") or []):
         notes.append(f'<div class="nr"><span class="to">{icon("out")}Sent to {h(name(n["to"]))}</span>'
@@ -674,18 +775,11 @@ def agent_page(m, view, agent, ctx):
             notes.append(f'<div class="nr"><span class="to">{icon("bulb")}{whose}, {h(mo._date(i["added_at"]))}</span>'
                          f'<p dir="auto">{h(i["text"])}</p></div>')
     if a.get("arena"):  # its own words, never the Arena item's line: that line counts matches won
-        day = f'&day={ctx["day"]}' if ctx["day"] else ""
         notes.append(f'<div class="nr"><span class="to">{icon("note")}From the Arena, {h(mo._date(a["arena"]["at"]))}</span>'
-                     f'<p>It practised on made-up cases. <a class="lk" href="/new/build?agent={h(agent)}{day}">'
+                     f'<p>It practised on made-up cases. <a class="lk" href="{tab_href(ctx, agent, "arena")}">'
                      'See where it slipped</a></p></div>')
     out.append('<section class="grp sq" aria-labelledby="r-h"><h3 id="r-h">Reflection notes</h3>'
-               + ("".join(notes) or '<div class="nr"><p>Nothing yet.</p></div>') + "</section>")
-    if agent in m.plugs:  # the technical view of its loop (reflection/console.py)
-        day = f'&day={ctx["day"]}' if ctx["day"] else ""
-        out.append(f'<section class="grp sq" aria-labelledby="c-h"><h3 id="c-h">Console</h3><div class="nr"><p>'
-                   f'<a class="lk" href="/console?agent={h(agent)}{h(day)}">Open console</a>, what the engine saved for '
-                   'this agent, as it runs.</p></div></section>')
-    out.append("</div>")
+               + ("".join(notes) or '<div class="nr"><p>Nothing yet.</p></div>') + "</section></div>")
     return "".join(out)
 
 
@@ -870,25 +964,25 @@ def _cap(t):
     return t[:1].upper() + t[1:]
 
 
-def correct_this(ctx, agent):
+def correct_this(ctx, agent, fix_ctx=None):
     """Correct this, under a reply the agent lost a practice match on: the same correction as the box on
     the agent's page (Morning.correct, a hotfix through the short exam), sent from beside the reply it
     is about; the answer shows on the agent's page, on the same demo day or Live tab (ctx["q"]), so the
     correction runs on the database the user was looking at."""
     return (f'<details class="fix"><summary>{icon("loop")}Correct this</summary><form method="post" action="/correct">'
-            f'{_hidden(dict(ctx, path=f"/agents/{agent}"), agent=agent)}<div class="box"><textarea name="line" '
+            f'{_hidden(fix_ctx or dict(ctx, path=f"/agents/{agent}"), agent=agent)}<div class="box"><textarea name="line" '
             f'aria-label="What it should do here" placeholder="What should it do here?" maxlength="{mo.MAX_LEN}" '
             f'dir="auto" required></textarea></div><div class="say-f"><p class="quiet">{SAY_NOTE}</p>'
             f'<button class="send" type="submit">Send{icon("arrow")}</button></div></form></details>')
 
 
-def build(m, agent, ctx):
-    """Screen 2: the newest Arena run saved next to the database for this agent: the climb as a
-    path, the matches it lost as tiles with why. No total of won and lost (the trust level stays
-    private, DECISIONS item 17)."""
+def arena_parts(m, agent, ctx, back=None, fix_ctx=None):
+    """The newest Arena run saved next to the database for this agent, as (the climb card, the match
+    tiles, Try again). The matches it lost are tiles with why; no total of won and lost (the trust
+    level stays private, DECISIONS item 17). back: where Try again returns; fix_ctx: the ctx Correct
+    this sends from (its answer shows there)."""
     arena, _ = m.read_arena()
     run = arena.get(agent) if agent else None
-    title = f"Building your {name(agent).lower()}" if agent else "Building your agent"
     tok = ctx["token"] if agent and agent in m.lessons else None
     tried = {r["card"]: r for r in ((run or {}).get("retry") or {}).get("results") or [] if r["result"] != "not_played"}
     tiles, seen = [], set()
@@ -904,27 +998,40 @@ def build(m, agent, ctx):
         elif again:
             why, text, res = again["why"], again["text"], "Still lost"
         quote = f'<p class="out" dir="auto">"{h(text)}"</p>' if text else ""
-        fix = correct_this(ctx, agent) if tok and text and cls == "lost" else ""
+        fix = correct_this(ctx, agent, fix_ctx) if tok and text and cls == "lost" else ""
         tiles.append(f'<article class="tile {cls}"><div class="t-h"><span class="pav">{icon("chat")}</span><div>'
                      f'<b>Practice case</b><small>Made up for the Arena</small></div><span class="res">{res}</span>'
                      f'</div><p class="persona" dir="auto">{h(_cap(why))}.</p>{quote}{fix}</article>')
     if not tiles:
         tiles.append('<div class="ghost"><span class="pav" aria-hidden="true"></span>No saved practice run yet.</div>')
-    retry = try_again(m, agent, run, ctx) if (run or {}).get("lost") else ""
+    retry = try_again(m, agent, run, ctx, back) if (run or {}).get("lost") else ""
     when = f'Newest run, {mo._when(run["at"])}.' if run else "No saved run yet."
-    return (f'<div class="qs"><section class="top"><div><h1>{h(title)}</h1><p class="num">{h(when)}</p></div></section>'
-            '<div class="s2"><section class="a-climb" aria-label="How close it is"><article class="glow sq">'
+    glow = ('<section class="a-climb" aria-label="How close it is"><article class="glow sq">'
             '<div class="glow-h"><span class="gchip">In the Arena</span><span class="gsub">practising on made-up '
             f'cases</span></div>{CLIMB}<div class="climb-l"><span>Started</span><span>Ready to go live</span></div>'
-            '<p class="calm">Nothing to do here while it practises.</p></article></section>'
+            f'<p class="calm">{h(when)} Nothing to do here while it practises.</p></article></section>')
+    return glow, "".join(tiles), retry
+
+
+def build(m, agent, ctx):
+    """The Arena screen of an agent (/new/build?agent=): the climb as a path, the matches it lost as
+    tiles with why. The agent page's Arena tab shows the same parts."""
+    arena, _ = m.read_arena()
+    run = arena.get(agent) if agent else None
+    title = f"Building your {name(agent).lower()}" if agent else "Building your agent"
+    glow, tiles, retry = arena_parts(m, agent, ctx)
+    when = f'Newest run, {mo._when(run["at"])}.' if run else "No saved run yet."
+    glow = glow.replace(f"{h(when)} Nothing to do", "Nothing to do")
+    return (f'<div class="qs"><section class="top"><div><h1>{h(title)}</h1><p class="num">{h(when)}</p></div></section>'
+            f'<div class="s2">{glow}'
             '<section class="a-matches" aria-labelledby="m-h"><div class="sec-h"><h2 id="m-h">Practice matches</h2>'
-            f'<small>Where it slipped</small></div><div class="tiles">{"".join(tiles)}</div>{retry}</section></div></div>')
+            f'<small>Where it slipped</small></div><div class="tiles">{tiles}</div>{retry}</section></div></div>')
 
 
 TRY_SAID = "Plays only the matches it lost again, with your corrections. A few minutes."
 
 
-def try_again(m, agent, run, ctx):
+def try_again(m, agent, run, ctx, back=None):
     """Try again under the practice matches (Morning.try_again, arena/retry.py): the button while no try
     runs and the page has a token, "Trying again..." while one runs, and a line when the last one could
     not run or stopped early. The Sales agent only; any other agent shows it greyed out, like Pull."""
@@ -941,7 +1048,7 @@ def try_again(m, agent, run, ctx):
     elif ((run or {}).get("retry") or {}).get("stopped"):
         out.append('<p class="no-yet">The last try stopped before it played every match; the rest show as they were.</p>')
     if ctx["token"]:
-        back = f"/new/build?agent={agent}" + (f"&{ctx['q'][1:]}" if ctx["q"] else "")
+        back = back or f"/new/build?agent={agent}" + (f"&{ctx['q'][1:]}" if ctx["q"] else "")
         out.append(f'<p class="quiet">{TRY_SAID}</p>'
                    + _post(ctx, "tryagain", f'{icon("loop")}Try again', "yes", agent=agent, back=back))
     return f'<div class="act">{"".join(out)}</div>' if out else ""

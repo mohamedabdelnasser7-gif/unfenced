@@ -80,7 +80,7 @@ class Turn(Base):
         self.assertEqual(self.counts(), counts)
         self.assertEqual(connections.history(self.db, "sales"), conns)
         self.assertEqual(json.loads((self.dir / run.CALLS_FILE).read_text())["calls"], 1)  # counted on the day's cap
-        page = self.p.get("/agents/sales", {}, "tok")
+        page = self.p.get("/agents/sales", {"tab": ["live"]}, "tok")
         self.assertIn(REPLY, page)
         self.assertIn('action="/try/sales"', page)
         self.assertIn('action="/try/sales/clear"', page)
@@ -118,13 +118,13 @@ class Turn(Base):
         self.assertFalse(bare.try_sales.ready())
         with self.assertRaises(try_sales.Refused) as e:
             bare.try_sales.say(self.m, "Hi")
-        page = bare.get("/agents/sales", {}, "tok")
+        page = bare.get("/agents/sales", {"tab": ["live"]}, "tok")
         self.assertIn("recorded/play.py", page)
         self.assertNotIn('action="/try/sales"', page)
 
     def test_only_the_sales_page_has_it(self):
         self.assertNotIn("Try Sales", self.p.get("/agents", {}, "tok"))
-        self.assertNotIn('action="/try/sales"', self.p.get("/agents/sales", {}, None))
+        self.assertNotIn('action="/try/sales"', self.p.get("/agents/sales", {"tab": ["live"]}, None))
 
 
 class OverTheServer(Base):
@@ -148,7 +148,7 @@ class OverTheServer(Base):
             headers["Origin"] = f"http://127.0.0.1:{self.port}"
         if host:
             headers["Host"] = host
-        body = urllib.parse.urlencode([("token", token), ("back", "/agents/sales")] + list(fields)).encode()
+        body = urllib.parse.urlencode([("token", token), ("back", "/agents/sales?tab=live")] + list(fields)).encode()
         req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", data=body, method="POST", headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=10) as r:

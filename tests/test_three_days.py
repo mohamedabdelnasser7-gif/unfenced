@@ -188,7 +188,7 @@ class DemoServer(unittest.TestCase):
         self.assertIn("Reflection checked it last night: it ran in", three)
         self.assertNotIn("Reflection checks it tonight", three)
         self.assertNotIn("held-out", three)  # the Arena note in plain words, no matches won
-        self.assertIn("See where it slipped", three)
+        self.assertIn("See where it slipped", self.fetch("/agents/sales?tab=lessons&day=3")[1])  # the Lessons tab
         self.assertNotIn("day=live", self.fetch("/?day=1")[1])  # no --db, no Live tab
         for d in (1, 2, 3):
             today = self.fetch(f"/?day={d}")[1]

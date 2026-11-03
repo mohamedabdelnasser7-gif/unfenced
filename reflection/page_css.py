@@ -495,4 +495,45 @@ textarea.typed{width:100%; border:0; background:transparent; resize:none; outlin
 .try .say-f form{margin:0}
 .try .over{height:44px; padding:0 14px; border:0; border-radius:22px; background:none; font:500 14px/44px var(--font); color:var(--ink-2); cursor:pointer}
 
+/* the agent page's head and its four tabs (design/boards/pages-r2/structure-b.html) */
+.ahead{margin:12px 0 0}
+.ahead .back{margin:0}
+.ah-row{display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between; gap:12px; margin-top:8px}
+.ah-row h1{margin:0; font:300 40px/44px var(--font); letter-spacing:-.035em}
+.ah-row p{margin:6px 0 0; font:400 15px/22px var(--font); color:var(--ink-2)}
+.cons{display:inline-flex; align-items:center; gap:6px; height:40px; padding:0 14px; border-radius:20px; background:var(--bubble); box-shadow:var(--bubble-shadow), 0 0 0 1px rgba(11,15,18,.06); font:500 14px/1 var(--font); color:var(--ink); white-space:nowrap; flex:none; text-decoration:none}
+.cons svg.i{width:16px; height:16px}
+.atabs{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:4px; padding:4px; margin:18px 0 20px; border-radius:24px; background:var(--chip)}
+.atabs a{height:42px; border-radius:20px; display:flex; align-items:center; justify-content:center; font:500 13px/1 var(--font); color:var(--ink-2); white-space:nowrap; text-decoration:none}
+.atabs a.on{background:var(--card); color:var(--ink); box-shadow:var(--shadow-soft)}
+.ov,.ov-l,.ov-r,.ar,.ar-l,.ar-r,.livetab,.lv-l,.lv-r,.lstab{display:flex; flex-direction:column; gap:16px; min-width:0}
+.ar-r{order:-1}
+.grp-h{display:flex; align-items:center; justify-content:space-between; gap:12px}
+.grp-h h3{margin:0}
+.lrows{display:flex; flex-direction:column; gap:8px}
+.lrow{display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:center; padding:14px 18px; border-radius:20px; background:#fff; box-shadow:var(--shadow-soft); color:inherit; text-decoration:none}
+.lrow .who{min-width:0}
+.lrow .who b{display:block; font:500 15px/21px var(--font); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.lrow .line{display:block; font:400 14px/20px var(--font); color:var(--ink-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.lrow .meta{display:flex; flex-direction:column; align-items:flex-end; gap:4px}
+.lrow small{font:400 12px/16px var(--font); color:var(--ink-3)}
+.note{display:flex; align-items:flex-start; gap:14px; padding:18px 20px; border-radius:var(--r-card); background:#fff; box-shadow:var(--shadow-soft)}
+.note b{display:block; font:500 16px/22px var(--font)}
+.note p{margin:4px 0 0; font:400 14px/21px var(--font); color:var(--ink-2)}
+@media (min-width: 1024px){
+  .agp{max-width:1180px; margin:0 auto}
+  .ahead{margin:32px 0 0}
+  .ah-row h1{font-size:56px; line-height:60px}
+  .ah-row p{font-size:17px; line-height:24px}
+  .cons{height:44px; padding:0 18px; border-radius:22px; font-size:15px}
+  .atabs{display:inline-grid; grid-template-columns:repeat(4,128px); margin:24px 0 28px}
+  .atabs a{height:44px; font-size:15px}
+  .ov{display:grid; grid-template-columns:minmax(0,7fr) minmax(0,5fr); gap:24px; align-items:start}
+  .ov-l,.ov-r{gap:20px}
+  .ar,.livetab{display:grid; grid-template-columns:minmax(0,8fr) minmax(0,4fr); gap:24px 32px; align-items:start}
+  .ar-r{order:2}
+  .ar .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .lstab{max-width:880px}
+}
+
 """

@@ -35,7 +35,7 @@ from kit import sample
 from kit.model import ModelError
 
 EFFORT = "medium"
-MAX_TOKENS = 600
+MAX_TOKENS = 3000  # reasoning included: at 600 its thinking used it all and the answer came back empty
 NO_TURNS = "no turn was played"
 FAILED = "failed send check"
 SILENT = "the agent produced nothing"

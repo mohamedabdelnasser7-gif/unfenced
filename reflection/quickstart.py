@@ -563,7 +563,7 @@ class QuickStart:
             messages.append({"role": "assistant", "content": json.dumps(
                 {"card": _model_card(t["card"]), "question": t["question"], "follow": t["follow"]}, ensure_ascii=False)})
         messages.append({"role": "user", "content": text})
-        got = clean_card(read_json(self._chat(messages, 2500), MAX_REPLY))
+        got = clean_card(read_json(self._chat(messages, 6000), MAX_REPLY))
         d["turns"].append(dict(got, said=text))
         self._save(folder, d)
         return None

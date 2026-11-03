@@ -7,6 +7,9 @@
    When the customer's last chat ended without an order, fast reflection's note for this
    chat (reflection/fast.py) goes last in the prompt, read once a turn before the first
    model call; it is not a lesson and its id never joins the lesson ids a row keeps.
+   With chat memory (sales/memory.py), a long chat or a returning customer's talk also gets the
+   case's memory note, after the lessons and before the fast note, with the messages after it in
+   place of the last 40; when it cannot be read the turn sees the last 40 as before.
    Right before the first model call, and only then, the channel's typing dots are asked for
    once (typing). A paused agent, a customer over a limit and a turn of fixed lines only make
    no model call, so they get no dots. A turn that ends with no safe reply still had them,
@@ -113,6 +116,7 @@ class _Turn:
     amounts: set = field(default_factory=set)
     tool_steps: int = 0
     note: str = ""  # fast reflection's note for this chat, under its heading; "" when none
+    memory: str = ""  # the case's chat memory note (sales/memory.py), under its heading; "" when none
 
     @property
     def lesson_ids(self):
@@ -121,13 +125,15 @@ class _Turn:
         return self.ctx.lesson_ids
 
 
-def system_prompt(stage, picked, note=""):
+def system_prompt(stage, picked, note="", memory=""):
     """The instructions, the stage note, the lessons in the slot the engine writes from the plug,
-    then fast reflection's note for this chat when it has one."""
+    then the case's chat memory note and fast reflection's note for this chat, each when it has one."""
     parts = [INSTRUCTIONS, stages.note(stage)]
     lessons = slot(PLUG, picked)
     if lessons:
         parts.append(lessons)
+    if memory:
+        parts.append(memory)
     if note:
         parts.append(note)
     return {"role": "system", "content": "\n\n".join(parts)}
@@ -143,6 +149,17 @@ def fast_note(fast, chat_id):
     except Exception:
         log.exception("could not read the fast note; the turn goes on without it")
         return ""
+
+
+def chat_memory(memory, chat_id, upto, limits, who, history):
+    """(the messages the turn sees before the new one, the memory note or "") from the case's chat
+    memory. Never raises: when it cannot be read the turn sees today's history, with no note."""
+    meter = (lambda m: limits.meter(m, who)) if limits is not None else None
+    try:
+        return memory.for_turn(chat_id, upto, meter=meter)
+    except Exception:
+        log.exception("could not read the chat memory; the turn sees the last messages as before")
+        return history, ""
 
 
 def user_message(msg, stage):
@@ -181,7 +198,8 @@ def warn_size_prices():
     return found
 
 
-def turn(msg, *, chats, model, lessons, results, send, limits=None, over=None, fast=None, typing=None):
+def turn(msg, *, chats, model, lessons, results, send, limits=None, over=None, fast=None, typing=None,
+         memory=None):
     """Handle one customer message. send(to, text) sends on the customer's channel.
 
     limits: a kit.limits.Limits; every model call in the turn is counted against it.
@@ -189,6 +207,8 @@ def turn(msg, *, chats, model, lessons, results, send, limits=None, over=None, f
     fast: fast reflection's notes (reflection.fast.FastNotes); left out, no note is read.
     typing: called with no arguments right before the first model call (the channel's typing
     dots); left out, none are shown. A failure there is logged and the turn goes on.
+    memory: the case's chat memory (sales.memory.Memory); left out, the turn sees the last 40
+    messages as before. Its call counts against the customer's limits.
     """
     kept = [media.fingerprint("image", i.data, i.mime) for i in msg.images]
     kept += [dict(NOT_OPENED, kind="image") for _ in range(msg.rejected_images or 0)]
@@ -200,7 +220,8 @@ def turn(msg, *, chats, model, lessons, results, send, limits=None, over=None, f
     chat_id, n = chats.receive(msg.channel, msg.customer_id, content=msg.text or None, media=kept or None,
                                message_id=msg.message_id or None)
     stage = stages.get(chats.stage(chat_id))
-    history = chats.messages(chat_id, upto=n - 1)
+    upto = n - 1
+    history = chats.messages(chat_id, upto=upto)
     if switch.is_paused(PLUG.agent, db=chats.db):
         return TurnResult(chat_id, PAUSED)
 
@@ -239,9 +260,11 @@ def turn(msg, *, chats, model, lessons, results, send, limits=None, over=None, f
         results.record(chat_id, "replied", step=n, stage=stage.name, detail={"fixed_reply": fixed[-1][0]})
         return TurnResult(chat_id, "replied", fixed[-1][1])
 
-    convo = history + [user_message(msg, stage)]
     t.note = fast_note(fast, chat_id)  # read just before the first model call, once a turn
     _typing(typing)
+    if memory is not None:  # its note may need a model call, so it comes after the typing dots
+        history, t.memory = chat_memory(memory, chat_id, upto, limits, who, history)
+    convo = history + [user_message(msg, stage)]
     try:
         return _answer(t, convo, msg, vocab, sizes, names, results=results, send=send)
     except limits_mod.OverLimit as e:
@@ -496,7 +519,7 @@ def _draft(t, convo):
         last = step == MAX_TOOL_STEPS
         picked = _lessons(t)
         defs = [] if last else tools.definitions(ctx.stage)
-        out = ctx.model.chat([system_prompt(ctx.stage, picked, t.note)] + convo, tools=defs or None)
+        out = ctx.model.chat([system_prompt(ctx.stage, picked, t.note, t.memory)] + convo, tools=defs or None)
         calls = out.get("tool_calls") or []
         calls = [c for c in calls if isinstance(c, dict)] if isinstance(calls, list) else []
         if not calls or last:

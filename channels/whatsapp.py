@@ -45,6 +45,9 @@ It listens on 127.0.0.1:PORT (default 8080). Meta must reach it through a public
 - Fast reflection (reflection/fast.py): the same thread then sweeps for chats that ended without
   an order and writes each one note for that customer's next chat only; the turn reads it into
   the prompt. A tick or sweep that fails is logged and the next one tries again.
+- Chat memory (sales/memory.py): each turn hands the case's memory to the Sales turn, which keeps
+  what falls out of the 40 message window, and a returning customer's earlier talks, as one note
+  under the case. When it cannot start, turns see the last 40 messages as before.
 - Night studies (reflection/scheduler.py): one more thread runs each agent's night once a night,
   at NIGHT_HOUR (default 3) in NIGHT_TZ (default Africa/Cairo), each night in a child process of
   its own so it never changes this server's env, logging or store. NIGHT_HOUR=off turns it off. It
@@ -464,7 +467,7 @@ class App:
     """
 
     def __init__(self, chats, model, lessons, results, graph, limits=None, maxsize=MAX_QUEUE, fast=None, clock=None,
-                 connected=None):
+                 connected=None, memory=None):
         """connected: None follows the user's Connect and Pull on the agent page (kit/connections.py,
         read from the chats' database before every turn and tick); False keeps it silent and True
         answers unless the latest row is a Pull, for tests and the demo (main reads WHATSAPP_LIVE)."""
@@ -474,6 +477,7 @@ class App:
         self.clock = clock or getattr(chats, "clock", time.time)  # the quiet tick's clock; tests set it
         self.started = self.clock()  # a quiet notice already due by now is never sent (sales/quiet.py)
         self.fast = fast  # fast reflection's notes (reflection.fast.FastNotes), or None for none
+        self.memory = memory  # the Sales chat memory (sales.memory.Memory), or None: the last 40 messages only
         self.q = queue.Queue(maxsize=maxsize)
 
     def accept(self, items):
@@ -539,7 +543,8 @@ class App:
         dots = getattr(self.graph, "typing", None)  # a test channel may have no dots
         typing = (lambda: dots(inc.message_id)) if dots else None  # the turn calls it once, only when it will answer
         return loop.turn(msg, chats=self.chats, model=self.model, lessons=self.lessons, results=self.results,
-                         send=self.graph.send, limits=self.limits, over=over, fast=self.fast, typing=typing)
+                         send=self.graph.send, limits=self.limits, over=over, fast=self.fast, typing=typing,
+                         memory=self.memory)
 
     def sweep_fast(self, stop=None, every=FAST_EVERY):
         """The quiet tick, then fast reflection's sweep, every `every` seconds until stop (a
@@ -692,8 +697,14 @@ def main():
     except Exception:
         log.exception("fast reflection is off: its notes could not be set up")
         fast = None
+    try:  # the chat memory is never needed to answer: if it cannot start, turns see the last 40 messages
+        from sales.memory import Memory
+        memory = Memory(db, chats)
+    except Exception:
+        log.exception("chat memory is off: it could not be set up")
+        memory = None
     app = App(chats, Model(), Lessons(db, judge=Judge()), Results(db), graph, limits=limits, fast=fast,
-              connected=live_setting(env.get(LIVE_SETTING)))
+              connected=live_setting(env.get(LIVE_SETTING)), memory=memory)
     handler = make_handler(env.get("WHATSAPP_APP_SECRET"), env.get("WHATSAPP_VERIFY_TOKEN"), app.accept, pnid)
     port = int(env.get("PORT", "8080"))
     server = ThreadingHTTPServer(("127.0.0.1", port), handler)

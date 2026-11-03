@@ -391,9 +391,15 @@ class Chats:
         """The chat as OpenAI-style messages, to resume it. Events are left out.
 
         Keeps the last `last` messages and never starts on a tool reply cut off
-        from its call. Media that was sent earlier shows as a short note.
+        from its call. Media that was sent earlier shows as a short note. sales/memory.py keeps
+        what falls out of this window as a short note under the case.
         """
-        msgs = []
+        return from_user([m for _, m in self.numbered(chat_id, upto)][-last:])
+
+    def numbered(self, chat_id, upto=None):
+        """Every message of the chat as messages() writes it, events left out, each with its step
+        number: [(n, message)], oldest first, with no window."""
+        out = []
         for s in self.steps(chat_id, upto):
             if s["role"] == "event":
                 continue
@@ -405,11 +411,8 @@ class Chats:
                 m["tool_calls"] = s["tool_calls"]
             if s["role"] == "tool":
                 m["tool_call_id"] = s["tool_call_id"]
-            msgs.append(m)
-        msgs = msgs[-last:]
-        while msgs and msgs[0]["role"] != "user":
-            msgs.pop(0)
-        return msgs
+            out.append((s["n"], m))
+        return out
 
     # branch and replay
 
@@ -496,6 +499,15 @@ class Chats:
             c.executemany("UPDATE seen_messages SET attempts = attempts + 1, at = ? WHERE message_id = ?",
                           [(now, r["message_id"]) for r in rows])
         return [json.loads(r["payload"]) for r in rows]
+
+def from_user(msgs):
+    """The messages from the first customer message on, so a window never starts on a tool reply
+    cut off from its call."""
+    msgs = list(msgs)
+    while msgs and msgs[0]["role"] != "user":
+        msgs.pop(0)
+    return msgs
+
 
 def _now():
     return time.time()  # looked up at each call, so a test that patches time.time moves it

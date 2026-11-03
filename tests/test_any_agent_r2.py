@@ -12,7 +12,7 @@ from kit import send_check, turn
 from kit.chats import Chats
 from kit.db import Db
 from reflection import quickstart as qs
-from tests.fake_model import FakeModel, clean_env, say
+from tests.fake_model import FakeModel, clean_env, say, tool_call
 
 THREE = json.loads((Path(__file__).resolve().parent / "three_agents.json").read_text(encoding="utf-8"))
 
@@ -187,11 +187,106 @@ class HouseStyleInTheInstructions(unittest.TestCase):
                 json.dumps({"plug": plug, "instructions": a["instructions"]}), name, a["card"]["tools"], a["card"])
             self.assertIsNone(why, name)
             self.assertTrue(words.startswith(a["instructions"].strip()))
-            self.assertTrue(words.endswith(qs.HOUSE_STYLE))
+            self.assertTrue(words.startswith(f"{a['instructions'].strip()}\n\n{qs.HOUSE_STYLE}"))  # then how it acts
             self.assertEqual(words.count(qs.HOUSE_STYLE), 1)
         for rule in ("markdown", "**", "em or en dashes", "emoji"):
             self.assertIn(rule, qs.HOUSE_STYLE)
         self.assertEqual(send_check.style_problems(qs.HOUSE_STYLE.replace("**", "")), [])
+
+
+class EveryStepHasAnAction(unittest.TestCase):
+    """The judge failed the support agent for a ticket it never tagged (tag_ticket was declared, but its
+    instructions never named take_action or the step) and the leads agent for a trial it never booked (no
+    action could book it: the prompt said to leave out anything not connected, and the calendar was not)."""
+
+    def setUp(self):
+        clean_env(self)
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.root = Path(d.name)
+
+    def built(self, name):
+        a = THREE[name]
+        plug = {k: v for k, v in a["plug"].items() if k != "exam"}
+        got, words, why = qs.QuickStart._plug_from(
+            json.dumps({"plug": plug, "instructions": a["instructions"]}), name, a["card"]["tools"], a["card"])
+        self.assertIsNone(why, name)
+        return got, words
+
+    def test_the_steps_each_case_end_and_good_line_name(self):
+        self.assertEqual(qs.steps(THREE["support_calm_helper"]["card"]), [("ticket", "tagged")])
+        self.assertEqual(qs.steps(THREE["lead_trial_booker"]["card"]), [("trial session", "booked")])
+        self.assertEqual(qs.steps(THREE["coffee_caption_writer"]["card"]), [])  # delivered: the reply does it
+        card = {"case": {"ends": "when the lead is not interested or the order is not booked"},
+                "good": "The customer is happy and the refund is approved."}
+        self.assertEqual(qs.steps(card), [("refund", "approved")])
+        self.assertEqual(qs.steps({}), [])
+        self.assertEqual(qs.steps({"case": "x", "good": None}), [])
+
+    def test_only_the_leads_agent_gets_a_booking_action_and_it_says_the_calendar_is_not_connected(self):
+        support, _ = self.built("support_calm_helper")
+        self.assertEqual(support["actions"], THREE["support_calm_helper"]["plug"]["actions"])
+        writer, _ = self.built("coffee_caption_writer")
+        self.assertEqual(writer["actions"], THREE["coffee_caption_writer"]["plug"]["actions"])
+        leads, _ = self.built("lead_trial_booker")
+        before = THREE["lead_trial_booker"]["plug"]["actions"]
+        self.assertEqual(list(leads["actions"]), list(before) + ["mark_trial_session_booked"])
+        said = leads["actions"]["mark_trial_session_booked"]
+        self.assertIn("trial session is booked", said)
+        self.assertIn("Calendar to book trial sessions is not connected yet", said)
+        self.assertIsNone(qs.check_plug(leads))
+        connected = json.loads(json.dumps(THREE["lead_trial_booker"]["card"]))
+        connected["needs"][2]["connected"] = True
+        self.assertNotIn("not connected", qs.add_steps(before, connected)["mark_trial_session_booked"])
+
+    def test_the_instructions_say_how_to_take_each_step_and_name_the_real_tools(self):
+        for name, a in THREE.items():
+            plug, words = self.built(name)
+            self.assertIn(qs.ACT_NOTE, words, name)
+            self.assertIn("take_action", words)
+            for act in plug["actions"]:
+                if act != "reply":
+                    self.assertIn(f"{act} (", words, (name, act))
+            self.assertIn(f"The case ends {a['card']['case']['ends']}", words)
+            self.assertEqual(words.count(qs.HOUSE_STYLE), 1)
+        _, words = self.built("support_calm_helper")
+        tools_line = next(x for x in words.splitlines() if x.startswith("Your tools: "))
+        named = set(tools_line[len("Your tools: "):].split(".")[0].split(", "))
+        self.assertEqual(named, {"find_order", "draft_order", "delivery"})
+        for name in ("lead_trial_booker", "coffee_caption_writer"):  # WhatsApp is the channel, no tool to run
+            self.assertNotIn("Your tools:", self.built(name)[1], name)
+
+    def test_the_built_leads_agent_is_offered_the_booking_and_a_turn_records_it(self):
+        agent = turn.load(agent_folder(self.root, "lead_trial_booker"))
+        self.assertIn("mark_trial_session_booked", agent.acts)
+        db = Db(":memory:")
+        self.addCleanup(db.close)
+        chats = Chats(db)
+        cid = chats.open("whatsapp", "c1")
+        model = FakeModel(tool_call(turn.ACT_TOOL, {"action": "mark_trial_session_booked", "note": "Tuesday 6pm"}),
+                          *[say("See you Tuesday at 6pm for your free trial.")] * 4)
+        out = turn.turn(agent, "Tuesday at 6 works for me", chats=chats, chat_id=cid, model=model,
+                        send=lambda to, text: None, customer_id="c1")
+        self.assertEqual(out.outcome, "replied")
+        self.assertEqual(out.actions, [{"action": "mark_trial_session_booked", "note": "Tuesday 6pm"}])
+
+    def test_the_card_says_before_build_that_it_records_the_booking_until_the_calendar_is_connected(self):
+        from reflection import pages
+        wait = pages.STEP_WAIT.format(thing="trial session", done="booked")
+        html = pages.plan_card(THREE["lead_trial_booker"]["card"])
+        self.assertEqual(html.count(wait), 1)
+        tile = html[html.index("calendar to book trial sessions"):]
+        self.assertLess(tile.index(wait), tile.index("</div>"))
+        connected = json.loads(json.dumps(THREE["lead_trial_booker"]["card"]))
+        connected["needs"][2]["connected"] = True
+        self.assertNotIn("Until it is connected", pages.plan_card(connected))
+        for name in ("support_calm_helper", "coffee_caption_writer"):
+            self.assertNotIn("Until it is connected", pages.plan_card(THREE[name]["card"]), name)
+
+    def test_the_build_prompt_asks_for_every_step_as_an_action(self):
+        self.assertIn("declare it as an action the agent records", qs.BUILD_PROMPT)
+        self.assertIn("instructions say when it takes each declared action", qs.BUILD_PROMPT)
+        self.assertNotIn("is not connected yet: leave it out", qs.BUILD_PROMPT)
 
 
 if __name__ == "__main__":

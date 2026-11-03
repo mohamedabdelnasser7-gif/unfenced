@@ -1270,6 +1270,9 @@ def case_value(label, value):
 
 SAMPLE_STATE = "Sample data for now"            # a need with no real connection, read from the sample data
 STORE_SAMPLE = "Sample data until the store is connected"  # the store need with no Shopify keys
+# A step the case's end needs (reflection/quickstart.py steps) whose need is not connected: the card says,
+# before Build, that the agent records it and the user does that part until it is connected.
+STEP_WAIT = "Until it is connected, it records the {thing} as {done} and you do that part."
 DATA_NOTE = "Paste rows (CSV or JSON) or plain lines, or choose a file. They are added as yours."
 
 
@@ -1333,11 +1336,14 @@ def plan_card(card, data=None):
            + "".join(f"<div><dt>{t}</dt><dd>{v}</dd></div>" for t, v in rows) + "</dl></section>"]
     if card["needs"]:
         out.append('<div class="needs"><span class="lab">What it needs connected</span>')
+        steps = qs_mod.steps(card)
         for n in card["needs"]:
             said, on = need_state(n, data)
+            waits = "" if on else "".join(f"<small>{h(STEP_WAIT.format(thing=t, done=d))}</small>" for t, d in steps
+                                          if qs_mod.step_need(card, (t, d)) is n)
             out.append(f'<div class="file{" on" if on else ""}"><span class="fi">'
                        f'{icon("check" if on else "plus")}</span><div><b dir="auto">{h(n["what"])}</b>'
-                       f"<small>{h(said)}</small></div><span></span></div>")
+                       f"<small>{h(said)}</small>{waits}</div><span></span></div>")
         out.append("</div>")
     out.append(sample_line(data))
     return "".join(out)

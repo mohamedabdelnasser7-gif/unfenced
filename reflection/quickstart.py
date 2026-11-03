@@ -323,12 +323,13 @@ An example plug, for a personal assistant:
 
 Rules for this plug:
 - agent is "{agent}". Leave out exam, kind, owner and hands_over.
-- Connected tools: {tools}. Its actions use only these, or plain writing the model does itself. Anything else the card needs is not connected yet: leave it out.
+- Connected tools: {tools}. Its actions use only these, or plain writing the model does itself. Anything else the card needs is not connected yet: no tool for it, but when the case's end or the good result needs that step done (a booking, a tag, a close), declare it as an action the agent records with its details.
 - case is one plain line from the card's case: what arrives, who starts, what the agent produces, when it ends.
 - stages: one stage only.
 - decides.good is the result that matches the card's good result. decides.bad names at least one result that ends a case without it, including the result that matches the card's bad result (for example the chat closing with no sale, or the user correcting the work): with none, no case could ever end not good and the agent could never learn from a miss. No timer ends a case, so a case with neither waits for one.
 - Leave out shows_in_days in results: no day count settles anything.
-- When the agent takes a step beyond writing (a tag such as "needs the team", a close), it is a declared action of its own.
+- When the agent takes a step beyond writing (a tag such as "needs the team", a close, a booking), it is a declared action of its own. Every step the case's end or the good result names is one: "ends when the trial is booked" needs an action that books or records the booking.
+- instructions say when it takes each declared action and when it runs each connected tool.
 - No chat goes to a person: no handoff tool, no with_person stage, no action that passes a chat to a team. A tag the agent sets is its own action, never a hand over. Leave the subject of people taking chats out of the plug and the instructions entirely, never lines too.
 - risk high covers money (prices, amounts, discounts, fees, payment), refunds and replacements, personal data, promises to someone outside about dates or delivery, and anything that leaves the agent for the outside world beyond its normal work. Its normal work is never high: leave the nouns and verbs of the card's case output and of what it does (its reply, its caption, its booking, its next step) out of the high words, and leave out words that only name a time, a step or its own tools. Low covers how it does its own work.
 - instructions: the agent's own prompt in plain words, from the card: what it does and for whom, what a good result is, what it never does, and how it uses its connected tools. No dashes.
@@ -608,6 +609,112 @@ LOW_ABOUT = ("The agent's own work ({output}): how it writes, words, orders, tim
              "with none of the high risk parts.")
 
 
+# ---- the steps a case needs (every step its end or good result names is an action the agent has) ----
+
+# "the ticket is tagged", "both captions are delivered", "the trial session is booked": a thing, then the
+# word that says it is done. A step done by the agent's reply itself (sent, delivered) needs no action.
+_STEP = re.compile(r"(?<![a-z])(?:the|a|an|its|their|his|her|your|our|each|every|both|all)\s+((?:[a-z]+\s+){0,2}?[a-z]+)"
+                   r"\s+(?:is|are|was|were|has\s+been|have\s+been|gets|get|got)\s+(?:(?:now|then|all|fully|finally|"
+                   r"already)\s+)?([a-z]+ed|[a-z]+en|sent|done|made|set|put|paid|built|sold|kept|held|told)(?![a-z])",
+                   re.IGNORECASE)
+REPLY_STEPS = frozenset(("sent", "delivered", "written", "answered", "replied", "given", "received", "seen", "read"))
+NOT_STEPS = frozenset(("interested", "satisfied", "pleased", "happy", "confused", "tired", "worried", "annoyed",
+                       "pressured", "heard", "helped", "frozen", "broken", "stolen", "forgotten", "hidden"))
+ACT_NOTE = ("How you take your steps: each time you take one, call the take_action tool with the step's name and a "
+            "short note (for a tag, the tag; for a booking, the day and time), in the same turn as your reply. A step "
+            "you only write about is not taken.")
+
+
+def steps(card):
+    """(thing, done) for each step the card's case end and good line say is done, in order, once each:
+    "when the ticket is tagged" is ("ticket", "tagged"). A step the reply itself does (sent, delivered),
+    a feeling (interested, helped) and one after "not" are left out."""
+    case = card.get("case") if isinstance(card, dict) and isinstance(card.get("case"), dict) else {}
+    out = []
+    for text in (case.get("ends"), card.get("good") if isinstance(card, dict) else None):
+        for m in _STEP.finditer(text or ""):
+            thing, done = " ".join(m.group(1).lower().split()), m.group(2).lower()
+            if done in REPLY_STEPS or done in NOT_STEPS or re.search(r"(?<![a-z])not\s*$", text[:m.start(2)][-12:]):
+                continue
+            if (thing, done) not in out:
+                out.append((thing, done))
+    return out
+
+
+def _shares(done, text):
+    """True when text holds a form of the done word (booked meets book, booking, books)."""
+    forms = _stems(done)
+    return any(_stems(t) & forms for t in _TOKEN.findall((text or "").lower().replace("_", " ")))
+
+
+def step_need(card, step):
+    """The card's need whose words name the step (a calendar to book trial sessions, for "booked"), or None."""
+    for n in card.get("needs", []) if isinstance(card, dict) else ():
+        if isinstance(n, dict) and _shares(step[1], n.get("what", "")):
+            return n
+    return None
+
+
+def step_action(actions, step):
+    """The declared action whose name or line names the step, or None."""
+    for name, said in (actions.items() if isinstance(actions, dict) else ()):
+        if _shares(step[1], f"{name} {said if isinstance(said, str) else ''}"):
+            return name
+    return None
+
+
+def step_name(step):
+    """The action Build declares for a step no action names: mark_<thing>_<done>, a plug name."""
+    s = re.sub(r"[^a-z0-9]+", "_", f"mark {step[0]} {step[1]}".lower()).strip("_")
+    return s[:40].rstrip("_")
+
+
+def add_steps(actions, card):
+    """The plug's actions with one more for each step the card's case needs that no action names, so the
+    agent can take it (kit/turn.py take_action) and the judge can see it. A step whose need is not
+    connected says the note is its record until it is."""
+    if not isinstance(actions, dict):
+        return actions
+    out = dict(actions)
+    for step in steps(card):
+        if step_action(out, step) is not None:
+            continue
+        name = step_name(step)
+        if not plug_mod.NAME.fullmatch(name) or name in out:
+            continue
+        line_ = f"Record that the {step[0]} is {step[1]}, with its details, once it is."
+        need = step_need(card, step)
+        if need is not None and not need.get("connected"):
+            line_ += f" {_cap(need.get('what', ''))} is not connected yet, so this note is its record until it is."
+        out[name] = line_
+    return out
+
+
+def _cap(text):
+    text = str(text or "").strip()
+    return text[:1].upper() + text[1:]
+
+
+def how_it_acts(plug, card, tools):
+    """The instructions' last part, written by the code: how it takes each declared step (take_action,
+    kit/turn.py), what the case's end needs done, and its tools to run (the kit/tools names the agent is
+    offered, kit/turn.py tools_of, so WhatsApp, the channel, is none). "" with neither."""
+    acts = [(a, said) for a, said in plug.get("actions", {}).items() if a != "reply"] if isinstance(plug, dict) else []
+    case = card.get("case") if isinstance(card, dict) and isinstance(card.get("case"), dict) else {}
+    parts = []
+    if acts and case:  # take_action is offered to a card with a case (kit/turn.py acts)
+        parts.append(ACT_NOTE)
+        parts.append("Your steps: " + "; ".join(f"{a} ({line(said, 200).rstrip('.')})" for a, said in acts) + ".")
+        if case.get("ends"):
+            ends = line(case["ends"], CAPS["ends"]).rstrip(".")
+            parts.append(f"The case ends {ends}: take every step that line names before it ends, and take each "
+                         "other step when the case reaches it.")
+    if tools:
+        parts.append(f"Your tools: {', '.join(tools)}. Run them to read what you need before you answer, and never "
+                     "guess what they would say.")
+    return "\n".join(parts)
+
+
 def clean_plug(raw, agent, tools, card=None):
     """The model's plug with what the code sets itself: the agent's name, the strict trial levels,
     no keys that need files or other agents, its tools exactly the connected ones, its high risk cleaned
@@ -624,6 +731,8 @@ def clean_plug(raw, agent, tools, card=None):
     out["trial"] = json.loads(json.dumps(STRICT_TRIAL))
     if "risk" in out:  # tools: the connected ones only, whatever the model wrote
         out["risk"] = clean_risk(out["risk"], card or {}, tools)
+    if card and "actions" in out:  # every step the case's end or good line names is an action it has
+        out["actions"] = add_steps(out["actions"], card)
     return out
 
 
@@ -980,10 +1089,14 @@ class QuickStart:
             return None, None, "the instructions were empty"
         if names_a_person(words):
             return None, None, NO_PERSON_SAID
-        if HOUSE_STYLE not in words:  # the send check holds every agent to it (kit/send_check.py named_style)
-            words = f"{words}\n\n{HOUSE_STYLE}"
         if len(words) > MAX_INSTRUCTIONS:
             return None, None, f"the instructions are over {MAX_INSTRUCTIONS} characters"
+        if HOUSE_STYLE not in words:  # the send check holds every agent to it (kit/send_check.py named_style)
+            words = f"{words}\n\n{HOUSE_STYLE}"
+        from kit import turn as turn_mod
+        acting = how_it_acts(plug, card or {}, turn_mod.tools_of(plug_mod.from_dict(plug))[0])
+        if acting:  # every declared step and tool, and when: the model's words alone named none of them
+            words = f"{words}\n\n{acting}"
         return plug, words, None
 
     @staticmethod

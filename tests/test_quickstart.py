@@ -200,7 +200,10 @@ class QuickStartPage(unittest.TestCase):
         self.assertEqual(card["good"], "You hear about a low item a day before it runs out.")
         self.assertEqual(card["tools"], ["store"])  # Bosta is not in the repo: on the card, not connected, not in the plug
         self.assertEqual([n["connected"] for n in card["needs"]], [True, False])
-        self.assertIn("watch the store", (where / "instructions.md").read_text(encoding="utf-8"))
+        words = (where / "instructions.md").read_text(encoding="utf-8")
+        self.assertIn("watch the store", words)
+        self.assertIn(qs.ACT_NOTE, words)  # Build passes the card, so the instructions say how it takes its steps
+        self.assertIn("Your steps: check (", words)
         page = self.get()  # the build page's steps, all ticked, then Go to the Arena on the agent's Arena tab
         for done in ("Card read", "Plug written and checked", "Exam written", "Files saved", "agents/stock_watcher",
                      "Ready for the Arena"):

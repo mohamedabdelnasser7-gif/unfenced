@@ -162,6 +162,9 @@ svg.i{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.6;
 .say textarea{min-height:84px; font-size:18px; line-height:25px}
 .say-f{display:flex; align-items:center; gap:12px; margin-top:12px}
 .say-f .quiet{flex:1; margin:0}
+.say-f .pick{align-items:center; min-width:0}
+.say-f .pick input{min-width:0; max-width:100%; font:400 13px/18px var(--font); color:var(--ink-2)}
+.sdata{margin:12px 2px 0}
 .send{height:48px; padding:0 20px; border-radius:24px; display:inline-flex; align-items:center; gap:8px; background:var(--volt); color:var(--ink); font:600 15px/1 var(--font); flex:none;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.6), 0 12px 24px -14px rgba(90,110,0,.7)}
 .send svg.i{width:18px; height:18px; stroke-width:2}

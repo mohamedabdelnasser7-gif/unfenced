@@ -224,3 +224,170 @@ class PracticeSeesTheSameData(tap.Base):
         self.assertIn("Trail Cap", seen[0])
         self.assertEqual(world.judged[0]["data"][2]["title"], "Trail Cap")
         self.assertIn(turn.DATA_TOOL, rep["tools"])
+
+
+# ---- the card shows the sample data, and the user can add more (build page, Overview, /agents/data) ----
+
+import http.client  # noqa: E402
+import threading  # noqa: E402
+
+from tests.test_late_marks import multipart  # noqa: E402
+from tests.test_quickstart import no_keys  # noqa: E402
+
+CARD_LINE = "Sample data made for this agent: products with stock counts, 3 made up."
+STORE_SET = dict.fromkeys(("SHOPIFY_STORE", "SHOPIFY_TOKEN"), "fake")  # both Shopify keys, fake values
+
+
+class CardShowsSampleData(PageCase):
+    def setUp(self):
+        PageCase.setUp(self)
+        self.m.db_path = str(self.folder / "ascent.db")  # the live page, so the built agent joins it
+        keys = no_keys()
+        keys.start()
+        self.addCleanup(keys.stop)
+
+    def built(self):
+        self.page(card_reply(), plug_reply(), exam_reply(), sample_reply())
+        self.send("an agent for my stock")
+        before = self.get()
+        self.assertNotIn(f'action="{mo.DATA_PATH}"', before)  # no add box before it is built
+        self.assertNotIn("Sample data made", before)
+        self.assertTrue(self.build().startswith("Built Stock watcher"))
+        return self.get()
+
+    def test_the_card_says_it_made_sample_data_and_the_build_page_takes_more(self):
+        page = self.built()
+        self.assertIn(CARD_LINE, page)
+        form = page.split(f'action="{mo.DATA_PATH}"')[1].split("</form>")[0]
+        for part in ('enctype="multipart/form-data"', 'name="text"', 'type="file" name="file"',
+                     'name="agent" value="stock_watcher"', pages.DATA_NOTE):
+            self.assertIn(part, form)
+
+    def test_overview_shows_the_sample_data_and_the_add_box(self):
+        self.built()
+        page = self.p.get("/agents/stock_watcher", {}, "t")
+        self.assertIn('<h3 id="sd-h">Sample data</h3>', page)
+        self.assertIn(CARD_LINE, page)
+        self.assertIn(f'action="{mo.DATA_PATH}"', page)
+        self.assertNotIn(f'action="{mo.DATA_PATH}"', self.p.get("/agents/stock_watcher", {}, ""))  # no token, no box
+        self.assertNotIn("Sample data", self.p.get("/agents/sales", {}, "t"))  # only an agent made here
+
+    def test_a_store_need_is_sample_data_with_no_keys_and_connected_with_them(self):
+        page = self.built()
+        need = page.split("Your store&#x27;s stock")[1].split("</small>")[0]
+        self.assertIn(pages.STORE_SAMPLE, need)
+        self.assertNotIn("Connected", need)
+        with mock.patch.dict(os.environ, STORE_SET):
+            need = self.get().split("Your store&#x27;s stock")[1].split("</small>")[0]
+        self.assertIn("Connected: Store", need)
+
+
+class AddData(unittest.TestCase):
+    def setUp(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.dir = Path(d.name).resolve()
+        self.folder = self.dir / "agents" / "stock_watch"
+        shutil.copytree(tap.FIXTURE, self.folder)
+        sample.write(self.folder, sample.made("products with stock counts", PRODUCTS))
+        from engine import plug as plug_mod
+        from kit.db import Db
+        self.db = Db(str(self.dir / "ascent.db"))
+        self.addCleanup(self.db.close)
+        self.m = mo.Morning(self.db, [plug_mod.load(tq.ROOT / "sales" / "plug.json")], reports=self.dir,
+                            built={"stock_watch"}, db_path=self.dir / "ascent.db")
+
+    def rows(self):
+        return sample.read(self.folder)["rows"]
+
+    def test_pasted_csv_json_and_plain_lines_and_a_file_are_added_as_the_users(self):
+        said = self.m.add_data("stock_watch", "name,price,stock\nRed Cap,250,4\nGrey Scarf,90,0\n")
+        self.assertEqual(said, "Added 2 rows to its sample data. Its next practice reads them.")
+        self.m.add_data("stock_watch", json.dumps([{"title": "Blue Bag", "price": 800}]))
+        self.assertEqual(self.m.add_data("stock_watch", "call Sara back on Sunday"),
+                         "Added 1 row to its sample data. Its next practice reads them.")
+        self.m.add_data("stock_watch", "", b"title,price\nGreen Hat,150\n")
+        rows = self.rows()
+        self.assertEqual([r["by"] for r in rows], [sample.MADE_UP] * 3 + [sample.USER] * 5)
+        self.assertEqual(rows[3]["row"], {"name": "Red Cap", "price": "250", "stock": "4"})
+        self.assertEqual(rows[5]["row"], {"title": "Blue Bag", "price": 800})
+        self.assertEqual(rows[6]["row"], {"text": "call Sara back on Sunday"})
+        self.assertEqual(rows[7]["row"], {"title": "Green Hat", "price": "150"})
+        self.assertEqual(sample.words(sample.read(self.folder)),
+                         "Sample data made for this agent: products with stock counts, 3 made up, 5 added by you.")
+        self.assertEqual(sample.rows_of(sample.read(self.folder))[-1]["source"], "added by the user")
+
+    def test_markup_is_stripped_and_nothing_is_run(self):
+        with mock.patch("builtins.eval") as ev, mock.patch("builtins.exec") as ex:
+            self.m.add_data("stock_watch", '<script>alert(1)</script>\n__import__("os").system("x")')
+        ev.assert_not_called()
+        ex.assert_not_called()
+        got = [r["row"]["text"] for r in self.rows()[3:]]
+        self.assertEqual(got, ["scriptalert(1)/script", '__import__("os").system("x")'])
+
+    def test_refusals_save_nothing(self):
+        before = (self.folder / sample.FILE).read_bytes()
+        cases = [("sales", "a,b\n1,2", b""), ("stock_watch", "", b""), ("stock_watch", "  \n ", b""),
+                 ("stock_watch", "\n".join(f"row {n}" for n in range(sample.MAX_ADD + 1)), b""),
+                 ("stock_watch", "x" * (sample.MAX_TEXT + 1), b""), ("stock_watch", "", b"\xff\xfe\x00bad"),
+                 ("stock_watch", "", b"a" * (sample.MAX_UPLOAD + 1)), ("stock_watch", "[{broken", b"")]
+        for agent, text, raw in cases:
+            with self.subTest(agent=agent, text=text[:20], raw=raw[:10]):
+                with self.assertRaises(mo.Refused):
+                    self.m.add_data(agent, text, raw)
+        self.assertEqual((self.folder / sample.FILE).read_bytes(), before)
+        with self.assertRaises(mo.Refused):  # the same folder, but the page does not count it as made here
+            mo.Morning(self.db, [], built=(), db_path=self.dir / "ascent.db").add_data("stock_watch", "a")
+
+
+class DataPost(AddData):
+    def serve(self, two_tabs=True):
+        server = mo.make_server(self.m, port=0, pages=pages.Pages(self.m) if two_tabs else None)
+        thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+        thread.start()
+
+        def stop():
+            server.shutdown()
+            server.server_close()
+            thread.join(5)
+        self.addCleanup(stop)
+        return server
+
+    def post(self, server, body, kind, length=None):
+        here = f"127.0.0.1:{server.server_address[1]}"
+        headers = {"Host": here, "Content-Type": kind, "Origin": f"http://{here}"}
+        if length is not None:
+            headers["Content-Length"] = str(length)
+        conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
+        try:
+            conn.request("POST", mo.DATA_PATH, body, headers)
+            r = conn.getresponse()
+            r.read()
+            return r.status
+        finally:
+            conn.close()
+
+    def test_the_token_the_size_cap_and_the_form_are_checked(self):
+        server = self.serve()
+        before = (self.folder / sample.FILE).read_bytes()
+        good = [("agent", "stock_watch"), ("text", "Red Cap\nGrey Scarf")]
+        cases = [(multipart(good), 403), (multipart([("token", "guess")] + good), 403),
+                 (multipart([("token", server.token)] + good + [("other", "x")]), 400),
+                 (multipart([("token", server.token), ("token", server.token)] + good), 400),
+                 ((b"agent=stock_watch&text=Red", "application/x-www-form-urlencoded"), 415)]
+        for (body, kind), want in cases:
+            with self.subTest(want=want, body=body[:60]):
+                self.assertEqual(self.post(server, body, kind), want)
+        body, kind = multipart([("token", server.token)] + good)
+        self.assertEqual(self.post(server, body, kind, length=mo.MAX_DATA_POST + 1), 413)
+        self.assertEqual((self.folder / sample.FILE).read_bytes(), before)
+        self.assertEqual(self.post(server, body, kind), 303)
+        self.assertEqual([r["row"]["text"] for r in self.rows()[3:]], ["Red Cap", "Grey Scarf"])
+        body, kind = multipart([("token", server.token), ("agent", "stock_watch"), ("file", b"title,price\nHat,90\n")])
+        self.assertEqual(self.post(server, body, kind), 303)
+        self.assertEqual(self.rows()[-1], {"by": sample.USER, "row": {"title": "Hat", "price": "90"}})
+
+    def test_the_one_page_server_has_no_data_post(self):
+        server = self.serve(two_tabs=False)
+        body, kind = multipart([("token", server.token), ("agent", "stock_watch"), ("text", "Red Cap")])
+        self.assertEqual(self.post(server, body, kind), 404)

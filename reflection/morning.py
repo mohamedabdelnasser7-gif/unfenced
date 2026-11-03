@@ -854,6 +854,34 @@ class Morning:
             return []
         return [c for c in conn_mod.CHANNELS if c in tools]
 
+    def agent_folder(self, agent):
+        """The folder of an agent Quick start built, beside the database; None for any other agent or with
+        no database path (the sample days)."""
+        if agent not in self.built or self.db_path is None:
+            return None
+        from kit import turn as turn_mod
+        return Path(self.db_path).resolve().parent / turn_mod.AGENTS / agent
+
+    def sample_data(self, agent):
+        """The built agent's sample data (kit/sample.py read), or None."""
+        from kit import sample
+        folder = self.agent_folder(agent)
+        return None if folder is None else sample.read(folder)
+
+    def add_data(self, agent, text, raw=b"", now=None):
+        """Rows or a file the user adds to a built agent's sample data, marked as the user's (kit/sample.py
+        add): parsed in code as JSON, CSV or plain lines, never run, every value capped and plain. Its next
+        practice and its tools read them. Refused, with nothing saved, for any other agent."""
+        from kit import sample
+        folder = self.agent_folder(agent)
+        if folder is None or folder.is_symlink() or not folder.is_dir():
+            raise Refused("Only an agent made here takes sample data.")
+        try:
+            n = sample.add(folder, text, raw or b"")
+        except sample.Refused as e:
+            raise Refused(str(e)) from None
+        return f"Added {n} {'row' if n == 1 else 'rows'} to its sample data. Its next practice reads them."
+
     def gate(self, agent):
         """Did the agent's latest Arena gate pass? From the newest Arena item saved next to the database
         (read_arena): a rounds item whose last gate won at least the wins its level needs, that says it was
@@ -2941,11 +2969,16 @@ ACTIONS = {"/stop": lambda m, f, now=None: m.stop(_field(f, "lesson"), _field(f,
                                                             now=now),
            "/mode": lambda m, f, now=None: m.answer_mode(_field(f, "agent"), _field(f, "card"), _field(f, "choice"),
                                                          _field(f, "name") if "name" in f else "", now=now)}
-SHEET_PATH = "/late_sheet"  # the one POST that takes a file: multipart, its own size cap (MAX_SHEET)
+SHEET_PATH = "/late_sheet"  # a POST that takes a file: multipart, its own size cap (MAX_SHEET)
 SHEET_FIELDS = ("token", "back", "agent", "sheet")
+DATA_PATH = "/agents/data"  # rows or a file added to a built agent's sample data (Morning.add_data): multipart too
+DATA_FIELDS = ("token", "back", "agent", "text", "file")
+MAX_DATA_POST = 160 * 1024  # bytes in one sample data POST: the file (kit/sample.py MAX_UPLOAD) and the pasted text
+# the multipart POSTs: their fields, the one field that is a file, and the whole request's cap
+MULTIPART = {SHEET_PATH: (SHEET_FIELDS, "sheet", MAX_SHEET), DATA_PATH: (DATA_FIELDS, "file", MAX_DATA_POST)}
 
 
-def sheet_fields(content_type, body):
+def sheet_fields(content_type, body, fields=SHEET_FIELDS, file="sheet"):
     """{name: [value]} from the sheet upload's multipart/form-data body: the file (sheet) as bytes,
     every other field as text. Read with the standard library's email parser, at most one part per
     field it takes and only those fields; ValueError for anything else, so nothing is saved."""
@@ -2958,16 +2991,16 @@ def sheet_fields(content_type, body):
         msg = BytesParser(policy=policy.HTTP).parsebytes(
             b"MIME-Version: 1.0\r\nContent-Type: " + ct.encode("latin-1") + b"\r\n\r\n" + body)
         parts = msg.get_payload() if msg.is_multipart() else None
-        if not isinstance(parts, list) or not 0 < len(parts) <= len(SHEET_FIELDS):
+        if not isinstance(parts, list) or not 0 < len(parts) <= len(fields):
             raise ValueError("not a sheet upload")
         out = {}
         for part in parts:
             name = part.get_param("name", header="content-disposition")
-            if part.get_content_disposition() != "form-data" or name not in SHEET_FIELDS or name in out \
+            if part.get_content_disposition() != "form-data" or name not in fields or name in out \
                     or part.is_multipart():
                 raise ValueError("not a sheet upload")
             data = part.get_payload(decode=True) or b""
-            out[name] = [data if name == "sheet" else data.decode("utf-8")]
+            out[name] = [data if name == file else data.decode("utf-8")]
     except ValueError:
         raise
     except Exception:  # the email parser's own errors: still not a sheet upload
@@ -2975,8 +3008,8 @@ def sheet_fields(content_type, body):
     return out
 
 
-def _sheet(form):
-    got = form.get("sheet") or [b""]
+def _sheet(form, name="sheet"):
+    got = form.get(name) or [b""]
     return got[0] if isinstance(got[0], bytes) else b""
 
 
@@ -2985,7 +3018,10 @@ def _sheet(form):
 A3_ONLY = ("/idea", "/edit")
 TWO_TAB_ACTIONS = {**{k: v for k, v in ACTIONS.items() if k not in A3_ONLY},
                    # Try again on the Arena screen (Morning.try_again): the two tab page only
-                   "/tryagain": lambda m, f, now=None: m.try_again(_field(f, "agent"), now=now)}
+                   "/tryagain": lambda m, f, now=None: m.try_again(_field(f, "agent"), now=now),
+                   # rows or a file the user adds to a built agent's sample data (kit/sample.py)
+                   DATA_PATH: lambda m, f, now=None: m.add_data(_field(f, "agent"), _field(f, "text"),
+                                                                 _sheet(f, "file"), now=now)}
 
 
 def make_server(morning, *, port=int(PORT_DEFAULT), token=None, pages=None):
@@ -3056,6 +3092,7 @@ def _handler(morning, token, pages=None):
             table = ACTIONS if pages is None else {**TWO_TAB_ACTIONS, **getattr(pages, "actions", {})}  # + Quick start
             path = urllib.parse.urlsplit(self.path).path
             sheet = path == SHEET_PATH  # the sheet upload: a file, so multipart and its own size cap
+            multi = MULTIPART.get(path) if sheet or path in table else None
             act = (lambda m, f, now=None: m.late_sheet(_field(f, "agent"), _sheet(f), now=now)) if sheet else \
                 table.get(path)
             if act is None:
@@ -3064,14 +3101,14 @@ def _handler(morning, token, pages=None):
                 length = int(self.headers.get("Content-Length") or "")
             except ValueError:
                 return self._send(411, "A length is needed.\n")
-            if not 0 <= length <= (MAX_SHEET if sheet else MAX_BODY):
+            if not 0 <= length <= (multi[2] if multi else MAX_BODY):
                 return self._send(413, "Too long.\n")
             kind = (self.headers.get("Content-Type") or "").lower()
-            if not kind.startswith("multipart/form-data" if sheet else "application/x-www-form-urlencoded"):
+            if not kind.startswith("multipart/form-data" if multi else "application/x-www-form-urlencoded"):
                 return self._send(415, "A form is needed.\n")
             try:
-                if sheet:
-                    form = sheet_fields(self.headers.get("Content-Type"), self.rfile.read(length))
+                if multi:
+                    form = sheet_fields(self.headers.get("Content-Type"), self.rfile.read(length), multi[0], multi[1])
                 else:
                     form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"), keep_blank_values=True,
                                                  max_num_fields=8)

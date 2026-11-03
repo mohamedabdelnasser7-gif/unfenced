@@ -25,6 +25,12 @@ from tests.fake_model import FakeModel, say
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def no_keys():
+    """The environment with no Shopify or WhatsApp keys, so a store or WhatsApp need is not connected."""
+    return mock.patch.dict(os.environ, {k: v for k, v in os.environ.items()
+                                        if not k.startswith(("SHOPIFY", "WHATSAPP"))}, clear=True)
+
+
 CASE = {"input": "a customer's question about whether an item is in stock", "starts": "person",
         "output": "a clear in stock or out of stock answer", "ends": "the customer has the answer"}
 
@@ -101,9 +107,10 @@ class QuickStartPage(unittest.TestCase):
         self.assertIn("Start the build", before)
         self.assertNotIn('class="plan"', before)
         self.assertIsNone(self.send("i want an agent to track my stock in bosta"))
-        page = self.get()
+        with no_keys():
+            page = self.get()
         for words in ("Stock watcher", "Checks stock every morning", "a day before it runs out",
-                      "Never orders stock by itself", "Your store&#x27;s stock", "Connected: Store",
+                      "Never orders stock by itself", "Your store&#x27;s stock", pages.STORE_SAMPLE,
                       "Bosta stock reports", "Not connected yet", "i want an agent to track my stock in bosta"):
             self.assertIn(words, page)
         self.assertIn('action="/quickstart/build"', page)
@@ -209,11 +216,13 @@ class QuickStartPage(unittest.TestCase):
                  {"what": "Your Shopify stock", "tool": "store"}]
         self.page(card_reply(needs=needs), plug_reply(), exam_reply())
         self.send("i want an agent to track my stock in bosta")
-        page = self.get()
+        with no_keys():
+            page = self.get()
         bosta = page.split("Bosta stock levels")[1].split("</small>")[0]
         self.assertIn("Not connected yet", bosta)
         self.assertNotIn("Connected: Store", bosta)
-        self.assertIn("Connected: Store", page.split("Your Shopify stock")[1].split("</small>")[0])
+        # the store tool reaches it, but with no Shopify keys it reads sample data (kit/sample.py)
+        self.assertIn(pages.STORE_SAMPLE, page.split("Your Shopify stock")[1].split("</small>")[0])
         self.build()
         card = json.loads((self.folder / "agents" / "stock_watcher" / "card.json").read_text(encoding="utf-8"))
         self.assertEqual([(n["tool"], n["connected"]) for n in card["needs"]], [("", False), ("", False), ("store", True)])

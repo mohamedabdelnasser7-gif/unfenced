@@ -46,6 +46,7 @@ import time
 import urllib.parse
 
 from engine import lessons as lessons_mod
+from kit import sample as sample_mod
 from reflection import console as console_mod
 from reflection import morning as mo
 from reflection import quickstart as qs_mod
@@ -856,6 +857,15 @@ def overview_tab(m, view, a, agent, st, ctx):
             f'</small></div><div class="st-r">{roll}{pull}</div></section>']
     if conns:
         left.append(connections_html(agent, conns, ctx, tok))
+    folder = m.agent_folder(agent) if hasattr(m, "agent_folder") else None
+    if folder is not None:  # an agent made here: its sample data and the box that adds to it
+        data = m.sample_data(agent)
+        line = sample_mod.words(data) or "No sample data yet. Add rows it can work from."
+        left.append(f'<section class="grp sq" aria-labelledby="sd-h"><h3 id="sd-h">Sample data</h3><div class="lr">'
+                    f'<b dir="auto">{h(line)}</b><small>Made up for practice until a real connection is set.</small>'
+                    '</div></section>')
+        if tok:
+            left.append(data_form(ctx, agent))
     if tok:
         left.append(f'<section class="say sq" aria-label="Send an idea or a correction"><form method="post" action="/correct">'
                     f'{_hidden(ctx, agent=agent)}<span class="lab">Send an idea or a correction</span><div class="box">'
@@ -1105,6 +1115,7 @@ def new_agent(m, quick, ctx, run=None):
                 f'press Build. It starts from zero and earns every lesson in the Arena.</p>{form}{"".join(notes)}'
                 "</section></div>")
     out = []
+    data = m.sample_data(built) if built and not building else None  # made at Build, shown on its card
     split = run is not None and run.error is None  # turns after Build was pressed show under its steps
     head = turns[:min(run.base, len(turns))] if split else turns
     later = iter(turns[len(head):])
@@ -1115,7 +1126,7 @@ def new_agent(m, quick, ctx, run=None):
             out.append(f'<div class="bot">{_who()}<p class="uf" dir="auto">{h(t["follow"])}</p></div>')
             continue
         card = [f'<div class="bot">{_who()}<p class="uf" dir="auto">{h(t["follow"])}</p><div class="acard sq">'
-                f'<span class="lab">Agent card</span>{plan_card(t["card"])}']
+                f'<span class="lab">Agent card</span>{plan_card(t["card"], data)}']
         if t["question"] and not built and not building:
             card.append(f'<p class="uq" dir="auto">{h(t["question"])}</p>')
         if built or building or run is not None and run.error is None:
@@ -1137,6 +1148,8 @@ def new_agent(m, quick, ctx, run=None):
         practice = quick.practice_line(built) if built else None
         if practice:
             out.append(f'<div class="bot">{_who()}<p role="status">{h(practice)}</p></div>')
+        if built and not building and tok and m.agent_folder(built) is not None:  # it can take more data
+            out.append(f'<div class="bot">{_who()}{data_form(ctx, built)}</div>')
     for t in run.taken if split else ():
         out.append(f'<div class="you"><span dir="auto">{h(t["said"])}</span></div>')
         if t["kind"] == "card":  # the model wrote the card again: its new follow line, as written
@@ -1175,7 +1188,46 @@ def case_value(label, value):
     return cut or v
 
 
-def plan_card(card):
+SAMPLE_STATE = "Sample data for now"            # a need with no real connection, read from the sample data
+STORE_SAMPLE = "Sample data until the store is connected"  # the store need with no Shopify keys
+DATA_NOTE = "Paste rows (CSV or JSON) or plain lines, or choose a file. They are added as yours."
+
+
+def data_form(ctx, agent):
+    """The box that adds rows or a file to a built agent's sample data (Morning.add_data)."""
+    return (f'<section class="say sq" aria-label="Add sample data"><form method="post" action="{mo.DATA_PATH}" '
+            f'enctype="multipart/form-data">{_hidden(ctx, agent=agent)}<span class="lab">Add data</span><div class="box">'
+            f'<textarea name="text" aria-label="Rows or text to add" maxlength="{sample_mod.MAX_TEXT}" dir="auto" '
+            'placeholder="name, price, stock"></textarea></div><div class="say-f"><label class="quiet pick">'
+            f'{icon("plus")}<input type="file" name="file" aria-label="A CSV or JSON file" '
+            'accept=".csv,.json,.txt,text/csv,application/json,text/plain"></label><button class="send" type="submit">'
+            f'Add{icon("arrow")}</button></div><p class="quiet">{DATA_NOTE}</p></form></section>')
+
+
+def sample_line(data):
+    return f'<p class="quiet sdata">{icon("note")}{h(sample_mod.words(data))}</p>' if data else ""
+
+
+def need_keys(tool):
+    """The keys a tool needs set before its need reads as connected; () for a tool that needs none."""
+    if tool == "store":
+        return ("SHOPIFY_STORE", "SHOPIFY_TOKEN")
+    return ()
+
+
+def need_state(n, data):
+    """(words, connected) for one need on the card: Connected only with a real connection, so the store
+    only with its keys set. The store with no keys, or a need with no tool while the agent has sample data,
+    says sample data."""
+    from kit import env
+    if n["connected"] and not all(env.get(k) for k in need_keys(n["tool"])):
+        return (STORE_SAMPLE, False) if n["tool"] == "store" else ("Not connected yet", False)
+    if n["connected"]:
+        return f'Connected: {qs_mod.TOOLS.get(n["tool"], "").split(":")[0]}', True
+    return (SAMPLE_STATE if data else "Not connected yet"), False
+
+
+def plan_card(card, data=None):
     """The model's card as one plain white card, then what it needs, each marked connected or not yet.
     One case is: what arrives, what the agent gives and when it is over, in the model's words under the
     page's labels, and a line when the agent writes first; then the good and the bad result (DECISIONS
@@ -1199,12 +1251,12 @@ def plan_card(card):
     if card["needs"]:
         out.append('<div class="needs"><span class="lab">What it needs connected</span>')
         for n in card["needs"]:
-            tool = qs_mod.TOOLS.get(n["tool"], "").split(":")[0]
-            said = f"Connected: {h(tool)}" if n["connected"] else "Not connected yet"
-            out.append(f'<div class="file{" on" if n["connected"] else ""}"><span class="fi">'
-                       f'{icon("check" if n["connected"] else "plus")}</span><div><b dir="auto">{h(n["what"])}</b>'
-                       f"<small>{said}</small></div><span></span></div>")
+            said, on = need_state(n, data)
+            out.append(f'<div class="file{" on" if on else ""}"><span class="fi">'
+                       f'{icon("check" if on else "plus")}</span><div><b dir="auto">{h(n["what"])}</b>'
+                       f"<small>{h(said)}</small></div><span></span></div>")
         out.append("</div>")
+    out.append(sample_line(data))
     return "".join(out)
 
 

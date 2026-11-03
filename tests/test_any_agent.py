@@ -228,13 +228,17 @@ class PracticeSeesTheSameData(tap.Base):
 
 # ---- the card shows the sample data, and the user can add more (build page, Overview, /agents/data) ----
 
+import dataclasses  # noqa: E402
 import http.client  # noqa: E402
 import threading  # noqa: E402
 
+from channels import whatsapp  # noqa: E402
+from kit import tools as kit_tools  # noqa: E402
 from tests.test_late_marks import multipart  # noqa: E402
 from tests.test_quickstart import no_keys  # noqa: E402
 
 CARD_LINE = "Sample data made for this agent: products with stock counts, 3 made up."
+WA_SET = dict.fromkeys(whatsapp.REQUIRED_ENV, "fake")      # every WhatsApp key set, to a fake value
 STORE_SET = dict.fromkeys(("SHOPIFY_STORE", "SHOPIFY_TOKEN"), "fake")  # both Shopify keys, fake values
 
 
@@ -280,6 +284,21 @@ class CardShowsSampleData(PageCase):
         with mock.patch.dict(os.environ, STORE_SET):
             need = self.get().split("Your store&#x27;s stock")[1].split("</small>")[0]
         self.assertIn("Connected: Store", need)
+
+    def test_a_whatsapp_need_is_connected_only_with_its_keys(self):
+        self.page(card_reply(needs=[{"what": "Customer chats", "tool": "whatsapp"}]))
+        self.send("an agent for my customer chats")
+
+        def need():
+            return self.get().split("Customer chats")[1].split("</small>")[0]
+        self.assertIn("Not connected yet", need())
+        self.assertNotIn("Connected: WhatsApp", need())
+        one_missing = dict(WA_SET)
+        one_missing[whatsapp.REQUIRED_ENV[0]] = ""
+        with mock.patch.dict(os.environ, one_missing):
+            self.assertNotIn("Connected: WhatsApp", need())
+        with mock.patch.dict(os.environ, WA_SET):
+            self.assertIn("Connected: WhatsApp", need())
 
 
 class AddData(unittest.TestCase):
@@ -391,3 +410,23 @@ class DataPost(AddData):
         server = self.serve(two_tabs=False)
         body, kind = multipart([("token", server.token), ("agent", "stock_watch"), ("text", "Red Cap")])
         self.assertEqual(self.post(server, body, kind), 404)
+
+
+class DataAmountsPass(TheAgentReadsIt):
+    def test_the_data_tool_is_on_the_list_whose_amounts_the_full_check_accepts(self):
+        self.assertIn(data_tool.NAME, kit_tools.AMOUNT_TOOLS)
+        from kit.chats import Chats
+        from kit.db import Db
+        from tests.fake_model import tool_call
+        sample.write(self.folder, sample.made("open tickets", [{"ticket": "late parcel", "fee": 175}]))
+        agent = dataclasses.replace(turn.load(self.folder), full_check=True)
+        db = Db(":memory:")
+        self.addCleanup(db.close)
+        chats = Chats(db)
+        cid = chats.open("whatsapp", "c1")
+        sent = []
+        model = FakeModel(tool_call("data", {"query": "parcel"}), say("The fee for the late parcel is 175 EGP."))
+        got = turn.turn(agent, "What is the fee for the late parcel?", chats=chats, chat_id=cid, model=model,
+                        send=lambda to, text: sent.append(text), customer_id="c1")
+        self.assertEqual(got.outcome, "replied", got)
+        self.assertEqual(sent, ["The fee for the late parcel is 175 EGP."])

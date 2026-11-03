@@ -1212,13 +1212,16 @@ def need_keys(tool):
     """The keys a tool needs set before its need reads as connected; () for a tool that needs none."""
     if tool == "store":
         return ("SHOPIFY_STORE", "SHOPIFY_TOKEN")
+    if tool == "whatsapp":
+        from channels import whatsapp
+        return whatsapp.REQUIRED_ENV
     return ()
 
 
 def need_state(n, data):
-    """(words, connected) for one need on the card: Connected only with a real connection, so the store
-    only with its keys set. The store with no keys, or a need with no tool while the agent has sample data,
-    says sample data."""
+    """(words, connected) for one need on the card: Connected only with a real connection, so the store and
+    WhatsApp only with their keys set. The store with no keys, or a need with no tool while the agent has
+    sample data, says sample data; WhatsApp with no keys is not connected yet."""
     from kit import env
     if n["connected"] and not all(env.get(k) for k in need_keys(n["tool"])):
         return (STORE_SAMPLE, False) if n["tool"] == "store" else ("Not connected yet", False)

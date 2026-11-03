@@ -28,11 +28,13 @@ CONTROL = ("switch_stage",)
 # catalogue, and subtotal, fee and total worked out in code from the catalogue and delivery data.
 # find_order: the total of each of the customer's own past orders, from the store's own record
 # (found by the chat's WhatsApp number, matched exactly in code), so a past order's real total
-# passes. Its items carry no line price today. cod_risk is for the team only and adds none.
+# passes. Its items carry no line price today. data: a price, fee, total or subtotal in the agent's own
+# sample data (kit/sample.py), read from its file in code, rows made up at Build or added by the user,
+# never from the model's arguments. cod_risk is for the team only and adds none.
 # A new tool joins this list only in the PR that builds it, with a line here naming which of
 # its keys (price, fee, total, subtotal) the server computes. A voice note or any other free
 # text never adds an amount.
-AMOUNT_TOOLS = ("store", "delivery", "draft_order", "find_order")
+AMOUNT_TOOLS = ("store", "delivery", "draft_order", "find_order", "data")
 
 
 @dataclass

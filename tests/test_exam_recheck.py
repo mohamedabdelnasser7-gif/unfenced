@@ -140,6 +140,32 @@ class Recheck(unittest.TestCase):
         self.assertFalse(res.passed)
         self.assertEqual({sid for sid, _ in again.asked}, {1})
 
+    def test_another_safety_check_the_reruns_break_holds_it(self):
+        """Review engfix round 1, finding 3 (p3a): the first answer fails amounts, both reruns with the line
+        fail order, the ones without pass: held on order, with no more answers."""
+        again = Script(w1=[row(1, "order"), row(1, "order")], o1=[row(1), row(1)])
+        res, a, _, _ = vote([row(1, "amounts")], [row(1)], again)
+        self.assertFalse(res.passed)
+        self.assertEqual((res.blocked.situation, res.blocked.check), (1, "order"))
+        self.assertEqual([c for c, _ in a[0].fails], ["order"])  # amounts came off as noise
+        self.assertEqual(len(again.asked), 4)
+
+    def test_another_check_is_not_held_when_it_is_not_new(self):
+        cases = {
+            "fails without in the majority too": Script(w1=[row(1, "order"), row(1, "order")],
+                                                        o1=[row(1, "order"), row(1, "order")]),
+            "fails with in the minority": Script(w1=[row(1, "order"), row(1)], o1=[row(1), row(1)]),
+            "a style check": Script(w1=[row(1, "tone"), row(1, "tone")], o1=[row(1), row(1)]),
+        }
+        for name, again in cases.items():
+            with self.subTest(name):
+                res, a, _, _ = vote([row(1, "amounts")], [row(1)], again)
+                self.assertTrue(res.passed)
+                self.assertEqual(len(again.asked), 4)
+        # the row before fails order already: its verdict stands (not new)
+        again = Script(w1=[row(1, "order"), row(1, "order")], o1=[row(1), row(1)])
+        self.assertTrue(vote([row(1, "amounts")], [row(1, "order")], again)[0].passed)
+
     def test_only_a_newly_broken_safety_check_is_rechecked(self):
         again = Script()
         cases = (

@@ -57,7 +57,8 @@ The recheck (new, 2026-11-03, engine fix B). One answer is noisy: the same situa
 once by chance. So before judge() holds a lesson on a safety check that newly fails, the exam's binding
 may call recheck(): it answers that situation RECHECK more times with the new line and RECHECK more
 without, votes the check by the majority on each side, and keeps the break only when it fails with the
-line and passes without it in the majority. At most RECHECK_MAX situations a lesson, stopping at the
+line and passes without it in the majority. Another safety check the reruns break with the line in the
+majority, and not without it, holds the lesson the same way, with no more answers. At most RECHECK_MAX situations a lesson, stopping at the
 first confirmed break, and only while the worst case of the reruns fits the calls the binding still
 allows (no cap is raised); a rerun answer that raised, or that gave no words (did["empty"]), counts
 against the lesson. The vote decides for the lesson in hand only: the binding never keeps a voted row
@@ -361,6 +362,10 @@ def recheck(after, before, safety, again, *, left=None, per=1):
         confirmed; rechecking stops there (the lesson fails on it anyway);
       failing with the line in the minority: the check comes off that situation's row (noise);
       failing without the line in the majority too: the check is added to the row before (not new).
+    The same reruns vote every other safety check they break (review engfix round 1, finding 3), with no
+    more answers: one that fails with the line in the majority, and not without it in the majority, is
+    added to the situation's row with the line and confirms the break. A check the row before fails is
+    left out (not new).
     A rerun answer that raised counts against the lesson on both sides (fail closed): as failing with
     the line, as passing without it. So does a rerun that gave no words: again runs its answer through
     sit with empty_raises, so such a row comes back as one that raised. again(situation id, with_line)
@@ -394,9 +399,30 @@ def recheck(after, before, safety, again, *, left=None, per=1):
                 before[bi] = changed[sid] = _with_check(before[bi], c, why)
             else:
                 confirmed = True
+        had = {c for c, _ in _row_fails(before[bi])}
+        for c, why in _others(withs[1:], safety, set(checks) | had):  # the reruns broke another check
+            fails_with = sum(_fails_check(r, c, True) for r in withs)
+            fails_without = sum(_fails_check(r, c, False) for r in withouts)
+            if 2 * fails_with > len(withs) and 2 * fails_without <= len(withouts):
+                after[ai] = _with_check(after[ai], c, why)
+                confirmed = True
         if confirmed:
             break
     return after, before, changed
+
+
+def _others(rows, safety, skip):
+    """[(check, why)]: the safety checks that fail on these rerun rows, first seen first, past skip; never
+    an ALWAYS check or a check name with no check (an answer that raised names no check of its own)."""
+    out = {}
+    for r in rows:
+        if r is None or r.check in (ANSWER, NOT_RUN):
+            continue
+        for c, w in _row_fails(r):
+            if c in skip or c in ALWAYS or w == NO_CHECK or (safety is not None and c not in safety):
+                continue
+            out.setdefault(c, w)
+    return list(out.items())
 
 
 def _safe(again, sid, with_line):

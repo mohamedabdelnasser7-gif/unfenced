@@ -95,7 +95,8 @@ class Kept(Base):
     def test_a_test_file_that_cannot_be_read_stops_before_any_model_call(self):
         name = "support_calm_helper"
         folder = self.folders[name]
-        for text in ("not json", '{"test": "persona-01"}', '{"test": [{"id": 3}]}', "[]"):
+        for text in ("not json", '{"test": "persona-01"}', '{"test": [{"id": 3}]}', "[]",
+                     '{"test": [{"id": "persona-01"}]}'):  # no from_card
             with self.subTest(text=text):
                 (folder / practice.TEST_FILE).write_text(text, encoding="utf-8")
                 writer = Writer()

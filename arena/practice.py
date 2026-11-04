@@ -589,7 +589,8 @@ def _choose(winnable, size):
 
 def read_test(folder):
     """The saved test customers, [(id, fingerprint)], [] when there is no test-set.json. run.Refused when
-    it is there but cannot be read, is a link or is not a list of them (fail closed)."""
+    it is there but cannot be read, is a link or is not a list of them, each with its id and from_card
+    (fail closed)."""
     path = Path(folder) / TEST_FILE
     if not path.exists() and not path.is_symlink():
         return []
@@ -605,8 +606,8 @@ def read_test(folder):
         raise bad
     out = []
     for e in got:
-        if not isinstance(e, dict) or not isinstance(e.get("id"), str) or \
-                not isinstance(e.get("from_card"), (str, type(None))):
+        if not isinstance(e, dict) or not isinstance(e.get("id"), str) or "from_card" not in e or \
+                not isinstance(e["from_card"], (str, type(None))):
             raise bad
         out.append((e["id"], e["from_card"]))
     return out

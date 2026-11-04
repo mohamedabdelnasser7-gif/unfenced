@@ -73,6 +73,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from engine import fast as engine_fast
 from engine import plug as plug_mod
 from engine.lessons import slot
 from kit import sample as sample_mod, send_check, switch, tools
@@ -324,14 +325,41 @@ def built(db_folder, most=MAX_AGENTS):
     return out
 
 
+# A refused draft kept for the Arena's turn record is stored as this when it quotes the customer
+HELD_DRAFT = "(held back: it quotes the customer)"
+# Short words a run of the customer's words may hold and still be no quote ("is the mercurial")
+COMMON_WORDS = frozenset(("the", "a", "an", "is", "are", "it", "of", "for", "to", "in", "on", "and", "or", "how",
+                          "much", "what", "do", "you", "have", "this", "that", "el", "b", "bkam"))
+
+
+def held_draft(draft, theirs, own=()):
+    """The draft as written, or HELD_DRAFT when it copies 3 or more words in a row (engine/fast.py COPY_RUN)
+    of any text in theirs (the customer's lines; the four forms the risk check reads, engine/fast.py _runs).
+    A run made only of own words (the store's product titles and words) and COMMON_WORDS is the store's, not
+    the customer's, and does not count (red team losses round 1, item 8)."""
+    if not isinstance(draft, str):
+        return ""
+    words = set(COMMON_WORDS)
+    for w in own:
+        if isinstance(w, str):
+            words.update(engine_fast._WORDS.findall(engine_fast.risk_mod.normalize(w)))
+    mine = engine_fast._runs(draft)
+    for t in theirs:
+        if isinstance(t, str) and any(not set(r) <= words for r in mine & engine_fast._runs(t)):
+            return HELD_DRAFT
+    return draft
+
+
+
 @dataclass
 class TurnResult:
     outcome: str                  # replied, no_safe_reply, model_error or paused
     reply: str | None = None
     failed: list = field(default_factory=list)  # [{check, why}] when the turn ended on failed checks
     retried: list = field(default_factory=list)  # [{check, why}] of the drafts that failed before the reply went out
-    refused: list = field(default_factory=list)  # [{draft, check}]: each refused draft, the agent's own words and the
-    # check's line (never the person's text), for the Arena's turn record, whether the turn replied or not
+    refused: list = field(default_factory=list)  # [{draft, check}]: each refused draft and the check's line, for the
+    # Arena's turn record, whether the turn replied or not; a draft that quotes the person's words (3 or more in a
+    # row, held_draft) is stored as HELD_DRAFT, so the person's text is never kept there
     actions: list = field(default_factory=list)  # [{action, note}] take_action recorded this turn
 
 
@@ -423,6 +451,7 @@ def _turn(agent, text, ctx, history, chats, chat_id, send, customer_id, lessons,
     system = system_prompt(agent, lessons, loop.fast_note(fast, chat_id))  # read once a turn
     failed, acted, refused = [], [], []
     said = "" if first else text  # the person's words the full check reads; a case input is not theirs
+    theirs = [text] + [m.get("content") for m in history if m.get("role") == "user"]  # held_draft reads these
     try:
         while True:
             reply = _draft(ctx, system, convo, amounts, agent, acted)
@@ -433,7 +462,8 @@ def _turn(agent, text, ctx, history, chats, chat_id, send, customer_id, lessons,
                 return TurnResult("replied", reply, retried=list(failed), actions=list(acted), refused=refused)
             feedback = feedback or "The reply was empty. Write one."
             failed.append({"check": "send_check", "why": " ".join(feedback.split())[:300]})
-            refused.append({"draft": reply or "", "check": " ".join(feedback.split())[:300]})
+            refused.append({"draft": held_draft(reply or "", theirs, (*names, *vocab)),
+                            "check": " ".join(feedback.split())[:300]})
             if len(failed) >= MAX_FAILED_CHECKS:  # no safe reply: nothing goes out (sales/loop.py)
                 loop.drop_draft(chats, chat_id)
                 return TurnResult("no_safe_reply", None, failed, actions=list(acted), refused=refused)

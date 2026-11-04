@@ -29,7 +29,8 @@ Each turn record also says why the turn went as it did (2026-11-01; logging is o
 this is the only trace): "checks", the send check feedback of each draft that failed it, and, when
 no safe reply could be sent, "no_safe_reply" with "by" (send_check, model_error or turn_failed)
 (why_of). "refused" keeps each draft the send check refused, {"draft", "check"}: the agent's own words
-and the check's line only, never the customer's text, so a loss on "no safe reply" shows what the agent
+and the check's line, and a draft that quotes the customer (3 or more of their words in a row, kit/turn.py
+held_draft) as "(held back: it quotes the customer)", so a loss on "no safe reply" shows what the agent
 tried to say and why it was held (the Arena run 20261104T120239 lost 13 matches that way with no draft
 kept). Matches recorded before item 53 may end "handed_off".
 """
@@ -249,7 +250,8 @@ def play(card, *, agent_model, customer_model, prompt=GENERIC_PROMPT, lessons=No
                         failed += checker(reply, line, ran, orders)
                 turns.append({"n": n, "customer": line, "replies": sent, "outcome": out.outcome,
                               "tools": [name for name, _ in ran], "failed": failed, "order": bool(made),
-                              **why_of(results, chat_id, seen)})
+                              **why_of(results, chat_id, seen, customer.lines + [line],
+                                       (*store.titles(), *store.vocabulary()))})
                 if made:
                     order, ended = made, "order"
                     break
@@ -281,17 +283,19 @@ def _last_row(results, chat_id):
     return max((r["id"] for r in results.for_chat(chat_id)), default=0)
 
 
-def why_of(results, chat_id, after):
+def why_of(results, chat_id, after, theirs=(), own=()):
     """Why the turn went as it did, from the result rows it wrote (rows after id `after`):
     "checks", the send check feedback of each reply that failed it (check_failed), and, when the
     turn had no safe reply, "no_safe_reply" with why ("by": send_check, model_error or
     turn_failed), and "refused": each refused draft as {"draft": the agent's words, "check": the
-    check's feedback}. The customer's text is never put there."""
+    check's feedback}. A draft that quotes theirs (the customer's lines) is stored as kit/turn.py
+    HELD_DRAFT, own words (the store's) left out of the count, so the customer's text is never put there."""
+    from kit.turn import held_draft  # kit/turn.py reads sales/loop.py too; imported here, at use
     rows = [r for r in results.for_chat(chat_id) if r["id"] > after]
     failed = [r["detail"] for r in rows if r["outcome"] == "check_failed"
               and isinstance(r.get("detail"), dict) and isinstance(r["detail"].get("feedback"), str)]
     out = {"checks": [d["feedback"] for d in failed],
-           "refused": [{"draft": d["reply"] if isinstance(d.get("reply"), str) else "", "check": d["feedback"]}
+           "refused": [{"draft": held_draft(d.get("reply"), theirs, own), "check": d["feedback"]}
                        for d in failed]}
     for r in rows:
         if r["outcome"] == "no_safe_reply":

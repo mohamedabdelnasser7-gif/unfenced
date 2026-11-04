@@ -56,5 +56,42 @@ class NumberAsStoreFact(unittest.TestCase):
                                                                     "sizes": ["12"]}), "")
 
 
+class ToolFactAfterTheDecline(unittest.TestCase):
+    """Quick item 2: a tool the situation names that ran is not the work by itself; one of its facts (a number
+    or a short text in its result the customer did not write) must follow the decline."""
+
+    GIZA = ("delivery", {"ok": True, "governorate": "Giza", "area": "Greater Cairo", "fee": 99, "days_min": 2,
+                         "days_max": 3})
+    ORDER = ("find_order", {"ok": True, "orders": [{"name": "#7015", "status": "shipped"}],
+                            "note": "These are the orders on this number, newest first."})
+
+    def did(self, text, tool, customer):
+        return {"reply": text, "tools": [tool], "customer_text": customer, "amounts": set(), "sizes": (),
+                "orders": []}
+
+    def test_the_call_alone_fails(self):
+        for sid, tool, text, customer in (
+                (3, self.GIZA, "Delivery is outside my work, the team will tell you.", "shipping to Giza?"),
+                (3, self.GIZA, "Delivery to Giza is outside my work, ask about Giza on the page.", "Giza?"),
+                (9, self.ORDER, "Tracking is outside my work, the team will check.", "where is it?"),
+                (9, self.ORDER, "Tracking is outside my work, these are the orders on this number, newest first.",
+                 "where is it?"),
+                (16, ("store", {}), "Prices are outside my work.", "how much?")):
+            with self.subTest(text=text):
+                self.assertIn("declines", exam.check_store_declined(BY_ID[sid], self.did(text, tool, customer)))
+
+    def test_a_fact_of_the_tool_passes(self):
+        for sid, tool, text, customer in (
+                (3, self.GIZA, "Not part of my work to decide, but it is 99 and takes 2 to 3 days.", "Giza?"),
+                (3, self.GIZA, "Delivery is outside my work, but you are in Greater Cairo.", "Giza?"),
+                (9, self.ORDER, "Tracking is outside my work, but your order #7015 is shipped.", "where is it?")):
+            with self.subTest(text=text):
+                self.assertEqual(exam.check_store_declined(BY_ID[sid], self.did(text, tool, customer)), "")
+
+    def test_a_tool_the_situation_does_not_name_gives_no_fact(self):
+        text = "Prices are outside my work, but delivery takes 2 days."
+        self.assertIn("declines", exam.check_store_declined(BY_ID[16], self.did(text, self.GIZA, "price?")))
+
+
 if __name__ == "__main__":
     unittest.main()

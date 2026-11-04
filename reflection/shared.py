@@ -412,6 +412,15 @@ class Link:
         return [{"id": p["id"], "text": p["text"], "owners": len(set(p["owners"]))}
                 for p in pool.shared(LESSON, but=self.owner or None)]
 
+    def source(self, pid, owners):
+        """The source line a lesson taken from pattern pid carries (the console reads owners off it)."""
+        return source_line(self.kind, pid, owners)
+
+    @staticmethod
+    def pattern_of(source):
+        """The pattern a lesson's source line names, or None for a lesson not from the pool."""
+        return pattern_in(source)
+
     def _give(self, what, key, data, sources, worry=None):
         if not self.owner:
             return {"pattern": None, "why": "this agent names no owner, so it gives nothing"}

@@ -72,6 +72,14 @@ a lesson card through the agent's own lessons and risk check.
    so a new agent of a kind its owner already runs starts with what they kept. A
    sibling's line goes on trial only through this agent's eval gate: with no examiner
    on the lessons (Lessons.examiner) it waits for a yes and never starts a trial by itself.
+   The shared pool comes next (DECISIONS item 83; reflection/shared.py), with a link given
+   (shared): the lesson patterns of this agent's kind seen at 2 or more other owners, most
+   owners first, at most LIMIT a night, each through the same fit check and adapter, and on
+   trial only through this agent's eval gate as a sibling's line is (with no gate it waits
+   for a yes). Its source line names the pattern and how many owners it was learned from,
+   and a pattern taken before, in any state, is not asked again. The study also gives the
+   pool this agent's kept lessons (the ones not from the pool), at most the link's give a
+   night, each written up once; the pool keeps only clean patterns and hashed owners.
 7. Ideas. With an idea part given, the study also asks for ideas: lessons with no past cases
    behind them, paths worth trying ("let's try this path"). The part reads the proposer's
    sample and the agent's lessons, and gives at most IDEAS (3) a night; any past the cap is
@@ -122,6 +130,8 @@ LESSON, KNOWN, FEW_CASES, FEW_SOURCES, NO_GAP = (
     "lesson", "already a lesson", "too few cases", "too few sources", "gap not clear")
 PULLED_BEFORE = "pulled before"
 NO_GATE = "a sibling's line waits for a yes: this agent has no eval gate to put it on trial through"
+POOL = "pool"  # gated: a line from the shared pool across owners (see 6)
+POOL_NO_GATE = "a line from the shared pool waits for a yes: this agent has no eval gate to put it on trial through"
 HANDED = "handed over"  # a candidate that is another agent's matter (see 8)
 FAILED_BEFORE = "failed the eval gate before"
 FAILED_GIVEN = 10  # failed lines the proposer and the idea part are given a night, the newest
@@ -208,7 +218,7 @@ class Study:
 
     def __init__(self, db, plug, *, proposer, tagger, fit=None, adapter=None, others=(), lessons=None,
                  judge=risk_mod.no_judge, limit=LIMIT, sample=SAMPLE, seed=0, clash=None, ideas=None,
-                 idea_limit=IDEAS, hand_over=None):
+                 idea_limit=IDEAS, hand_over=None, shared=None):
         self.db = db
         self.plug = plug
         self.log = Log(db, plug)
@@ -220,6 +230,7 @@ class Study:
         self.ideas, self.idea_limit = ideas, int(idea_limit)
         self.hand_over = hand_over  # engine/handover.py Track, or None for no hand over track (see 8)
         self.others = tuple(others)
+        self.shared = shared  # reflection/shared.py Link, or None: the shared pool is not read (see 6)
         self.limit, self.sample, self.seed = int(limit), int(sample), seed
         self._failed_lines, self._given, self._given_ids = set(), [], set()  # this night's failed lines (see 5)
 
@@ -273,6 +284,7 @@ class Study:
         rep["candidates"] = found["candidates"]
         self._across(since, until, known, pulled, rep)
         self._ideas(cases, known, pulled, texts, rep, since, until)
+        self._give_shared(rep)
         rep["hand_over"] = (None if self.hand_over is None else
                              self.hand_over.night(cases, texts, since, until, now=at, notes=rep["notes"]))
         rep["switches"] = self.lessons.switches.reading(at)
@@ -531,8 +543,9 @@ class Study:
         trial = close is None and against is None and not held
         if gated and trial and getattr(self.lessons, "examiner", None) is None:  # never live without the gate
             trial = False
-            if NO_GATE not in rep["notes"]:
-                rep["notes"].append(NO_GATE)
+            note = POOL_NO_GATE if gated == POOL else NO_GATE
+            if note not in rep["notes"]:
+                rep["notes"].append(note)
         failed_close = close is not None and close in self._failed_lines
         if close is not None:  # the yes asker sees which pulled or failed line it comes close to
             what = "a line that failed the eval gate" if failed_close else "a pulled line"
@@ -609,12 +622,17 @@ class Study:
         given = {o.agent for o in others}
         rep["unread"] = [a for a in self.log.agents(since, until) if a != self.plug.agent and a not in given]
         if self.fit is None or self.adapter is None:
-            rep["notes"].append("no fit check or adapter given; other agents were not read")
+            rep["notes"].append("no fit check or adapter given; other agents were not read"
+                                + ("" if self.shared is None else ", nor the shared pool"))
             return
         fields = set(self.plug.fields)
         linked = {les["source_lesson_id"] for les in self.lessons.mine() if les["source_lesson_id"] is not None}
+        pool_read = False
         for other in sorted(others, key=lambda o: (not sibling(self.plug, o), -len(fields & set(o.fields)), o.agent)):
             gated = sibling(self.plug, other)
+            if not gated and not pool_read:  # the shared pool right after the siblings (see 6)
+                pool_read = True
+                self._from_shared(known, pulled, rep)
             theirs = Lessons(self.db, other)
             texts = _Texts(theirs)
             cases = _read(other, self.log.window(since, until, agent=other.agent, plug=other), until)
@@ -657,6 +675,52 @@ class Study:
                            source=lambda fit, les=les: f'adapted {fit} from {other.agent} lesson {les["id"]}: '
                                                        f'"{les["text"]}"',
                            origin={"agent": other.agent, "lesson": les["id"]})
+        if not pool_read:
+            self._from_shared(known, pulled, rep)
+
+    def _from_shared(self, known, pulled, rep):
+        """The shared pool's lesson patterns of this agent's kind (see 6), each as a sibling's kept
+        lesson is taken: the fit check, the adapter, then this agent's risk check and its eval gate
+        (gated POOL); never a trial without the gate. rep["shared"]: what was read and taken."""
+        if self.shared is None:
+            return
+        entry = rep["shared"] = {"read": 0, "lessons": [], "given": rep.get("shared", {}).get("given", [])}
+        try:
+            patterns = list(self.shared.lessons())
+        except Exception as e:  # a pool that cannot be read makes no lesson; the night goes on
+            rep["notes"].append(f"the shared pool was not read ({_failed(e)})")
+            return
+        entry["read"] = len(patterns)
+        taken = {self.shared.pattern_of(les.get("source") or "") for les in self.lessons.mine()} - {None}
+        other = _PoolAgent(self.plug, POOL_AGENT)
+        for p in [p for p in patterns if p["id"] not in taken][:self.limit]:
+            rec = {"pattern": p["id"], "owners": p["owners"], "fit": None, "lesson_id": None, "why": None}
+            entry["lessons"].append(rec)
+            public = {"lesson": p["text"], "situation": "", "stages": []}
+            line = self.shared.source(p["id"], p["owners"])
+            self._take(other, public, None, rep, known, pulled, sources=[], into=rec, gated=POOL,
+                       source=lambda fit, line=line, text=p["text"]: f'adapted {fit} from the {line}: "{text}"',
+                       origin={"agent": POOL_AGENT, "pool": p["id"], "owners": p["owners"]})
+
+    def _give_shared(self, rep):
+        """This agent's kept lessons into the shared pool (see 6): the ones that did not come from
+        it, oldest first, at most the link's give a night that reach the writer. Each is written up
+        once; what the pool drops is never kept."""
+        if self.shared is None:
+            return
+        entry = rep.setdefault("shared", {"read": 0, "lessons": [], "given": []})
+        asked = 0
+        for les in self.lessons.mine(KEPT):
+            if asked >= self.shared.give or self.shared.pattern_of(les.get("source") or "") is not None:
+                continue
+            try:
+                got = self.shared.give_lesson(self.plug.agent, {"id": les["id"], "text": les["text"]})
+            except Exception as e:  # the pool could not be written; the night goes on
+                rep["notes"].append(f"the shared pool was not given lesson {les['id']} ({_failed(e)})")
+                break
+            asked += bool(got.get("asked"))
+            if got.get("why") != "given before":
+                entry["given"].append({"lesson": les["id"], "pattern": got.get("pattern"), "why": got.get("why")})
 
     def _take(self, other, public, rec, rep, known, pulled, *, sources, source, origin, into=None,
               source_lesson_id=None, gated=False):
@@ -699,6 +763,20 @@ class Study:
             return
         into["lesson_id"] = card["lesson_id"]
         known[_norm(adapted["lesson"])] = KNOWN
+
+
+POOL_AGENT = "shared_pool"  # reflection/shared.py POOL_AGENT: the name notes and links give the pool
+
+
+class _PoolAgent:
+    """The pool as the fit check and the adapter read the other side: an agent of this agent's own
+    kind (its plug, read through) under the pool's name."""
+
+    def __init__(self, plug, name):
+        self._plug, self.agent = plug, name
+
+    def __getattr__(self, name):
+        return getattr(self._plug, name)
 
 
 def sibling(plug, other):

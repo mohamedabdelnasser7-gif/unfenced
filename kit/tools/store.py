@@ -14,6 +14,11 @@ url live; in the demo store a stand-in link on an .example host (demo_images in
 demo/catalogue.json, kept out of the seed mutation's variables), never a real brand's image.
 Only an https link with no space in it goes out. The send check lets a reply carry a link only
 when the store tool gave it in that chat (sales/loop.py store_links).
+
+Sample stock (DECISIONS 107, 2026-11-04): the demo store tracks no variant's stock, so with no real
+store connected an untracked variant's level comes from a separate sample layer, demo/sample-stock.json
+(made up per SKU, never written into the catalogue as tracked stock). Every answer built from sample
+data, that layer or a built agent's sample products (SAMPLE), carries "data": kit/sample.py LABEL.
 """
 import contextvars
 import html
@@ -23,12 +28,13 @@ import time
 import urllib.request
 from pathlib import Path
 
-from kit import env, net
+from kit import env, net, sample as sample_mod
 from kit.send_check import amount
 
 ROOT = Path(__file__).resolve().parents[2]
 DEMO_CATALOGUE = ROOT / "demo" / "catalogue.json"
 DEMO_DELIVERY = ROOT / "demo" / "delivery.json"
+DEMO_SAMPLE_STOCK = ROOT / "demo" / "sample-stock.json"  # made up stock per SKU, read only with no real store
 # Not checked against live docs today: set SHOPIFY_API_VERSION to the current one from shopify.dev.
 SHOPIFY_DEFAULT_VERSION = "2026-10"
 CACHE_SECONDS = 300
@@ -38,7 +44,7 @@ NAME = "store"
 DEFINITION = {"type": "function", "function": {
     "name": NAME,
     "description": (
-        "Look up the store's products: names, prices, tiers, sizes, stock level (in stock, few left or out) when the store tracks it, "
+        "Look up the store's products: names, prices, tiers, sizes, stock level (in stock, few left or out) when the store has it, "
         "and each product's image link when it has one. "
         "Search in English words "
         "like 'phantom' or 'name printing'. Leave query empty to get every product."),
@@ -49,7 +55,7 @@ DEFINITION = {"type": "function", "function": {
     },
 }}
 
-_cache = {"at": 0.0, "items": None}
+_cache = {"at": 0.0, "items": None, "sampled": False}
 # A Quick start agent's sample products (kit/sample.py store_items), set by kit/turn.py for one turn of an
 # agent that has them. Read only when no Shopify keys are set: real keys always win.
 SAMPLE = contextvars.ContextVar("store_sample", default=None)
@@ -70,12 +76,30 @@ def run(args, ctx):
     q = (args.get("query") or "").lower()
     words = [w for w in re.findall(r"\w+", q) if len(w) > 1]
     if not words:
-        return {"ok": True, "items": items}
+        return _labelled({"ok": True, "items": items})
     hits = [i for i in items if all(w.rstrip("s") in _haystack(i) for w in words)]
     hits = hits or [i for i in items if any(w.rstrip("s") in _haystack(i) for w in words)]
     if not hits:
-        return {"ok": True, "items": items, "note": "Nothing matched the search, so this is every product."}
-    return {"ok": True, "items": hits}
+        return _labelled({"ok": True, "items": items, "note": "Nothing matched the search, so this is every product."})
+    return _labelled({"ok": True, "items": hits})
+
+
+def _labelled(out):
+    """The answer with the sample data label when what it was built from is sample data."""
+    if sampled():
+        out["data"] = sample_mod.LABEL
+    return out
+
+
+def sampled():
+    """True when the catalogue this turn reads is sample data: no real store keys, and either the agent's
+    sample products or the demo catalogue with its sample stock layer."""
+    if env.get("SHOPIFY_STORE") and env.get("SHOPIFY_TOKEN"):
+        return False
+    if SAMPLE.get() is not None:
+        return True
+    catalogue()
+    return bool(_cache.get("sampled"))
 
 
 def _haystack(item):
@@ -93,11 +117,13 @@ def catalogue(fresh=False):
         return sample
     if not fresh and _cache["items"] is not None and time.time() - _cache["at"] < CACHE_SECONDS:
         return _cache["items"]
+    stock = None
     if real:
         items = _from_shopify()
     else:
-        items = _from_demo(DEMO_CATALOGUE)
-    _cache.update(at=time.time(), items=items)
+        stock = sample_stock(DEMO_SAMPLE_STOCK)
+        items = _from_demo(DEMO_CATALOGUE, stock)
+    _cache.update(at=time.time(), items=items, sampled=bool(stock))
     return items
 
 
@@ -132,7 +158,21 @@ def _image(url):
     return url if isinstance(url, str) and IMAGE_LINK.fullmatch(url) else None
 
 
-def _from_demo(path):
+def sample_stock(path):
+    """{sku: made up quantity} from the sample stock layer, or {} when it is missing or cannot be read."""
+    try:
+        d = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return {}
+    got = d.get("stock") if isinstance(d, dict) else None
+    if not isinstance(got, dict):
+        return {}
+    return {k: v for k, v in got.items() if isinstance(k, str) and isinstance(v, int) and not isinstance(v, bool)}
+
+
+def _from_demo(path, stock=None):
+    """The demo catalogue. stock: the sample stock layer ({sku: quantity}), read only for a variant the
+    store does not track."""
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     products = data.get("variables", data)
     images = data.get("demo_images") if isinstance(data.get("demo_images"), dict) else {}
@@ -154,6 +194,8 @@ def _from_demo(path):
             qty = [q["quantity"] for q in v.get("inventoryQuantities", []) if q.get("name") == "available"]
             if qty and _tracked(v):
                 var["stock"] = stock_level(sum(qty))
+            elif not _tracked(v) and stock and v.get("sku") in stock:
+                var["stock"] = stock_level(stock[v["sku"]])
             variants.append(var)
         _put(item, "variants", variants)
         items.append(item)

@@ -25,6 +25,8 @@ import secrets
 from pathlib import Path
 
 FILE = "sample-data.json"
+# The label every tool answer built from sample data carries, as its "data" field (DECISIONS 107).
+LABEL = "sample data, nothing connected yet"
 MADE_UP, USER = "made_up", "user"
 MAX_BYTES = 96_000      # the file
 MAX_ROWS = 200          # rows in the file
@@ -44,7 +46,8 @@ _KEY = re.compile(r"[^a-z0-9_]+")
 
 TITLE_KEYS = ("title", "name", "product", "product_name", "item")
 PRICE_KEYS = ("price", "unit_price", "cost")
-STOCK_KEYS = ("stock", "quantity", "qty", "in_stock", "stock_count", "stock_level", "inventory", "units", "on_hand")
+STOCK_KEYS = ("stock", "quantity", "qty", "in_stock", "stock_count", "stock_level", "stock_status", "inventory",
+              "units", "on_hand", "available", "availability")
 SIZE_KEYS = ("size", "variant")
 TYPE_KEYS = ("type", "category", "product_type")
 LEVELS = ("in stock", "few left", "out")
@@ -264,7 +267,8 @@ def stock_word(v):
     if re.fullmatch(r"\d{1,9}", s):
         return store.stock_level(int(s))
     return {"yes": "in stock", "no": "out", "true": "in stock", "false": "out", "sold out": "out",
-            "out of stock": "out", "low": "few left"}.get(s)
+            "out of stock": "out", "low": "few left", "low stock": "few left", "available": "in stock",
+            "unavailable": "out"}.get(s)
 
 
 def store_items(data):

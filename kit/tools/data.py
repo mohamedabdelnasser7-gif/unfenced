@@ -50,7 +50,7 @@ def run(args, ctx):
             rows = hits
         else:
             note = "Nothing matched the search, so these are every row."
-    out = {"ok": True, "about": data["what"], "rows": rows[:MAX_ROWS]}
+    out = {"ok": True, "about": data["what"], "data": sample.LABEL, "rows": rows[:MAX_ROWS]}
     if len(rows) > MAX_ROWS:
         out["note"] = f"Only the first {MAX_ROWS} rows; search to narrow them."
     if note:

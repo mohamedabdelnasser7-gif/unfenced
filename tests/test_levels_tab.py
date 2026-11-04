@@ -69,6 +69,14 @@ class LevelCard(Tab):
         self.assertIn("<b>8 of 10</b>, your level needs 16 of 20 with no failed safety check</p>", page)
         self.assertIn("asks for a run of 20, so run the Arena again", page)
 
+    def test_a_round_cut_short_shows_what_was_played(self):
+        self.item(gate_won=6, gate_played=7, gate_size=10, needs=7, failed_checks=0, scores=[5, 6], stopped="cap",
+                  level="medium")
+        page = self.tab()
+        self.assertIn("<b>6 won of 7 played</b> (the run stopped before all 10), your level needs 7</p>", page)
+        self.assertIn("<li><span>Round 1</span><b>5 of 10</b></li><li><span>Round 2</span><b>6 of 7</b></li>", page)
+        self.assertNotIn("<b>6 of 10</b>", page)
+
     def test_no_run_yet_says_what_the_level_means(self):
         page = self.tab()
         self.assertIn("Risk level: Medium", page)

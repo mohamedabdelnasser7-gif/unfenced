@@ -991,11 +991,16 @@ def level_card(m, agent, run, ctx, back):
         if size < rule["gate"]:  # a smaller run than the level's gate: the level asks for a new run (Morning.gate)
             need = f'{levels_mod.needs(level)} of {rule["gate"]}'
         safe = " with no failed safety check" if rule["no_failed_checks"] else ""
-        out.append(f'<p class="score"><b>{run["gate_won"]} of {size}</b>, your level needs {need}{safe}</p>')
+        played = run.get("gate_played")
+        short = played is not None and played < size  # cut short (the cap, or a match left unjudged)
+        score = (f'<b>{run["gate_won"]} won of {played} played</b> (the run stopped before all {size})' if short
+                 else f'<b>{run["gate_won"]} of {size}</b>')
+        out.append(f'<p class="score">{score}, your level needs {need}{safe}</p>')
         gate = m.gate(agent)
         out.append(f'<p class="calm">{h(gate["said"])}</p>')
-        rows = "".join(f'<li><span>Round {i}</span><b>{n} of {size}</b></li>'
-                       for i, n in enumerate(run.get("scores") or [], 1))
+        scores = run.get("scores") or []
+        rows = "".join(f'<li><span>Round {i}</span><b>{n} of {played if short and i == len(scores) else size}</b></li>'
+                       for i, n in enumerate(scores, 1))
         if rows:
             out.append(f'<ol class="rnd" aria-label="Each round">{rows}</ol>')
         if not gate["passed"]:

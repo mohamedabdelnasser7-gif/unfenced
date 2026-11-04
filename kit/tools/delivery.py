@@ -6,6 +6,10 @@ fee and days come only from the zone in the delivery data, never from the model.
 
 A place that matches no governorate, or more than one, comes back with ok false and a
 note asking which governorate. Cities and districts are not in the list yet.
+
+A call with no governorate gets every zone's fee and days with its governorates (table, through
+kit/tools run and NEEDS), so the agent can answer "how long does delivery take" before the customer
+names a place.
 """
 import json
 import re
@@ -23,17 +27,21 @@ DEFINITION = {"type": "function", "function": {
     "name": NAME,
     "description": (
         "Get the delivery fee and delivery days for the customer's governorate (محافظة). "
-        "Pass the place as the customer wrote it, in Arabic, English or Franco."),
+        "Pass the place as the customer wrote it, in Arabic, English or Franco. Leave it out when the "
+        "customer has not said it yet: you get every zone's fee and days."),
     "parameters": {
         "type": "object",
         "properties": {"governorate": {
-            "type": "string", "description": "The governorate as the customer wrote it, for example الجيزة, Alex or eskendereya."}},
-        "required": ["governorate"],
+            "type": "string", "description": "The governorate as the customer wrote it, for example الجيزة, Alex or "
+                                             "eskendereya. May be left out."}},
         "additionalProperties": False,
     },
 }}
 
 ASK_WHICH = "Ask the customer which governorate (محافظة) they are in."
+NEEDS = ("governorate",)  # left out or blank: table() instead of a refusal (kit/tools run)
+NO_PLACE = ("No governorate was given, so here is every zone's fee and days. Answer from it, and ask "
+            "which governorate (محافظة) for the exact fee.")
 
 # Spellings are compared after folding: Arabic letter forms, the article, doubled Latin letters.
 AR_FOLD = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ة": "ه", "ى": "ي"})
@@ -74,6 +82,20 @@ def quote(place):
         return {"ok": False, "note": "The delivery data has no fee for this governorate."}
     return {"ok": True, "governorate": gov["name"], "governorate_ar": gov["name_ar"], "area": zone["area"],
             "fee": zone["fee"], "days_min": zone["days_min"], "days_max": zone["days_max"]}
+
+
+def table(ctx=None):
+    """Every zone in the delivery data with its fee, days and governorates, for a call with no governorate."""
+    names = {}
+    for g in _data()["governorates"]:
+        names.setdefault(g["zone"], []).append(g["name"])
+    zones = [{"area": z["area"], "fee": z["fee"], "days_min": z["days_min"], "days_max": z["days_max"],
+              "governorates": names.get(z["area"], [])}
+             for z in store.delivery().get("zones", [])
+             if isinstance(z, dict) and all(k in z for k in ("area", "fee", "days_min", "days_max"))]
+    if not zones:
+        return {"ok": False, "note": "The delivery data has no zones."}
+    return {"ok": True, "zones": zones, "note": NO_PLACE}
 
 
 def find(place):

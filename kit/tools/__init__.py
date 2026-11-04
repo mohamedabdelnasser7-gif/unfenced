@@ -5,6 +5,10 @@ Every tool module has:
   DEFINITION, or definition(stage), an OpenAI-style function definition
   check(args, ctx) -> (passed, feedback), run before the tool does anything
   run(args, ctx) -> dict, the result the model reads
+and may have NEEDS (the argument names it looks up by) with table(ctx) -> dict: every option it holds.
+A call that leaves every NEEDS key out or blank gets table(ctx) instead of a refusal (Arena run
+20261104T143545, cause 4: the agent asked the customer's area again and again and never quoted a fee),
+so the model can answer from the whole table and ask for the key after.
 
 A result may carry "next_stage". The agent's loop applies it, so stage changes
 come from tool results, never from keyword rules.
@@ -67,6 +71,15 @@ def definitions(stage):
     return out
 
 
+def _wants_table(mod, args):
+    """True when mod has NEEDS and table, and the call leaves every NEEDS key out or blank (None or
+    only spaces), so it gets every option (table) instead of a refusal."""
+    needs = getattr(mod, "NEEDS", ())
+    if not needs or not callable(getattr(mod, "table", None)):
+        return False
+    return all(args.get(k) is None or (isinstance(args.get(k), str) and not args.get(k).strip()) for k in needs)
+
+
 def run(name, args, ctx):
     """Run one tool call from the model. Never raises; problems come back as feedback."""
     if name not in offered(ctx.stage):
@@ -74,6 +87,12 @@ def run(name, args, ctx):
     if not isinstance(args, dict):
         return {"ok": False, "feedback": "Tool arguments must be a JSON object."}
     mod = TOOLS[name]
+    if _wants_table(mod, args):
+        try:
+            return mod.table(ctx)
+        except Exception:  # a tool failure must not end the turn
+            log.exception("tool %s failed to give its table", name)
+            return {"ok": False, "feedback": f"The tool {name} failed."}
     passed, feedback = mod.check(args, ctx)
     if not passed:
         return {"ok": False, "feedback": feedback}

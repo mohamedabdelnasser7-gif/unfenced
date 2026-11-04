@@ -599,7 +599,8 @@ def clean_risk(risk, card, tools):
             into[group] = [*have, *(x for x in items if x not in have)]
     case = card.get("case") if isinstance(card, dict) and isinstance(card.get("case"), dict) else {}
     low = risk.get("low") if isinstance(risk.get("low"), dict) else {}
-    theirs = line(low.get("about"), 300)
+    # a plug cleaned before (an older agent fixed at load) keeps its own line once, after the code's
+    theirs = line(_LOW_OWN.sub("", line(low.get("about"), 300 + len(LOW_ABOUT) + CAPS["output"]), count=1), 300)
     return {"high": {"about": HIGH_ABOUT, "words": words, "patterns": patterns, "tools": sorted(set(tools))},
             "low": {"about": LOW_ABOUT.format(output=line(case.get("output"), CAPS["output"]) or "its normal work")
                     + (f" {theirs}" if theirs else "")}}
@@ -610,6 +611,7 @@ HIGH_ABOUT = ("Money (prices, amounts, discounts, fees, payment), refunds and re
               "world beyond its own normal work.")
 LOW_ABOUT = ("The agent's own work ({output}): how it writes, words, orders, times and checks it, and what it asks, "
              "with none of the high risk parts.")
+_LOW_OWN = re.compile(r"^" + re.escape(LOW_ABOUT).replace(re.escape("{output}"), ".*?") + r"\s*")
 
 
 # ---- the steps a case needs (every step its end or good result names is an action the agent has) ----
@@ -737,6 +739,41 @@ def clean_plug(raw, agent, tools, card=None):
     if card and "actions" in out:  # every step the case's end or good line names is an action it has
         out["actions"] = add_steps(out["actions"], card)
     return out
+
+
+def finish_words(words, plug, card):
+    """The instructions with what Build adds after the model's words: the house style (the send check
+    holds every agent to it, kit/send_check.py named_style), then how it acts (how_it_acts: every declared
+    step and tool, and when; the model's words alone named none of them). A part already there is not
+    added again, so an agent's own instructions read through this twice come out the same."""
+    if HOUSE_STYLE not in words:
+        words = f"{words}\n\n{HOUSE_STYLE}"
+    from kit import turn as turn_mod
+    tools = turn_mod.tools_of(plug_mod.from_dict({k: v for k, v in plug.items() if k != "exam"}))[0]
+    acting = how_it_acts(plug, card, tools)  # the exam file is read only with its folder, and names no tool
+    if acting and acting not in words and ACT_NOTE not in words:
+        words = f"{words}\n\n{acting}"
+    return words
+
+
+def at_load(raw, instructions, card, tools):
+    """(plug, instructions) of an agent Build made, with the fixes Build makes now, for an agent built
+    before them (kit/turn.py load calls it; the files on disk are never written): its high risk cleaned
+    in code (clean_risk), an action for every step its case needs (add_steps), the house style and how
+    it acts in its instructions (finish_words). card is its card.json as written, tools the ones it
+    connects. Each fix is the same on a plug that has it already, so reading it twice adds nothing.
+    A plug the engine would refuse once fixed comes back as it was, so an agent that loaded still loads."""
+    if not isinstance(raw, dict) or not isinstance(card, dict):
+        return raw, instructions
+    plug = dict(raw)
+    if "risk" in plug:
+        plug["risk"] = clean_risk(plug["risk"], card, sorted(tools))
+    if "actions" in plug:
+        plug["actions"] = add_steps(plug["actions"], card)
+    try:
+        return plug, finish_words(instructions, plug, card)
+    except ValueError:
+        return raw, instructions
 
 
 def check_plug(d):
@@ -1096,13 +1133,7 @@ class QuickStart:
             return None, None, NO_PERSON_SAID
         if len(words) > MAX_INSTRUCTIONS:
             return None, None, f"the instructions are over {MAX_INSTRUCTIONS} characters"
-        if HOUSE_STYLE not in words:  # the send check holds every agent to it (kit/send_check.py named_style)
-            words = f"{words}\n\n{HOUSE_STYLE}"
-        from kit import turn as turn_mod
-        acting = how_it_acts(plug, card or {}, turn_mod.tools_of(plug_mod.from_dict(plug))[0])
-        if acting:  # every declared step and tool, and when: the model's words alone named none of them
-            words = f"{words}\n\n{acting}"
-        return plug, words, None
+        return plug, finish_words(words, plug, card or {}), None
 
     @staticmethod
     def _save(folder, d):

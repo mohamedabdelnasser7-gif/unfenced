@@ -648,6 +648,10 @@ def main(argv=None, *, until=None):
         print(f"Not run: no database at {args.db}. The Sales agent makes it when it first runs.", file=sys.stderr)
         return 2
     plug = plug_mod.load(args.plug)
+    folder = built_folder(plug, args.plug)
+    if folder is not None:  # an agent Quick start built is read as kit/turn.py reads it, with the newer fixes
+        from kit import turn as turn_mod
+        plug = turn_mod.load(folder).plug
     try:
         state = assistant_state(args.assistant_state) if plug.agent == ASSISTANT else None
     except Refused as e:
@@ -660,7 +664,7 @@ def main(argv=None, *, until=None):
         exam = agent_exam(plug, args.db, folder=Path(args.plug).resolve().parent)
         rep = night(db, plug, days=args.days, until=now, ideas=parts.Ideas(), exam=exam,
                     spotter=parts.Spotter(), note_writer=parts.NoteWriter(), others=other_plugs(plug, db=args.db),
-                    practice=built_folder(plug, args.plug))
+                    practice=folder)
         rep["courier"] = courier
     except Refused as e:
         print(f"Not run: {e}.", file=sys.stderr)
@@ -683,7 +687,7 @@ def main(argv=None, *, until=None):
     from arena import grow
     try:  # every kind grows its own pool (DECISIONS item 79); a built agent's owner is found from its folder
         rep["practice"] = grow.night(args.db, plug, args.recipe, rep["window"]["since"], rep["window"]["until"],
-                                     folder=built_folder(plug, args.plug), own=plug.agent == SALES.agent)
+                                     folder=folder, own=plug.agent == SALES.agent)
     except Exception as e:  # the lessons went in already: the report and its rollback line are still saved
         rep["practice"] = {"kind": grow.kind_of(plug), "stopped": f"failed: {type(e).__name__}"}
     # ---- end of the practice step

@@ -538,5 +538,106 @@ class AskOnce(PageCase):
         self.assertNotIn(pages.HOW_OTHER, html)
 
 
+def old_folder(root, name, card=None):
+    """One of the three agents as Build wrote its folder before these fixes: the model's plug with only the
+    name and the strict trial set (any digit high, no step actions), its instructions with no house style
+    and no steps."""
+    a = THREE[name]
+    folder = Path(root) / "agents" / name
+    folder.mkdir(parents=True)
+    raw = {k: v for k, v in a["plug"].items() if k != "exam"}
+    raw.update(agent=name, trial=qs.STRICT_TRIAL)
+    (folder / "plug.json").write_text(json.dumps(raw), encoding="utf-8")
+    (folder / "card.json").write_text(json.dumps(a["card"] if card is None else card), encoding="utf-8")
+    (folder / "instructions.md").write_text(a["instructions"], encoding="utf-8")
+    return folder
+
+
+def on_disk(folder):
+    return {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in sorted(Path(folder).iterdir())}
+
+
+class OlderAgentsGetTheFixes(unittest.TestCase):
+    """Mohamed: "i want older agents gets the fix". An agent built before these fixes still had "[0-9]" in its
+    plug, no house style and no steps in its instructions, and no action for a step its case needs."""
+
+    def setUp(self):
+        clean_env(self)
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.root = Path(d.name)
+
+    @staticmethod
+    def build_now(name):
+        """(plug, instructions) as Build writes them today."""
+        a = THREE[name]
+        plug = {k: v for k, v in a["plug"].items() if k != "exam"}
+        got, words, why = qs.QuickStart._plug_from(
+            json.dumps({"plug": plug, "instructions": a["instructions"]}), name, a["card"]["tools"], a["card"])
+        assert why is None, why
+        return got, words
+
+    def test_an_older_built_agent_loads_with_every_fix(self):
+        for name, a in THREE.items():
+            folder = old_folder(self.root, name)
+            self.assertIn('"[0-9]"', (folder / "plug.json").read_text(encoding="utf-8"))
+            agent = turn.load(folder)
+            plug, words = self.build_now(name)
+            self.assertEqual(agent.plug.risk, cleaned(name).risk, name)
+            self.assertEqual(dict(agent.plug.actions), plug["actions"], name)
+            self.assertEqual(agent.instructions, words, name)
+            self.assertEqual(agent.instructions.count(qs.HOUSE_STYLE), 1)
+            self.assertIn(qs.ACT_NOTE, agent.instructions)
+            self.assertTrue(agent.priced_only, name)
+            highs = [n for n, text in enumerate(a["lessons"], 1)
+                     if risk_mod.classify(text, agent.plug.risk, low)[0] == risk_mod.HIGH]
+            self.assertEqual(highs, [2] if name == "support_calm_helper" else [], name)
+        leads = turn.load(self.root / "agents" / "lead_trial_booker")
+        self.assertIn("mark_trial_session_booked", leads.acts)
+        self.assertIn("mark_trial_session_booked (", leads.instructions)
+
+    def test_loading_twice_or_an_agent_built_today_adds_nothing(self):
+        for name in THREE:
+            folder = old_folder(self.root, name)
+            first, second = turn.load(folder), turn.load(folder)
+            self.assertEqual((first.plug, first.instructions), (second.plug, second.instructions), name)
+            plug, words = self.build_now(name)
+            today = Path(self.root) / "today"
+            folder = agent_folder(today, name, instructions=words)
+            agent = turn.load(folder)
+            self.assertEqual(agent.instructions, words, name)
+            self.assertEqual(agent.plug, plug_mod.from_dict(plug), name)
+            self.assertEqual(agent.plug.risk.low_about.count("The agent's own work"), 1, name)
+            self.assertEqual(agent.plug.risk.patterns, plug_mod.from_dict(plug).risk.patterns, name)
+        fixed, words = qs.at_load(plug, words, THREE[name]["card"], THREE[name]["card"]["tools"])
+        self.assertEqual((fixed, words), qs.at_load(fixed, words, THREE[name]["card"], THREE[name]["card"]["tools"]))
+        self.assertEqual(json.dumps(fixed["risk"]["low"]).count("The agent's own work"), 1)
+
+    def test_the_files_on_disk_stay_byte_for_byte(self):
+        folders = [old_folder(self.root, name) for name in THREE]
+        before = [on_disk(f) for f in folders]
+        turn.built(self.root)
+        for f in folders:
+            turn.load(f)
+        self.assertEqual([on_disk(f) for f in folders], before)
+
+    def test_sales_and_a_folder_written_by_hand_are_unchanged(self):
+        a = THREE["support_calm_helper"]
+        card = {k: v for k, v in a["card"].items() if k not in turn.BUILT_KEYS}  # no tools: written by hand
+        folder = old_folder(self.root, "support_calm_helper", card=card)
+        agent = turn.load(folder)
+        raw = json.loads((folder / "plug.json").read_text(encoding="utf-8"))
+        self.assertEqual(agent.plug, plug_mod.from_dict(raw, folder))
+        self.assertEqual(agent.instructions, a["instructions"].strip())
+        self.assertNotIn(qs.HOUSE_STYLE, agent.instructions)
+        self.assertIn(("number", "[0-9]"), agent.plug.risk.patterns)
+        self.assertNotIn("mark_ticket_tagged", agent.plug.actions)
+        self.assertFalse(agent.priced_only)
+        from reflection import PLUG as SALES, night
+        sales_path = Path(night.ROOT) / "sales" / "plug.json"
+        self.assertIsNone(night.built_folder(SALES, sales_path))
+        self.assertEqual(plug_mod.load(sales_path), SALES)  # the Sales plug is read as it is, never through Build
+
+
 if __name__ == "__main__":
     unittest.main()

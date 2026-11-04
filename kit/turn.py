@@ -12,7 +12,10 @@ writes (reflection/quickstart.py):
                    and the rest is checked for shape and left alone. A card with no case is a chat
                    case, as every card was before.
 
-load(folder) reads them, under size caps and with no link followed, into an Agent. turn() runs one
+load(folder) reads them, under size caps and with no link followed, into an Agent. An agent Build made
+(its card names its tools) is read with the fixes Build makes now, so one built before them gets them
+too (reflection/quickstart.py at_load); its files are never written. A folder written by hand and the
+Sales agent are read as they are. turn() runs one
 message from the person the agent serves, the way sales/loop.py runs a Sales turn, cut down to
 what any agent has. With first=True the text is the case's input, not a person's message: the agent
 writes first (a lead it follows up), and the input is saved under a frame line so later turns read it.
@@ -243,6 +246,7 @@ def load(folder):
         extra = sorted(set(p.risk.tools) - connected)
         if extra:
             raise Refused(f"plug.json names tools the card does not connect: {', '.join(extra)}")
+        p, instructions = _fixed(folder, raw, p, instructions, text, connected)
     offered, missing = tools_of(p)
     data = sample_mod.read(folder)
     if data is not None and DATA_TOOL not in offered:  # the rows it works from with no real connection
@@ -256,6 +260,22 @@ def load(folder):
     return Agent(name=p.agent, folder=folder, plug=p, instructions=instructions, card=card, tools=offered,
                  missing=missing, stage=stage, full_check=talks, acts=acts, data=data, priced_only=priced_only,
                  stock=stock)
+
+
+def _fixed(folder, raw, p, instructions, card_text, connected):
+    """(plug, instructions) of an agent Build made, read with the fixes Build makes now, for one built
+    before them (reflection/quickstart.py at_load: its high risk cleaned in code, an action for every
+    step its case needs, the house style and how it acts in its instructions). Nothing is written back:
+    the files stay as they are. A fixed plug the engine refuses leaves the agent as it was read."""
+    from reflection import quickstart  # here, not at the top: Quick start reads this module too
+    plug, words = quickstart.at_load(raw, instructions, json.loads(card_text), connected)
+    if plug is raw:
+        return p, words
+    try:
+        return plug_mod.from_dict(plug, folder), words
+    except (ValueError, RecursionError) as e:
+        log.warning("agent %s read without the newer fixes: %s", p.agent, e)
+        return p, instructions
 
 
 def built(db_folder, most=MAX_AGENTS):

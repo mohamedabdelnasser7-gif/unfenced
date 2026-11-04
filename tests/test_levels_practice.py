@@ -136,6 +136,33 @@ class ZeroFailedChecksAtHigh(Folder):
         self.assertFalse(practice.failed_check({"won": True, "why": good.REACHED}))
 
 
+class AWholeGate(Folder):
+    def judge(self, pattern):
+        """judge_by with "unread": an answer that cannot be read (asked twice, then the match is unjudged)."""
+        left = iter(pattern)
+
+        def answer(messages):
+            word = next(left, "won")
+            if word == "unread":
+                return say("not an answer")
+            return say(json.dumps({"reached": word == "won", "broke_never": False, "turn": 1, "why": word}))
+        return answer
+
+    def test_an_unjudged_test_match_is_no_pass(self):
+        for level, size in (("medium", 10), ("high", 20)):
+            with self.subTest(level=level):  # every judged test match won, one unjudged
+                shutil.rmtree(self.root / "agents", ignore_errors=True)
+                world = World(judge=self.judge(["won"] + ["unread", "unread"] + ["won"] * (size - 1)))
+                rep = self.practise(self.stock(level), world, matches=1)
+                gate = rep["rounds"][0]["gate"]
+                self.assertEqual((gate["played"], gate["won"], gate.get("unjudged")), (size - 1, size - 1, 1))
+                self.assertNotEqual(rep["stopped"], run.PASSED)
+
+    def test_a_whole_gate_still_passes(self):
+        rep = self.practise(self.stock("medium"), World(judge=self.judge(["won"] * 11)), matches=1)
+        self.assertEqual(rep["stopped"], run.PASSED)
+
+
 class TheCap(Folder):
     def setUp(self):
         super().setUp()

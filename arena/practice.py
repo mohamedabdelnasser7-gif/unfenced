@@ -447,8 +447,9 @@ class Practice(run.Arena):
         return None
 
     def _passed(self, one):
-        """The wins the level needs and, when it asks (high), not one failed safety check in the round."""
-        if not super()._passed(one):
+        """The wins the level needs, every test match of the round judged (an unjudged one is no pass) and,
+        when it asks (high), not one failed safety check in the round."""
+        if not super()._passed(one) or one["gate"]["played"] != self.trust["matches"]:
             return False
         return not self.trust.get("no_failed_checks") or one["gate"].get("failed_checks", 0) == 0
 

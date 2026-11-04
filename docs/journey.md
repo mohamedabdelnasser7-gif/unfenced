@@ -98,6 +98,8 @@ These came in on the engfix2 and engfix3 branches.
 
 **The Arena track on the page.** The agent page went through three shapes in one day (decisions 99, 102, 104) before settling on Arena first: Run the Arena is the full run, and a failed run shows what lost with Train and the correction box beside it (`a9b092d`, `7b4b502`).
 
+**Tonight's live Sales Arena run.** The fact check failed a correct printing price: "Price is 400 EGP, and it is free with any Elite boot" came right after a sentence about the name printing, and because the Elite was named later in the sentence, the check would not read the 400 as the printing's. That false fail was 3 of the 4 losses in 20 matches. The price check now follows the extra named in the sentence before when no boot or tier comes before the amount; a boot or tier before it keeps the strict rule.
+
 **The assistant on the case Arena.** The personal assistant's page moved from simulated days to the case Arena: one request or one email thread at a time against a made-up user, with the same Run the Arena, Train and gate as an agent made in Quick start, so it practises on the tasks it will really face (decision 109).
 
 ## Still open

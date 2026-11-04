@@ -168,6 +168,10 @@ ADDON = re.compile(
     send_check.LETTER_BEFORE + r"(?:(?:plus|(?:an\s+)?extra|زيادة|زياده)[^\S\n]+|\+[^\S\n]*)(" + send_check.DIGITS + r")(?![\d.,]\d)"
     r"|(?<![\d.,])(" + send_check.DIGITS + r")[^\S\n]*(?:" + send_check.CURRENCY + r")?[^\S\n]*(?:" + ADDON_WORDS + ")"
     + send_check.NO_LETTER_AFTER + ADDON_AFTER, re.IGNORECASE)
+# A word that offers the extra free with a boot or a tier, for the extra price rule's sentence before:
+# "It costs 400 EGP, free with an Elite", "ومجانية مع أي Elite", "w free m3 ay Elite" (review pricectx
+# round 1, finding 1).
+FREE_WORD = re.compile(r"(?<!\w)(?:free|included|on\s+the\s+house|bbalash)(?!\w)|مجان|ببلاش|هدية", re.IGNORECASE)
 # For a clause that names a boot or a tier and an extra: a word that joins the extra to the boot before
 # it, so the clause's amount is the boot's with the extra on it ("The Vapor 17 Elite with printing is
 # 400 EGP"), and "and", which joins them only with no amount between: "The Elite and printing is 400
@@ -175,6 +179,11 @@ ADDON = re.compile(
 # none of these the boot only says which boot: "For the Vapor 17 Elite the printing is 400 EGP" (review
 # gatefb round 2, finding 5). An extra written with the Arabic ب (with) or و (and) joins the same way.
 JOIN = re.compile(r"(?<![^\W_])(?:with|w/|plus|including|incl|ma3|m3|مع)(?![^\W_])|\+", re.IGNORECASE)
+# A word for a boot that names no product, for _boot_word_joined: "Boot plus printing", "الجزمة مع الطباعة".
+BOOT_WORD = re.compile(r"(?<![^\W_])(?:boots?|shoes?|pairs?|cleats?|gazm\w*|[وف]?(?:ال)?جزم[ةه]|[وف]?(?:ال)?كوتشي)"
+                       r"(?![^\W_])", re.IGNORECASE)
+# A Franco "w" or "wa" (and) opening a clause, for _opening_boot_word only: SUBJECT_LEAD stays as it is.
+FRANCO_AND = re.compile(r"^wa?\W+", re.IGNORECASE)
 AND = re.compile(r"(?<![^\W_])(?:and|w|و)(?![^\W_])|&", re.IGNORECASE)
 # The words an extra's clause may open with before the extra and still have it as the clause's subject
 # ("The printing", "Your name"), and the words that put it beside the boot after it, before any amount
@@ -302,6 +311,41 @@ def _extra_not_held(clause, extras, items, all_tiers, sizes, orders):
     after = clause[first.end():]
     reach = after[:_boot_end(after, items, extras, all_tiers)]
     return not (TOWARD.search(reach) or send_check.prices_in(reach, sizes, orders))
+
+
+def _boot_word_joined(clause, extras, items, sizes, orders):
+    """True when a word for a boot (BOOT_WORD) opens the clause (only SUBJECT_LEAD words before it) and
+    comes before the clause's first extra with a joining word between (JOIN or AND), or the extra is
+    written with ب or و, and no amount but the extra's own price sits between them: "Boot plus printing
+    comes to 400 EGP", "Your boot is 400 EGP with printing" (round 3, finding 1) and
+    "الجزمة مع الطباعة بـ 400 جنيه" put the amount on the boot with the extra (review pricectx round 1).
+    "Printing on your boot is 400 EGP" names the extra first; "Send me your shoe size and printing is
+    400 EGP" does not open with the boot; "Your boot costs 16,500 EGP plus printing at 400 EGP" gives
+    the boot its own amount. None of these is one (review pricectx round 2, finding 3)."""
+    found = [m for m in (_extra_match(e, clause, items) for e in extras) if m]
+    if not found:
+        return False
+    first = min(found, key=lambda m: m.start())
+    boot = _opening_boot_word(clause[:first.start()])
+    if boot is None:
+        return False
+    gap = clause[boot.end():first.start()]
+    mine = _dec(send_check.amount(v["price"]) for e in extras for v in e.get("variants", []) if "price" in v)
+    if _dec(send_check.prices_in(gap, sizes, orders)) - mine:
+        return False
+    return bool(JOIN.search(gap) or AND.search(gap) or first.group(0).startswith(("ب", "و")))
+
+
+def _opening_boot_word(text):
+    """The first word for a boot (BOOT_WORD) in text when only SUBJECT_LEAD words come before it ("The
+    boot", "الجزمة", "El gazma"), after a Franco w or wa (and) too: "W el gazma" (round 3, finding 3).
+    Else None. "Per pair", "لكل جزمة", "Send me your shoe size" and "It is 400 EGP a pair" open with other
+    words (review pricectx round 2, findings 1 and 3)."""
+    found = BOOT_WORD.search(text)
+    if found is None:
+        return None
+    lead = FRANCO_AND.sub("", text[:found.start()].lstrip(" \t\"'“”‘’"), count=1)
+    return found if SUBJECT_LEAD.fullmatch(lead) is not None else None
 
 
 def _own_price_then_extra(gap, after, items, extras, sizes, orders):
@@ -464,7 +508,8 @@ def check(reply, customer_text="", tool_results=(), orders=()):
     backdrop = extras_named(reply, extras, items)
     if not backdrop and not products_named(reply, items):
         backdrop = extras_named(customer_text, extras, items)
-    for clause, start, boot, kinds, sentence_boot, sentence in _extra_clauses(text, items, extras, all_tiers):
+    for clause, start, boot, kinds, sentence_boot, sentence, before in _extra_clauses(text, items, extras,
+                                                                                         all_tiers):
         here = extras_named(clause, extras, items)
         # the extra the clause names, else one its sentence names, keeps its price beside an add-on
         # word: "If you add printing to the Elite, it's 400 EGP more" (DECISIONS item 52). An extra
@@ -487,8 +532,32 @@ def check(reply, customer_text="", tool_results=(), orders=()):
         # "Printing on the Vapor 17 Elite is 400 EGP" passes (red team gatefb rounds 1 and 2).
         if _extra_not_held(clause, extras, items, all_tiers, sizes, orders) and not set(amounts) & sums:
             here = []
-        own = _dec(send_check.amount(v["price"]) for e in (here if sentence_boot else here or backdrop)
-                   for v in e.get("variants", []) if "price" in v)
+        # A word for a boot joined to the extra before it ("Boot plus printing comes to 400 EGP") holds
+        # neither the extra's price nor the one of an extra named elsewhere (review pricectx round 1).
+        joined = _boot_word_joined(clause, extras, items, sizes, orders) and not set(amounts) & sums
+        # A sentence that names a boot or a tier only after the clause (in a later clause, "It costs 400
+        # EGP, free with an Elite") reads a clause that names no product, no tier and no extra like a
+        # sentence with no boot: the extra named before it in its sentence, else the one the sentence
+        # before names (before). A boot or a tier before the clause keeps the clause to its own extra
+        # (live Sales Arena run 2026-11-04: 3 of 4 losses in 20 matches were this false fail).
+        # Only while every boot or tier after it offers the extra free ("free with an Elite") or carries
+        # its own boot price ("and the Elite is 16,500 EGP"): "Printing is available. The price is 400
+        # EGP, for the Elite" fails, the 400 is the boot's (review pricectx round 1, finding 1). The
+        # text up to the clause's end counts, so a boot cut by a mark fails too: "The Mercurial; Vapor
+        # 17 is 400 EGP" (finding 3). A clause that opens with a word for a boot prices the boot: "The
+        # boot is 400 EGP, free printing with an Elite" fails (review pricectx round 2, finding 1).
+        end = start + len(clause)
+        if joined:
+            holds = []
+        elif not sentence_boot:
+            holds = here or backdrop
+        elif here or boot or _names_boot(sentence[:end], items, extras, all_tiers) or \
+                _opening_boot_word(clause) is not None or \
+                not _later_boots_offer(sentence[end:], items, extras, all_tiers, base, sums, sizes, orders):
+            holds = here
+        else:
+            holds = extras_named(sentence[:start], extras, items) or before
+        own = _dec(send_check.amount(v["price"]) for e in holds for v in e.get("variants", []) if "price" in v)
         if kinds and not boot:
             ok = own | sums | _dec(fees | from_tools) | {e + f for e in own for f in _dec(fees)}
             if any(d in ok and d not in _dec(fees | from_tools) for d in amounts):
@@ -684,8 +753,13 @@ def _extra_clauses(text, items, extras, all_tiers):
     A clause that names no product (boot or extra) and no tier takes the boots, tiers and kinds of
     the clauses before it in its sentence: in "Vapor Elite, 400 EGP, with your name" the 400 sits
     beside the boot (red team round 2, R2-1). A bracket or a spaced dash cuts a clause too (ASIDE).
-    sentence_boot: the sentence names a boot or a tier."""
+    sentence_boot: the sentence names a boot or a tier. before: the extras the nearest sentence before
+    it that names a product, a tier or an extra names, when that sentence names an extra and no boot
+    and no tier, else none ("Printing is available. It costs 400 EGP, free with an Elite": the 400 is
+    the printing's, live Sales Arena run 2026-11-04). A sentence that names nothing passes it on, as
+    _with_context does for stock; one that names a boot or a tier ends it."""
     out = []
+    before = []
     for sentence in PRICE_SENTENCE.findall(text):
         sentence_boot = bool(tiers_named(sentence, all_tiers) or _boots(products_named(sentence, items), extras))
         seen_boot, seen_kinds = [], []
@@ -699,8 +773,44 @@ def _extra_clauses(text, items, extras, all_tiers):
                 seen_kinds += kinds
             else:
                 boot, kinds = list(seen_boot), list(seen_kinds)
-            out.append((clause, found.start(), boot, kinds, sentence_boot, sentence))
+            out.append((clause, found.start(), boot, kinds, sentence_boot, sentence, before))
+        if sentence_boot:
+            before = []
+        else:
+            before = extras_named(sentence, extras, items) or before
     return out
+
+
+def _later_boots_offer(rest, items, extras, all_tiers, base, sums, sizes, orders):
+    """True when rest (a sentence after a price clause) names no boot and no tier outside clauses that
+    offer the extra free with one, a free word (FREE_WORD) before the boot ("free with an Elite"), or
+    hold a boot price or a sum of their own ("and the Elite is 16,500 EGP"). "for the Elite", "Vapor 17
+    Elite with free printing" and "the Elite with 60 EGP delivery" leave a boot (review pricectx round 1,
+    finding 1). A free word in a clause about delivery (DELIVERY) offers no extra: "Total is 400 EGP,
+    free delivery with the Elite" leaves the boot (round 2, finding 2). Only the words before the boot
+    are read for it: "free with an Elite and free delivery too" offers the extra (round 3, finding 2).
+    Those clauses are cut out and what is left is read whole, so a boot cut by a mark counts."""
+    own = _dec(base) | sums
+
+    def kept(found):
+        clause = found.group(0)
+        free = FREE_WORD.search(clause)
+        upto = _boot_end(clause, items, extras, all_tiers) or len(clause)
+        if free and not _about_delivery(clause[:upto]) and not _names_boot(clause[:free.start()], items, extras,
+                                                                              all_tiers):
+            return ";"
+        if {Decimal(str(a)) for a in send_check.prices_in(clause, sizes, orders)} & own:
+            return ";"
+        return clause
+
+    return not _names_boot(EXTRA_CLAUSE.sub(kept, ASIDE.sub(";", rest)), items, extras, all_tiers)
+
+
+def _about_delivery(clause):
+    """True when DELIVERY names delivery or shipping in clause, with a و or ف taken off before شحن or
+    توصيل first, with or without ال: "والتوصيل مجاني", "وشحن مجاني" (review pricectx round 2, finding 2;
+    round 3, finding 2)."""
+    return bool(DELIVERY.search(re.sub(r"(?<!\w)[وف](?=(?:ال)?(?:شحن|توصيل))", "", clause)))
 
 
 def _addon_hits(clause):

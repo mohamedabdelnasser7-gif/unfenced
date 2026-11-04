@@ -17,11 +17,13 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from kit.tools import cod_risk, data, delivery, draft_order, find_order, store, switch_stage, voice_note
+from kit.tools import (calendar_tool, cod_risk, data, delivery, draft_order, find_order, mailbox, store, switch_stage,
+                       voice_note)
 
 log = logging.getLogger("kit.tools")
 
-TOOLS = {m.NAME: m for m in (store, voice_note, delivery, draft_order, cod_risk, find_order, switch_stage, data)}
+TOOLS = {m.NAME: m for m in (store, voice_note, delivery, draft_order, cod_risk, find_order, switch_stage, data,
+                             mailbox, calendar_tool)}  # email and calendar: the personal assistant's demo mail and calendar
 
 # Control tools are offered in every stage where the agent replies, on top of the stage's own list.
 CONTROL = ("switch_stage",)

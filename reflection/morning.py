@@ -531,21 +531,8 @@ CSP = ("default-src 'none'; style-src 'sha256-" + base64.b64encode(hashlib.sha25
 
 STALE_PLAN = "Not rolled back: the lessons changed after the plan was shown. Look at the plan again."
 TRY_NOT_BUILT = "Try again is not built for this agent yet, so nothing was started."
-ARENA_NOT_HERE = ("Run the Arena is for the Sales agent, the personal assistant or an agent made here, so nothing "
-                  "was started.")
+ARENA_NOT_HERE = "Run the Arena is for the Sales agent or an agent made here, so nothing was started."
 ARENA_NO_DB = "Run the Arena for the Sales agent needs the database folder. Start the page with --db."
-# The personal assistant's own Arena on its page (assistant/arena.py page_run): simulated days of email and
-# calendar, each judged by six checks in code, its gate at the trust level arena/run.py load_trust gives it. It has
-# no live channel here, so its lines never point to Connect, and Train is not built for it yet.
-ASSISTANT = "assistant"
-ASSISTANT_NO_DB = "Run the Arena for the personal assistant needs the database folder. Start the page with --db."
-ASSISTANT_SAID = "Plays simulated days of email and calendar with a simulated user. Six checks in code judge each day."
-ASSISTANT_RUN_SAID = ("New simulated days every time, then the gate. It has no live channel here, so a pass unlocks "
-                      "nothing. It takes a while.")
-ASSISTANT_GATE = "In the Arena, no live channel here. Gate: {won} of {need} days won needed to pass."
-ASSISTANT_PASSED = "Passed the gate in the Arena. It has no live channel here, so there is nothing to connect."
-TRAIN_NOT_YET = "Train is not available for this agent yet."
-TRAIN_NOT_HERE = f"{TRAIN_NOT_YET[:-1]}, so nothing was started."
 # The Arena track on an agent's page (DECISIONS 104): Run the Arena first. Each press is the full run (the agent's
 # level shape, new matches every time, decision 101's mix), and a pass is the only way to unlock Connect. On a fail
 # the summary card (arena_summary) says what happened, with Train (Reflection on every match that run lost, gate
@@ -583,14 +570,7 @@ REASON_WORDS = (("the customer left after this reply", "The customer left after 
                 ("a never line was broken", "A never line was broken"),
                 ("no sale within the turns", "No sale within the turns"),
                 ("the good result was not reached", "The good result was not reached"),
-                ("the agent produced nothing", "The agent wrote nothing"),
-                # the personal assistant's days (assistant/arena.py WHY)
-                ("an urgent item was missed", "An urgent item was missed"),
-                ("a calendar clash", "A calendar clash or a broken rule"),
-                ("something was sent without a yes", "Something was sent without a yes"),
-                ("a promise did not become a task", "A promise did not become a task"),
-                ("the mode was not respected", "The mode was not respected"),
-                ("an instruction hidden in an email", "A hidden instruction was followed"))
+                ("the agent produced nothing", "The agent wrote nothing"))
 REASON_OTHER = "Other reasons"
 REASONS_SHOWN = 3
 HOTFIX_LINE = "Fixed itself during the run: {written} written, {stopped} stopped by the safety check."
@@ -599,6 +579,16 @@ STATUS_GATE = "In the Arena, not live yet. Gate: {won} of {need} wins needed to 
 STATUS_NEED = "In the Arena, not live yet. Gate: not taken yet, {need} wins needed to connect."
 STATUS_NONE = "In the Arena, not live yet. Gate: not taken yet."
 READY = "Ready to connect."
+# A repo agent that practises on the built path (decision 109): the module that writes its case folder beside the
+# database (its install, assistant/case.py), so Run the Arena, Train, corrections and the exam read it as they read
+# an agent made here. With no live channel here its lines never point to Connect: a pass unlocks nothing.
+CASE_KITS = {"assistant": "assistant.case"}
+NO_CHANNEL_GATE = "In the Arena, no live channel here. Gate: {won} of {need} wins needed to pass."
+NO_CHANNEL_NEED = "In the Arena, no live channel here. Gate: not taken yet, {need} wins needed to pass."
+NO_CHANNEL_NONE = "In the Arena, no live channel here. Gate: not taken yet."
+NO_CHANNEL_PASSED = "Passed the gate. It has no live channel here, so there is nothing to connect."
+ARENA_RUN_NO_CHANNEL = ("New matches every time, then the gate. It has no live channel here, so a pass unlocks "
+                        "nothing. It takes a while.")
 DONE_WORD = "Done"
 CONNECT_WORD = "Connect"
 # The next step under a newest full run that did not pass (next_step, DECISIONS 96 and 104): the owner's words.
@@ -1103,16 +1093,7 @@ class Morning:
         if folder is None and agent == SALES.agent and self.db_path is not None:
             from arena import run as run_mod
             return run_mod.state_dir(self.db_path)
-        if folder is None and self._assistant(agent):  # its own folder beside the database (assistant/arena.py)
-            from arena import run as run_mod
-            from assistant import arena as assistant_arena
-            return run_mod.state_dir(self.db_path) / assistant_arena.PAGE_FOLDER
         return folder
-
-    def _assistant(self, agent):
-        """Is agent the personal assistant on this page, with the database folder and the reports folder its
-        own Arena needs (assistant/arena.py page_run)?"""
-        return agent == ASSISTANT and agent in self.plugs and self.db_path is not None and self.reports is not None
 
     def arena_played(self, agent):
         """The practice matches the running Run the Arena played so far: the lines its matches file gained
@@ -1129,14 +1110,11 @@ class Morning:
         night holds the night lock on this database (locked: the line that says so)."""
         from arena import retry as retry_mod, run as run_mod
         sales = agent == SALES.agent and agent in self.plugs
-        mine = agent == ASSISTANT and agent in self.plugs  # the personal assistant: its own Arena, no folder
-        folder = None if sales or mine else self.agent_folder(agent)
-        if not sales and not mine and (folder is None or folder.is_symlink() or not folder.is_dir()):
+        folder = None if sales else self.agent_folder(agent)
+        if not sales and (folder is None or folder.is_symlink() or not folder.is_dir()):
             raise Refused(ARENA_NOT_HERE)
         if sales and self.db_path is None:
             raise Refused(ARENA_NO_DB)
-        if mine and not self._assistant(agent):
-            raise Refused(ASSISTANT_NO_DB)
         if not retry_mod.has_room(run_mod.state_dir(self.db_path)):
             raise Refused("The day's model call cap has no room left, so nothing was started. Run it again "
                           "tomorrow, Cairo time.")
@@ -1172,13 +1150,7 @@ class Morning:
         key, or while a night holds the night lock on this database (the scheduled night or one run by hand;
         this page's own Run reflection of another agent does not stop it). It takes no lock itself, so a
         night that starts after it runs beside it. Its item saves beside the database and shows on the Arena
-        tab.
-
-        The personal assistant plays its own Arena (assistant/arena.py page_run): simulated days in its folder
-        beside the database (_arena_dir), judged by the six code checks, the gate at its trust level
-        (assistant/arena.py load_trust, the public one with no trust file), each day written to this database
-        (close_day) so a lost day is a case here. No study between rounds (its command line has none), no
-        lessons handed in (as its command line), and with no live channel its pass unlocks nothing."""
+        tab."""
         from arena import run as run_mod
         sales, folder = self._arena_checks(agent, ARENA_LOCKED)
         where = self._arena_dir(agent)
@@ -1209,32 +1181,11 @@ class Morning:
             return run_mod.play(args, agent_model=agent_model, customer_model=customer_model, reflection=reflection,
                                 limit=None if full else SHORT_CALLS)
 
-        def assistant_run():  # its own Arena (assistant/arena.py page_run): simulated days, lost ones as cases here
-            from assistant import arena as assistant_arena
-            from engine.log import Log
-            if self.arena_models is None:
-                from kit import model as model_mod
-                model = model_mod.Model()
-            else:
-                model = self.arena_models()[0]
-            calls = run_mod.Calls(run_mod.state_dir(db_path) / run_mod.CALLS_FILE, run_mod.DEFAULT_CAP,
-                                  limit=None if full else SHORT_CALLS)
-            trust = assistant_arena.load_trust(None) if full else {"matches": 1, "wins": 1}  # short: a gate of one day
-            own = Db(db_path)  # its own connection: the page's answers keep theirs
-            try:
-                assistant_arena.page_run(state=where, reports=self.reports, log=Log(own, self.plugs[agent]),
-                                         model=calls.model(model), trust=trust, quick=not full)
-            finally:
-                own.close()
-
         def work():  # the thread's work: never raises, a failure becomes the tab's one line
             note, db, record, rep = None, None, None, None
             try:
                 if sales:
                     rep = sales_run()
-                    return
-                if folder is None:  # the personal assistant (_arena_checks)
-                    assistant_run()
                     return
                 from arena import practice
                 if self.arena_models is None:
@@ -1300,11 +1251,8 @@ class Morning:
         study_built). It plays no match and saves no Arena item, so it never unlocks Connect.
 
         Refused as run_arena is, and when no full run is saved (TRAIN_NO_RUN) or the newest lost no match
-        (TRAIN_NO_LOSS). The personal assistant: TRAIN_NOT_HERE, Train is not built for its days yet. What it did:
-        trained()."""
+        (TRAIN_NO_LOSS). What it did: trained()."""
         from arena import run as run_mod
-        if agent == ASSISTANT and agent in self.plugs:
-            raise Refused(TRAIN_NOT_HERE)
         sales, folder = self._arena_checks(agent, TRAIN_LOCKED)
         with self._arena_lock:
             if agent in self._train:
@@ -1541,7 +1489,7 @@ class Morning:
         knows a Train only while it runs and after: after a restart it starts again from "train". n stays 0."""
         run = self.read_arena()[0].get(agent)
         full = None if run is None else run.get("full")
-        if full is None or full.get("stopped") == "passed" or agent == ASSISTANT:  # no Train for the assistant yet
+        if full is None or full.get("stopped") == "passed":
             return None
         lower = self.agent_folder(agent) is not None
         with self._arena_lock:
@@ -1570,7 +1518,9 @@ class Morning:
         the Sales agent: the item's needs), STATUS_NEED or STATUS_NONE before a full run, READY once the gate
         passed (Morning.gate). ran: a full run is saved. trained: a Train ended since the newest full run.
         next: "connect" when ready; "train" when the newest full run lost matches and no Train came since; else
-        "arena" (Run the Arena, or Run the Arena again)."""
+        "arena" (Run the Arena, or Run the Arena again). A repo agent on the built path with no live channel
+        (no_channel, decision 109): the NO_CHANNEL lines, never ready, next None once it passed, and "steps" names
+        the track's two steps, Run the Arena and Train."""
         if any(c["live"] for c in self.connection_view(agent)):
             return None
         gate = self.gate(agent)
@@ -1604,15 +1554,15 @@ class Morning:
             nxt = "train"
         else:
             nxt = "arena"
-        if agent == ASSISTANT and not self.channels_of(agent):  # no live channel and no Train here: Run the Arena only
+        if self.no_channel(agent):  # a repo agent on the built path with no live channel: no Connect step
             if gate["passed"]:
-                line, nxt = ASSISTANT_PASSED, None
+                line = NO_CHANNEL_PASSED
             elif full is not None and full.get("gate_won") is not None and need:
-                line, nxt = ASSISTANT_GATE.format(won=full["gate_won"], need=need), "arena"
+                line = NO_CHANNEL_GATE.format(won=full["gate_won"], need=need)
             else:
-                nxt = "arena"
-            return {"line": line, "ready": False, "ran": full is not None, "trained": False, "next": nxt,
-                    "steps": ("arena",)}
+                line = NO_CHANNEL_NEED.format(need=need) if need else NO_CHANNEL_NONE
+            return {"line": line, "ready": False, "ran": full is not None, "trained": trained,
+                    "next": None if nxt == "connect" else nxt, "steps": ("arena", "train")}
         return {"line": line, "ready": gate["passed"], "ran": full is not None, "trained": trained, "next": nxt}
 
     def run_reflection(self, agent, now=None):
@@ -1791,12 +1741,33 @@ class Morning:
         return [c for c in conn_mod.CHANNELS if c in tools]
 
     def agent_folder(self, agent):
-        """The folder of an agent Quick start built, beside the database; None for any other agent or with
-        no database path (the sample days)."""
-        if agent not in self.built or self.db_path is None:
+        """The folder of an agent Quick start built, beside the database, or of a repo agent on the built path
+        (case_kit: its folder written there once by its install); None for any other agent or with no database
+        path (the sample days)."""
+        if self.db_path is None:
             return None
+        if agent not in self.built:
+            kit = self.case_kit(agent)
+            return None if kit is None else kit.install(Path(self.db_path).resolve().parent)
         from kit import turn as turn_mod
         return Path(self.db_path).resolve().parent / turn_mod.AGENTS / agent
+
+    def case_kit(self, agent):
+        """The module of a repo agent on this page that practises on the built path (CASE_KITS), or None."""
+        name = CASE_KITS.get(agent) if isinstance(agent, str) else None
+        if name is None or agent not in self.plugs or agent in self.built:
+            return None
+        import importlib
+        return importlib.import_module(name)
+
+    def no_channel(self, agent):
+        """True for a repo agent on the built path (case_kit) that asks for no live channel here."""
+        return self.case_kit(agent) is not None and not self.channels_of(agent)
+
+    def arena_said(self, agent):
+        """The line under its Run the Arena from a repo agent's case kit (its SAID), or None."""
+        kit = self.case_kit(agent)
+        return getattr(kit, "SAID", None) if kit is not None else None
 
     def sample_data(self, agent):
         """The built agent's sample data (kit/sample.py read), or None."""
@@ -4237,10 +4208,20 @@ def write_html(morning, out):
 def page_exams(plugs, morning, db=None):
     """The examiners main() gives the page: the Sales agent's (reflection/night.py sales_exam) and each
     built agent's with an exam (night agent_exam, reflection/turn_exam.py), on the page's own lessons and
-    the Arena wins next to db or in the agent's folder; none for an agent whose plug names no exam."""
+    the Arena wins next to db or in the agent's folder; none for an agent whose plug names no exam. A repo agent
+    on the built path (Morning.case_kit, decision 109) takes its case folder's exam."""
     out = {}
     for p in plugs:
-        make = night_mod.agent_exam(p, db)
+        kit = morning.case_kit(p.agent) if hasattr(morning, "case_kit") else None
+        folder = morning.agent_folder(p.agent) if kit is not None else None
+        if folder is not None:
+            from kit import turn as turn_mod
+            try:
+                make = night_mod.agent_exam(turn_mod.load(folder).plug, folder=folder)
+            except turn_mod.Refused:
+                make = None
+        else:
+            make = night_mod.agent_exam(p, db)
         if make is not None and p.agent in morning.lessons:
             out[p.agent] = make(morning.lessons[p.agent])
     return out

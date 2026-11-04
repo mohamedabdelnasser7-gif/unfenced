@@ -98,11 +98,13 @@ These came in on the engfix2 and engfix3 branches.
 
 **The Arena track on the page.** The agent page went through three shapes in one day (decisions 99, 102, 104) before settling on Arena first: Run the Arena is the full run, and a failed run shows what lost with Train and the correction box beside it (`a9b092d`, `7b4b502`).
 
+**The assistant on the case Arena.** The personal assistant's page moved from simulated days to the case Arena: one request or one email thread at a time against a made-up user, with the same Run the Arena, Train and gate as an agent made in Quick start, so it practises on the tasks it will really face (decision 109).
+
 ## Still open
 
 - The offers and fair close work (decision 105) is on its own branch and not yet merged here.
 - The price check, the send check, the hotfix note guard and the cleaner still miss some shapes. Each is listed in [known-limits.md](known-limits.md) with what replaces it next.
 - The cleaner can miss a rare surname or a number written in words (decisions 23 and 40).
 - Hand-off to a person is a later feature (decision 53). A live off-topic check on every real reply is next (decision 89).
-- The personal assistant's code is still day shaped; its move to one email thread is next (decision 71).
+- The personal assistant's night and command line Arena still play simulated days; its page practises case by case (decisions 71 and 109).
 - One agent with several kinds of case is next, not built (decision 69).

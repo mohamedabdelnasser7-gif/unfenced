@@ -210,11 +210,11 @@ class Tools(Base):
 
     def test_quick_start_tool_keys_read_as_the_tool_files_behind_them(self):
         plug = json.loads((self.folder / "plug.json").read_text())
-        plug["risk"]["high"]["tools"] = ["calendar", "orders", "store", "whatsapp"]
+        plug["risk"]["high"]["tools"] = ["sheets", "orders", "store", "whatsapp"]
         (self.folder / "plug.json").write_text(json.dumps(plug))
         a = turn.load(self.folder)
         self.assertEqual(a.tools, ("find_order", "draft_order", "store"))
-        self.assertEqual(a.missing, ("calendar",))  # whatsapp is the channel the chat is on, no tool
+        self.assertEqual(a.missing, ("sheets",))  # whatsapp is the channel the chat is on, no tool
         self.assertTrue(set(turn.QUICK_TOOLS) <= set(qs.TOOLS))
 
     def test_a_tool_the_plug_does_not_name_never_runs(self):

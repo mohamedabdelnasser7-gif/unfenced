@@ -282,7 +282,7 @@ class Patterns(Night):
         self.assertLessEqual(len(call["sample"]), study.SAMPLE)
         good = [v for v in call["sample"] if v["good"]]
         self.assertEqual((len(good), len(call["sample"]) - len(good)), (study.SAMPLE // 2, study.SAMPLE // 2))
-        self.assertEqual((call["limit"], call["known"]), (study.LIMIT, []))
+        self.assertEqual((call["limit"], call["known"]), (study.ANSWER_MAX, []))
 
     def test_only_good_or_only_bad_cases_ask_no_proposer(self):
         fk.beds(self.log, early_bad=0, late_bad=0)
@@ -290,13 +290,15 @@ class Patterns(Night):
         self.assertEqual((self.proposer.calls, rep["candidates"], rep["cards"]), ([], [], []))
         self.assertTrue(rep["notes"])
 
-    def test_at_most_limit_candidates_are_tagged(self):
+    def test_one_answer_past_the_size_bound_is_named_never_kept_quietly(self):
         fk.beds(self.log)
         many = [fk.candidate(fk.EARLY, pattern=f"pattern {n}", lesson=f"Lesson {n}.") for n in range(9)]
         marks = {c["pattern"]: "early" for c in many}
         rep = self.run_night(*many, tagger=fk.Tagger(marks), limit=2)
         self.assertEqual(len(self.tagger.calls), 2)
         self.assertEqual(len(rep["candidates"]), 2)
+        self.assertEqual([d["candidate"] for d in rep["dropped"]], [f"pattern {n}" for n in range(2, 9)])
+        self.assertEqual({d["why"] for d in rep["dropped"]}, {study.past_bound(2)})
 
     def test_a_bad_candidate_is_dropped_and_said(self):
         fk.beds(self.log)

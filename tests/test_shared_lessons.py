@@ -83,7 +83,7 @@ class SharedLessons(unittest.TestCase):
             self.pool.add(shared.LESSON, text if n == 0 else NEAR, o, f"lesson:x:{n}")
         return self.pool.shared(shared.LESSON)[0]["id"] if len(set(owners)) >= 2 else None
 
-    def night(self, exam=None, others=(), writer=None, fit=None, give=shared.GIVE, limit=study.LIMIT):
+    def night(self, exam=None, others=(), writer=None, fit=None, give=shared.GIVE, limit=study.ANSWER_MAX):
         self.mine = Lessons(self.db, self.new, judge=always_low, exam=exam)
         self.fit = fit or fk.Fit({PATTERN: "fully", SIB: "fully", FAR: "partly"})
         self.link = shared.Link.for_agent(self.new, self.folder, writer or writer_of(), self.root, give=give)
@@ -124,12 +124,12 @@ class SharedLessons(unittest.TestCase):
         self.assertIn(study.POOL_NO_GATE, rep["notes"])
         self.assertNotIn("kept", {x["state"] for x in self.mine.mine()})
 
-    def test_at_most_limit_patterns_are_read_a_night(self):
+    def test_every_pattern_not_taken_is_read_with_no_cap(self):  # DECISIONS item 98
         self.seen_at("north", "south")
         for n, o in enumerate(("north", "south")):
             self.pool.add(shared.LESSON, FILTERS, o, f"lesson:y:{n}")
         self.assertEqual(len(self.pool.shared(shared.LESSON)), 2)
-        self.assertEqual(len(self.night(exam=passing, limit=1)["shared"]["lessons"]), 1)
+        self.assertEqual(len(self.night(exam=passing, limit=1)["shared"]["lessons"]), 2)
 
     def test_a_pattern_seen_at_one_owner_is_not_read(self):
         self.seen_at("north", "north")

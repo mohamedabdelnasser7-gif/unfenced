@@ -41,11 +41,12 @@ class Runs:
     """The fake night: records (agent folder, db path, now); answers by agent."""
 
     def __init__(self, answers=None):
-        self.calls, self.answers = [], answers or {}
+        self.calls, self.answers, self.deadlines = [], answers or {}, []
 
-    def __call__(self, path, db_path, now):
+    def __call__(self, path, db_path, now, deadline=None):
         agent = Path(path).parent.name
         self.calls.append((agent, db_path, now))
+        self.deadlines.append(deadline)
         answer = self.answers.get(agent, 0)
         if callable(answer):
             return answer()

@@ -235,13 +235,13 @@ class RefusedWrite(across.Across):
         self.assertEqual(whys, ["not written: refused here"] * 2)
         self.assertEqual(rep["cards"], [])
 
-    def test_kept_lessons_asked_are_at_most_the_limit(self):
+    def test_every_kept_lesson_is_asked_with_no_cap(self):  # DECISIONS item 98
         for n in range(7):
             kept_lesson(self.theirs["ledger"], f"Post entries in batch {n}.", ["all"], yes_by="owner")
         rep = self.run_night(fit=fk.Fit())
         ledger = next(a for a in rep["across"] if a["agent"] == "ledger")
-        self.assertEqual(len(ledger["lessons"]), study.LIMIT)
-        self.assertEqual(len(self.fit.calls), study.LIMIT)
+        self.assertEqual(len(ledger["lessons"]), 7)
+        self.assertEqual(len(self.fit.calls), 7)
 
 
 class ModelPartPins(unittest.TestCase):

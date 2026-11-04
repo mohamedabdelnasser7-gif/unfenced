@@ -271,9 +271,9 @@ class TheNights(unittest.TestCase):
             calls.append(("trial check", now))
             return check(this, now)
 
-        def spy_study(this, since, until, *, now=None):
+        def spy_study(this, since, until, *, now=None, **kw):
             calls.append(("study", since, until, now))
-            return study(this, since, until, now=now)
+            return study(this, since, until, now=now, **kw)
 
         with mock.patch.object(Trials, "check", spy_check), mock.patch.object(Study, "run", spy_study):
             out = fn()

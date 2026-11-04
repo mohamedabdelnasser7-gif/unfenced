@@ -15,8 +15,18 @@ META_STUDY_ROUTE=open), and the fit check, the adapter and the risk judge on Mus
 reads their cases and kept lessons, siblings first, then the shared pool of the agent's kind across
 owners (reflection/shared.py, DECISIONS item 83): lesson patterns seen at 2 or more other owners,
 each on trial only through the agent's eval gate, and this agent's kept lessons given to the pool as
-clean patterns. The idea part, on the study route too, gives at most 3
-ideas a night: lessons with no past cases behind them, each going the normal way to a trial.
+clean patterns. The idea part, on the study route too, gives every idea worth a try: lessons with
+no past cases behind them, each going the normal way to a trial. There is no cap on lessons
+(DECISIONS item 98): the study writes and examines every lesson it finds.
+
+A deadline and a queue (DECISIONS item 98; engine/study.py step 10). The scheduled night is given
+--deadline, the next 09:00 in NIGHT_TZ (reflection/scheduler.py); a run by hand and Run reflection
+are given none and run to the end. Before each lesson's write and exam the study checks the deadline,
+a person's Stop (night(stop=...)) and the day's model call cap (the Arena's count file next to the
+database, or in the built agent's folder, as the shared pool's writer counts on it); once one says
+stop, every lesson not examined yet is queued in the agent's database (engine/study_queue.py), and the
+next night or Run reflection writes the queued ones first. The report names them (queued, from_queue,
+stopped).
 
 N comes from the plug unless --days gives it: twice the longest time the plug says its deciding
 results take to show (engine/study.py read_days, 7 days when it says none). It sets only how
@@ -166,6 +176,19 @@ class LinkedStudy(Study):
         return found
 
 
+def day_cap_reached(home):
+    """The capped check the night and Run reflection give the study (engine/study.py step 10): True once
+    the day's model call count in home (the Arena's count file, arena/run.py Calls) has no room left. A
+    count file that cannot be read counts as no room, as Calls fails closed."""
+    from arena import run as arena_run
+    path = Path(home) / arena_run.CALLS_FILE
+
+    def capped():
+        calls = arena_run.Calls(path, arena_run.DEFAULT_CAP)
+        return calls.problem is not None or calls.count >= calls.cap
+    return capped
+
+
 def links(rep, others=(), lessons=None):
     """Each new lesson of the night with what it links back to, and the agents read.
     lessons: one per card, {lesson_id, state, from_agent, cases, from_lesson, waits_for}: the agent whose
@@ -178,6 +201,9 @@ def links(rep, others=(), lessons=None):
     engine's back_links(); empty without lessons."""
     found = {}
     for rec in rep["candidates"] + [c for a in rep["across"] for c in a["candidates"] + a["lessons"]]:
+        if rec.get("lesson_id") is not None:
+            found[rec["lesson_id"]] = rec
+    for rec in rep.get("from_queue") or []:  # a queued lesson keeps the cases it was found on (step 10)
         if rec.get("lesson_id") is not None:
             found[rec["lesson_id"]] = rec
     lessons_out = []
@@ -228,7 +254,8 @@ def other_plugs(plug, root=ROOT, db=None):
 
 
 def night(db, plug, *, days=None, until=None, others=None, judge=None, proposer=None, tagger=None, fit=None,
-          adapter=None, ideas=None, exam=None, spotter=None, note_writer=None, practice=None, shared=None):
+          adapter=None, ideas=None, exam=None, spotter=None, note_writer=None, practice=None, shared=None,
+          deadline=None, stop=None, capped=None):
     """Run one night study over [until - days, until). Parts left out are the Meta ones, except
     the idea part: main() gives the Meta one; left out here, the night asks for no ideas, so a
     night run with scripted parts never reaches a model for ideas. exam: makes the gate before a
@@ -241,6 +268,11 @@ def night(db, plug, *, days=None, until=None, others=None, judge=None, proposer=
     counts (arena/learn_built.py from_folder); the report counts them as practice_cases. shared: the
     agent's link into the shared pool of its kind (reflection/shared.py Link); main() gives one with
     the Meta writer; left out, the pool is neither read nor given to.
+    deadline, stop and capped: engine/study.py Study.run's (step 10). deadline: a time in seconds since
+    1970 past which no lesson is examined (the scheduled night's next 09:00 in NIGHT_TZ); stop: a
+    callable, True once a person pressed Stop; capped: a callable, True once the day's model call cap is
+    reached (day_cap_reached). Left out, the study runs to the end. What is not examined by then is
+    queued and goes first next time. Run reflection gives no deadline, its stop check and capped.
     The trial check runs first, at until. Returns the study's report, with the runner's own
     window line, the links and the trial check ("trials") added."""
     days = default_days(plug) if days is None else float(days)
@@ -271,7 +303,7 @@ def night(db, plug, *, days=None, until=None, others=None, judge=None, proposer=
     study = LinkedStudy(db, plug, proposer=proposer or parts.Proposer(), tagger=tagger or parts.Tagger(),
                         fit=fit or parts.FitCheck(), adapter=adapter or parts.Adapter(),
                         others=others, lessons=lessons, ideas=ideas, hand_over=hand, shared=shared)
-    rep = study.run(since, until, now=until)
+    rep = study.run(since, until, now=until, deadline=deadline, stop=stop, capped=capped, take_queue=True)
     rep["days"] = days
     rep["parts"]["judge"] = _judge_label(judge)
     rep["trials"] = checked
@@ -466,6 +498,13 @@ def text(rep, plug):
         lines.append(f'    - "{card["change"]}"{came}: {_state(card)}')
         if card.get("gate"):
             lines.append("      " + engine_exam.effect_line(card["gate"]))
+    if rep.get("from_queue"):
+        lines.append(f'  from the queue, first: {len(rep["from_queue"])}')
+        lines.extend(f'    - "{q["lesson"]}": ' + (f'lesson {q["lesson_id"]}' if q["lesson_id"] is not None else q["why"])
+                     for q in rep["from_queue"])
+    if rep.get("stopped"):
+        lines.append(f'  stopped: {rep["stopped"]}; queued for the next study: {len(rep["queued"])}')
+        lines.extend(f'    - "{q["lesson"]}" ({q["part"]})' for q in rep["queued"])
     if rep.get("ideas"):
         lines.append(f'  ideas {len(rep["ideas"])}')
         lines.extend(f'    - "{i["idea"]}": ' + (f'lesson {i["lesson_id"]}' if i["lesson_id"] is not None else i["why"])
@@ -638,6 +677,9 @@ def main(argv=None, *, until=None):
                     help="the persona recipe, outside the repo: real chats become practice customers (arena/grow.py)")
     ap.add_argument("--until", type=float, default=None,
                     help="the window's end, in seconds since 1970 (default: now; the night scheduler gives its own)")
+    ap.add_argument("--deadline", type=float, default=None,
+                    help="seconds since 1970 past which no lesson is examined; the rest is queued for the next "
+                         "study (the night scheduler gives the next 09:00 in NIGHT_TZ; default: none)")
     ap.add_argument("--limit", type=float, default=None,
                     help="seconds before the run ends itself; it also ends when its stdin closes (the night "
                          "scheduler gives it, reflection/scheduler.py guard)")
@@ -685,7 +727,7 @@ def main(argv=None, *, until=None):
             link, left_out = None, shared_mod.left_out(e)
         rep = night(db, plug, days=args.days, until=now, ideas=parts.Ideas(), exam=exam,
                     spotter=parts.Spotter(), note_writer=parts.NoteWriter(), others=other_plugs(plug, db=args.db),
-                    practice=folder, shared=link)
+                    practice=folder, shared=link, deadline=args.deadline, capped=day_cap_reached(home))
         rep["courier"] = courier
         if left_out:
             rep["notes"].append(left_out)

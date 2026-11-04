@@ -10,7 +10,7 @@ calling it with a round's number then:
 1. Runs the night study (reflection/night.py LinkedStudy, the night's own Meta parts) on that
    round's lost matches only: every other case in the database is out of its window, and no other
    agent is read. All its cases ended not good, so the pattern search, which needs good and not
-   good cases, finds nothing; the idea part (at most 3 ideas a study) is what writes lessons here.
+   good cases, finds nothing; the idea part (every idea worth a try, DECISIONS item 98) is what writes lessons here.
    A lesson the gate failed after an earlier round goes back into this study with what it broke
    (engine/study.py, step 5; DECISIONS item 50), so the idea part writes a different try.
 2. Puts every new lesson through the eval gate (arena/gate.py: the exam, then the rerun of past

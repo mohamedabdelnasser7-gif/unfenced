@@ -235,6 +235,15 @@ CLEAN = [
     "Patients who cancelled before often want an earlier appointment, so offer one plainly.",
     "If a follower asks about a same-day reply, explain when the team is online.",
     "Offer a one to one call when a learner is stuck on the same lesson twice.",
+    # review crossowner round 3, item 2: modern words, irregular forms and British spellings
+    "When women ask whether the box is gift wrapped after they have paid, confirm it before the courier leaves.",
+    "If a trainee wants to practise the programme at home, suggest a short cardio routine first.",
+    "When a campaign starts to underperform, test a new headline before the next webinar.",
+    "Customers who held an item in the cart for days often wait for a promo, so mention it once.",
+    "When a customer asks about the refund timeline, give the steps and when each one happens.",
+    "Offer gift boxes when a customer buys jewellery, and explain the licence card inside.",
+    "If guests ask about parking, explain whether the kerb outside is free to stop at.",
+    "When a client began strong but stopped logging workouts, ask what changed without blame.",
 ]
 
 
@@ -249,6 +258,14 @@ class CleanTable(unittest.TestCase):
         for line in CLEAN:
             with self.subTest(line=line):
                 self.assertEqual(shared.check(line), [])
+
+    def test_common_modern_irregular_and_british_words_are_words(self):
+        for w in ("paid", "held", "began", "women", "feet", "box", "boxes", "timeline", "upsell", "upsize",
+                  "underperform", "underperforming", "cardio", "podcast", "webinars", "practise", "practising",
+                  "programme", "jewellery", "licence", "fibre", "kerb", "fulfilled", "paediatric", "became",
+                  "forgiven", "wishlist", "selfie", "knives"):
+            with self.subTest(word=w):
+                self.assertTrue(shared._english_word(w))
 
     def test_the_reasons_name_each_new_guard(self):
         cases = [

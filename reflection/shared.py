@@ -253,6 +253,22 @@ screenshot screenshots blog blogs influencer influencers livestream reschedule r
 workout workouts skincare haircut sneakers hoodies feedback reorder subscription subscriptions prioritize
 customize personalize
 """.split()) | GLUED_OK
+# and the common words the 1934 list misses (review crossowner round 3, item 2): modern words, the
+# irregular forms its endings cannot reach, and British spellings its UK rules cannot; no name of a
+# brand, a person or a place
+SAFE = SAFE | frozenset("""
+timeline upsell upsize upsold underperform outsold undersold resold cardio warmup cooldown physio carb carbs
+podcast webinar vlog selfie wishlist bestseller backorder cashback chargeback payout paywall freebie reboot
+uninstall roadmap workflow troubleshoot bootcamp burnout mindset wellbeing lifestyle weeknight earbud earbuds
+smartwatch touchscreen takeaway takeout meetup ebook ecommerce autoreply meme rewatch copywriting upcycle vegan
+playlist haircare makeover hairstyle telehealth walkthrough rideshare carpool babysitter daycare homeschool
+dropoff timeslot anytime anymore info intro pricey customization personalization offboarding
+paid prepaid repaid overpaid held began became befell blew awoken woken forgave forgiven foresaw foreseen forsook
+mislaid misspelt overcame overdid overran oversaw overslept overtook overtaken overthrew outgrew outdid rewrote
+rewritten undergone undertaken withdrew women feet knives scarves selves box boxes fax
+practise programme jewellery licence fibre kerb kerbside fulfil fulfilment offence pretence storey sceptical
+paediatric paediatrician orthopaedic orthopaedics anaesthetic oestrogen manoeuvre moustache tonne postcode
+""".split())
 CONTRACTIONS = frozenset("""
 don't doesn't didn't isn't aren't wasn't weren't won't wouldn't shouldn't couldn't can't haven't hasn't
 hadn't mustn't needn't it's they're you're we're they've you've we've i'm i've i'll i'd they'll you'll we'll

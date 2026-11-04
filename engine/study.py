@@ -97,7 +97,8 @@ read at the night's now, and notes on any part that failed. A failing part makes
 
 9. Scope cases. A case the Arena wrote from an off topic practice match (arena/scope.py; every row's
    detail says "kind": "scope", arena/learn.py and arena/learn_built.py) is counted, but never read by
-   the proposer, the tagger, the idea part, the hand over track or another agent's study: the ask in it
+   the proposer, the tagger, the idea part (a rewrite in the run too), the hand over track or another
+   agent's study; all of them take their cases from one reader, _own: the ask in it
    is one made-up person's, so a lesson from it could refuse a topic. From the lost ones the study
    writes only DECLINE, one general line (decline briefly, give no part of it, offer the agent's own
    work), never a refusal of a topic, through Lessons.propose as any lesson, its source line starting
@@ -255,10 +256,8 @@ class Study:
                                                                ("clash", self.clash), ("ideas", self.ideas))
                          if part is not None}}
         texts = _Texts(self.lessons)
-        cases = _read(self.plug, self.log.window(since, until), until)
-        rep.update(_counts(self.plug, cases))
-        scoped = [c for c in cases if c.scope]  # off topic practice cases: only the decline line (see 9)
-        cases = [c for c in cases if not c.scope]
+        every, cases, scoped = _own(self.plug, self.log.window(since, until), until)
+        rep.update(_counts(self.plug, every))  # scope cases are counted; only the decline line reads them (see 9)
         mine = self.lessons.mine()
         tries = self._failed_tries(mine)
         known = _known(mine, {t["lesson_id"] for t in tries})
@@ -422,7 +421,7 @@ class Study:
             return out
         plug = self.plug
         texts = _Texts(self.lessons)
-        cases = _read(plug, self.log.window(since, until), until)
+        _, cases, _ = _own(plug, self.log.window(since, until), until)  # never a scope case (see 9)
         mine = self.lessons.mine()
         every = self._failed_tries(mine)
         chain = [int(t) for t in tries]
@@ -662,9 +661,8 @@ class Study:
             gated = sibling(self.plug, other)
             theirs = Lessons(self.db, other)
             texts = _Texts(theirs)
-            cases = _read(other, self.log.window(since, until, agent=other.agent, plug=other), until)
-            counts = _counts(other, cases)
-            cases = [c for c in cases if not c.scope]  # never another agent's off topic practice (see 9)
+            every, cases, _ = _own(other, self.log.window(since, until, agent=other.agent, plug=other), until)
+            counts = _counts(other, every)  # never another agent's off topic practice (see 9)
             entry = {"agent": other.agent, "sibling": gated, "shared_fields": sorted(fields & set(other.fields)),
                      "read": {"cases": counts["read"]["cases"], "good": counts["decided"]["good"],
                               "bad": counts["decided"]["bad"], "pending": counts["pending"],
@@ -852,6 +850,14 @@ def _read(plug, window, until):
         out.append(_Case(f"k{n}", case_id, rows, status, deciding, causes, sources[-1] if sources else None,
                          "\n".join(words), cut))
     return out
+
+
+def _own(plug, window, until):
+    """The one reader of the study's parts (see 9): (every case read, the cases a part may read, the scope
+    cases). Run, rewrite and the read of other agents all take their cases from here, so no part but the
+    decline line ever reads an off topic practice case."""
+    every = _read(plug, window, until)
+    return every, [c for c in every if not c.scope], [c for c in every if c.scope]
 
 
 def _counts(plug, cases):

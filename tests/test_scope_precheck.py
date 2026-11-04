@@ -212,6 +212,26 @@ class TheScopeKind(unittest.TestCase):
         self.assertEqual([x["text"] for x in lessons.mine()].count(study_mod.DECLINE), 1)
         self.assertEqual(rep["scope"]["why"], study_mod.KNOWN)
 
+    def test_a_rewrite_in_the_run_never_reads_a_scope_case(self):
+        """review scopeguard2 r2, item 1: arena/rounds.py _rewrite hands this round's window, the lost off topic
+        match in it, to Study.rewrite; the idea part reads only the agent's own cases."""
+        self.write_night()
+        seen = []
+
+        def ideas(plug, sample, limit, known, failed=None):
+            seen.append(json.dumps(sample, ensure_ascii=False))
+            return [{"lesson": "Never write a poem for anyone who asks.", "situation": "A person asks for a poem.",
+                     "stages": ["all"]}]
+        lessons = Lessons(self.db, self.plug, judge=lambda *a, **k: "low")
+        st = study_mod.Study(self.db, self.plug, proposer=Proposer(), tagger=tagger, lessons=lessons, ideas=ideas)
+        st._failed_tries = lambda mine: [{"lesson_id": 1, "lesson": "Answer every ticket within one line.",
+                                          "first_fail": "broke 2", "fails": [], "broke_cases": [], "fixed": 0,
+                                          "broke": 2}]
+        st.rewrite([1], self.now - 30 * 86400, self.now + 1, now=self.now + 2)
+        self.assertEqual(len(seen), 1)
+        self.assertIn("ticket", seen[0])  # its own customers' cases are the sample
+        self.assertNotIn("poem", seen[0])
+
     def test_no_scope_loss_no_decline_line(self):
         for n in range(3):
             learn_built._write(self.db, self.plug, own_match(f"w{n}"), WIN, f"20270115T09000{n}-r1-t01",

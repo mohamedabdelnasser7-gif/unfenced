@@ -858,7 +858,9 @@ class Morning:
         """Start a new test set on the Arena tab (arena/practice.py new_test_set): the way on when the
         agent's matches file, test-set.json or trained.json is torn, changed or gone. The old files are renamed aside, every
         customer before counts as trained, and the next run's test set is written new. Never starts a
-        run. Refused for any other agent, while a run goes, and when the record reads whole."""
+        run. Refused for any other agent, while a run goes, and when the record reads whole. The reply
+        warns when too few customers are left under the cap for a test set at the agent's level
+        (practice.room_warning)."""
         from arena import practice, run as run_mod
         folder = self.agent_folder(agent) if isinstance(agent, str) else None
         if agent == SALES.agent or folder is None or folder.is_symlink() or not folder.is_dir():
@@ -874,7 +876,8 @@ class Morning:
                 raise Refused(f"Nothing was changed: the files could not be renamed ({type(e).__name__}).")
             self._arena_note.pop(agent, None)
             self._arena_record.pop(agent, None)
-        return NEW_TEST_SET
+        warn = practice.room_warning(folder)  # the 99 customer cap leaves too few new ones at its level
+        return f"{NEW_TEST_SET} {warn}" if warn else NEW_TEST_SET
 
     def arena_played(self, agent):
         """The practice matches the running Run the Arena played so far: the lines its matches file gained

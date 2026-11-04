@@ -1,12 +1,17 @@
 """The levels seal check's findings (review levels seal check items 1 to 5): a folder whose three record
 files were all deleted, or left with none by a crash inside Start a new test set, counts every saved
 practice customer as trained, so none of them joins the next test set; a correction's practice round
-never plays a saved test customer. Fake models only."""
+never plays a saved test customer; the refusal when too few customers are left names lowering the
+level, and Start a new test set warns when the 99 customer cap leaves too few at the agent's level.
+Fake models only."""
+import json
 import os
 from unittest import mock
 
-from arena import gate, practice, run
+from arena import gate, levels, madeup, practice, run
 from kit import turn
+from reflection import morning as mo
+from tests import test_levels_tab
 from tests import test_levels_testset as testset  # the module, so its tests are not run twice
 from tests.test_customers_shape import Base, Writer
 
@@ -107,6 +112,66 @@ class CorrectionRoundCards(Base):
         with self.assertRaises(run.Refused):
             self.round_of(folder, writer).cards()
         self.assertEqual(writer.asks, [])
+
+
+
+def all_trained(folder, upto=madeup.MAX_CUSTOMERS):
+    """persona-01 to persona-<upto> each have a training match on record (the roster a run would keep)."""
+    practice.keep_trained(folder, [(f"persona-{n:02d}", practice._ANY) for n in range(1, upto + 1)])
+
+
+class Cap(Base):
+    """Item 3: an agent has at most 99 customers, so repeated resets can leave too few for a test set."""
+    practise = testset.Kept.practise
+
+    def test_the_too_few_refusal_names_lowering_the_level(self):
+        folder = self.folders[NAME]
+        all_trained(folder)
+        with self.assertRaises(run.Refused) as got:
+            self.practise(NAME, 30, 20)
+        self.assertIn("too few are left. One step: lower the agent's risk level to medium or low, whose test "
+                      "set holds 10", str(got.exception))
+        with self.assertRaises(run.Refused) as got:
+            self.practise(NAME, 20, 10)
+        self.assertIn("too few are left. No lower risk level holds a smaller test set", str(got.exception))
+        self.assertNotIn("One step", str(got.exception))
+
+    def test_room_warning_at_the_agents_level(self):
+        folder = self.folders[NAME]
+        self.assertIsNone(practice.room_warning(folder, levels.HIGH))  # a fresh agent
+        all_trained(folder, 60)
+        self.assertIsNone(practice.room_warning(folder, levels.HIGH))  # 39 left: enough for 20
+        all_trained(folder, 85)
+        warn = practice.room_warning(folder, levels.HIGH)  # 14 left: too few for 8, 8 and 4
+        self.assertIn("85 of the 99 customers", warn)
+        self.assertIn("test set of 20 at its high level", warn)
+        self.assertIn("lower the agent's risk level to medium or low", warn)
+        self.assertIsNone(practice.room_warning(folder, levels.MEDIUM))  # enough for 4, 4 and 2
+        all_trained(folder, 97)
+        self.assertIn("No lower risk level", practice.room_warning(folder, levels.MEDIUM))
+        levels.write(folder, levels.HIGH)
+        self.assertIn("at its high level", practice.room_warning(folder))  # the agent's own level.json
+
+
+class CapPage(test_levels_tab.Tab):
+    """Item 3 on the Arena tab: Start a new test set says when the cap leaves too few."""
+
+    def reset(self, level, saved):
+        levels.write(self.folder, level)
+        cards = self.folder / madeup.FOLDER
+        cards.mkdir(exist_ok=True)
+        for n in range(1, saved + 1):
+            (cards / f"persona-{n:02d}.json").write_text(json.dumps({"id": f"persona-{n:02d}"}), encoding="utf-8")
+        (self.folder / run.MATCHES_FILE).write_text("torn\n", encoding="utf-8")
+        return self.m.new_test_set("stock_watch")
+
+    def test_the_reset_warns_at_high_with_85_customers_trained(self):
+        got = self.reset(levels.HIGH, 85)
+        self.assertTrue(got.startswith(mo.NEW_TEST_SET + " 85 of the 99 customers"), got)
+        self.assertIn("lower the agent's risk level to medium or low", got)
+
+    def test_the_reset_says_nothing_more_while_there_is_room(self):
+        self.assertEqual(self.reset(levels.MEDIUM, 85), mo.NEW_TEST_SET)
 
 
 if __name__ == "__main__":

@@ -922,6 +922,39 @@ def _card_of(c):
 RESET = "reset"  # the id of a reset line starts with it, and every reset line carries it true
 
 
+def _lower(size):
+    """The step when a test set of size cannot be filled: the lower risk levels whose test set is smaller,
+    else that none is (an agent has at most madeup.MAX_CUSTOMERS customers)."""
+    smaller = [lv for lv in reversed(levels.ORDER) if levels.LEVELS[lv]["gate"] < size]
+    if not smaller:
+        return (f"No lower risk level holds a smaller test set, and an agent has at most {madeup.MAX_CUSTOMERS} "
+                "customers")
+    sizes = sorted({levels.LEVELS[lv]["gate"] for lv in smaller}, reverse=True)
+    return (f"One step: lower the agent's risk level to {' or '.join(smaller)}, whose test set holds "
+            f"{' or '.join(map(str, sizes))}")
+
+
+def room_warning(folder, level=None):
+    """A line when the madeup.MAX_CUSTOMERS cap leaves too few new customers for the test set at the
+    agent's level (level, else its level.json), else None: Start a new test set says it, since every
+    customer before counts as trained and the next run would stop with too few left. An estimate from the
+    shape's mix (shape_mix) of the ids no customer that trained holds; None when the record is unreadable."""
+    level = level if levels.valid(level) else levels.read(folder)
+    shape = levels.shape(level)
+    try:
+        used = {c for c, _ in trained(folder) if madeup.CARD_FILE.fullmatch(f"{c}.json")}
+    except run.Refused:
+        return None
+    left = madeup.MAX_CUSTOMERS - len(used)
+    have = shape_mix(left) if left > 0 else {}
+    need = _quota(shape_mix(shape["customers"]), shape["gate"])
+    if all(have.get(k, 0) >= n for k, n in need.items()):
+        return None
+    return (f"{len(used)} of the {madeup.MAX_CUSTOMERS} customers an agent can have count as trained, too few "
+            f"are left for the test set of {shape['gate']} at its {level} level, so its next run would stop. "
+            f"{_lower(shape['gate'])}.")
+
+
 def new_test_set(folder, now=time.time):
     """The way past a torn, changed or missing record (Unrecorded): the old matches file, test-set.json and
     trained.json are renamed aside, never deleted or read past a bad line, and a new matches file holds
@@ -1133,7 +1166,7 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
         customers += short  # more people that never trained, written by the same writer on the same cap
     if gate_size is not None and held is None:
         raise run.Refused(f"the test set needs {gate_size} customers that can reach the good result and never "
-                          "played a training match, with one left to practise on; too few are left")
+                          f"played a training match, with one left to practise on; too few are left. {_lower(gate_size)}")
     bar = dict(run.QUICK_TRUST) if quick else run.load_trust(trust, agent=agent.name)
     if old_gate:  # the old gate: a trust file or --gate set it
         if made_up:

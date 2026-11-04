@@ -283,7 +283,8 @@ class Void(Base):
     def test_an_agent_model_error_voids_the_match(self):
         code, rep = self.main("--quick", "--json", agent=types.SimpleNamespace(chat=raises))
         self.assertEqual((code, rep["stopped"]), (1, run.MODEL_ERROR))
-        self.assertEqual(rep["error"], practice.AGENT_SILENT)
+        # the why rides along, route and status only (a run on the Meta key alone stopped with no reason kept)
+        self.assertTrue(rep["error"].startswith(practice.AGENT_SILENT + " ("), rep["error"])
         self.assertEqual(self.matches(), [])  # dropped, never a loss
 
     def test_a_customer_model_error_voids_the_match(self):

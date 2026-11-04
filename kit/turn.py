@@ -369,6 +369,7 @@ class TurnResult:
     # Arena's turn record, whether the turn replied or not; a draft that quotes the person's words (3 or more in a
     # row, held_draft) is stored as HELD_DRAFT, so the person's text is never kept there
     actions: list = field(default_factory=list)  # [{action, note}] take_action recorded this turn
+    error: str = ""               # model_error: why, the route and a status or error type, never the request
 
 
 def system_prompt(agent, lessons=(), note=""):
@@ -493,7 +494,7 @@ def _turn(agent, text, ctx, history, chats, chat_id, send, customer_id, lessons,
     except ModelError as e:
         log.warning("the agent's model did not answer: %s", e)
         loop.drop_draft(chats, chat_id)
-        return TurnResult("model_error")
+        return TurnResult("model_error", error=" ".join(str(e).split())[:300])  # route and status only (kit/model.py)
 
 
 def _draft(ctx, system, convo, amounts, agent=None, acted=None):

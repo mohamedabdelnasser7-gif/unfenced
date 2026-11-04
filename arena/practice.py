@@ -338,7 +338,7 @@ def play(agent, card, *, agent_model, customer_model, seed=0, max_turns=MAX_TURN
                     one["input"] = given
                 turns.append(one)
                 if out.outcome == "model_error":
-                    ended, error = VOID, AGENT_SILENT
+                    ended, error = VOID, AGENT_SILENT + (f" ({out.error})" if getattr(out, "error", "") else "")
                     break
                 if out.outcome == "no_safe_reply":
                     ended = "no_safe_reply"

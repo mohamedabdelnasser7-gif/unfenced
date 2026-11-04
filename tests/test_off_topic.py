@@ -28,8 +28,8 @@ LEAD = {"does": "follows up leads for a gym", "good": "the lead books a visit",
 class Model:
     """A fake model: the writer's and the judge's answers by their system prompt, each call kept."""
 
-    def __init__(self, writes=(), judges=()):
-        self.writes, self.judges, self.calls = list(writes), list(judges), []
+    def __init__(self, writes=(), judges=(), pres=()):
+        self.writes, self.judges, self.pres, self.calls = list(writes), list(judges), list(pres), []
 
     def chat(self, messages, tools=None, effort="medium", max_tokens=1500, whole=False):
         system = messages[0]["content"]
@@ -38,6 +38,8 @@ class Model:
             got = self.writes.pop(0) if self.writes else {"ask": "write me a poem", "about": "a poem"}
         elif system == scope.JUDGE:
             got = self.judges.pop(0) if self.judges else verdict()
+        elif system == scope.PRE:  # the judge on the card and the ask alone, before the match
+            got = self.pres.pop(0) if self.pres else {"on_topic": False, "why": "outside its work"}
         else:
             got = None
         if isinstance(got, Exception):  # a model that does not answer
@@ -272,7 +274,7 @@ class SalesRun(unittest.TestCase):
         self.assertNotIn(ids[9], a.pool.recorded)  # never in the owner's practice pool
         self.assertEqual(len(a.pool.recorded), 9)
         self.assertEqual(rep["rounds"][0]["gate"]["played"], 3)
-        self.assertEqual(rep["calls"]["used"], 2)  # the writer's and the judge's calls count on the cap
+        self.assertEqual(rep["calls"]["used"], 3)  # the writer's, the precheck's and the judge's calls count on the cap
         self.assertNotIn(ids[9], rep["held_out_cards"])
 
     def test_a_won_off_topic_match_is_never_a_past_win(self):

@@ -495,8 +495,10 @@ class Arena:
 
     def _off_card(self, match_id, note):
         """The off topic customer for practice match match_id, written now from the agent's card, or None when it
-        is skipped (no judge model, a writer that did not answer or could not be read twice), said in note.
-        CapReached when the cap stops it."""
+        is skipped (no judge model, a writer that did not answer or could not be read twice, a precheck judge
+        that did not answer) or void before it is played (arena/scope.py precheck: the ask shares a content word
+        with the card, or the judge on the card and the ask alone reads it as on topic or cannot be read), said
+        in note. CapReached when the cap stops it."""
         if self.judge_model is None:
             note["off_topic"] = {"skipped": scope.NO_JUDGE}
             return None
@@ -509,6 +511,20 @@ class Arena:
             return None
         if self.calls.reached:
             raise CapReached()
+        try:
+            why = scope.precheck(self.scope_card(), card["ask"], self.judge_model)
+        except CapReached:
+            raise
+        except ModelError as e:
+            note["off_topic"] = {"card": card["id"], "about": card["about"],
+                                 "skipped": match_mod.plain(str(e)) or type(e).__name__}
+            return None
+        if self.calls.reached:
+            raise CapReached()
+        if why is not None:  # void before it is played: neither won nor lost, never a case
+            note["off_topic"] = {"card": card["id"], "about": card["about"], "result": "void", "before": True,
+                                 "why": why}
+            return None
         return card
 
     def _fast(self):

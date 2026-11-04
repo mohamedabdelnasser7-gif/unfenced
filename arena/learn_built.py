@@ -31,6 +31,9 @@ declares it as ending that action and it is not a deciding result: only the verd
 
 The source: when the plug's case names its source, the case id is it; when each row names it, the
 practice card's id, so matches against one made-up person share a source.
+
+An off topic match (arena/scope.py) has "kind": "scope" on every row, so the study writes from it only its
+general decline line, never a refusal of a topic (engine/study.py, see 9).
 """
 import calendar
 import json
@@ -105,6 +108,9 @@ def _write(db, plug, match, judged, match_id, now, won):
     source = None if plug.source.known_by == CASE else f"arena-{match.get('card') or match_id}"
     base = {"arena": True, "history": True, "practice": True, "match": match_id, "card": match.get("card"),
             "worry": match.get("worry"), "made_up": match.get("made_up") is True}
+    if match.get("off_scope"):  # an off topic match: the study writes only its decline line from it
+        from engine.study import SCOPE
+        base["kind"] = SCOPE
     at, step = start, 0
     for i, t in enumerate(turns):
         took = actions_of(plug, t)

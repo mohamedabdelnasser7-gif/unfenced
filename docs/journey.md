@@ -75,7 +75,7 @@ The demo store is Beyond the Limits. Its name is made up; its products and price
 
 **The gate was played by one rare customer type.** The held-out cards were scaled up to fill the gate, so one type (10 of 300 real chats) played about 98% of the gate matches. Fix: every type that can buy plays at its real share of chats, no type plays more than 3 of 10, and every gate match is new (`917f044`, decision 101).
 
-**Then the gate asked for more than the real shop sells.** With the real mix in place, the gate expected 7 wins in 10 from customers the store itself wins about 1 time in 10. One customer type is 78% of real chats and buys only on a discount, and the store had no offers to give. No lesson could close that gap honestly. Decision 105 gives each store its offers as data (installments, free delivery, a card payment discount, free printing, a second pair discount), read only through the store tool. A customer no offer covers wins on a fair close: no made-up offer, the nearest real option, polite, the door left open. Reflection never studies a fair close as a loss. The gate stays 7 of 10. This work is on the offers branch (`81f8a10`, `68d9726`) and was not merged into this branch when this page was written.
+**Then the gate asked for more than the real shop sells.** With the real mix in place, the gate expected 7 wins in 10 from customers the store itself wins about 1 time in 10. One customer type is 78% of real chats and buys only on a discount, and the store had no offers to give. No lesson could close that gap honestly. Decision 105 gives each store its offers as data (installments, free delivery, a card payment discount, free printing, a second pair discount), read only through the store tool. A customer no offer covers wins on a fair close: no made-up offer, the nearest real option, polite, the door left open. Reflection never studies a fair close as a loss. The gate stays 7 of 10. It came in on the offers branches (`81f8a10`, `68d9726` and the work after them) and is merged here.
 
 **The Arena run of 4 November afternoon.** One full run (20261104T143545) lost for eight separate reasons, each fixed in its own commit:
 
@@ -90,13 +90,20 @@ The demo store is Beyond the Limits. Its name is made up; its products and price
 
 These came in on the engfix2 and engfix3 branches.
 
-**Loosening the send check opened holes.** An earlier run that day (20261104T120239) showed the send check refusing times, lists, counts and order numbers as if they were prices, so we loosened it (`20f5637`). The red team on that work found the holes it opened: a customer could plant a number with a # and have the check ignore it, some range and count shapes let wrong prices and fees through, and the note guard passed spelled-out prices. The review marked two of these blocking. All were closed (`c7ab1c2`, `fe3d7e4`, `6f9ac05`), and the turn record no longer keeps the words of a refused draft that quotes the customer (`565f121`). The losses round 1 review and red team reports were not yet filed under reviews/ when this page was written.
+**Loosening the send check opened holes.** An earlier run that day (20261104T120239) showed the send check refusing times, lists, counts and order numbers as if they were prices, so we loosened it (`20f5637`). The red team on that work found the holes it opened: a customer could plant a number with a # and have the check ignore it, some range and count shapes let wrong prices and fees through, and the note guard passed spelled-out prices. The review marked two of these blocking. All were closed (`c7ab1c2`, `fe3d7e4`, `6f9ac05`), and the turn record no longer keeps the words of a refused draft that quotes the customer (`565f121`). The losses round 1 review and red team reports are filed under reviews/2026-11-04.
 
 **Dead code.** The same review found that the built agents' live notes had no caller: no channel runs a built agent for real customers, so that code was never reached. We removed it (`7cfea89`).
 
 **Real names in the replay data.** Before the repo goes public we scan the cleaned data again. That scan found Instagram display names in the store's header lines, partial addresses after an address cue, and one first name a customer asked to have printed. The cleaner now masks all three and can re-clean files already written (`a0b7df1`). The replay set and one card were cleaned again: 725 of 3,084 replay entries changed (`256a800`).
 
 **The Arena track on the page.** The agent page went through three shapes in one day (decisions 99, 102, 104) before settling on Arena first: Run the Arena is the full run, and a failed run shows what lost with Train and the correction box beside it (`a9b092d`, `7b4b502`).
+
+**The live runs of 4 November evening.** With every fix above merged, we ran the Sales agent and a built agent (a morning low stock report) live on the Meta key and read every loss.
+
+- Most Sales matches now reached an order, but every one failed the stock check: the demo store had no stock numbers, so any "in stock" was a claim with no data. Decision 107 gives any agent sample data, labelled, when nothing is connected, and the demo store got sample stock per size (`26d8b52`). The built agent had lost for the same reason: it reported that it had no stock levels.
+- With stock in place, the remaining stock fails were the check's own mistakes. A size line under one boot's heading was checked against every boot in the reply (`acfc8e5`), and one sentence listing sizes in stock and out was read as all out (`335e9f0`). The agent's answers were right. Each size now takes the stock word beside it, and a wrong size in a list still fails.
+- A model call that got no answer stopped the built agent's run, and the reason was not kept. A lost call is now asked once more, counted on the cap (`32e7e39`), and a stopped run says what failed (`a4a77bf`).
+- The command line practice run now learns between rounds the way the page does (`33260aa`), and the exam keeps what the agent said in each situation, so a refused lesson can be explained (`a303e93`).
 
 **Tonight's live Sales Arena run.** The fact check failed a correct printing price: "Price is 400 EGP, and it is free with any Elite boot" came right after a sentence about the name printing, and because the Elite was named later in the sentence, the check would not read the 400 as the printing's. That false fail was 3 of the 4 losses in 20 matches. The price check now follows the extra named in the sentence before when no boot or tier comes before the amount; a boot or tier before it keeps the strict rule.
 
@@ -119,7 +126,6 @@ These came in on the engfix2 and engfix3 branches.
 
 ## Still open
 
-- The offers and fair close work (decision 105) is on its own branch and not yet merged here.
 - The price check, the send check, the hotfix note guard and the cleaner still miss some shapes. Each is listed in [known-limits.md](known-limits.md) with what replaces it next.
 - The cleaner can miss a rare surname or a number written in words (decisions 23 and 40).
 - Hand-off to a person is a later feature (decision 53). A live off-topic check on every real reply is next (decision 89).

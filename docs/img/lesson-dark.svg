@@ -1,0 +1,204 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 778" width="1200" height="778" role="img" aria-labelledby="lesson-c-title lesson-c-desc" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title id="lesson-c-title">One case, two learning speeds: a hotfix in seconds and a tested lesson by night</title>
+  <desc id="lesson-c-desc">A lesson is a short record that carries where it came from, and every row is tied to one case, case 4821 (made-up example). Lesson: show the value first. The lost case went quiet after the price. In seconds a hotfix says try this instead, for that person's next case only. Night Reflection then finds across many cases, price without value lost more. The lesson passed the eval gate (example counts: 3 fixed, 0 broken), runs as a canary on a small share of chats first, and the next case goes better. Checks stop today's mistake. Reflection stops it coming back.</desc>
+  <defs>
+    <radialGradient id="canvasGlow" cx="0.18" cy="-0.1" r="0.75">
+      <stop offset="0" stop-color="#b0c0bb" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#b0c0bb" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="floorTint" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0.6" stop-color="#b0c0bb" stop-opacity="0"/>
+      <stop offset="1" stop-color="#b0c0bb" stop-opacity="0.07"/>
+    </linearGradient>
+    <linearGradient id="faceW" x1="0.38" y1="0" x2="0.62" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.6" stop-color="#f9f8f5"/>
+      <stop offset="1" stop-color="#f1f0eb"/>
+    </linearGradient>
+    <radialGradient id="faceWtint" cx="1" cy="1" r="0.75">
+      <stop offset="0" stop-color="#5f7471" stop-opacity="0.09"/>
+      <stop offset="1" stop-color="#5f7471" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="mistBase" x1="0.38" y1="0" x2="0.62" y2="1">
+      <stop offset="0" stop-color="#e2e8e5"/>
+      <stop offset="0.55" stop-color="#edefeb"/>
+      <stop offset="1" stop-color="#f4f3ef"/>
+    </linearGradient>
+    <radialGradient id="mistA" cx="1" cy="0" r="0.7">
+      <stop offset="0" stop-color="#5f7471" stop-opacity="0.36"/>
+      <stop offset="1" stop-color="#5f7471" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="mistB" cx="0" cy="1" r="0.65">
+      <stop offset="0" stop-color="#8fa39e" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#8fa39e" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sageBase" x1="0.38" y1="0" x2="0.62" y2="1">
+      <stop offset="0" stop-color="#5f7471"/>
+      <stop offset="0.45" stop-color="#2f3a39"/>
+      <stop offset="1" stop-color="#141a19"/>
+    </linearGradient>
+    <radialGradient id="sageA" cx="1" cy="0" r="0.5">
+      <stop offset="0" stop-color="#b0c0bb" stop-opacity="0.62"/>
+      <stop offset="1" stop-color="#b0c0bb" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="sageB" cx="0" cy="1" r="0.6">
+      <stop offset="0" stop-color="#080b0a" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#080b0a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="edgeHi" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="0.3" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="edgeHiS" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.34"/>
+      <stop offset="0.35" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="workActive" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a4746"/>
+      <stop offset="1" stop-color="#1d2524"/>
+    </linearGradient>
+    <linearGradient id="funnel" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e2e8e5"/>
+      <stop offset="1" stop-color="#c9d3cf"/>
+    </linearGradient>
+    <radialGradient id="volt" cx="0.35" cy="0.3" r="0.8">
+      <stop offset="0" stop-color="#e9f88a"/>
+      <stop offset="0.55" stop-color="#d7f24b"/>
+      <stop offset="1" stop-color="#c3dc3a"/>
+    </radialGradient>
+    <filter id="b1" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="1"/></filter>
+    <filter id="b3" x="-30%" y="-60%" width="160%" height="220%"><feGaussianBlur stdDeviation="3"/></filter>
+    <filter id="b14" x="-40%" y="-100%" width="180%" height="300%"><feGaussianBlur stdDeviation="14"/></filter>
+    <filter id="grainK" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="7" stitchTiles="stitch" result="t"/>
+      <feColorMatrix in="t" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1.6 0 0 0 -0.55" result="g"/>
+      <feComposite in="g" in2="SourceAlpha" operator="in"/>
+    </filter>
+    <filter id="grainW" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="11" stitchTiles="stitch" result="t"/>
+      <feColorMatrix in="t" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  1.6 0 0 0 -0.55" result="g"/>
+      <feComposite in="g" in2="SourceAlpha" operator="in"/>
+    </filter>
+    <mask id="moonCut">
+      <circle cx="408" cy="394" r="9" fill="#ffffff"/>
+      <circle cx="413" cy="389" r="7.5" fill="#000000"/>
+    </mask>
+  </defs>
+  <rect width="1200" height="778" rx="28" fill="#111716"/>
+  <rect width="1200" height="778" rx="28" fill="url(#canvasGlow)"/>
+  <rect width="1200" height="778" rx="28" fill="url(#floorTint)"/>
+  <rect width="1200" height="778" rx="28" fill="#000000" opacity="0.05" filter="url(#grainW)"/>
+  <rect x="0.5" y="0.5" width="1199" height="777" rx="27.5" fill="none" stroke="#ffffff" stroke-opacity="0.06"/>
+  <g transform="translate(0 59)">
+  <g transform="rotate(-5 140 300)" opacity="0.92">
+  <rect x="64" y="180" width="152" height="250" rx="22" fill="#000000" opacity="0.5" filter="url(#b14)"/>
+  <rect x="41" y="152" width="198" height="280" rx="22" fill="#000000" opacity="0.3" filter="url(#b1)"/>
+  <rect x="40" y="150" width="200" height="280" rx="22" fill="url(#faceW)"/>
+  <rect x="40" y="150" width="200" height="280" rx="22" fill="url(#faceWtint)"/>
+  <rect x="40" y="150" width="200" height="280" rx="22" fill="#000000" opacity="0.06" filter="url(#grainK)"/>
+  <rect x="40.5" y="150.5" width="199" height="279" rx="21.5" fill="none" stroke="#0b0f12" stroke-opacity="0.07"/>
+  <rect x="41.25" y="151.25" width="197.5" height="277.5" rx="20.75" fill="none" stroke="url(#edgeHi)" stroke-width="1.5"/>
+  <rect x="60" y="180" width="120" height="40" rx="12" fill="#eeede7"/>
+  <rect x="60.5" y="180.5" width="119" height="39" rx="11.5" fill="none" stroke="#0b0f12" stroke-opacity="0.06"/>
+  <line x1="76" y1="200.0" x2="164" y2="200.0" stroke="#c4c2ba" stroke-width="6" stroke-linecap="round"/>
+  <rect x="101" y="241" width="120" height="40" rx="12" fill="#0b0f12" opacity="0.2" filter="url(#b3)"/>
+  <rect x="100" y="236" width="120" height="40" rx="12" fill="url(#workActive)"/>
+  <path d="M116 250.0 L127 250.0 L133 256.0 L127 262.0 L116 262.0 Z" fill="none" stroke="#ffffff" stroke-opacity="0.85" stroke-width="2" stroke-linejoin="round"/>
+  <circle cx="120.5" cy="256.0" r="1.6" fill="#ffffff" fill-opacity="0.85"/>
+  <line x1="144" y1="256.0" x2="204" y2="256.0" stroke="#ffffff" stroke-opacity="0.5" stroke-width="6" stroke-linecap="round"/>
+  <rect x="61" y="293" width="138" height="38" rx="12" fill="none" stroke="#8a908d" stroke-width="1.8" stroke-dasharray="5 6"/>
+  <circle cx="82" cy="312.0" r="3" fill="#a9a79f"/>
+  <circle cx="96" cy="312.0" r="3" fill="#a9a79f"/>
+  <circle cx="110" cy="312.0" r="3" fill="#a9a79f"/>
+  <rect x="61" y="349" width="88" height="38" rx="12" fill="none" stroke="#8a908d" stroke-width="1.8" stroke-dasharray="5 6"/>
+  <circle cx="82" cy="368.0" r="3" fill="#a9a79f"/>
+  <circle cx="96" cy="368.0" r="3" fill="#a9a79f"/>
+  <circle cx="110" cy="368.0" r="3" fill="#a9a79f"/>
+  </g>
+  <g transform="rotate(5 1060 300)" opacity="0.92">
+  <rect x="984" y="180" width="152" height="250" rx="22" fill="#000000" opacity="0.5" filter="url(#b14)"/>
+  <rect x="961" y="152" width="198" height="280" rx="22" fill="#000000" opacity="0.3" filter="url(#b1)"/>
+  <rect x="960" y="150" width="200" height="280" rx="22" fill="url(#faceW)"/>
+  <rect x="960" y="150" width="200" height="280" rx="22" fill="url(#faceWtint)"/>
+  <rect x="960" y="150" width="200" height="280" rx="22" fill="#000000" opacity="0.06" filter="url(#grainK)"/>
+  <rect x="960.5" y="150.5" width="199" height="279" rx="21.5" fill="none" stroke="#0b0f12" stroke-opacity="0.07"/>
+  <rect x="961.25" y="151.25" width="197.5" height="277.5" rx="20.75" fill="none" stroke="url(#edgeHi)" stroke-width="1.5"/>
+  <rect x="980" y="180" width="120" height="40" rx="12" fill="#eeede7"/>
+  <rect x="980.5" y="180.5" width="119" height="39" rx="11.5" fill="none" stroke="#0b0f12" stroke-opacity="0.06"/>
+  <line x1="996" y1="200.0" x2="1084" y2="200.0" stroke="#c4c2ba" stroke-width="6" stroke-linecap="round"/>
+  <rect x="1011" y="241" width="130" height="40" rx="12" fill="#2a3332" opacity="0.16" filter="url(#b3)"/>
+  <rect x="1010" y="236" width="130" height="40" rx="12" fill="#dbe3e0"/>
+  <rect x="1010.75" y="236.75" width="128.5" height="38.5" rx="11.25" fill="none" stroke="#5f7471" stroke-width="1.5"/>
+  <path d="M1026 248.0 L1038 248.0 L1038 264.0 L1032 259.5 L1026 264.0 Z" fill="#2a3332"/>
+  <line x1="1052" y1="256.0" x2="1124" y2="256.0" stroke="#2a3332" stroke-opacity="0.32" stroke-width="6" stroke-linecap="round"/>
+  <rect x="1011" y="297" width="130" height="40" rx="12" fill="#0b0f12" opacity="0.2" filter="url(#b3)"/>
+  <rect x="1010" y="292" width="130" height="40" rx="12" fill="url(#workActive)"/>
+  <path d="M1026 306.0 L1037 306.0 L1043 312.0 L1037 318.0 L1026 318.0 Z" fill="none" stroke="#ffffff" stroke-opacity="0.85" stroke-width="2" stroke-linejoin="round"/>
+  <circle cx="1030.5" cy="312.0" r="1.6" fill="#ffffff" fill-opacity="0.85"/>
+  <line x1="1054" y1="312.0" x2="1124" y2="312.0" stroke="#ffffff" stroke-opacity="0.5" stroke-width="6" stroke-linecap="round"/>
+  <rect x="980" y="348" width="100" height="40" rx="12" fill="#eeede7"/>
+  <rect x="980.5" y="348.5" width="99" height="39" rx="11.5" fill="none" stroke="#0b0f12" stroke-opacity="0.06"/>
+  <path d="M994 368.0 L999 373.0 L1008 363.0" fill="none" stroke="#5f7471" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="1020" y1="368.0" x2="1064" y2="368.0" stroke="#c4c2ba" stroke-width="6" stroke-linecap="round"/>
+  </g>
+  <path d="M250 300 L270 300" fill="none" stroke="#9aa3a0" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M282 300 L270 293 L270 307 Z" fill="#9aa3a0"/>
+  <path d="M918 300 L938 300" fill="none" stroke="#9aa3a0" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M950 300 L938 293 L938 307 Z" fill="#9aa3a0"/>
+  </g>
+  <rect x="324" y="634" width="552" height="36" rx="18" fill="#e6e5df"/>
+  <rect x="324.5" y="634.5" width="551" height="35" rx="17.5" fill="none" stroke="#0b0f12" stroke-opacity="0.10"/>
+  <rect x="310" y="624" width="580" height="40" rx="20" fill="#f2f1ec"/>
+  <rect x="310.5" y="624.5" width="579" height="39" rx="19.5" fill="none" stroke="#0b0f12" stroke-opacity="0.10"/>
+  <rect x="320" y="80" width="560" height="574" rx="24" fill="#000000" opacity="0.5" filter="url(#b14)"/>
+  <rect x="297" y="52" width="606" height="604" rx="24" fill="#000000" opacity="0.3" filter="url(#b1)"/>
+  <rect x="296" y="50" width="608" height="604" rx="24" fill="url(#faceW)"/>
+  <rect x="296" y="50" width="608" height="604" rx="24" fill="url(#faceWtint)"/>
+  <rect x="296" y="50" width="608" height="604" rx="24" fill="#000000" opacity="0.06" filter="url(#grainK)"/>
+  <rect x="296.5" y="50.5" width="607" height="603" rx="23.5" fill="none" stroke="#0b0f12" stroke-opacity="0.07"/>
+  <rect x="297.25" y="51.25" width="605.5" height="601.5" rx="22.75" fill="none" stroke="url(#edgeHi)" stroke-width="1.5"/>
+  <rect x="334" y="92" width="532" height="104" rx="18" fill="#141a19" opacity="0.42" filter="url(#b14)"/>
+  <rect x="317" y="72" width="566" height="124" rx="18" fill="#0b0f12" opacity="0.12" filter="url(#b1)"/>
+  <rect x="316" y="70" width="568" height="124" rx="18" fill="url(#sageBase)"/>
+  <rect x="316" y="70" width="568" height="124" rx="18" fill="url(#sageA)"/>
+  <rect x="316" y="70" width="568" height="124" rx="18" fill="url(#sageB)"/>
+  <rect x="316" y="70" width="568" height="124" rx="18" fill="#000000" opacity="0.09" filter="url(#grainW)"/>
+  <rect x="317.25" y="71.25" width="565.5" height="121.5" rx="16.75" fill="none" stroke="url(#edgeHiS)" stroke-width="1.5"/>
+  <text x="344" y="114" font-size="23" font-weight="500" fill="#ffffff" fill-opacity="0.7">lesson</text>
+  <text x="344" y="162" font-size="40" font-weight="600" fill="#ffffff" letter-spacing="-0.015em">Show the value first</text>
+  <!-- case id: every row below comes from this one case -->
+  <rect x="735" y="92" width="121" height="30" rx="15" fill="#0b0f12" fill-opacity="0.26"/>
+  <rect x="735.5" y="92.5" width="120" height="29" rx="14.5" fill="none" stroke="#ffffff" stroke-opacity="0.12"/>
+  <text x="795.5" y="114" font-size="20" font-weight="500" fill="#ffffff" fill-opacity="0.85" text-anchor="middle">case 4821</text>
+  <text x="332" y="250" font-size="23" font-weight="500" fill="#5d6360">lost case</text>
+  <text x="468" y="250" font-size="23" font-weight="500" fill="#0b0f12">went quiet after the price</text>
+  <line x1="332" y1="274" x2="868" y2="274" stroke="#0b0f12" stroke-opacity="0.07"/>
+  <!-- fast lane: hotfix in seconds (timer) -->
+  <text x="332" y="312" font-size="23" font-weight="500" fill="#5d6360">hotfix</text>
+  <circle cx="408" cy="305" r="8.5" fill="none" stroke="#5d6360" stroke-width="2.2"/>
+  <path d="M408 305 L408 300 M405 293.5 L411 293.5" fill="none" stroke="#5d6360" stroke-width="2.2" stroke-linecap="round"/>
+  <text x="468" y="312" font-size="23" font-weight="500" fill="#0b0f12">in seconds: try this instead,</text>
+  <text x="468" y="340" font-size="23" font-weight="500" fill="#0b0f12">for that person's next case only</text>
+  <line x1="332" y1="364" x2="868" y2="364" stroke="#0b0f12" stroke-opacity="0.07"/>
+  <!-- night lane: Reflection by night (moon) -->
+  <text x="332" y="402" font-size="23" font-weight="500" fill="#5d6360">night</text>
+  <circle cx="408" cy="394" r="9" fill="#5d6360" mask="url(#moonCut)"/>
+  <text x="332" y="430" font-size="23" font-weight="500" fill="#5d6360">Reflection</text>
+  <text x="468" y="402" font-size="23" font-weight="500" fill="#0b0f12">across many cases:</text>
+  <text x="468" y="430" font-size="23" font-weight="500" fill="#0b0f12">price without value lost more</text>
+  <line x1="332" y1="454" x2="868" y2="454" stroke="#0b0f12" stroke-opacity="0.07"/>
+  <text x="332" y="492" font-size="23" font-weight="500" fill="#5d6360">eval gate</text>
+  <circle cx="482" cy="487" r="15" fill="#000000" opacity="0.3" filter="url(#b3)"/>
+  <circle cx="482" cy="484" r="15" fill="url(#volt)"/>
+  <path d="M475.0 484.5 L480.0 489.5 L489.5 479.0" fill="none" stroke="#0b0f12" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="508" y="492" font-size="23" font-weight="600" fill="#0b0f12">passed</text>
+  <text x="592" y="492" font-size="23" font-weight="500" fill="#4b514f">3 fixed, 0 broken</text>
+  <text x="868" y="492" font-size="23" font-weight="500" fill="#8a908d" text-anchor="end">example</text>
+  <line x1="332" y1="516" x2="868" y2="516" stroke="#0b0f12" stroke-opacity="0.07"/>
+  <text x="332" y="554" font-size="23" font-weight="500" fill="#5d6360">canary</text>
+  <text x="468" y="554" font-size="23" font-weight="500" fill="#0b0f12">a small share of chats first</text>
+  <line x1="332" y1="578" x2="868" y2="578" stroke="#0b0f12" stroke-opacity="0.07"/>
+  <text x="332" y="616" font-size="23" font-weight="500" fill="#5d6360">next case</text>
+  <text x="468" y="616" font-size="23" font-weight="500" fill="#0b0f12">goes better</text>
+  <text x="600" y="738" font-size="28" font-weight="500" fill="#a8b0ad" text-anchor="middle">Checks stop today's mistake. Reflection stops it coming back.</text>
+</svg>

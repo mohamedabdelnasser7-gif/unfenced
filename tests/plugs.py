@@ -88,3 +88,16 @@ def changed(base, **changes):
     out = copy.deepcopy(base)
     out.update(changes)
     return out
+
+
+def owned(data, test, owner=None):
+    """The plug written into an agent folder under an owner's state folder whose owner.json names
+    owner (the plug's own owner when None), read back as load does: (plug, the agent's folder)."""
+    d = tempfile.TemporaryDirectory()
+    test.addCleanup(d.cleanup)
+    home = Path(d.name) / "owner"
+    folder = home / data["agent"]
+    folder.mkdir(parents=True)
+    (home / "owner.json").write_text(json.dumps({"owner": owner or data.get("owner", "")}), encoding="utf-8")
+    (folder / "plug.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    return plug.load(folder / "plug.json"), folder

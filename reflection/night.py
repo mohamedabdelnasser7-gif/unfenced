@@ -673,7 +673,8 @@ def main(argv=None, *, until=None):
         courier = courier_check(db, plug, now)  # before the study, so the results it brings count tonight
         exam = agent_exam(plug, args.db, folder=Path(args.plug).resolve().parent)
         from reflection import shared as shared_mod  # the shared pool of this kind across owners (item 83)
-        link = shared_mod.Link.for_plug(plug, shared_mod.Writer(), shared_mod.root_for(args.db))
+        home = folder if folder is not None else Path(args.db).expanduser().resolve().parent  # as grow.night
+        link = shared_mod.Link.for_agent(plug, home, shared_mod.Writer(), shared_mod.root_for(args.db))
         rep = night(db, plug, days=args.days, until=now, ideas=parts.Ideas(), exam=exam,
                     spotter=parts.Spotter(), note_writer=parts.NoteWriter(), others=other_plugs(plug, db=args.db),
                     practice=folder, shared=link)

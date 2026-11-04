@@ -22,11 +22,14 @@ There is one pool per kind across owners, patterns-<kind>.json in the install's 
 data/), written under a fresh name and moved into place (arena/personas.py _write), under a lock
 so two owners' nights never lose each other's patterns. Each pattern keeps which owners it was
 seen at as keyed hashes (owner_hash: HMAC with the folder's own random key), never an owner's name
-or id. A pattern written at a second owner joins the first when it is near equal: the same kind of
-pattern (lesson or lost) and, on their content words (casefolded, marks and small words out), an
-overlap of at least SAME. A pattern is shared only once it is seen at MIN_OWNERS (2) distinct owners.
-An agent that names no owner gives nothing (its folder alone never says who the owner is, as in
-arena/grow.py); it still reads the pool.
+or id. An owner is counted by an id the system writes once into its state folder (owner_id,
+OWNER_ID_FILE), never by the name owner.json gives, so a renamed owner stays one owner. A pattern
+written at a second owner joins the first when it is near equal: the same kind of pattern (lesson
+or lost) and, on their content words (casefolded, marks and small words out), an overlap of at
+least SAME. A pattern is shared only once it is seen at MIN_OWNERS (2) distinct owners. An agent
+whose owner.json does not name the owner its plug names gives nothing (its folder alone never says
+who the owner is, as in arena/grow.py); it still reads the pool. Within one install, whoever can
+make owner folders can still make owners; the id only stops one owner counting twice by a new name.
 
 Where the patterns go, each through the paths siblings already take:
   lessons  engine/study.py step 6 reads the shared lesson patterns of its kind beside its siblings,
@@ -73,6 +76,7 @@ GIVE = 5             # kept lessons a night may send to the writer
 GIVE_LOST = 5        # lost chats a night may send to the writer
 POOL_FILE = "patterns-{kind}.json"
 KEY_FILE = "owner-key"
+OWNER_ID_FILE = "owner-id"  # in an owner's state folder: the id the pool counts it by
 SHARED_DIR = "shared"
 POOL_AGENT = "shared_pool"  # the name the study's notes and links give the pool
 MAX_FILE = 5_000_000
@@ -550,8 +554,42 @@ class Writer(parts._Part):
 
 # ---- the link the night study and the night's practice step read
 
+def owner_id(folder):
+    """The owner of an agent's folder as the pool counts it: a random id the system writes once into
+    the owner's state folder (OWNER_ID_FILE beside owner.json, arena/grow.py owner_of), never the name
+    owner.json gives, so renaming an owner, or naming one owner two ways in its plugs, stays one owner.
+    "" when owner.json names no owner for this agent (it then gives nothing)."""
+    from arena import grow  # late: grow reads this module inside its night
+    if folder is None:
+        return ""
+    home, plug = grow.owner_of(folder), grow._plug_at(folder)
+    name = grow.owner_name(home)
+    if name is None or plug is None or plug.owner != name:
+        return ""
+    path = home / OWNER_ID_FILE
+    if path.is_symlink():
+        raise Refused("the owner's id file is a link")
+    if not path.exists():
+        tmp = home / f".{OWNER_ID_FILE}.{secrets.token_hex(8)}"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        try:
+            os.write(fd, secrets.token_hex(16).encode("ascii"))
+        finally:
+            os.close(fd)
+        try:
+            os.link(tmp, path)  # the first night's id wins; a second night at once reads it
+        except FileExistsError:
+            pass
+        finally:
+            os.unlink(tmp)
+    raw = path.read_bytes()[:100].strip()
+    if not HASH.fullmatch(raw.decode("ascii", "replace")):
+        raise Refused("the owner's id file is out of shape")
+    return "owner-id:" + raw.decode("ascii")
+
+
 class Link:
-    """One agent's way into its kind's pool. owner: the owner its plug names, or "" (gives nothing).
+    """One agent's way into its kind's pool. owner: the owner's id (owner_id), or "" (gives nothing).
     writer: Writer or a test's stand in. give, give_lost: the writer's calls a night at most."""
 
     def __init__(self, kind, owner, writer, root, give=GIVE, give_lost=GIVE_LOST):
@@ -560,8 +598,10 @@ class Link:
         self._pool = None
 
     @classmethod
-    def for_plug(cls, plug, writer, root, **kw):
-        return cls(getattr(plug, "kind", "") or plug.agent, getattr(plug, "owner", ""), writer, root, **kw)
+    def for_agent(cls, plug, folder, writer, root, **kw):
+        """The link of the agent whose plug sits in folder: its kind, and its owner's id (owner_id)
+        when owner.json names the owner its plug names, else no owner."""
+        return cls(getattr(plug, "kind", "") or plug.agent, owner_id(folder), writer, root, **kw)
 
     @property
     def pool(self):

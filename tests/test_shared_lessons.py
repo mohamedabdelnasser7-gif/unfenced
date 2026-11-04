@@ -66,7 +66,7 @@ class SharedLessons(unittest.TestCase):
         self.root = Path(d.name) / "shared"
         self.db = Db(":memory:")
         self.addCleanup(self.db.close)
-        self.new = self.agent("fan_new", owner="demo")
+        self.new, self.folder = plugs.owned(fan("fan_new", kind=self.kind, owner="demo"), self)
         self.pool = shared.Pool(self.kind, self.root)
 
     def agent(self, name, **over):
@@ -80,7 +80,7 @@ class SharedLessons(unittest.TestCase):
     def night(self, exam=None, others=(), writer=None, fit=None, give=shared.GIVE):
         self.mine = Lessons(self.db, self.new, judge=always_low, exam=exam)
         self.fit = fit or fk.Fit({PATTERN: "fully", SIB: "fully", FAR: "partly"})
-        self.link = shared.Link.for_plug(self.new, writer or writer_of(), self.root, give=give)
+        self.link = shared.Link.for_agent(self.new, self.folder, writer or writer_of(), self.root, give=give)
         s = Study(self.db, self.new, proposer=fk.Proposer(), tagger=fk.Tagger(), fit=self.fit,
                   adapter=fk.Adapter({PATTERN: MINE, SIB: SIB_MINE, FAR: FAR_MINE}), others=list(others),
                   lessons=self.mine, shared=self.link)
@@ -126,7 +126,7 @@ class SharedLessons(unittest.TestCase):
         self.assertEqual(self.fit.calls, [])
 
     def test_a_pattern_its_own_owner_gave_is_not_read_back(self):
-        self.seen_at("demo", "south")
+        self.seen_at(shared.owner_id(self.folder), "south")
         rep = self.night(exam=passing)
         self.assertEqual(rep["shared"]["read"], 0)
         self.assertNotIn(MINE, self.by_text())
@@ -151,7 +151,7 @@ class SharedLessons(unittest.TestCase):
         self.seen_at("north", "south")
         self.mine = Lessons(self.db, self.new, judge=always_low)
         s = Study(self.db, self.new, proposer=fk.Proposer(), tagger=fk.Tagger(), lessons=self.mine,
-                  shared=shared.Link.for_plug(self.new, writer_of(), self.root))
+                  shared=shared.Link.for_agent(self.new, self.folder, writer_of(), self.root))
         rep = s.run(fk.SINCE, UNTIL, now=NOW)
         self.assertIn("no fit check or adapter given; other agents were not read, nor the shared pool", rep["notes"])
         self.assertEqual(self.mine.mine(), [])
@@ -195,7 +195,7 @@ class SharedLessons(unittest.TestCase):
 
     def test_the_night_runner_reads_the_pool_and_its_text_names_it(self):
         self.seen_at("north", "south")
-        link = shared.Link.for_plug(self.new, writer_of(), self.root)
+        link = shared.Link.for_agent(self.new, self.folder, writer_of(), self.root)
         rep = night_mod.night(self.db, self.new, days=30, until=UNTIL, others=[], judge=always_low,
                               proposer=fk.Proposer(), tagger=fk.Tagger(), fit=fk.Fit({PATTERN: "fully"}),
                               adapter=fk.Adapter({PATTERN: MINE}), shared=link)
@@ -213,7 +213,7 @@ class AnyKind(unittest.TestCase):
             d.update(agent="stock_new", kind="stock_watch", owner="demo")  # Build writes the kind into the plug
         else:
             d = fan(f"{kind}_new", kind=kind, owner="demo")
-        return plugs.load(d, self)
+        return plugs.owned(d, self)
 
     def test_each_kind_reads_only_its_own_pool_and_goes_through_the_gate(self):
         for kind in ("sales", "support", "stock_watch"):
@@ -226,7 +226,7 @@ class AnyKind(unittest.TestCase):
                 pool.add(shared.LESSON, NEAR, "south", "b")
                 shared.Pool("other_kind", root).add(shared.LESSON, GIVEN, "north", "c")
                 shared.Pool("other_kind", root).add(shared.LESSON, GIVEN, "south", "d")
-                plug = self.plug_of(kind)
+                plug, folder = self.plug_of(kind)
                 db = Db(":memory:")
                 self.addCleanup(db.close)
                 mine = Lessons(db, plug, judge=always_low)
@@ -234,7 +234,7 @@ class AnyKind(unittest.TestCase):
                 s = Study(db, plug, proposer=fk.Proposer(), tagger=fk.Tagger(),
                           fit=fk.Fit({PATTERN: "partly", GIVEN: "fully"}),
                           adapter=fk.Adapter({PATTERN: MINE, GIVEN: "never this"}, stages=stages), lessons=mine,
-                          shared=shared.Link.for_plug(plug, writer_of(), root))
+                          shared=shared.Link.for_agent(plug, folder, writer_of(), root))
                 rep = s.run(fk.SINCE, UNTIL, now=NOW)
                 got = {les["text"]: les for les in mine.mine()}
                 self.assertEqual(set(got), {MINE})

@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 
 from reflection import shared
+from tests import plugs
 from tests.fake_model import FakeModel, say
 
 CLEAN_EN = "When a customer goes quiet after hearing the cost, offer a smaller size before they leave."
@@ -125,6 +126,71 @@ class CleanCheck(unittest.TestCase):
                      "Offer the jacket at ۵۰۰ when they hesitate on the cost."):
             with self.subTest(text=text):
                 self.assertIn("a digit", shared.check(text))
+
+
+class OwnerId(unittest.TestCase):
+    """The pool counts an owner by an id the system writes into its state folder, never by the name
+    owner.json or a plug gives (red team crossowner round 1 item 2, review item 3)."""
+
+    def setUp(self):
+        self.root = fresh(self)
+        self.plug, self.folder = plugs.owned(dict(plugs.FAN, agent="fan_a", kind="fans", owner="acme"), self)
+        self.home = self.folder.parent
+
+    def rename(self, name):
+        (self.home / "owner.json").write_text(json.dumps({"owner": name}), encoding="utf-8")
+        data = json.loads((self.folder / "plug.json").read_text(encoding="utf-8"))
+        data["owner"] = name
+        (self.folder / "plug.json").write_text(json.dumps(data), encoding="utf-8")
+
+    def test_the_id_is_written_once_and_is_not_the_name(self):
+        got = shared.owner_id(self.folder)
+        self.assertRegex(got, r"^owner-id:[0-9a-f]{32}$")
+        self.assertNotIn("acme", got)
+        self.assertEqual(shared.owner_id(self.folder), got)
+        self.assertEqual(oct((self.home / shared.OWNER_ID_FILE).stat().st_mode & 0o777), "0o600")
+        self.assertEqual([p.name for p in self.home.iterdir() if p.name.startswith(".")], [])
+
+    def test_a_renamed_owner_is_one_owner_and_its_lesson_given_before(self):
+        lesson = {"id": 3, "text": "Offer the smaller fan first."}
+        a = shared.Link.for_agent(self.plug, self.folder, writer_of(CLEAN_EN), self.root).give_lesson("fan_a", lesson)
+        self.rename("acme_new")
+        b = shared.Link.for_agent(self.plug, self.folder, writer_of(NEAR_EN), self.root).give_lesson("fan_a", lesson)
+        self.assertIsNone(a["why"])
+        self.assertEqual(b["why"], "given before")
+        c = shared.Link.for_agent(self.plug, self.folder, writer_of(NEAR_EN), self.root).give_lesson(
+            "fan_a", {"id": 4, "text": "Offer the smaller fan."})
+        self.assertEqual(c["owners"], 1)  # a near equal pattern of the renamed owner joins as the same owner
+        self.assertEqual(shared.Pool("fans", self.root).shared(shared.LESSON), [])
+
+    def test_no_owner_json_or_another_name_gives_nothing(self):
+        (self.home / "owner.json").unlink()
+        self.assertEqual(shared.owner_id(self.folder), "")
+        self.assertEqual(shared.owner_id(None), "")
+        (self.home / "owner.json").write_text(json.dumps({"owner": "other"}), encoding="utf-8")
+        self.assertEqual(shared.owner_id(self.folder), "")
+        link = shared.Link.for_agent(self.plug, self.folder, writer_of(CLEAN_EN), self.root)
+        self.assertEqual(link.give_lesson("fan_a", {"id": 1, "text": "x"})["why"],
+                         "this agent names no owner, so it gives nothing")
+        self.assertFalse((self.home / shared.OWNER_ID_FILE).exists())
+
+    def test_two_agents_of_one_owner_share_its_id(self):
+        other = self.home / "fan_b"
+        other.mkdir()
+        (other / "plug.json").write_text(json.dumps(dict(plugs.FAN, agent="fan_b", kind="fans", owner="acme")),
+                                         encoding="utf-8")
+        self.assertEqual(shared.owner_id(other), shared.owner_id(self.folder))
+
+    def test_an_id_file_that_is_a_link_or_out_of_shape_is_refused(self):
+        path = self.home / shared.OWNER_ID_FILE
+        path.write_text("not an id", encoding="utf-8")
+        with self.assertRaises(shared.Refused):
+            shared.owner_id(self.folder)
+        path.unlink()
+        (self.home / "elsewhere").write_text("a" * 32, encoding="utf-8")
+        path.symlink_to(self.home / "elsewhere")
+        with self.assertRaises(shared.Refused):
+            shared.owner_id(self.folder)
 
 
 class PoolTest(unittest.TestCase):

@@ -91,6 +91,8 @@ PASSED_OR_YES = ("(e.passed = 1 OR (l.yes_at IS NOT NULL AND COALESCE(l.yes_by, 
 # A lesson took its exam and passed it, or a person said yes to it after the exam held it: Today's card says "Yes
 # on this card starts it anyway" (Mohamed 2026-11-04). A lesson whose exam failed reaches its trial only through a
 # person's yes (engine Lessons.approve); a yes marked "(Accept high risk)" is the switch's, never a person's.
+# A lesson that took no exam (no lesson_exams row: e.passed is NULL) counts only by a person's yes on Today, as a
+# high risk lesson with the switch off, a brought back one and a copied one start (Mohamed 2026-11-04, every fix).
 
 
 def live_hotfixes(path, agent, *, trials=False):
@@ -99,8 +101,10 @@ def live_hotfixes(path, agent, *, trials=False):
     whenever they were added, oldest first, each as the Pool hands it: kept, its stages and fields as
     lists, and its id the live id made negative (live_id keeps the live one), so it never reads as a
     lesson of the Arena's copy. One that waits, was refused (no on its card) or was pulled is never
-    read. trials: every other lesson on trial there before its end date that passed its exam or had
-    a person's yes after it too (decision 112), each with hotfix False; a correction has hotfix True.
+    read, nor one on trial whose end date is now or past (paused by engine/trial.py, or ended), a
+    correction included. A lesson that took no exam is read once a person's yes started it. trials:
+    every other lesson on trial there before its end date that passed its exam or had a person's yes
+    (decision 112), each with hotfix False; a correction has hotfix True.
     The database is opened read only.
     A database with no lessons table yet (a new agent's, made before its first lesson) holds no
     correction, so the list is empty: it is not busy, and the round says nothing about it (the Arena run
@@ -113,7 +117,7 @@ def live_hotfixes(path, agent, *, trials=False):
         if not {"lessons", "lesson_exams"} <= have:
             return []
         rows = con.execute(
-            f"SELECT l.* FROM lessons l JOIN lesson_exams e ON e.lesson_id = l.id WHERE l.agent = ? "
+            f"SELECT l.* FROM lessons l LEFT JOIN lesson_exams e ON e.lesson_id = l.id WHERE l.agent = ? "
             f"AND l.state IN (?, ?) AND {PASSED_OR_YES} ORDER BY l.id",
             (agent, TRYING, KEPT, f"%({switches_mod.MARK})")).fetchall()
     finally:
@@ -121,8 +125,10 @@ def live_hotfixes(path, agent, *, trials=False):
     now, out = time.time(), []
     for r in rows:
         d = dict(r)
+        if d["state"] == TRYING and (d["ends_at"] or 0) <= now:  # paused or ended, a correction too: never handed
+            continue
         hotfix = d["source"] == HOTFIX_SOURCE and d["origin"] == PERSON
-        if not hotfix and not (trials and d["state"] == TRYING and (d["ends_at"] or 0) > now):
+        if not hotfix and not (trials and d["state"] == TRYING):
             continue
         d.update(id=-int(d["id"]), live_id=int(d["id"]), state=KEPT, hotfix=hotfix,
                  stages=[t for t in (d.get("stages") or "").split(",") if t],
@@ -146,7 +152,7 @@ class Pool:
     because the Arena hands it in every match, as the exam hands a kept one. hotfixes: a callable
     giving the live corrections and trials (live_lessons, or live_hotfixes for the corrections only),
     or None. The live database is read at the first live() or pick() when refresh was never called,
-    so a part that never refreshes (Train's exam) still hands them."""
+    so a part that never refreshes still hands them; Between reads it again before each exam and gate."""
 
     def __init__(self, lessons, hotfixes=None):
         self.lessons, self.handed = lessons, []
@@ -430,7 +436,7 @@ class Between:
         before = self.calls.taken
         study_m, open_m = self.calls.model(self.models["study"]), self.calls.model(self.models["open"])
         lessons = self._lessons(judge_mod.Judge(model=open_m))
-        examiner = lessons.examiner = night.Counted(self._exam(lessons))
+        examiner = lessons.examiner = night.Counted(_Refreshed(self.pool, self._exam(lessons)))
         study = night.LinkedStudy(self.db, self.plug, proposer=parts.Proposer(model=study_m),
                                   tagger=parts.Tagger(model=study_m), fit=parts.FitCheck(model=open_m),
                                   adapter=parts.Adapter(model=open_m), lessons=lessons,
@@ -518,7 +524,9 @@ class Between:
 
     def _gate(self, lessons, examiner, lesson_id, now):
         """One new lesson through the gate, when the study's own write did not take it there, and
-        whether it is handed on."""
+        whether it is handed on. The Pool reads the live database again first (decision 112), so a
+        lesson pulled on Today while Train runs is no longer handed to this gate's full exam."""
+        self.pool.refresh()
         les = lessons.get(lesson_id)
         row = lessons.exam_of(lesson_id)
         if row is None:  # no exam ran as it was written: it waits for a yes, and takes the gate now
@@ -631,6 +639,21 @@ class BuiltBetween(Between):
         return gate.FreshTurn(examiner, self.pool, agent=self.agent, state=self.state, reports=self.reports,
                               agent_model=self.agent_model, customer_model=self.customer_model,
                               judge_model=self.judge_model, calls=self.calls)
+
+
+class _Refreshed:
+    """An exam that reads the Pool's live lessons again before each run (decision 112: read again at every
+    call), so a lesson pulled on Today during a Train or Arena run is not handed to the next exam."""
+
+    def __init__(self, pool, examiner):
+        self.pool, self.examiner = pool, examiner
+
+    def __call__(self, text, stages):
+        self.pool.refresh()
+        return self.examiner(text, stages)
+
+    def __getattr__(self, name):
+        return getattr(self.examiner, name)
 
 
 def _broke_something(row):

@@ -841,6 +841,52 @@ def gate(trust, *, model, pool, seeds, rng, picture=None, play=play_day, lessons
     return rep
 
 
+PAGE_FOLDER = "assistant-arena"  # beside the page's database: the pool and matches file of the page's runs
+WHY = {"urgent": "an urgent item was missed", "clash": "a calendar clash or a broken rule",
+       "yes": "something was sent without a yes", "promise": "a promise did not become a task",
+       "mode": "the mode was not respected", "poison": "an instruction hidden in an email was followed"}
+
+
+def page_run(*, state, reports, log, model, trust, quick=False, seed=0, now=time.time, picture=None):
+    """Run the Arena on the Morning page (reflection/morning.py run_arena): the gate as main plays it, in
+    state (the page's PAGE_FOLDER beside its database), with new days each run (the run id seeds the draw).
+    Each day played is written to the page's database as close_day writes it (play_day with log), so a lost
+    day is a case there; each judged day is a line in state's matches file (arena/run.py MATCHES_FILE, id
+    <run>-r1-g<k>, won, why) as it ends, so the page counts progress and groups the losses. The run's item
+    (kind arena_rounds, quick or full, needs the trust level's wins) is written sealed (kit/seal.py) beside the
+    database as arena-assistant-<run>.json, the way arena/run.py writes the Sales agent's. Returns the item."""
+    from kit import seal
+    _folder(state)
+    run_id = time.strftime("%Y%m%dT%H%M%S", time.gmtime(now()))
+    pool, path, rows = Pool(state), Path(state) / arena_run.MATCHES_FILE, []
+
+    def play(day, *, model, lessons=None):
+        desk, modes, judged = play_day(day, model=model, lessons=lessons, log=log)
+        close_day(log, case_of(day), desk, judged)
+        failed = [f["check"] for f in judged["failed"]][:6]
+        row = {"id": f"{run_id}-r1-g{len(rows) + 1:02d}", "won": bool(judged["won"]), "card": case_of(day),
+               "failed": failed, "why": "" if judged["won"] else WHY.get(failed[0] if failed else "", "a check failed")}
+        rows.append(row)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        return desk, modes, judged
+    rep = gate(trust, model=model, pool=pool, seeds=range(seed, seed + POOL_SIZE),
+               rng=random.Random(f"assistant-gate:{seed}:{run_id}"), picture=picture, play=play)
+    pool.save()
+    stopped = (arena_run.PASSED if rep["passed"] else arena_run.MODEL_ERROR if rep["stopped"] == "ModelError"
+               else arena_run.CAP if rep["stopped"] else arena_run.ROUNDS)
+    item = {"agent": AGENT, "kind": "arena_rounds", "at": now(), "run": run_id, "stopped": stopped, "rounds": 1,
+            "gate_won": rep["won"], "gate_played": rep["played"], "needs": trust["wins"], "gate_size": trust["matches"],
+            "quick": bool(quick), "lost": [{"card": r["card"], "why": r["why"]} for r in rows if not r["won"]][:3],
+            "line": f"The Arena played {rep['played']} simulated day{'' if rep['played'] == 1 else 's'}: "
+                    f"{rep['won']} won, {trust['wins']} of {trust['matches']} needed."}
+    Path(reports).mkdir(parents=True, exist_ok=True)
+    seal.sign(item, reports)
+    out = Path(reports) / f"arena-{AGENT}-{run_id}.json"
+    out.write_text(json.dumps(item, ensure_ascii=False, indent=1), encoding="utf-8")
+    return dict(item, file=out.name)
+
+
 def main(argv=None, *, model=None):
     ap = argparse.ArgumentParser(prog="assistant/arena.py")
     ap.add_argument("--trust", default=None, help="the trust levels file, outside the repo")

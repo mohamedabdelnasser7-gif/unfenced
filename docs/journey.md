@@ -104,6 +104,10 @@ These came in on the engfix2 and engfix3 branches.
 
 **A planner that broke a never line still passed.** The example Family Dinner Planner passed its medium gate at 7 of 10 while the judge said a never line was broken: it served meat to a vegan family with a peanut allergy. Only the high level counted safety checks, and the match it saved did not say a check had failed. Fix: a broken never line is now marked as a failed safety check on the match, and it fails the gate at every level, whatever the win count. A match that ended with no safe reply after send check refusals still counts only at high. An agent whose work touches diets, allergies or health now starts at high, the planner included (decision 110).
 
+**A clear mistake had to happen three times.** The night study wrote a lesson only when a pattern had at least 5 cases from 3 different sources on each side and a 75% chance of being better. That bar suits soft patterns, like shorter replies closing better, but it also held back mistakes that are plain from one case, like meat in a vegan plan or a price the store never set: they could not become a lesson until they repeated across 3 sources. Now a broken never line or a failed fact check in the Arena makes a lesson from that one case, and the lesson still passes the exam, the gate and a trial before it is kept. Softer patterns keep the old bar (decision 111).
+
+**One bad round could write a lesson per loss.** The review found that a round where the agent kept quoting the same wrong price made one lesson for every lost match, because each loss named its own amount, and each lesson then took its exam and gate calls, enough to use up a practice run's call budget before its gate was played. Fact check losses now count as one mistake per check, so 25 wrong prices make one lesson, and a study asks about the first 3 distinct mistakes only; the rest stay in the log, marked not asked.
+
 ## Still open
 
 - The offers and fair close work (decision 105) is on its own branch and not yet merged here.

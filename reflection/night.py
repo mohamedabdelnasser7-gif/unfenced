@@ -205,6 +205,9 @@ def links(rep, others=(), lessons=None):
     for rec in rep["candidates"] + [c for a in rep["across"] for c in a["candidates"] + a["lessons"]]:
         if rec.get("lesson_id") is not None:
             found[rec["lesson_id"]] = rec
+    for rec in rep.get("mistakes") or []:  # a lesson from one clear mistake links to its one case
+        if rec.get("lesson_id") is not None:
+            found[rec["lesson_id"]] = rec
     for rec in rep.get("from_queue") or []:  # a queued lesson keeps the cases it was found on (step 10)
         if rec.get("lesson_id") is not None:
             found[rec["lesson_id"]] = rec
@@ -502,6 +505,10 @@ def text(rep, plug):
     lines.append(f'  candidates {len(rep["candidates"])}')
     for c in rep["candidates"]:
         lines.append(f'    - "{c["pattern"]}": {c["verdict"]}; ' + _numbers(c, good))
+    if rep.get("mistakes"):
+        lines.append(f'  clear mistakes {len(rep["mistakes"])}')
+        lines.extend(f'    - {m["case_id"]} ({m["kind"]}): ' + (f'lesson {m["lesson_id"]}' if m["lesson_id"] is not None
+                                                                else m["verdict"]) for m in rep["mistakes"])
     lines.append(f'  lesson cards {len(rep["cards"])}')
     for card in rep["cards"]:
         came = f' (adapted from {card["from"]["agent"]})' if card["from"] else ""

@@ -1639,7 +1639,8 @@ class Morning:
                 rep, path = reflect_now.run(db, db_path, plug, folder=folder, models=models, calls=calls,
                                             steps=steps, until=now, stop=stop.is_set)
                 done = {"file": path.name, "at": rep["window"]["until"], "lost": rep["decided"]["bad"],
-                        "read": rep["read"]["cases"], "candidates": len(rep["candidates"]),
+                        "read": rep["read"]["cases"],
+                        "candidates": len(rep["candidates"]) + len(rep.get("mistakes") or []),  # clear mistakes too
                         "cards": [c["lesson_id"] for c in rep["cards"] if c.get("lesson_id") is not None],
                         "notes": list(rep["notes"]), "calls": rep.get("calls", 0),
                         "queued": len(rep.get("queued") or []), "stopped": rep.get("stopped"), "seen": steps.seen}

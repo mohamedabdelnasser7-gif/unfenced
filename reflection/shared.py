@@ -329,18 +329,31 @@ def _stem(w):
     return w
 
 
+# words that turn a pattern around (negation, order, how often, more or less): they stay content
+# words, and two patterns that differ in one are never one (review crossowner round 1, item 4)
+_POLAR = frozenset("""
+not no never nor without cannot don doesn didn isn aren wasn weren won wouldn shouldn nothing none neither
+before after until first last then next once again earlier later early late sooner
+always often ever sometimes rarely seldom usually twice only
+more most less least fewer
+""".split())
+POLAR = frozenset(_stem(w) for w in _POLAR)
+
+
 def words(text):
     """The pattern's content words: casefolded, marks out, Arabic letter forms joined, small words
-    and one letter words out, a few endings off; a sorted list."""
+    (but not the POLAR ones) and one letter words out, a few endings off; a sorted list."""
     plain = risk_mod.normalize(text, letters=True).translate(_FOLD)
-    return sorted({_stem(w) for w in re.findall(r"[^\W\d_]+", plain) if len(w) > 1 and w not in SMALL_WORDS})
+    return sorted({_stem(w) for w in re.findall(r"[^\W\d_]+", plain)
+                   if len(w) > 1 and (w not in SMALL_WORDS or w in _POLAR)})
 
 
 def same(a, b):
     """Two patterns' content words (words) are one pattern: the very same words, or both at least
-    MIN_SAME_WORDS long with an overlap (shared over all) of at least SAME."""
+    MIN_SAME_WORDS long with an overlap (shared over all) of at least SAME, and no POLAR word in one
+    only."""
     a, b = set(a), set(b)
-    if not a or not b:
+    if not a or not b or (a ^ b) & POLAR:
         return False
     if a == b:
         return True

@@ -128,6 +128,43 @@ class CleanCheck(unittest.TestCase):
                 self.assertIn("a digit", shared.check(text))
 
 
+class NearEqual(unittest.TestCase):
+    """Patterns that say the opposite never join (review crossowner round 1, item 4)."""
+    PAIRS = (("Ask the size before you tell the customer the price of the item.",
+              "Ask the size after you tell the customer the price of the item."),
+             ("Offer a discount when the customer hesitates after hearing the cost.",
+              "Never offer a discount when the customer hesitates after hearing the cost."),
+             ("Share the delivery cost first when the customer asks about the order.",
+              "Share the delivery cost last when the customer asks about the order."),
+             ("Ask about the size more often when the customer hesitates on the fit.",
+              "Ask about the size less often when the customer hesitates on the fit."),
+             ("Offer the smaller size when the customer hesitates on the cost again.",
+              "Offer the smaller size when the customer hesitates on the cost once."),
+             ("Offer the smaller size when the customer usually hesitates on the cost.",
+              "Offer the smaller size when the customer rarely hesitates on the cost."),
+             ("Offer the smaller size when the customer always hesitates on the cost.",
+              "Offer the smaller size when the customer hesitates on the cost."),
+             ("Do offer a smaller size when the customer hesitates on the cost of it.",
+              "Do not offer a smaller size when the customer hesitates on the cost of it."))
+
+    def test_opposite_patterns_from_two_owners_stay_apart(self):
+        for one, two in self.PAIRS:
+            with self.subTest(one=one):
+                self.assertEqual(shared.check(one), [])
+                self.assertEqual(shared.check(two), [])
+                self.assertFalse(shared.same(shared.words(one), shared.words(two)))
+                pool = shared.Pool("sales", fresh(self))
+                pool.add(shared.LESSON, one, OWNER_A, "k1")
+                got, _ = pool.add(shared.LESSON, two, OWNER_B, "k2")
+                self.assertEqual(len(got["owners"]), 1)
+                self.assertEqual(pool.shared(shared.LESSON), [])
+
+    def test_the_same_polar_word_on_both_sides_still_joins(self):
+        self.assertTrue(shared.same(shared.words(NEAR_EN), shared.words(CLEAN_EN)))
+        self.assertTrue(shared.same(shared.words("Never offer a discount when the customer hesitates on the cost."),
+                                    shared.words("Never offer a discount if a customer hesitates on the cost.")))
+
+
 class OwnerId(unittest.TestCase):
     """The pool counts an owner by an id the system writes into its state folder, never by the name
     owner.json or a plug gives (red team crossowner round 1 item 2, review item 3)."""

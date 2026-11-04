@@ -137,6 +137,30 @@ class RedTeamLows(unittest.TestCase):
         self.assertEqual((card["does"], card["good"], card["case"]["input"]),
                          ("tutors science now", "the student understands", "a question"))
 
+    def test_every_format_mark_but_the_two_joiners_is_taken_out_of_card_lines(self):
+        """Red team scopeguard2 r2 item 7: zero width spaces, word joiners and tag characters go too; the zero
+        width non joiner and joiner stay, since Arabic and emoji need them."""
+        from kit import turn
+        text = json.dumps({"name": "Tutor", "does": "tutors sci\u200bence\u2060 \U000e0049\U000e0047now\ufeff",
+                           "good": "the family \U0001f468\u200d\U0001f469 under\u00adstands م\u200cن",
+                           "never": [], "needs": [],
+                           "case": {"input": "a \u180equestion", "starts": "person", "output": "an answer",
+                                    "ends": "when done"}})
+        card = turn.read_card(text)
+        self.assertEqual((card["does"], card["good"], card["case"]["input"]),
+                         ("tutors science now", "the family \U0001f468\u200d\U0001f469 understands م\u200cن",
+                          "a question"))
+
+    def test_combining_marks_outside_tashkeel_count_as_spaces(self):
+        """Red team scopeguard2 r2 item 6: a combining grapheme joiner never joins words into one; tashkeel never
+        splits one."""
+        joined = "\u034f".join(["wave"] * 300)
+        self.assertEqual(exam.words(joined), 300)
+        got = scope.judge(match([joined + " Need a science question?"]), TUTOR, Model(judges=[verdict()]))
+        self.assertEqual(got["why"], scope.LONG)
+        self.assertEqual(exam.words("ب\u0650س\u0652م\u0650 الل\u0651\u064eه\u0650"), 2)
+        self.assertEqual(exam.words("\uff57\uff41\uff56\uff45 wave"), 2)
+
     def test_an_answer_that_is_not_text_is_unreadable_never_attribute_error(self):
         class Parts:
             def chat(self, messages, **kw):

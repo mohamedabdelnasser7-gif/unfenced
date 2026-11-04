@@ -443,9 +443,10 @@ def _revealed(word, text):
 
 
 def words(text):
-    """The words in text, a format mark (zero width space, joiner, a direction mark) read as a space, so a
-    reply joined by hidden marks still counts every word."""
-    return len("".join(" " if unicodedata.category(ch) == "Cf" else ch for ch in str(text)).split())
+    """The words in text in its NFKC form, a hidden mark (_hidden: a format mark, or a combining mark outside
+    tashkeel such as the combining grapheme joiner) read as a space, so a reply joined by hidden marks still
+    counts every word (red team scopeguard2 r2, item 6). The 45 word rule (SCOPE_WORDS) counts with it."""
+    return len("".join(" " if _hidden(ch) else ch for ch in unicodedata.normalize("NFKC", str(text))).split())
 
 
 def check_off_scope(s, did):

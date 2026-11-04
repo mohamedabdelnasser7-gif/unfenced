@@ -63,6 +63,7 @@ in a throwaway database.
 """
 import json
 import logging
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -138,14 +139,19 @@ def _read(folder, name):
         raise Refused(f"{name} could not be read as text") from None
 
 
-# Direction marks (LRM, RLM, ALM, the embeddings, overrides and isolates): taken out of a card line, so text that
-# shows one way cannot read another way in the prompt, the scope line or the off topic writer (red team
-# scopeguard2 r1, item 5). Joiners stay: Arabic and emoji need them.
-BIDI = dict.fromkeys(map(ord, "\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"))
+# Every format mark (direction marks, embeddings, overrides and isolates, zero width spaces, word joiners, tag
+# characters): taken out of a card line, so text that shows one way cannot read another way, or hide words, in
+# the prompt, the scope line or the off topic writer (red team scopeguard2 r1, item 5; r2, item 7). The two
+# joiners stay (JOINERS): Arabic and emoji need them.
+JOINERS = "\u200c\u200d"
+
+
+def _unmarked(v):
+    return "".join(ch for ch in v if ch in JOINERS or unicodedata.category(ch) != "Cf")
 
 
 def _line(v, what):
-    v = v.translate(BIDI) if isinstance(v, str) else v
+    v = _unmarked(v) if isinstance(v, str) else v
     if not isinstance(v, str) or not v.strip():
         raise Refused(f"card.json {what}: one plain line")
     if len(v) > MAX_CARD_LINE:

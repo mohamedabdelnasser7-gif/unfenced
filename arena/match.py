@@ -28,7 +28,10 @@ plain dict (match_of); the score is arena/verdict.py and the fact checks arena/f
 Each turn record also says why the turn went as it did (2026-11-01; logging is off in a match, so
 this is the only trace): "checks", the send check feedback of each draft that failed it, and, when
 no safe reply could be sent, "no_safe_reply" with "by" (send_check, model_error or turn_failed)
-(why_of). The failed drafts stay out. Matches recorded before item 53 may end "handed_off".
+(why_of). "refused" keeps each draft the send check refused, {"draft", "check"}: the agent's own words
+and the check's line only, never the customer's text, so a loss on "no safe reply" shows what the agent
+tried to say and why it was held (the Arena run 20261104T120239 lost 13 matches that way with no draft
+kept). Matches recorded before item 53 may end "handed_off".
 """
 import hashlib
 import json
@@ -282,10 +285,14 @@ def why_of(results, chat_id, after):
     """Why the turn went as it did, from the result rows it wrote (rows after id `after`):
     "checks", the send check feedback of each reply that failed it (check_failed), and, when the
     turn had no safe reply, "no_safe_reply" with why ("by": send_check, model_error or
-    turn_failed). Code words and the check's feedback only; the failed reply is left out."""
+    turn_failed), and "refused": each refused draft as {"draft": the agent's words, "check": the
+    check's feedback}. The customer's text is never put there."""
     rows = [r for r in results.for_chat(chat_id) if r["id"] > after]
-    out = {"checks": [r["detail"]["feedback"] for r in rows if r["outcome"] == "check_failed"
-                      and isinstance(r.get("detail"), dict) and isinstance(r["detail"].get("feedback"), str)]}
+    failed = [r["detail"] for r in rows if r["outcome"] == "check_failed"
+              and isinstance(r.get("detail"), dict) and isinstance(r["detail"].get("feedback"), str)]
+    out = {"checks": [d["feedback"] for d in failed],
+           "refused": [{"draft": d["reply"] if isinstance(d.get("reply"), str) else "", "check": d["feedback"]}
+                       for d in failed]}
     for r in rows:
         if r["outcome"] == "no_safe_reply":
             d = r.get("detail") if isinstance(r.get("detail"), dict) else {}

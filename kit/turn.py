@@ -326,6 +326,8 @@ class TurnResult:
     reply: str | None = None
     failed: list = field(default_factory=list)  # [{check, why}] when the turn ended on failed checks
     retried: list = field(default_factory=list)  # [{check, why}] of the drafts that failed before the reply went out
+    refused: list = field(default_factory=list)  # [{draft, check}]: each refused draft, the agent's own words and the
+    # check's line (never the person's text), for the Arena's turn record, whether the turn replied or not
     actions: list = field(default_factory=list)  # [{action, note}] take_action recorded this turn
 
 
@@ -410,7 +412,7 @@ def _turn(agent, text, ctx, history, chats, chat_id, send, customer_id, lessons,
             log.exception("store data unavailable; no price can pass the check this turn")
     convo = history + [{"role": "user", "content": text or "(empty message)"}]
     system = system_prompt(agent, lessons)
-    failed, acted = [], []
+    failed, acted, refused = [], [], []
     said = "" if first else text  # the person's words the full check reads; a case input is not theirs
     try:
         while True:
@@ -419,12 +421,13 @@ def _turn(agent, text, ctx, history, chats, chat_id, send, customer_id, lessons,
             if passed and reply:
                 send(customer_id, reply)
                 chats.add_step(chat_id, "assistant", content=reply)
-                return TurnResult("replied", reply, retried=list(failed), actions=list(acted))
+                return TurnResult("replied", reply, retried=list(failed), actions=list(acted), refused=refused)
             feedback = feedback or "The reply was empty. Write one."
             failed.append({"check": "send_check", "why": " ".join(feedback.split())[:300]})
+            refused.append({"draft": reply or "", "check": " ".join(feedback.split())[:300]})
             if len(failed) >= MAX_FAILED_CHECKS:  # no safe reply: nothing goes out (sales/loop.py)
                 loop.drop_draft(chats, chat_id)
-                return TurnResult("no_safe_reply", None, failed, actions=list(acted))
+                return TurnResult("no_safe_reply", None, failed, actions=list(acted), refused=refused)
             convo.append({"role": "assistant", "content": reply})
             convo.append({"role": "user", "content": RETRY.format(feedback=feedback)})
     except ModelError as e:

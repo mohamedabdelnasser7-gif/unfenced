@@ -320,7 +320,8 @@ def play(agent, card, *, agent_model, customer_model, seed=0, max_turns=MAX_TURN
                 one = {"n": n, "customer": "" if agent_first else line, "replies": sent, "outcome": out.outcome,
                        "tools": [name for name, _ in ran if name != turn_mod.ACT_TOOL],
                        "actions": [a["action"] for a in out.actions], "acted": list(out.actions),
-                       "failed": out.failed, "order": bool(made)}
+                       "failed": out.failed, "order": bool(made),
+                       "refused": list(getattr(out, "refused", None) or [])}  # the agent's refused drafts
                 if agent_first:
                     one["input"] = given
                 turns.append(one)

@@ -281,7 +281,8 @@ class TurnRecordGaps(Base):
                 {"id": 4, "outcome": "no_safe_reply", "detail": {"by": "send_check", "in_a_row": 3}}]
         results = mock.Mock(for_chat=lambda chat_id: rows)
         self.assertEqual(match.why_of(results, "c", 1),
-                         {"checks": ["new"], "no_safe_reply": {"by": "send_check"}})
+                         {"checks": ["new"], "refused": [{"draft": "", "check": "new"}],
+                          "no_safe_reply": {"by": "send_check"}})
 
     def test_the_franco_feedback_names_up_to_three_arabic_words(self):
         found = problems("el vapor b 16,500 جنيه يا باشا موجود", FR)

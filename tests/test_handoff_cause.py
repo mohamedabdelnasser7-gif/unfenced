@@ -44,7 +44,9 @@ class TurnRecordKeepsTheReason(unittest.TestCase):
         self.assertEqual(len(t["checks"]), 3)
         self.assertTrue(all(ARABIC_POUND in c and "EGP" in c for c in t["checks"]), t["checks"])
         self.assertEqual(t["no_safe_reply"], {"by": "send_check"})
-        self.assertNotIn("Elite 16,500", json.dumps(t, ensure_ascii=False))  # the failed drafts stay out
+        # the failed drafts are kept only under "refused", with their check line (part C of the run 20261104T120239)
+        self.assertEqual([r["draft"] for r in t["refused"]], [bad] * 3)
+        self.assertNotIn("Elite 16,500", json.dumps({k: v for k, v in t.items() if k != "refused"}, ensure_ascii=False))
 
     def test_a_reply_that_passes_keeps_no_checks_and_no_no_safe_reply(self):
         good = f"Here is the Nike Phantom 6:\n{LINK}\n\nElite 16,500 EGP, Pro 11,000 EGP, Academy 7,500 EGP."

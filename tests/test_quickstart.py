@@ -207,6 +207,20 @@ class QuickStartPage(unittest.TestCase):
         # the fixed scope line from the card goes under the model's words (Mohamed 2026-11-03)
         self.assertTrue(words.endswith("\n\n" + qs.scope_line(card) + "\n"))
         self.assertIn(CASE["input"], qs.scope_line(card))
+
+    def test_the_scope_line_holds_does_the_case_and_the_boundary(self):
+        """Review scopeguard2 r1 item 3: near neighbours of the work stay the agent's own."""
+        card = {"does": "answers a bakery's customers about cakes and orders.", "good": "the customer orders",
+                "case": {"input": "a customer's cake question", "starts": "person", "output": "a short answer",
+                         "ends": "when they order"}}
+        got = qs.scope_line(card)
+        for part in ("Your work: answers a bakery's customers about cakes and orders.", "a customer's cake question",
+                     "a short answer", "Requests people could fairly expect from this work are yours",
+                     "decline only what has nothing to do with it"):
+            self.assertIn(part, got)
+        bare = qs.scope_line({k: v for k, v in card.items() if k != "case"})
+        self.assertEqual(bare.count("answers a bakery's customers"), 1)
+        self.assertNotIn("A case of it", bare)
         page = self.get()  # the build page's steps, all ticked, then Go to the Arena on the agent's Arena tab
         for done in ("Card read", "Plug written and checked", "Exam written", "Files saved", "agents/stock_watcher",
                      "Ready for the Arena"):

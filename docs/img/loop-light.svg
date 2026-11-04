@@ -1,0 +1,291 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" width="1200" height="700" role="img" aria-labelledby="c-title c-desc" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title id="c-title">One engine loop: Arena, Deployment, Reflection, and back to the Arena</title>
+  <desc id="c-desc">A loop with no final step. An agent starts with zero lessons in the Arena, where it practises before going live, and passes the eval gate to Deployment, live with real data. Real cases go to Reflection, in seconds and every night, which sends lessons and new practice people back to the Arena, so it gets harder, and lessons for live agents straight into the eval gate. A lesson that passes the gate reaches a live agent as a canary on a small share of chats; a hotfix goes straight to Deployment. One engine: Sales agent, personal assistant, and more.</desc>
+  <defs>
+    <!-- canvas -->
+    <radialGradient id="canvasGlow" cx="0.18" cy="-0.1" r="0.75">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.8"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="floorTint" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0.6" stop-color="#2a3332" stop-opacity="0"/>
+      <stop offset="1" stop-color="#2a3332" stop-opacity="0.07"/>
+    </linearGradient>
+
+    <!-- white card -->
+    <linearGradient id="faceW" x1="0.38" y1="0" x2="0.62" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.6" stop-color="#f9f8f5"/>
+      <stop offset="1" stop-color="#f1f0eb"/>
+    </linearGradient>
+    <radialGradient id="faceWtint" cx="1" cy="1" r="0.75">
+      <stop offset="0" stop-color="#5f7471" stop-opacity="0.09"/>
+      <stop offset="1" stop-color="#5f7471" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="slabW" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#d9d7cf"/>
+      <stop offset="1" stop-color="#e6e4dd"/>
+    </linearGradient>
+
+    <!-- light sage mist card (A3 .pass) -->
+    <linearGradient id="mistBase" x1="0.38" y1="0" x2="0.62" y2="1">
+      <stop offset="0" stop-color="#e2e8e5"/>
+      <stop offset="0.55" stop-color="#edefeb"/>
+      <stop offset="1" stop-color="#f4f3ef"/>
+    </linearGradient>
+    <radialGradient id="mistA" cx="1" cy="0" r="0.7">
+      <stop offset="0" stop-color="#5f7471" stop-opacity="0.36"/>
+      <stop offset="1" stop-color="#5f7471" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="mistB" cx="0" cy="1" r="0.65">
+      <stop offset="0" stop-color="#8fa39e" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#8fa39e" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="slabM" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#b9c4c0"/>
+      <stop offset="1" stop-color="#cdd5d1"/>
+    </linearGradient>
+
+    <!-- dark sage card (A3 .glow) -->
+    <linearGradient id="sageBase" x1="0.38" y1="0" x2="0.62" y2="1">
+      <stop offset="0" stop-color="#5f7471"/>
+      <stop offset="0.45" stop-color="#2f3a39"/>
+      <stop offset="1" stop-color="#141a19"/>
+    </linearGradient>
+    <radialGradient id="sageA" cx="1" cy="0" r="0.5">
+      <stop offset="0" stop-color="#b0c0bb" stop-opacity="0.62"/>
+      <stop offset="1" stop-color="#b0c0bb" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="sageB" cx="0" cy="1" r="0.6">
+      <stop offset="0" stop-color="#080b0a" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#080b0a" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="sageC" cx="0.78" cy="0.92" r="0.5">
+      <stop offset="0" stop-color="#5f7471" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#5f7471" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="slabS" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0a0e0d"/>
+      <stop offset="1" stop-color="#18201f"/>
+    </linearGradient>
+
+    <!-- light edge highlights -->
+    <linearGradient id="edgeHi" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="0.3" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="edgeHiS" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.34"/>
+      <stop offset="0.35" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- inner details -->
+    <linearGradient id="workActive" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a4746"/>
+      <stop offset="1" stop-color="#1d2524"/>
+    </linearGradient>
+    <radialGradient id="volt" cx="0.35" cy="0.3" r="0.8">
+      <stop offset="0" stop-color="#e9f88a"/>
+      <stop offset="0.55" stop-color="#d7f24b"/>
+      <stop offset="1" stop-color="#c3dc3a"/>
+    </radialGradient>
+    <mask id="moonCut">
+      <circle cx="174" cy="172" r="9" fill="#ffffff"/>
+      <circle cx="179" cy="167" r="7.5" fill="#000000"/>
+    </mask>
+
+    <!-- blurs: floor shadow blur grows with the card's height -->
+    <filter id="b1" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="1"/></filter>
+    <filter id="b3" x="-30%" y="-60%" width="160%" height="220%"><feGaussianBlur stdDeviation="3"/></filter>
+    <filter id="b5" x="-40%" y="-300%" width="180%" height="700%"><feGaussianBlur stdDeviation="5"/></filter>
+    <filter id="b10" x="-40%" y="-300%" width="180%" height="700%"><feGaussianBlur stdDeviation="10"/></filter>
+    <filter id="b14" x="-40%" y="-100%" width="180%" height="300%"><feGaussianBlur stdDeviation="14"/></filter>
+    <filter id="b18" x="-50%" y="-300%" width="200%" height="700%"><feGaussianBlur stdDeviation="18"/></filter>
+    <filter id="b24" x="-50%" y="-300%" width="200%" height="700%"><feGaussianBlur stdDeviation="24"/></filter>
+    <filter id="b34" x="-60%" y="-300%" width="220%" height="700%"><feGaussianBlur stdDeviation="34"/></filter>
+
+    <!-- grain: fractal noise as dark or light specks, clipped to the shape -->
+    <filter id="grainK" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="7" stitchTiles="stitch" result="t"/>
+      <feColorMatrix in="t" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1.6 0 0 0 -0.55" result="g"/>
+      <feComposite in="g" in2="SourceAlpha" operator="in"/>
+    </filter>
+    <filter id="grainW" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="11" stitchTiles="stitch" result="t"/>
+      <feColorMatrix in="t" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  1.6 0 0 0 -0.55" result="g"/>
+      <feComposite in="g" in2="SourceAlpha" operator="in"/>
+    </filter>
+  </defs>
+
+  <!-- bone canvas and floor -->
+  <rect width="1200" height="700" rx="28" fill="#f4f3ef"/>
+  <rect width="1200" height="700" rx="28" fill="url(#canvasGlow)"/>
+  <rect width="1200" height="700" rx="28" fill="url(#floorTint)"/>
+  <rect width="1200" height="700" rx="28" fill="#000000" opacity="0.045" filter="url(#grainK)"/>
+
+
+  <!-- floor shadows: the higher the plane, the wider, softer and fainter -->
+  <g transform="rotate(-8 190 556)">
+    <ellipse cx="190" cy="556" rx="152" ry="17" fill="#0b0f12" opacity="0.13" filter="url(#b10)"/>
+    <ellipse cx="190" cy="556" rx="130" ry="8" fill="#0b0f12" opacity="0.22" filter="url(#b5)"/>
+  </g>
+  <g transform="rotate(-8 600 548)">
+    <ellipse cx="600" cy="548" rx="162" ry="22" fill="#0b0f12" opacity="0.10" filter="url(#b24)"/>
+    <ellipse cx="600" cy="548" rx="134" ry="11" fill="#0b0f12" opacity="0.13" filter="url(#b10)"/>
+  </g>
+  <g transform="rotate(-8 1010 540)">
+    <ellipse cx="1010" cy="540" rx="176" ry="26" fill="#0b0f12" opacity="0.09" filter="url(#b34)"/>
+    <ellipse cx="1010" cy="540" rx="138" ry="13" fill="#0b0f12" opacity="0.12" filter="url(#b18)"/>
+  </g>
+
+  <!-- floor line: the engine is not one agent -->
+  <text x="600" y="606" font-size="28" font-weight="500" fill="#5d6360" text-anchor="middle">One engine. Sales agent, personal assistant, and more...</text>
+
+  <!-- entry: the agent starts with zero lessons in the Arena -->
+  <text x="190" y="150" font-size="28" font-weight="500" fill="#4b514f" text-anchor="middle">starts with zero lessons</text>
+  <circle cx="190" cy="174" r="6" fill="none" stroke="#5d6360" stroke-width="2.25"/>
+  <path d="M190 180 L190 262" fill="none" stroke="#5d6360" stroke-width="2.25" stroke-linecap="round"/>
+  <path d="M190 275 L183 262 L197 262 Z" fill="#5d6360"/>
+
+  <!-- return path: Reflection down to the floor and back into the Arena -->
+  <path d="M1010 306 L1010 632 Q1010 656 986 656 L214 656 Q190 656 190 632 L190 520" fill="none" stroke="#5d6360" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M190 507 L183 520 L197 520 Z" fill="#5d6360"/>
+
+  <!-- climbing paths -->
+  <path d="M350 356 C396 356 402 300 438 300" fill="none" stroke="#5d6360" stroke-width="2.25" stroke-linecap="round"/>
+  <path d="M451 300 L438 293 L438 307 Z" fill="#5d6360"/>
+  <text x="383" y="394" font-size="28" font-weight="500" fill="#4b514f" text-anchor="middle">eval</text>
+  <text x="383" y="426" font-size="28" font-weight="500" fill="#4b514f" text-anchor="middle">gate</text>
+  <circle cx="398" cy="331" r="15" fill="#000000" opacity="0.3" filter="url(#b3)"/>
+  <circle cx="398" cy="328" r="15" fill="url(#volt)"/>
+  <path d="M391 328.5 L396 333.5 L405.5 323" fill="none" stroke="#0b0f12" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <path d="M760 256 C806 256 812 200 848 200" fill="none" stroke="#5d6360" stroke-width="2.25" stroke-linecap="round"/>
+  <path d="M861 200 L848 193 L848 207 Z" fill="#5d6360"/>
+  <text x="805" y="290" font-size="28" font-weight="500" fill="#4b514f" text-anchor="middle">real</text>
+  <text x="805" y="322" font-size="28" font-weight="500" fill="#4b514f" text-anchor="middle">cases</text>
+
+  <!-- canary: leaves from the eval gate; a lesson that passed the gate goes live on a small share of chats; the live agent keeps improving -->
+  <path d="M398 308 C398 236 452 172 532 172" fill="none" stroke="#5d6360" stroke-width="2" stroke-dasharray="6 7" stroke-linecap="round" opacity="0.85"/>
+  <path d="M544 177 L531 179 L535 167 Z" fill="#5d6360" opacity="0.85"/>
+  <text x="470" y="146" font-size="28" font-weight="600" fill="#4b514f" text-anchor="middle">canary</text>
+  <!-- lessons for live agents: Reflection under Deployment, up the gap into the eval gate, then canary -->
+  <path d="M940 330 C940 560 470 560 406.4 354.7" fill="none" stroke="#5d6360" stroke-width="2" stroke-dasharray="6 7" stroke-linecap="round" opacity="0.85"/>
+  <path d="M402.5 342.3 L412.1 352.9 L400.7 356.5 Z" fill="#5d6360" opacity="0.85"/>
+  <text x="700" y="548" font-size="23" font-weight="500" fill="#4b514f" fill-opacity="0.85" text-anchor="middle">lessons for live agents</text>
+  <!-- hotfix: a lighter, direct line from Reflection back to Deployment; never a lesson, skips the Arena -->
+  <path d="M896 90 C850 72 716 80 716 146" fill="none" stroke="#5d6360" stroke-width="2" stroke-dasharray="6 7" stroke-linecap="round" opacity="0.85"/>
+  <path d="M716 159 L710 147 L722 147 Z" fill="#5d6360" opacity="0.85"/>
+  <text x="800" y="62" font-size="28" font-weight="600" fill="#4b514f" text-anchor="middle">hotfix</text>
+
+  <!-- Arena: dark sage, first plane, lowest -->
+  <g transform="translate(40 300) skewY(-8)">
+    <rect x="32" y="46" width="236" height="188" rx="24" fill="#141a19" opacity="0.42" filter="url(#b14)"/>
+    <rect x="1" y="2" width="298" height="214" rx="24" fill="#0b0f12" opacity="0.12" filter="url(#b1)"/>
+    <!-- stack -->
+    <rect x="40" y="226" width="220" height="16" rx="8" fill="#0b0f12" opacity="0.16" filter="url(#b5)"/>
+    <rect x="28" y="196" width="244" height="40" rx="18" fill="#5d6865"/>
+    <rect x="28.5" y="196.5" width="243" height="39" rx="17.5" fill="none" stroke="#ffffff" stroke-opacity="0.10"/>
+    <rect x="14" y="185" width="272" height="40" rx="20" fill="#4b5653"/>
+    <rect x="14.5" y="185.5" width="271" height="39" rx="19.5" fill="none" stroke="#ffffff" stroke-opacity="0.10"/>
+    <rect width="300" height="214" rx="24" fill="url(#sageBase)"/>
+    <rect width="300" height="214" rx="24" fill="url(#sageA)"/>
+    <rect width="300" height="214" rx="24" fill="url(#sageB)"/>
+    <rect width="300" height="214" rx="24" fill="url(#sageC)"/>
+    <rect width="300" height="214" rx="24" fill="#000000" opacity="0.09" filter="url(#grainW)"/>
+    <rect x="1.25" y="1.25" width="297.5" height="211.5" rx="22.75" fill="none" stroke="url(#edgeHiS)" stroke-width="1.5"/>
+
+    <text x="26" y="62" font-size="46" font-weight="600" letter-spacing="-0.015em" fill="#ffffff">Arena</text>
+    <text x="26" y="94" font-size="23" font-weight="500" fill="#ffffff" fill-opacity="0.8">practice before</text>
+    <text x="26" y="122" font-size="23" font-weight="500" fill="#ffffff" fill-opacity="0.8">going live</text>
+
+    <!-- practice runs: a pass and a fail -->
+    <rect x="26" y="154" width="120" height="36" rx="12" fill="#0b0f12" fill-opacity="0.26"/>
+    <rect x="26.5" y="154.5" width="119" height="35" rx="11.5" fill="none" stroke="#ffffff" stroke-opacity="0.08"/>
+    <path d="M39 172 L44.5 177.5 L54 167" fill="none" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="68" y1="172" x2="126" y2="172" stroke="#ffffff" stroke-opacity="0.35" stroke-width="6" stroke-linecap="round"/>
+    <rect x="154" y="154" width="120" height="36" rx="12" fill="#0b0f12" fill-opacity="0.26"/>
+    <rect x="154.5" y="154.5" width="119" height="35" rx="11.5" fill="none" stroke="#ffffff" stroke-opacity="0.08"/>
+    <path d="M167 166.5 L178 177.5 M178 166.5 L167 177.5" fill="none" stroke="#ffffff" stroke-opacity="0.7" stroke-width="2.6" stroke-linecap="round"/>
+    <line x1="192" y1="172" x2="254" y2="172" stroke="#ffffff" stroke-opacity="0.35" stroke-width="6" stroke-linecap="round"/>
+  </g>
+
+  <!-- Deployment: white, middle -->
+  <g transform="translate(450 200) skewY(-8)">
+    <rect x="32" y="38" width="236" height="192" rx="24" fill="#0b0f12" opacity="0.16" filter="url(#b14)"/>
+    <rect x="1" y="2" width="298" height="214" rx="24" fill="#0b0f12" opacity="0.08" filter="url(#b1)"/>
+    <!-- stack -->
+    <rect x="40" y="226" width="220" height="16" rx="8" fill="#0b0f12" opacity="0.16" filter="url(#b5)"/>
+    <rect x="28" y="196" width="244" height="40" rx="18" fill="#e6e5df"/>
+    <rect x="28.5" y="196.5" width="243" height="39" rx="17.5" fill="none" stroke="#0b0f12" stroke-opacity="0.10"/>
+    <rect x="14" y="185" width="272" height="40" rx="20" fill="#f2f1ec"/>
+    <rect x="14.5" y="185.5" width="271" height="39" rx="19.5" fill="none" stroke="#0b0f12" stroke-opacity="0.10"/>
+    <rect width="300" height="214" rx="24" fill="url(#faceW)"/>
+    <rect width="300" height="214" rx="24" fill="url(#faceWtint)"/>
+    <rect width="300" height="214" rx="24" fill="#000000" opacity="0.06" filter="url(#grainK)"/>
+    <rect x="0.5" y="0.5" width="299" height="213" rx="23.5" fill="none" stroke="#0b0f12" stroke-opacity="0.07"/>
+    <rect x="1.25" y="1.25" width="297.5" height="211.5" rx="22.75" fill="none" stroke="url(#edgeHi)" stroke-width="1.5"/>
+
+    <text x="26" y="62" font-size="46" font-weight="600" letter-spacing="-0.015em" fill="#0b0f12">Deployment</text>
+    <text x="26" y="94" font-size="23" font-weight="500" fill="#4b514f">live with</text>
+    <text x="26" y="122" font-size="23" font-weight="500" fill="#4b514f">real data</text>
+
+    <!-- work items in a row: done, in progress, queued -->
+    <rect x="26" y="154" width="76" height="36" rx="10" fill="#eeede7"/>
+    <rect x="26.5" y="154.5" width="75" height="35" rx="9.5" fill="none" stroke="#0b0f12" stroke-opacity="0.06"/>
+    <path d="M37 172 L41.5 176.5 L49.5 167.5" fill="none" stroke="#5f7471" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="60" y1="172" x2="88" y2="172" stroke="#c4c2ba" stroke-width="6" stroke-linecap="round"/>
+
+    <rect x="113" y="157" width="76" height="36" rx="10" fill="#0b0f12" opacity="0.2" filter="url(#b3)"/>
+    <rect x="112" y="152" width="76" height="36" rx="10" fill="url(#workActive)"/>
+    <rect x="123" y="164" width="12" height="12" rx="3" fill="#ffffff" fill-opacity="0.85"/>
+    <line x1="146" y1="170" x2="174" y2="170" stroke="#ffffff" stroke-opacity="0.5" stroke-width="6" stroke-linecap="round"/>
+
+    <rect x="198" y="154" width="76" height="36" rx="10" fill="#eeede7"/>
+    <rect x="198.5" y="154.5" width="75" height="35" rx="9.5" fill="none" stroke="#0b0f12" stroke-opacity="0.06"/>
+    <rect x="210" y="166.5" width="11" height="11" rx="2.5" fill="none" stroke="#a9a79f" stroke-width="1.8"/>
+    <line x1="232" y1="172" x2="260" y2="172" stroke="#c4c2ba" stroke-width="6" stroke-linecap="round"/>
+  </g>
+
+  <!-- Reflection: light sage mist, highest -->
+  <g transform="translate(860 100) skewY(-8)">
+    <rect x="32" y="42" width="236" height="192" rx="24" fill="#2a3332" opacity="0.15" filter="url(#b14)"/>
+    <rect x="1" y="2" width="298" height="214" rx="24" fill="#0b0f12" opacity="0.07" filter="url(#b1)"/>
+    <!-- stack -->
+    <rect x="40" y="226" width="220" height="16" rx="8" fill="#0b0f12" opacity="0.16" filter="url(#b5)"/>
+    <rect x="28" y="196" width="244" height="40" rx="18" fill="#c7d0cd"/>
+    <rect x="28.5" y="196.5" width="243" height="39" rx="17.5" fill="none" stroke="#2a3332" stroke-opacity="0.10"/>
+    <rect x="14" y="185" width="272" height="40" rx="20" fill="#d5dddb"/>
+    <rect x="14.5" y="185.5" width="271" height="39" rx="19.5" fill="none" stroke="#2a3332" stroke-opacity="0.10"/>
+    <rect width="300" height="214" rx="24" fill="url(#mistBase)"/>
+    <rect width="300" height="214" rx="24" fill="url(#mistA)"/>
+    <rect width="300" height="214" rx="24" fill="url(#mistB)"/>
+    <rect width="300" height="214" rx="24" fill="#000000" opacity="0.07" filter="url(#grainK)"/>
+    <rect x="0.5" y="0.5" width="299" height="213" rx="23.5" fill="none" stroke="#2a3332" stroke-opacity="0.08"/>
+    <rect x="1.25" y="1.25" width="297.5" height="211.5" rx="22.75" fill="none" stroke="url(#edgeHi)" stroke-width="1.5"/>
+
+    <text x="26" y="62" font-size="46" font-weight="600" letter-spacing="-0.015em" fill="#0b0f12">Reflection</text>
+    <text x="26" y="94" font-size="23" font-weight="500" fill="#3f4a48">in seconds</text>
+    <text x="26" y="122" font-size="23" font-weight="500" fill="#3f4a48">and every night</text>
+
+    <!-- two speeds side by side: seconds (a timer) and nightly (a moon) -->
+    <rect x="28" y="158" width="120" height="36" rx="12" fill="#2a3332" opacity="0.12" filter="url(#b3)"/>
+    <rect x="26" y="154" width="120" height="36" rx="12" fill="#ffffff" fill-opacity="0.66"/>
+    <rect x="26.5" y="154.5" width="119" height="35" rx="11.5" fill="none" stroke="#ffffff" stroke-opacity="0.9"/>
+    <circle cx="46" cy="173" r="8.5" fill="none" stroke="#2a3332" stroke-width="2.2"/>
+    <path d="M46 173 L46 168 M43 161.5 L49 161.5" fill="none" stroke="#2a3332" stroke-width="2.2" stroke-linecap="round"/>
+    <line x1="66" y1="172" x2="126" y2="172" stroke="#2a3332" stroke-opacity="0.3" stroke-width="6" stroke-linecap="round"/>
+
+    <rect x="156" y="158" width="120" height="36" rx="12" fill="#2a3332" opacity="0.12" filter="url(#b3)"/>
+    <rect x="154" y="154" width="120" height="36" rx="12" fill="#ffffff" fill-opacity="0.66"/>
+    <rect x="154.5" y="154.5" width="119" height="35" rx="11.5" fill="none" stroke="#ffffff" stroke-opacity="0.9"/>
+    <circle cx="174" cy="172" r="9" fill="#2a3332" mask="url(#moonCut)"/>
+    <line x1="194" y1="172" x2="254" y2="172" stroke="#2a3332" stroke-opacity="0.3" stroke-width="6" stroke-linecap="round"/>
+  </g>
+
+  <!-- label on the return path -->
+  <rect x="386" y="638" width="428" height="44" rx="22" fill="#0b0f12" opacity="0.12" filter="url(#b3)"/>
+  <rect x="386" y="634" width="428" height="44" rx="22" fill="#ffffff"/>
+  <rect x="386.5" y="634.5" width="427" height="43" rx="21.5" fill="none" stroke="#0b0f12" stroke-opacity="0.08"/>
+  <text x="600" y="665" font-size="28" font-weight="500" fill="#0b0f12" text-anchor="middle">lessons + new practice people</text>
+</svg>

@@ -1,0 +1,237 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 712" width="1200" height="712" role="img" aria-labelledby="arena-title arena-desc" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title id="arena-title">Evaluate: the Arena, where a new agent practises before any real person</title>
+  <desc id="arena-desc">A new agent never learns on real people first. The Arena is self play between two models: one side is the agent, the other side is a practice person made from behaviour. The practice person shown is a made-up example. Worry: the price. Patience: low, two dodged answers then quiet. Language: Arabic, Franco and English mixed. Opens with: a voice note. Buys when: delivery time is clear. Cleaned example line: how much with delivery? They play a match of short chat turns. The verdict is judged in code: the match is won only when the order tool really placed the order on the person's yes, and an order confirmed message with no order fails the fact check. To go live the agent needs 7 of 10 matches won, a pass mark set per sector. The hard ones come back to the practice person side for more practice. Practice on real behaviour before any real person.</desc>
+  <defs>
+    <radialGradient id="canvasGlow" cx="0.18" cy="-0.1" r="0.75">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.8"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="floorTint" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0.6" stop-color="#2a3332" stop-opacity="0"/>
+      <stop offset="1" stop-color="#2a3332" stop-opacity="0.07"/>
+    </linearGradient>
+    <linearGradient id="faceW" x1="0.38" y1="0" x2="0.62" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.6" stop-color="#f9f8f5"/>
+      <stop offset="1" stop-color="#f1f0eb"/>
+    </linearGradient>
+    <radialGradient id="faceWtint" cx="1" cy="1" r="0.75">
+      <stop offset="0" stop-color="#5f7471" stop-opacity="0.09"/>
+      <stop offset="1" stop-color="#5f7471" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="mistBase" x1="0.38" y1="0" x2="0.62" y2="1">
+      <stop offset="0" stop-color="#e2e8e5"/>
+      <stop offset="0.55" stop-color="#edefeb"/>
+      <stop offset="1" stop-color="#f4f3ef"/>
+    </linearGradient>
+    <radialGradient id="mistA" cx="1" cy="0" r="0.7">
+      <stop offset="0" stop-color="#5f7471" stop-opacity="0.36"/>
+      <stop offset="1" stop-color="#5f7471" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="mistB" cx="0" cy="1" r="0.65">
+      <stop offset="0" stop-color="#8fa39e" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#8fa39e" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sageBase" x1="0.38" y1="0" x2="0.62" y2="1">
+      <stop offset="0" stop-color="#5f7471"/>
+      <stop offset="0.45" stop-color="#2f3a39"/>
+      <stop offset="1" stop-color="#141a19"/>
+    </linearGradient>
+    <radialGradient id="sageA" cx="1" cy="0" r="0.5">
+      <stop offset="0" stop-color="#b0c0bb" stop-opacity="0.62"/>
+      <stop offset="1" stop-color="#b0c0bb" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="sageB" cx="0" cy="1" r="0.6">
+      <stop offset="0" stop-color="#080b0a" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#080b0a" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="sageC" cx="0.78" cy="0.92" r="0.5">
+      <stop offset="0" stop-color="#5f7471" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#5f7471" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="edgeHi" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="0.3" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="edgeHiS" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.34"/>
+      <stop offset="0.35" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="workActive" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a4746"/>
+      <stop offset="1" stop-color="#1d2524"/>
+    </linearGradient>
+    <radialGradient id="volt" cx="0.35" cy="0.3" r="0.8">
+      <stop offset="0" stop-color="#e9f88a"/>
+      <stop offset="0.55" stop-color="#d7f24b"/>
+      <stop offset="1" stop-color="#c3dc3a"/>
+    </radialGradient>
+    <filter id="b1" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="1"/></filter>
+    <filter id="b3" x="-30%" y="-60%" width="160%" height="220%"><feGaussianBlur stdDeviation="3"/></filter>
+    <filter id="b14" x="-40%" y="-100%" width="180%" height="300%"><feGaussianBlur stdDeviation="14"/></filter>
+    <filter id="grainK" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="7" stitchTiles="stitch" result="t"/>
+      <feColorMatrix in="t" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1.6 0 0 0 -0.55" result="g"/>
+      <feComposite in="g" in2="SourceAlpha" operator="in"/>
+    </filter>
+    <filter id="grainW" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="11" stitchTiles="stitch" result="t"/>
+      <feColorMatrix in="t" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  1.6 0 0 0 -0.55" result="g"/>
+      <feComposite in="g" in2="SourceAlpha" operator="in"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="712" rx="28" fill="#f4f3ef"/>
+  <rect width="1200" height="712" rx="28" fill="url(#canvasGlow)"/>
+  <rect width="1200" height="712" rx="28" fill="url(#floorTint)"/>
+  <rect width="1200" height="712" rx="28" fill="#000000" opacity="0.045" filter="url(#grainK)"/>
+  <!-- practice person: white card, rows are behaviour fields (made-up values) -->
+  <g transform="translate(40 40)">
+  <rect x="24" y="92" width="324" height="517" rx="24" fill="#0b0f12" opacity="0.15" filter="url(#b14)"/>
+  <rect x="1" y="2" width="370" height="574" rx="24" fill="#0b0f12" opacity="0.08" filter="url(#b1)"/>
+  <rect width="372" height="574" rx="24" fill="url(#faceW)"/>
+  <rect width="372" height="574" rx="24" fill="url(#faceWtint)"/>
+  <rect width="372" height="574" rx="24" fill="#000000" opacity="0.06" filter="url(#grainK)"/>
+  <rect x="0.5" y="0.5" width="371" height="573" rx="23.5" fill="none" stroke="#0b0f12" stroke-opacity="0.07"/>
+  <rect x="1.25" y="1.25" width="369.5" height="571.5" rx="22.75" fill="none" stroke="url(#edgeHi)" stroke-width="1.5"/>
+  </g>
+  <text x="66" y="92" font-size="36" font-weight="600" letter-spacing="-0.015em" fill="#0b0f12">Practice person</text>
+  <rect x="66" y="110" width="206" height="30" rx="15" fill="#eeede7"/>
+  <rect x="66.5" y="110.5" width="205" height="29" rx="14.5" fill="none" stroke="#0b0f12" stroke-opacity="0.08"/>
+  <text x="169" y="131" font-size="20" font-weight="500" fill="#4b514f" text-anchor="middle">made from behaviour</text>
+  <line x1="66" y1="162" x2="386" y2="162" stroke="#0b0f12" stroke-opacity="0.07"/>
+  <text x="66" y="194" font-size="20" font-weight="500" fill="#5d6360">worry</text>
+  <text x="186" y="194" font-size="23" font-weight="500" fill="#0b0f12">the price</text>
+  <line x1="66" y1="212" x2="386" y2="212" stroke="#0b0f12" stroke-opacity="0.07"/>
+  <text x="66" y="244" font-size="20" font-weight="500" fill="#5d6360">patience</text>
+  <text x="186" y="244" font-size="23" font-weight="500" fill="#0b0f12">low, two dodged</text>
+  <text x="186" y="271" font-size="23" font-weight="500" fill="#0b0f12">answers then quiet</text>
+  <line x1="66" y1="289" x2="386" y2="289" stroke="#0b0f12" stroke-opacity="0.07"/>
+  <text x="66" y="321" font-size="20" font-weight="500" fill="#5d6360">language</text>
+  <text x="186" y="321" font-size="23" font-weight="500" fill="#0b0f12">Arabic, Franco and</text>
+  <text x="186" y="348" font-size="23" font-weight="500" fill="#0b0f12">English mixed</text>
+  <line x1="66" y1="366" x2="386" y2="366" stroke="#0b0f12" stroke-opacity="0.07"/>
+  <text x="66" y="398" font-size="20" font-weight="500" fill="#5d6360">opens with</text>
+  <text x="186" y="398" font-size="23" font-weight="500" fill="#0b0f12">a voice note</text>
+  <line x1="66" y1="416" x2="386" y2="416" stroke="#0b0f12" stroke-opacity="0.07"/>
+  <text x="66" y="448" font-size="20" font-weight="500" fill="#5d6360">buys when</text>
+  <text x="186" y="448" font-size="23" font-weight="500" fill="#0b0f12">delivery time</text>
+  <text x="186" y="475" font-size="23" font-weight="500" fill="#0b0f12">is clear</text>
+  <line x1="66" y1="493" x2="386" y2="493" stroke="#0b0f12" stroke-opacity="0.07"/>
+  <text x="66" y="525" font-size="20" font-weight="500" fill="#8a908d">cleaned example</text>
+  <rect x="66" y="539" width="320" height="44" rx="14" fill="#eeede7"/>
+  <rect x="66.5" y="539.5" width="319" height="43" rx="13.5" fill="none" stroke="#0b0f12" stroke-opacity="0.06"/>
+  <text x="82" y="569" font-size="23" font-weight="500" fill="#0b0f12">"how much with delivery?"</text>
+  <path d="M420 300 L444 300" fill="none" stroke="#5d6360" stroke-width="2.25" stroke-linecap="round"/>
+  <path d="M456 300 L444 293 L444 307 Z" fill="#5d6360"/>
+  <!-- Arena: dark sage hero card, a match between the practice person (left) and the agent (right) -->
+  <g transform="translate(462 110)">
+  <rect x="24" y="64" width="252" height="360" rx="24" fill="#0b0f12" opacity="0.30" filter="url(#b14)"/>
+  <rect x="1" y="2" width="298" height="400" rx="24" fill="#0b0f12" opacity="0.08" filter="url(#b1)"/>
+  <rect width="300" height="400" rx="24" fill="url(#sageBase)"/>
+  <rect width="300" height="400" rx="24" fill="url(#sageA)"/>
+  <rect width="300" height="400" rx="24" fill="url(#sageB)"/>
+  <rect width="300" height="400" rx="24" fill="url(#sageC)"/>
+  <rect width="300" height="400" rx="24" fill="#000000" opacity="0.09" filter="url(#grainW)"/>
+  <rect x="1.25" y="1.25" width="297.5" height="397.5" rx="22.75" fill="none" stroke="url(#edgeHiS)" stroke-width="1.5"/>
+  </g>
+  <text x="488" y="172" font-size="42" font-weight="600" letter-spacing="-0.015em" fill="#ffffff">Arena</text>
+  <text x="488" y="206" font-size="23" font-weight="500" fill="#ffffff" fill-opacity="0.8">self play, two models</text>
+  <!-- practice person: voice note -->
+  <rect x="488" y="236" width="168" height="40" rx="12" fill="#0b0f12" fill-opacity="0.26"/>
+  <rect x="488.5" y="236.5" width="167" height="39" rx="11.5" fill="none" stroke="#ffffff" stroke-opacity="0.08"/>
+  <path d="M503 248 L503 264 L516 256 Z" fill="#ffffff" fill-opacity="0.85"/>
+  <line x1="530" y1="253.0" x2="530" y2="259.0" stroke="#ffffff" stroke-opacity="0.5" stroke-width="3" stroke-linecap="round"/>
+  <line x1="538" y1="250.0" x2="538" y2="262.0" stroke="#ffffff" stroke-opacity="0.5" stroke-width="3" stroke-linecap="round"/>
+  <line x1="546" y1="247.0" x2="546" y2="265.0" stroke="#ffffff" stroke-opacity="0.5" stroke-width="3" stroke-linecap="round"/>
+  <line x1="554" y1="251.0" x2="554" y2="261.0" stroke="#ffffff" stroke-opacity="0.5" stroke-width="3" stroke-linecap="round"/>
+  <line x1="562" y1="248.0" x2="562" y2="264.0" stroke="#ffffff" stroke-opacity="0.5" stroke-width="3" stroke-linecap="round"/>
+  <line x1="570" y1="252.0" x2="570" y2="260.0" stroke="#ffffff" stroke-opacity="0.5" stroke-width="3" stroke-linecap="round"/>
+  <line x1="578" y1="249.0" x2="578" y2="263.0" stroke="#ffffff" stroke-opacity="0.5" stroke-width="3" stroke-linecap="round"/>
+  <line x1="586" y1="246.0" x2="586" y2="266.0" stroke="#ffffff" stroke-opacity="0.5" stroke-width="3" stroke-linecap="round"/>
+  <line x1="594" y1="250.0" x2="594" y2="262.0" stroke="#ffffff" stroke-opacity="0.5" stroke-width="3" stroke-linecap="round"/>
+  <line x1="602" y1="253.0" x2="602" y2="259.0" stroke="#ffffff" stroke-opacity="0.5" stroke-width="3" stroke-linecap="round"/>
+  <line x1="610" y1="249.0" x2="610" y2="263.0" stroke="#ffffff" stroke-opacity="0.5" stroke-width="3" stroke-linecap="round"/>
+  <line x1="618" y1="251.5" x2="618" y2="260.5" stroke="#ffffff" stroke-opacity="0.5" stroke-width="3" stroke-linecap="round"/>
+  <line x1="626" y1="248.0" x2="626" y2="264.0" stroke="#ffffff" stroke-opacity="0.5" stroke-width="3" stroke-linecap="round"/>
+  <line x1="634" y1="252.5" x2="634" y2="259.5" stroke="#ffffff" stroke-opacity="0.5" stroke-width="3" stroke-linecap="round"/>
+  <line x1="642" y1="250.5" x2="642" y2="261.5" stroke="#ffffff" stroke-opacity="0.5" stroke-width="3" stroke-linecap="round"/>
+  <!-- agent: reply with the price and delivery time -->
+  <rect x="561" y="295" width="176" height="40" rx="12" fill="#000000" opacity="0.22" filter="url(#b3)"/>
+  <rect x="560" y="290" width="176" height="40" rx="12" fill="#dbe3e0"/>
+  <rect x="560.75" y="290.75" width="174.5" height="38.5" rx="11.25" fill="none" stroke="#5f7471" stroke-width="1.5"/>
+  <path d="M576 304 L587 304 L593 310 L587 316 L576 316 Z" fill="none" stroke="#2a3332" stroke-width="2" stroke-linejoin="round"/>
+  <circle cx="580.5" cy="310" r="1.6" fill="#2a3332"/>
+  <line x1="606" y1="310" x2="720" y2="310" stroke="#2a3332" stroke-opacity="0.32" stroke-width="6" stroke-linecap="round"/>
+  <!-- practice person: a short yes -->
+  <rect x="488" y="344" width="112" height="40" rx="12" fill="#0b0f12" fill-opacity="0.26"/>
+  <rect x="488.5" y="344.5" width="111" height="39" rx="11.5" fill="none" stroke="#ffffff" stroke-opacity="0.08"/>
+  <line x1="504" y1="364" x2="584" y2="364" stroke="#ffffff" stroke-opacity="0.35" stroke-width="6" stroke-linecap="round"/>
+  <!-- legend: who is who -->
+  <rect x="488" y="430" width="18" height="18" rx="5" fill="#0b0f12" fill-opacity="0.26"/>
+  <rect x="488.5" y="430.5" width="17" height="17" rx="4.5" fill="none" stroke="#ffffff" stroke-opacity="0.3"/>
+  <text x="518" y="446" font-size="20" font-weight="500" fill="#ffffff" fill-opacity="0.75">practice person</text>
+  <rect x="488" y="462" width="18" height="18" rx="5" fill="#dbe3e0"/>
+  <text x="518" y="478" font-size="20" font-weight="500" fill="#ffffff" fill-opacity="0.75">agent</text>
+  <path d="M770 220 L794 220" fill="none" stroke="#5d6360" stroke-width="2.25" stroke-linecap="round"/>
+  <path d="M806 220 L794 213 L794 227 Z" fill="#5d6360"/>
+  <!-- verdict: judged in code, a check and a cross -->
+  <g transform="translate(812 40)">
+  <rect x="24" y="58" width="300" height="326" rx="24" fill="#0b0f12" opacity="0.15" filter="url(#b14)"/>
+  <rect x="1" y="2" width="346" height="362" rx="24" fill="#0b0f12" opacity="0.08" filter="url(#b1)"/>
+  <rect width="348" height="362" rx="24" fill="url(#faceW)"/>
+  <rect width="348" height="362" rx="24" fill="url(#faceWtint)"/>
+  <rect width="348" height="362" rx="24" fill="#000000" opacity="0.06" filter="url(#grainK)"/>
+  <rect x="0.5" y="0.5" width="347" height="361" rx="23.5" fill="none" stroke="#0b0f12" stroke-opacity="0.07"/>
+  <rect x="1.25" y="1.25" width="345.5" height="359.5" rx="22.75" fill="none" stroke="url(#edgeHi)" stroke-width="1.5"/>
+  </g>
+  <text x="838" y="98" font-size="42" font-weight="600" letter-spacing="-0.015em" fill="#0b0f12">Verdict</text>
+  <rect x="838" y="116" width="158" height="30" rx="15" fill="#eeede7"/>
+  <rect x="838.5" y="116.5" width="157" height="29" rx="14.5" fill="none" stroke="#0b0f12" stroke-opacity="0.08"/>
+  <text x="917" y="137" font-size="20" font-weight="500" fill="#4b514f" text-anchor="middle">judged in code</text>
+  <line x1="838" y1="168" x2="1134" y2="168" stroke="#0b0f12" stroke-opacity="0.07"/>
+  <circle cx="853" cy="201" r="15" fill="#000000" opacity="0.30" filter="url(#b3)"/>
+  <circle cx="853" cy="198" r="15" fill="url(#volt)"/>
+  <path d="M846 198.5 L851 203.5 L860.5 193" fill="none" stroke="#0b0f12" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="884" y="206" font-size="23" font-weight="600" fill="#0b0f12">won: the order tool</text>
+  <text x="884" y="236" font-size="23" font-weight="500" fill="#4b514f">really placed it</text>
+  <text x="884" y="262" font-size="23" font-weight="500" fill="#4b514f">on the person's yes</text>
+  <line x1="838" y1="284" x2="1134" y2="284" stroke="#0b0f12" stroke-opacity="0.07"/>
+  <circle cx="853" cy="314" r="15" fill="#eeede7"/>
+  <circle cx="853" cy="314" r="14.5" fill="none" stroke="#0b0f12" stroke-opacity="0.08"/>
+  <path d="M847 308 L859 320 M859 308 L847 320" fill="none" stroke="#5d6360" stroke-width="2.6" stroke-linecap="round"/>
+  <text x="884" y="322" font-size="23" font-weight="600" fill="#0b0f12">"order confirmed"</text>
+  <text x="884" y="350" font-size="23" font-weight="500" fill="#4b514f">with no order fails</text>
+  <text x="884" y="378" font-size="23" font-weight="500" fill="#4b514f">the fact check</text>
+  <!-- to go live: pass mark, 7 of 10 cells filled -->
+  <g transform="translate(812 430)">
+  <rect x="20" y="26" width="308" height="166" rx="24" fill="#0b0f12" opacity="0.15" filter="url(#b14)"/>
+  <rect x="1" y="2" width="346" height="184" rx="24" fill="#0b0f12" opacity="0.08" filter="url(#b1)"/>
+  <rect width="348" height="184" rx="24" fill="url(#mistBase)"/>
+  <rect width="348" height="184" rx="24" fill="url(#mistA)"/>
+  <rect width="348" height="184" rx="24" fill="url(#mistB)"/>
+  <rect width="348" height="184" rx="24" fill="#000000" opacity="0.07" filter="url(#grainK)"/>
+  <rect x="0.5" y="0.5" width="347" height="183" rx="23.5" fill="none" stroke="#2a3332" stroke-opacity="0.08"/>
+  <rect x="1.25" y="1.25" width="345.5" height="181.5" rx="22.75" fill="none" stroke="url(#edgeHi)" stroke-width="1.5"/>
+  </g>
+  <text x="838" y="474" font-size="28" font-weight="600" letter-spacing="-0.01em" fill="#0b0f12">To go live</text>
+  <rect x="838" y="494" width="19" height="38" rx="6" fill="url(#workActive)"/>
+  <rect x="863" y="494" width="19" height="38" rx="6" fill="url(#workActive)"/>
+  <rect x="888" y="494" width="19" height="38" rx="6" fill="url(#workActive)"/>
+  <rect x="913" y="494" width="19" height="38" rx="6" fill="url(#workActive)"/>
+  <rect x="938" y="494" width="19" height="38" rx="6" fill="url(#workActive)"/>
+  <rect x="963" y="494" width="19" height="38" rx="6" fill="url(#workActive)"/>
+  <rect x="988" y="494" width="19" height="38" rx="6" fill="url(#workActive)"/>
+  <rect x="1013" y="494" width="19" height="38" rx="6" fill="#f4f3ef" fill-opacity="0.85"/>
+  <rect x="1013.5" y="494.5" width="18" height="37" rx="5.5" fill="none" stroke="#0b0f12" stroke-opacity="0.10"/>
+  <rect x="1038" y="494" width="19" height="38" rx="6" fill="#f4f3ef" fill-opacity="0.85"/>
+  <rect x="1038.5" y="494.5" width="18" height="37" rx="5.5" fill="none" stroke="#0b0f12" stroke-opacity="0.10"/>
+  <rect x="1063" y="494" width="19" height="38" rx="6" fill="#f4f3ef" fill-opacity="0.85"/>
+  <rect x="1063.5" y="494.5" width="18" height="37" rx="5.5" fill="none" stroke="#0b0f12" stroke-opacity="0.10"/>
+  <text x="838" y="566" font-size="23" font-weight="500" fill="#0b0f12">7 of 10 matches won</text>
+  <text x="838" y="594" font-size="23" font-weight="500" fill="#3f4a48">pass mark set per sector</text>
+  <!-- the hard ones come back: verdict down the gap, under the Arena, into the practice person card -->
+  <path d="M806 344 C786 344 787 362 787 392 L787 540 C787 562 772 570 748 570 L438 570" fill="none" stroke="#5d6360" stroke-width="2" stroke-dasharray="6 7" stroke-linecap="round" opacity="0.85"/>
+  <path d="M425 570 L438 563 L438 577 Z" fill="#5d6360" opacity="0.85"/>
+  <text x="600" y="604" font-size="23" font-weight="500" fill="#4b514f" text-anchor="middle">the hard ones come back</text>
+  <text x="600" y="672" font-size="28" font-weight="500" fill="#5d6360" text-anchor="middle">Practice on real behaviour before any real person.</text>
+</svg>

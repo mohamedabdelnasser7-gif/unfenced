@@ -393,24 +393,36 @@ def check_order(s, did):
 
 def check_days_from_tools(s, did):
     """A day count only when a tool this turn gave that number (delivery days, an order's dates), or
-    the exchange days of the instructions in a sentence that talks about an exchange."""
+    the exchange days of the instructions in a clause that talks about an exchange. On a situation that
+    expects the exchange line (expect "exchange", check_exchange_line) the exchange days pass in any clause
+    with no delivery word: a check never fails the number another check on the same situation asks for (Arena run
+    20261104T143545, cause 5: lessons that added the 14 days were refused as made-up day counts)."""
+    expects = bool(s.get("expect", {}).get("exchange"))
     allowed = set()
     for _, res in did["tools"]:
         allowed |= {int(x) for x in re.findall(r"\d+", json.dumps(res))}
     for sentence in SENTENCE.split(send_check._plain(did["reply"])):
         for m in DAY_UNIT.finditer(sentence):
-            here = allowed | ({int(EXCHANGE_DAYS)} if _exchange_clause(sentence, m) else set())
+            start, end = _clause(sentence, m)
+            exchange = _exchange_clause(sentence, m) or (expects and not DELIVERY_TALK.search(sentence, start, end))
+            here = allowed | ({int(EXCHANGE_DAYS)} if exchange else set())
             for n in re.findall(r"\d+", m.group(0)):
                 if int(n) not in here:
                     return f"a day count ({n}) no tool gave this turn; call delivery or find_order"
     return ""
 
 
+def _clause(sentence, m):
+    """(start, end) of the clause of the day count m in its sentence (CLAUSE_BREAK)."""
+    start = max([0] + [b.end() for b in CLAUSE_BREAK.finditer(sentence, 0, m.start())])
+    end = next((b.start() for b in CLAUSE_BREAK.finditer(sentence, m.end())), len(sentence))
+    return start, end
+
+
 def _exchange_clause(sentence, m):
     """True when the clause of the day count m talks about an exchange: before the count, or after it with
     no delivery word before the count in that clause."""
-    start = max([0] + [b.end() for b in CLAUSE_BREAK.finditer(sentence, 0, m.start())])
-    end = next((b.start() for b in CLAUSE_BREAK.finditer(sentence, m.end())), len(sentence))
+    start, end = _clause(sentence, m)
     if EXCHANGE_TALK.search(sentence, start, m.start()):
         return True
     return EXCHANGE_TALK.search(sentence, m.end(), end) is not None and not DELIVERY_TALK.search(sentence, start, m.start())

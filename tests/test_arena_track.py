@@ -10,6 +10,7 @@ import unittest
 from unittest import mock
 
 from arena import learn_built, run as run_mod
+from engine import exam as engine_exam
 from kit import turn
 from reflection import morning as mo, pages, reflect_now
 import tests.test_reflect_button as trb
@@ -234,6 +235,140 @@ class CorrectionBox(Base):
         page = self.tab()
         self.assertIn('data-live="arena" data-running', page)
         self.assertEqual(live_parts_of(page)["/correct"], [])
+
+
+class Stop(Base):
+    def test_stop_during_train_reaches_its_study(self):
+        self.full_run(["no stock answer"])
+        self.m.run_train(AGENT)
+        seen = []
+
+        def study(db, db_path, between, *, steps, stop=None):
+            seen.append(stop())
+            self.assertEqual(self.p.actions[mo.STOP_PATH](self.m, {"agent": [AGENT]}), mo.STOPPING)  # the page's Stop
+            seen.append(stop())
+            return {"lost": 1, "proposed": 0, "passed": 0, "cards": [], "notes": [], "queued": 2}
+        with mock.patch.object(reflect_now, "study_built", study):
+            self.held[0][0]()
+        self.assertEqual(seen, [False, True])
+        self.assertEqual(self.m.trained(AGENT)["queued"], 2)
+        self.assertNotIn(AGENT, self.m._stops)  # gone once it ends: a second Stop is refused
+        with self.assertRaises(mo.Refused) as e:
+            self.m.stop_run(AGENT)
+        self.assertEqual(str(e.exception), mo.STOP_NONE)
+
+    def test_stop_during_run_reflection_reaches_its_run(self):
+        self.lose()
+        self.m.run_reflection(AGENT)
+        self.assertEqual(self.m.stop_run(AGENT), mo.STOPPING)
+        seen = []
+
+        def run(db, db_path, plug, **kw):
+            seen.append(kw["stop"]())
+            raise RuntimeError("made up: the run ends here")
+        with mock.patch.object(reflect_now, "run", run):
+            self.starts[0][0]()
+        self.assertEqual(seen, [True])
+        self.assertNotIn(AGENT, self.m._stops)
+
+    def test_stop_for_an_agent_not_here_or_not_a_name_is_refused(self):
+        for agent in ("nobody", None, ["x"]):
+            with self.subTest(agent=agent), self.assertRaises(mo.Refused) as e:
+                self.m.stop_run(agent)
+            self.assertEqual(str(e.exception), mo.STOP_NONE)
+
+
+class OneLitButton(Base):
+    def lit(self):
+        """Which of Run the Arena and Train is lit (class yes) on the Arena tab, and which are there."""
+        page = self.tab()
+        out = {}
+        for name, path in (("arena", pages.ARENA_PATH), ("train", mo.TRAIN_PATH)):
+            parts = page.split(f'action="{path}"')
+            if len(parts) == 2:
+                out[name] = '<button class="yes"' in parts[1].split("</form>")[0]
+        return out
+
+    def test_one_next_step_is_lit_at_each_point_of_the_track(self):
+        self.assertEqual(self.lit(), {"arena": True})  # before any run
+        self.full_run(["no stock answer"], at=time.time() - 120)
+        self.assertEqual(self.lit(), {"arena": False, "train": True})  # a run that lost: Train
+        self.m._trained[AGENT] = {"at": time.time(), "cards": [3], "lost": 1, "written": 1, "passed": 1, "notes": [],
+                                  "queued": 0, "seen": [], "run": "x"}
+        self.assertEqual(self.lit(), {"arena": True, "train": False})  # after Train: Run the Arena again
+        self.assertIn(f"{mo.ARENA_AGAIN}</button>", self.tab())
+
+
+class Revise(unittest.TestCase):
+    """Edit on a live lesson (Morning.revise, DECISIONS 100): passed, failed, the exam could not run, no exam."""
+
+    def setUp(self):
+        import tests.test_morning as tm
+        self.tm = tm
+        base = tm.Base(methodName="setUp")
+        base.setUp()
+        self.addCleanup(base.doCleanups)
+        self.lessons = base.lessons
+        self.live = tm.kept_lesson(self.lessons, "Water the grown beds deeply.", ["grown"], yes_by="tester", now=tm.NOW)
+        self.seen = []
+        self.result = engine_exam.Result(True, [engine_exam.Row(1, "s1", "guard", True)], calls=1)
+
+        def examiner(text, stages):
+            self.seen.append(text)
+            if isinstance(self.result, Exception):
+                raise self.result
+            return self.result
+        self.m = mo.Morning(base.db, [base.plug], reports=base.dir, judge=tm.always_low, exams={"waterer": examiner})
+
+    def unchanged(self):
+        les = self.lessons.get(self.live)
+        self.assertEqual((les["state"], les["text"], len(self.lessons.mine())),
+                         (self.tm.KEPT, "Water the grown beds deeply.", 1))
+
+    def test_a_version_that_passes_replaces_it_and_the_old_line_stays_in_the_history(self):
+        said = self.m.revise(self.live, "Water the grown beds at dusk.", now=self.tm.NOW + 1)
+        new = max(les["id"] for les in self.lessons.mine())
+        self.assertEqual(said, f"Lesson {self.live} edited: the new line is lesson {new}. It is on trial.")
+        old = self.lessons.get(self.live)
+        self.assertEqual((old["state"], old["text"]), (self.tm.PULLED, "Water the grown beds deeply."))
+        self.assertEqual(self.lessons.get(new)["text"], "Water the grown beds at dusk.")
+        self.assertEqual(self.seen, ["Water the grown beds at dusk."])
+
+    def test_a_version_that_fails_changes_nothing(self):
+        self.result = engine_exam.Result(False, [engine_exam.Row(2, "s2", "guard", False, "tone", "too long")], calls=1)
+        said = self.m.revise(self.live, "Water the grown beds at dusk.", now=self.tm.NOW + 1)
+        self.assertEqual(said, mo.REVISE_FAILED.format(line="failed the exam: situation 2, check tone", id=self.live))
+        self.unchanged()
+
+    def test_an_exam_that_cannot_run_changes_nothing(self):
+        self.result = RuntimeError("made up: the exam broke")
+        said = self.m.revise(self.live, "Water the grown beds at dusk.", now=self.tm.NOW + 1)
+        self.assertEqual(said, mo.REVISE_FAILED.format(line="failed the exam: it could not run", id=self.live))
+        self.unchanged()
+
+    def test_no_exam_here_or_the_same_words_take_no_exam_and_change_nothing(self):
+        with self.assertRaises(mo.Refused) as e:
+            self.m.revise(self.live, "Water the grown beds deeply.")
+        self.assertIn("the same as the old one", str(e.exception))
+        self.m.exams = {}
+        with self.assertRaises(mo.Refused) as e:
+            self.m.revise(self.live, "Water the grown beds at dusk.")
+        self.assertEqual(str(e.exception), mo.REVISE_NO_EXAM)
+        self.assertEqual(self.seen, [])
+        self.unchanged()
+
+
+class EditRows(Base):
+    def test_a_lessons_words_are_escaped_in_its_edit_row(self):
+        from engine.lessons import Lessons as EngineLessons
+        from tests.kept import kept_lesson
+        kept_lesson(EngineLessons(self.db, self.m.plugs[AGENT]), '<script>alert(1)</script> "x"', ["all"],
+                    yes_by="test", skip_exam=True)
+        page = self.tab()
+        self.assertNotIn("<script>alert(1)", page)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt; &quot;x&quot;", page)
+        self.assertIn(f'action="{mo.REVISE_PATH}"', page)
+        self.assertNotIn(f'action="{mo.REVISE_PATH}"', self.page(query=ARENA_TAB, token=None))  # no token: no form
 
 
 if __name__ == "__main__":

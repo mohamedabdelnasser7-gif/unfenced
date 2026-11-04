@@ -43,7 +43,9 @@ gate wins, and the same rows go to the Morning page in the run's item (arena_rou
 item when it got stuck). With no --db there is no step between rounds. With that step, each lost
 training match also gets a quick note from the fast half of Reflection (arena/notes.py), held in
 memory and handed in the run's next matches until the step between rounds has run; it is never a
-lesson and never written to any database.
+lesson and never written to any database. A built agent's run (arena/practice.py, with its database and
+the study between rounds) gets the same notes and guard. The printed summary gives each round's notes
+written, stopped by the guard (by mark) and the matches they were handed in.
 
 The off topic customer (decisions 88 and 89, arena/scope.py): with off_topic set (main sets it where it
 makes the models, so only with a model key) and a judge model, practice match 10 of each round is a person
@@ -113,7 +115,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if __name__ == "__main__" and str(ROOT) not in sys.path:  # run by its path under -I
     sys.path.insert(0, str(ROOT))
 
-from arena import factcheck, match as match_mod, paths, replay as replay_mod, scope, verdict  # noqa: E402
+from arena import factcheck, match as match_mod, notes as notes_mod, paths, replay as replay_mod, scope, verdict  # noqa: E402
 from kit import seal  # noqa: E402
 from kit.model import ModelError  # noqa: E402
 from reflection import history as hist  # noqa: E402
@@ -551,6 +553,7 @@ class Arena:
             rounds.append(one)
             for k in range(1, self.matches + 1):
                 mid = f"{self.run_id}-r{r}-t{k:02d}"
+                handed = bool(self.notes is not None and getattr(self.notes, "held", None))  # this match plays with notes
                 if self.off_topic and scope.slot(k):  # practice match 10: the off topic customer (arena/scope.py)
                     try:
                         card = self._off_card(mid, one["training"])
@@ -579,6 +582,8 @@ class Arena:
                     continue
                 m, judged = out
                 one["training"]["played"] += 1
+                if handed:
+                    one["training"]["notes_handed"] = one["training"].get("notes_handed", 0) + 1
                 one["training"]["won"] += judged["won"]
                 if off:
                     one["training"]["off_topic"] = {"card": card["id"], "about": card["about"],
@@ -952,6 +957,9 @@ def text(rep):
         t, g = r["training"], r["gate"]
         lines.append(f"  round {r['round']}: training {t['won']} of {t['played']} won, {len(t['cases'])} cases to "
                      f"Reflection; gate {g['won']} of {g['played']} won")
+        said = notes_mod.summary(t.get("notes") or [], t.get("notes_handed", 0))
+        if said:  # written, stopped by the guard (by mark) and handed, every round (losses part E)
+            lines.append("    " + said)
         for lost in g["lost"][:3]:
             lines.append(f"    lost {lost['card']}: {lost['why']} (turn {lost['quote']['turn']}, "
                          f"{lost['quote']['who']}: \"{lost['quote']['text']}\")")
@@ -1023,16 +1031,21 @@ def reflection_models():
             "notes": model_mod.Model(timeout=fast_mod.TIMEOUT, route=model_mod.OPEN)}
 
 
-def quick_notes(plug, calls, model):
-    """The run's quick notes (arena/notes.py) for the Sales agent: fast reflection's writer on model,
-    each call taken from calls, with fast reflection's never marks and the demo store's own words."""
+def quick_notes(plug, calls, model, agent=None):
+    """The run's quick notes (arena/notes.py) for any agent the Arena runs: fast reflection's writer on
+    model, each call taken from calls, and fast reflection's guard. For the Sales agent (agent None): its
+    never marks and the demo store's own words. For a built agent (kit/turn.py Agent): the same never
+    groups over its own plug's high list (reflection/fast.py never_for), and the demo store's words only
+    when it has the store tool, else none."""
     from arena import notes as notes_mod
     from reflection import fast as fast_mod
 
     def known():  # the demo store's catalogue and places, read with no store keys, as the matches see it
         with match_mod.demo_store():
             return fast_mod.known()
-    return notes_mod.RunNotes(plug, fast_mod.Writer(model=calls.model(model)), never=fast_mod.NEVER, known=known)
+    never = fast_mod.NEVER if agent is None else fast_mod.never_for(plug.risk)
+    words = known if agent is None or "store" in getattr(agent, "tools", ()) else None
+    return notes_mod.RunNotes(plug, fast_mod.Writer(model=calls.model(model)), never=never, known=words)
 
 
 def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):

@@ -272,12 +272,15 @@ class Customer(match_mod.Customer):
         return text
 
 
-def play(agent, card, *, agent_model, customer_model, seed=0, max_turns=MAX_TURNS, lessons=(), opening=None):
+def play(agent, card, *, agent_model, customer_model, seed=0, max_turns=MAX_TURNS, lessons=(), opening=None,
+         fast=None):
     """One practice match of agent (kit/turn.py Agent) against card. Returns the match dict in
     arena/match.py's shape, with the agent's name, the made-up mark, the customer's closing line and
     the prompt's fingerprint. opening: a customer first line to use as it is (the eval gate's rerun of
     a past win, arena/gate.py TurnGate), else the card's case input when it has one, else the customer
-    model writes it. A case the agent starts opens with the agent's first message and takes no opening."""
+    model writes it. A case the agent starts opens with the agent's first message and takes no opening.
+    fast: the run's quick notes (arena/notes.py RunNotes), handed last in the agent's prompt each turn
+    (kit/turn.py turn fast); None for a gate match, which plays without them as the live agent does."""
     customer = Customer(card, customer_model, agent.card["does"], seed, agent_card=agent.card,
                         data=getattr(agent, "data", None))
     case = case_of(agent.card)
@@ -313,7 +316,7 @@ def play(agent, card, *, agent_model, customer_model, seed=0, max_turns=MAX_TURN
                 out = turn_mod.turn(agent, given if agent_first else line, chats=chats, chat_id=chat_id,
                                     model=agent_model, send=lambda to, text: sent.append(text),
                                     customer_id=match_mod.CUSTOMER, lessons=lessons, first=agent_first,
-                                    channel=channel)
+                                    channel=channel, fast=fast)
                 ran = match_mod._tool_results(chats, chat_id, start)
                 made = turn_mod.order_made(chats, chat_id)
                 order = order or bool(made)
@@ -444,7 +447,8 @@ class Practice(run.Arena):
             if self.before_match is not None:  # Pool.refresh: the live corrections, read again
                 self.before_match()
             m = play(self.who, card, agent_model=self.agent_model, customer_model=self.customer_model, seed=match_id,
-                     lessons=lessons if lessons is not None else self.handed(), opening=opening)
+                     lessons=lessons if lessons is not None else self.handed(), opening=opening,
+                     fast=self.notes if training else None)  # the run's quick notes, training only
             if scope.is_off(card):  # judged with the exam's off-topic rules (arena/scope.py)
                 m.update(off_scope=True, ask=card["ask"])
             if m.get("ended") == VOID:  # a model did not answer: dropped, never a loss
@@ -1219,22 +1223,26 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
     if held is not None and bar["matches"] > len(held):
         raise run.Refused(f"the gate plays {bar['matches']} test matches a round but the test set holds "
                           f"{len(held)} customers; each test customer plays once a round")
-    between = pool = None
+    between = pool = notes = None
     if studies and rounds > 1:
         from arena import rounds as rounds_mod
         from engine.lessons import Lessons as EngineLessons
         hot = None if live_path is None else (lambda: rounds_mod.live_hotfixes(live_path, agent.name))
+        study = dict(study)  # the caller's models stay as given
+        notes_model = study.pop("notes", None)  # the quick note's writer (arena/run.py reflection_models); none, no notes
         pool = rounds_mod.Pool(EngineLessons(db, agent.plug), hotfixes=hot)
         between = rounds_mod.BuiltBetween(db, agent, reports=reports, judge_model=judge_model, calls=calls, pool=pool,
                                           agent_model=agent_model, customer_model=customer_model, models=study,
                                           examiner=study.get("examiner"))
         learn = between.learn
+        if notes_model is not None:  # the quick note after each lost training match, as the Sales run has it
+            notes = run.quick_notes(agent.plug, calls, notes_model, agent=agent)
     arena = Practice(agent, played, judge_model=judge_model, made_up=made_up, behaviour_from=behaviour_from,
                      held_out=held, once=held is not None,
                      agent_model=agent_model, customer_model=customer_model, calls=calls, trust=bar,
                      matches=matches, rounds=rounds, seed=seed, state=folder, reports=reports, learn=learn,
                      between=between, lessons=pool, before_match=None if pool is None else pool.refresh,
-                     off_topic=off_topic and not quick, shared=shared_cards(folder, agent.plug))
+                     off_topic=off_topic and not quick, shared=shared_cards(folder, agent.plug), notes=notes)
     arena.quick = bool(quick)  # its item says so, so a quick practice never unlocks Connect (Morning.gate)
     return arena.run()
 

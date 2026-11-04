@@ -35,7 +35,10 @@ cancelling), a way to pay (a deposit, a transfer, a card, an installment) or any
 data (a name, a password, a national id, an account), or a date, a day or a time (root call,
 2026-10-31, after the red team round). The engine still refuses a link, a phone number, a handle,
 more than one line and three or more words in a row copied from the customer. Ordinals (first,
-then, last) and "once" are not numbers here: the order of questions is what most notes are about.
+then, last) and "once" are not numbers here: the order of questions is what most notes are about. Nor is
+an English number word used as plain writing, never an amount or a count ("Try one short question
+first"; engine/fast.py _plain_number_word, losses part E, after the guard stopped most quick notes on 2
+Nov): beside a counted thing, a price word, another number or a digit it is still stopped.
 Only the fast note guard changed then. Since engine fix A (2026-11-03) the plug's list is narrow (amounts,
 discounts, promises, payment, policy changes, data beyond the order) and the lessons' risk check reads
 it with no tool marks; the note guard keeps the plug's old words and patterns (_PLUG_WORDS_BEFORE), so
@@ -251,6 +254,12 @@ def _never(plug_risk):
 
 
 NEVER = _never(PLUG.risk)
+
+
+def never_for(plug_risk):
+    """The note guard's never marks for any agent: the groups above over that plug's own high list
+    (the Arena's quick notes and the fast notes of a built agent, kit/turn.py)."""
+    return _never(plug_risk)
 
 
 def known():

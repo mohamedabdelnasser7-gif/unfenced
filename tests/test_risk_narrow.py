@@ -135,7 +135,7 @@ class NoteGuardUnchanged(unittest.TestCase):
 
     def test_a_note_that_only_the_old_list_caught_is_still_refused(self):
         for text in ("Ask for their name before the size.", "Check stock before replying.",
-                     "Say we take cash at the door.", "Mention the offer early.", "Ask one question about the size.",
+                     "Say we take cash at the door.", "Mention the offer early.", "Say one pair is left in their size.",
                      "Explain how exchange works."):
             with self.subTest(text=text):
                 self.assertTrue(engine_fast.guard(text, PLUG, self.THEIRS, never=sales_fast.NEVER))

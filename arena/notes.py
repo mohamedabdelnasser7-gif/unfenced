@@ -142,3 +142,43 @@ def line(held):
     if held.get("text"):
         parts.append((TRY if parts else "") + held["text"])
     return " ".join(parts)
+
+
+def summary(rows, handed=0):
+    """A round's quick notes as one line for the printed run summary, or "" when the round wrote none and
+    handed none: how many notes were written, how many the guard stopped and on which marks (a mark that
+    names the customer's words, or copies them, is said as "a name" or "their words", never the word
+    itself), the other reasons there is none, and in how many matches notes were handed. rows: the round's
+    training "notes" rows (RunNotes.after_loss and clear); handed: the round's matches played with a note."""
+    written = stopped = 0
+    marks, other = {}, {}
+    for r in rows:
+        why = r.get("why") or ""
+        if why.startswith("dropped"):
+            continue
+        if r.get("note") is not None:
+            written += 1
+        elif why.startswith("stopped: "):
+            stopped += 1
+            for mark in dict.fromkeys(_mark(f) for f in why[len("stopped: "):].split("; ")):
+                marks[mark] = marks.get(mark, 0) + 1
+        elif why:
+            key = "the writer failed" if why.startswith("the writer failed") else why
+            other[key] = other.get(key, 0) + 1
+    if not (written or stopped or other or handed):
+        return ""
+    out = f"quick notes: {written} written, {stopped} stopped by the guard"
+    if marks:
+        out += " (" + ", ".join(f"{m} {n}" for m, n in sorted(marks.items(), key=lambda x: (-x[1], x[0]))) + ")"
+    for why, n in sorted(other.items()):
+        out += f", {n} none: {why}"
+    return out + f"; handed in {handed} match{'' if handed == 1 else 'es'}"
+
+
+def _mark(found):
+    """One guard line as a short mark: "number: one" stays, a name or a copy says so without the words."""
+    if found.startswith("names a word"):
+        return "a name"
+    if found.startswith("copies"):
+        return "their words"
+    return found.strip()

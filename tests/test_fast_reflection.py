@@ -584,7 +584,9 @@ class Sales(unittest.TestCase):
             "a percent": ("Mention the 10% gap.", "number: /[0-9]/"),
             "a percent word": ("Say it is twenty percent less.", "number: twenty"),
             "a number word": ("Tell them it costs fifteen hundred.", "number: fifteen"),
-            "one": ("Ask one question about the size.", "number: one"),
+            # a plain "one" in an ordinary sentence passes since losses part E (tests/test_losses_notes.py);
+            # one as a count still fails
+            "one": ("Say only one pair is left in their size.", "number: one"),
             "a multiple": ("Offer them a pair at double the size.", "number: double"),
             "an arabic number word": ("Say خمسين is fair.", "number: خمس"),
             "a currency": ("Explain the value in pounds.", "amount: pound"),

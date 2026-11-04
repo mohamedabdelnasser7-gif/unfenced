@@ -331,13 +331,16 @@ class TurnResult:
     actions: list = field(default_factory=list)  # [{action, note}] take_action recorded this turn
 
 
-def system_prompt(agent, lessons=()):
+def system_prompt(agent, lessons=(), note=""):
     """The instructions, the rules its send check holds every reply to (_check: the full rules or the house
-    style only, kit/send_check.py prompt_rules, the same words the check reads), then its lessons."""
+    style only, kit/send_check.py prompt_rules, the same words the check reads), then its lessons, then
+    the fast note for this case under its heading when it has one (last, as sales/loop.py has it)."""
     parts = [agent.instructions, send_check.prompt_rules(agent.full_check, agent.stock)]
     picked = slot(agent.plug, list(lessons))
     if picked:
         parts.append(picked)
+    if note:
+        parts.append(note)
     return {"role": "system", "content": "\n\n".join(parts)}
 
 
@@ -378,11 +381,14 @@ def act_definition(agent):
 
 
 def turn(agent, text, *, chats, chat_id, model, send, customer_id, lessons=(), message=None, first=False,
-         channel=CHANNEL):
+         channel=CHANNEL, fast=None):
     """One message from the person the agent serves. send(to, text) is the only way out.
     message: the channels/base.py Message the tools may read (who wrote, a voice note); made from
     text when None. first: text is the case's input and the agent writes first (no person wrote).
-    channel: the channel the Message names when none is given (the Arena passes its practice one)."""
+    channel: the channel the Message names when none is given (the Arena passes its practice one).
+    fast: the fast notes (anything with for_prompt(chat_id): engine/fast.py FastNotes on the channel, the
+    Arena's RunNotes in practice); the note is read once a turn through sales/loop.py fast_note, the one
+    path Sales reads it by, and a note that cannot be read is left out, never stopping the reply."""
     from channels.base import Message
     if first:
         text = FIRST.format(input=" ".join(str(text or "").split()))
@@ -396,13 +402,13 @@ def turn(agent, text, *, chats, chat_id, model, send, customer_id, lessons=(), m
     items = sample_mod.store_items(agent.data) if store.NAME in agent.tools else []
     token = store.SAMPLE.set(items) if items else None  # its sample products when no Shopify keys are set
     try:
-        return _turn(agent, text, ctx, history, chats, chat_id, send, customer_id, lessons, first)
+        return _turn(agent, text, ctx, history, chats, chat_id, send, customer_id, lessons, first, fast)
     finally:
         if token is not None:
             store.SAMPLE.reset(token)
 
 
-def _turn(agent, text, ctx, history, chats, chat_id, send, customer_id, lessons, first):
+def _turn(agent, text, ctx, history, chats, chat_id, send, customer_id, lessons, first, fast=None):
     amounts, vocab, sizes, names = set(), frozenset(), frozenset(), frozenset()
     if store.NAME in agent.tools:
         try:
@@ -411,7 +417,7 @@ def _turn(agent, text, ctx, history, chats, chat_id, send, customer_id, lessons,
         except Exception:
             log.exception("store data unavailable; no price can pass the check this turn")
     convo = history + [{"role": "user", "content": text or "(empty message)"}]
-    system = system_prompt(agent, lessons)
+    system = system_prompt(agent, lessons, loop.fast_note(fast, chat_id))  # read once a turn
     failed, acted, refused = [], [], []
     said = "" if first else text  # the person's words the full check reads; a case input is not theirs
     try:

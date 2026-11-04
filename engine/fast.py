@@ -428,7 +428,8 @@ def guard(text, plug, theirs=(), never=None, known=()):
     if len(text.strip()) > NOTE_LEN:
         found.append(f"over {NOTE_LEN} characters")
     marks = plug.risk if never is None else never
-    found += risk_mod.code_check(text, dataclasses.replace(marks, patterns=NUMBERS + tuple(marks.patterns)))
+    found += [f for f in risk_mod.code_check(text, dataclasses.replace(marks, patterns=NUMBERS + tuple(marks.patterns)))
+              if not _plain_number_word(f, text)]
     if any(_runs(text) & _runs(t) for t in theirs if isinstance(t, str)):
         found.append(f"copies {COPY_RUN} or more words in a row from the source's own words")
     # a word at a sentence start has a capital anyway, so it counts only when the source wrote it
@@ -446,6 +447,48 @@ def guard(text, plug, theirs=(), never=None, known=()):
     if names:
         found.append("names a word from the source's own words: " + ", ".join(sorted(names)))
     return found
+
+
+def _plain_number_word(found, text):
+    """True when a mark the guard found is a spelled number word (SPELLED) that the note uses only as
+    plain writing, never as an amount or a count: "Try one short question first" (the guard stopped most
+    quick notes on 2 Nov as "number: one"). The word is an amount or a count, and the mark stays, where
+    any form of the note (risk_mod._forms: hidden characters, numeral signs, spaced letters) has it
+    beside another number word, beside a digit, before a counted thing within three words (COUNTED: a
+    pair, a piece, left, in stock, a day, a currency word, percent, off), after a word that sets what it costs
+    (AMOUNT_LEAD: for, at, costs, pay, under), or after is or are at the end of its clause ("Say the boots
+    are twenty"). Digits, money signs, the other number marks (hundred, half, double) and words in
+    other scripts are never let through here."""
+    group, _, word = found.partition(": ")
+    if group != "number" or word not in SPELLED:
+        return False
+    for form in risk_mod._forms(text):
+        for m in re.finditer(r"(?<![a-z])" + re.escape(word) + r"s?(?![a-z])", form):
+            before, after = form[:m.start()], form[m.end():]
+            if (COUNTED.match(after) or AMOUNT_LEAD.search(before)
+                    or (CLAUSE_END.match(after) and re.search(r"(?<![a-z])(?:is|are|was|were)\W*$", before))):
+                return False
+    return True
+
+
+# The English number words a note may write as plain words (_plain_number_word); every other number mark stays
+SPELLED = frozenset((
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+    "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty",
+    "forty", "fifty", "sixty", "seventy", "eighty", "ninety"))
+_NUMBER_WORD = (r"(?:" + "|".join(sorted(SPELLED, key=len, reverse=True))
+                + r"|hundred|thousand|million|billion|dozen|half|quarter)s?")
+# after a spelled number word: another number word or a digit, or a counted thing within three words
+COUNTED = re.compile(
+    r"(?:[\s\-]+(?:and\s+|a\s+)?" + _NUMBER_WORD + r"(?![a-z])|\W*[0-9]"
+    r"|\W+(?:[a-z]+\W+){0,3}?(?:pairs?|pieces?|items?|units?|left|remaining|remain|stock|available|availability"
+    r"|sold|minutes?|hours?|days?|weeks?|months?|years?|egp|le|l\.e|pounds?|dollars?|euros?|riyals?|dirhams?"
+    r"|percent|per\s*cent|off|k|grand|bucks?)(?![a-z]))")
+# right before a spelled number word: a word that sets what it costs ("for twenty", "costs twenty", "under
+# five"), a digit or another number word
+AMOUNT_LEAD = re.compile(r"(?:(?<![a-z])(?:for|at|costs?|costing|pay|pays|paid|paying|under|below|above|over|plus"
+                    r"|minus|only|just|last)|[0-9]|(?<![a-z])" + _NUMBER_WORD + r")[\W]*$")
+CLAUSE_END = re.compile(r"\s*(?:[.!?,;:\u061f\u060c]|$)")
 
 
 def _own_words(plug, known):

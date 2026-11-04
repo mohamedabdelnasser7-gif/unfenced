@@ -81,6 +81,23 @@ class Seller:
         return say(self.price)
 
 
+class ByLesson:
+    """An agent that answers as with_line when the lesson text is in its system message, else as
+    without (a plain Seller): a lesson that changes the play, for the Arena gate's vote with and
+    without the lesson (arena/gate.py VOTES). calls keeps every call, as FakeModel does."""
+
+    def __init__(self, lesson, with_line, without=None):
+        self.lesson, self.with_line, self.without = lesson, with_line, without or Seller()
+        self.calls, self.handed = [], []
+
+    def chat(self, messages, tools=None, effort="medium", max_tokens=1500, whole=False):
+        system = (messages[0].get("content") or "") if messages and messages[0].get("role") == "system" else ""
+        side = self.with_line if self.lesson in system else self.without
+        self.handed.append(side is self.with_line)
+        self.calls.append({"messages": copy.deepcopy(messages), "tools": copy.deepcopy(tools), "effort": effort})
+        return side.chat(messages, tools, effort, max_tokens, whole)
+
+
 class Buyer:
     """A customer that asks the price, buys with BUY, and answers an order summary with a plain yes."""
 

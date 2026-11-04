@@ -21,7 +21,7 @@ from reflection import exam, night
 from reflection import morning as page_mod
 from tests import plugs
 from tests import study_fakes as fk
-from tests.fake_model import Buyer, FakeModel, Seller, clean_env, say
+from tests.fake_model import Buyer, ByLesson, FakeModel, Seller, clean_env, say
 from tests.test_arena_gate import LESSON, past
 from tests.test_engine_lessons import always_low
 from tests.test_ideas import SHADE, WALL, Ideas
@@ -265,7 +265,7 @@ class GatePairs(unittest.TestCase):
         self.assertEqual((eff["fixed"], eff["broke"], eff["both_right"]), (1, 0, 3))
 
     def test_a_win_now_lost_counts_as_broke_and_still_holds(self):
-        r = self.gate(counted(True, fixed=3), Seller("The Football Boots, Black are 700 EGP."), Buyer())(LESSON, ("all",))
+        r = self.gate(counted(True, fixed=3), ByLesson(LESSON, Seller("The Football Boots, Black are 700 EGP.")), Buyer())(LESSON, ("all",))
         self.assertFalse(r.passed)
         self.assertEqual(r.first.check, gate.CHECK)
         self.assertEqual(r.pairs[-1], Pair("rerun m1", True, False))

@@ -21,7 +21,7 @@ from kit.db import Db
 from reflection import PLUG
 from reflection.lessons import Lessons as SalesLessons
 from reflection.results import Results
-from tests.fake_model import BUY, Seller, clean_env, say
+from tests.fake_model import BUY, PRICE, Seller, clean_env, say
 from tests.kept import kept_lesson
 
 GOOD = "Ask the customer which size they wear first."
@@ -39,14 +39,17 @@ def card(i, worry):
 
 
 class Agent(Seller):
-    """The fake_model Seller, keeping the system message of every call (the lessons it was handed)."""
+    """The fake_model Seller, keeping the system message of every call (the lessons it was handed);
+    lose_with: a lesson that, when handed, makes it give a price the store never set (a lost match)."""
 
-    def __init__(self):
+    def __init__(self, lose_with=None):
         super().__init__()
-        self.systems = []
+        self.systems, self.lose_with = [], lose_with
 
     def chat(self, messages, tools=None, effort="medium", max_tokens=1500, whole=False):
         self.systems.append(messages[0]["content"])
+        handed = self.lose_with is not None and self.lose_with in messages[0]["content"]
+        self.price = "The Mercurial Vapor 17 Elite is 11,000 EGP." if handed else PRICE
         return super().chat(messages, tools, effort, max_tokens, whole)
 
 
@@ -136,8 +139,8 @@ class Base(unittest.TestCase):
         return path
 
     def cli(self, db, ideas, *, refuse=(), cap=1000, rounds_n=2, state=None, accept=False, buyers=(), cards=None,
-            full=None):
-        self.agent, self.customer = Agent(), Customer(buyers)
+            full=None, lose_with=None):
+        self.agent, self.customer = Agent(lose_with), Customer(buyers)
         calls_file = (run.state_dir(db) if db else Path(state)) / run.CALLS_FILE
         self.night, self.exam_model, self.exams = Night(ideas, self.agent, calls_file), ExamModel(), Exams(refuse)
         if accept:
@@ -257,7 +260,7 @@ class Between(Base):
     def test_a_lesson_whose_rerun_loses_a_past_win_is_refused_and_never_reaches_round_two(self):
         db = self.db()
         self.past_win(db)
-        code, rep = self.cli(db, [GOOD], buyers=())  # the past win is lost on its rerun
+        code, rep = self.cli(db, [GOOD], buyers={"size"}, lose_with=GOOD)  # the past win is lost on its rerun
         got = rep["rounds"][0]["reflection"]
         self.assertEqual((got["passed"], got["refused"], got["handed"], got["broke"]), (0, 1, 0, 1))
         self.assertEqual(self.exams.seen, [GOOD])  # the exam passed it; the rerun held it

@@ -39,8 +39,9 @@ import threading
 import time
 from pathlib import Path
 
-READ, LESSON, EXAM = "read", "lesson", "exam"
-STEPS = (READ, LESSON, EXAM)
+PLAY, READ, LESSON, EXAM = "play", "read", "lesson", "exam"
+STEPS = (PLAY, READ, LESSON, EXAM)  # PLAY: Train's practice round, before its reflection reads what it lost
+PASSED, FAILED, NOT_RUN, IN_EXAM = "passed", "failed", "not run", "in exam"  # a seen lesson's exam (Steps.seen)
 PAGE_HOLDER = "page"  # how the night lock names a holder that is Run reflection (scheduler.py night_lock)
 
 
@@ -82,11 +83,23 @@ def gone(held):
     return False
 
 
-class Steps:
-    """Where a running reflection is: READ, then LESSON, then EXAM; it never steps back."""
+def exam_word(result):
+    """PASSED, FAILED or NOT_RUN for an exam result (engine/exam.py, reflection/exam.py: .passed and .first)."""
+    from engine import exam as engine_exam
+    first = getattr(result, "first", None)
+    if getattr(first, "check", None) == engine_exam.NOT_RUN:
+        return NOT_RUN
+    return PASSED if getattr(result, "passed", False) else FAILED
 
-    def __init__(self):
-        self._at, self._lock = READ, threading.Lock()
+
+class Steps:
+    """Where a running reflection is: READ, then LESSON, then EXAM; it never steps back. Train starts at
+    PLAY (its practice round). seen: each lesson as it takes its exam, then the exam's word, for the page's
+    live view (DECISIONS 99 and 100), with the corrections sent while it runs (Morning.correct)."""
+
+    def __init__(self, start=READ):
+        self._at, self._lock = start, threading.Lock()
+        self._seen = []
 
     @property
     def at(self):
@@ -97,6 +110,47 @@ class Steps:
         with self._lock:
             if STEPS.index(step) > STEPS.index(self._at):
                 self._at = step
+
+    @property
+    def seen(self):
+        """[{text, exam, kind}] in the order the lessons took their exam: exam IN_EXAM while it runs, then
+        PASSED, FAILED or NOT_RUN; kind "lesson", or "correction" for one the owner sent while it ran. A
+        lesson that takes a second exam (the full exam before live) shows that one's word."""
+        with self._lock:
+            return [dict(x) for x in self._seen]
+
+    def begin(self, text, kind="lesson"):
+        """A lesson starts its exam: its entry, IN_EXAM until end()."""
+        with self._lock:
+            for x in self._seen:
+                if x["text"] == text and x["kind"] == kind:
+                    x["exam"] = IN_EXAM
+                    return x
+            x = {"text": str(text), "exam": IN_EXAM, "kind": kind}
+            self._seen.append(x)
+            return x
+
+    def end(self, entry, word):
+        with self._lock:
+            entry["exam"] = word
+
+    def add(self, text, result, kind="correction"):
+        """A lesson that took its exam elsewhere (a correction sent while it runs): shown with its word."""
+        self.end(self.begin(text, kind), exam_word(result))
+
+    def _watch(self, examine):
+        """examine(text, stages), each call shown in seen with its result."""
+        def run(text, stages):
+            self.mark(EXAM)
+            entry = self.begin(text)
+            try:
+                result = examine(text, stages)
+            except Exception:
+                self.end(entry, NOT_RUN)
+                raise
+            self.end(entry, exam_word(result))
+            return result
+        return run
 
     def marking(self, model, step):
         """model, marking step at each call (the proposer's and the idea part's: writing a lesson)."""
@@ -112,14 +166,19 @@ class Steps:
         return Marked()
 
     def exam(self, make):
-        """make(lessons) -> examiner, marking EXAM each time a lesson takes it."""
+        """make(lessons) -> examiner, marking EXAM each time a lesson takes it and showing it in seen."""
         def made(lessons):
-            examiner = make(lessons)
+            return self._watch(make(lessons))
+        return made
 
-            def run(text, stages):
-                self.mark(EXAM)
-                return examiner(text, stages)
-            return run
+    def gate_exam(self, make):
+        """make(plug, kept, model) -> examiner (the Arena's exams, arena/rounds.py Between), marking EXAM and
+        showing each lesson in seen as exam() does; None stays None."""
+        if make is None:
+            return None
+
+        def made(p, kept, model):
+            return self._watch(make(p, kept, model))
         return made
 
 
@@ -144,10 +203,13 @@ def plug_path(agent, folder, db_path):
     return next((str(p) for a, p in scheduler.agents(None) if a == agent), None)
 
 
-def run(db, db_path, plug, *, folder, models, calls, steps, until=None):
+def run(db, db_path, plug, *, folder, models, calls, steps, until=None, stop=None):
     """One night of plug now, on db (its own connection) at db_path. models: {"study", "open", "exam"}
     (arena/run.py reflection_models; a test hands fakes), each call taken from calls. folder: the folder of an
-    agent Quick start built, else None. Returns (the report, the saved report's path)."""
+    agent Quick start built, else None. stop: the page's Stop check (DECISIONS 98). It runs with no deadline, to
+    the end: once Stop is pressed or the day's call cap is reached (night.day_cap_reached on the count calls
+    takes from), no new lesson starts its exam and the rest are queued for tonight (engine/study_queue.py).
+    Returns (the report, the saved report's path)."""
     from kit.db import DEFAULT_PATH
     from reflection import judge as judge_mod
     from reflection import night
@@ -170,7 +232,8 @@ def run(db, db_path, plug, *, folder, models, calls, steps, until=None):
                       fit=parts.FitCheck(model=open_m), adapter=parts.Adapter(model=open_m),
                       ideas=parts.Ideas(model=lesson_m), exam=None if make is None else steps.exam(make),
                       spotter=parts.Spotter(model=study_m), note_writer=parts.NoteWriter(model=study_m),
-                      others=night.other_plugs(plug, db=str(db_path)), practice=folder, shared=link)
+                      others=night.other_plugs(plug, db=str(db_path)), practice=folder, shared=link,
+                      deadline=None, stop=stop, capped=night.day_cap_reached(Path(calls.path).parent))
     if left_out:
         rep["notes"].append(left_out)
     rep["by"] = "Run reflection"  # started on the page, not by the scheduler
@@ -214,15 +277,15 @@ def arena_losses(db_path, agent):
         return []
 
 
-def run_arena(db_path, plug, *, models, agent_model, customer_model, calls, steps, until=None):
+def run_arena(db_path, plug, *, models, agent_model, customer_model, calls, steps, until=None, stop=None):
     """Run reflection on the Sales agent's Arena losses (arena_losses): the study between rounds and its
     eval gate (arena/rounds.py Between) on the Arena's copy, read from the oldest of those losses, then the
     full exam before a lesson that passed is written to the live database at db_path. models: {"study",
     "open", "exam"} (arena/run.py reflection_models; a test adds "examiner" and "full", as arena/run.py main
     takes them); agent_model and customer_model: the Arena's, for the gate's rerun of past wins. Each call is
-    taken from calls. Returns Between's counts with "cases", the losses read, and "cards", the live ids of
-    the lessons written to the live database. Refused (ValueError) when the copy holds a lesson mined from
-    history rows (DECISIONS item 20)."""
+    taken from calls. stop: Train's Stop check (Between.stop). Returns Between's counts with "cases", the losses
+    read, and "cards", the live ids of the lessons written to the live database. Refused (ValueError) when the
+    copy holds a lesson mined from history rows (DECISIONS item 20)."""
     from arena import rounds as rounds_mod, run as run_mod
     from kit.db import Db
     from reflection.lessons import Lessons as SalesLessons
@@ -231,19 +294,7 @@ def run_arena(db_path, plug, *, models, agent_model, customer_model, calls, step
     full = models.pop("full", None if "examiner" in models else rounds_mod.full_examiner)
     examiner = models.pop("examiner", functools.partial(rounds_mod.real_examiner, cap=rounds_mod.EXAM_CAP))
     marked = {"study": steps.marking(models["study"], LESSON), "open": models["open"], "exam": models["exam"]}
-
-    def at_exam(make):  # each exam the gate makes marks EXAM when a lesson takes it
-        if make is None:
-            return None
-
-        def made(p, kept, model):
-            examine = make(p, kept, model)
-
-            def run_it(text, stages):
-                steps.mark(EXAM)
-                return examine(text, stages)
-            return run_it
-        return made
+    at_exam = steps.gate_exam  # each exam the gate makes marks EXAM and shows the lesson when it takes it
     copy = Db(str(arena_path(db_path)))
     live = []
     try:
@@ -263,6 +314,7 @@ def run_arena(db_path, plug, *, models, agent_model, customer_model, calls, step
                                      examiner=at_exam(examiner), live=live_lessons, full=at_exam(full),
                                      now=lambda: until)
         between.pending = [case for case, _ in losses]
+        between.stop = stop
         if losses:
             between.since = min(at for _, at in losses) - 1.0
         out = between(0)
@@ -273,3 +325,37 @@ def run_arena(db_path, plug, *, models, agent_model, customer_model, calls, step
     out["cards"] = [one["live_id"] for one in out["lessons"] if one.get("live_id") is not None]
     out["until"] = until
     return out
+
+
+def study_built(db, db_path, between, *, steps, stop=None):
+    """Train's reflection for an agent Quick start built (DECISIONS 102): the study between Arena rounds
+    (arena/rounds.py BuiltBetween, made by train_between) on the practice matches its round lost, which its
+    learn() wrote as cases in db, as arena/practice.py runs it between two rounds. Returns its counts with
+    "cases" and "cards", the ids of the lessons that passed, and "lost", the cases studied."""
+    lost = len(between.pending)
+    between.stop = stop
+    out = between(1)
+    out["lost"] = lost
+    out["cards"] = [one["lesson_id"] for one in out["lessons"] if one.get("passed")]
+    return out
+
+
+def train_between(db, db_path, folder, *, models, agent_model, customer_model, judge_model, steps):
+    """The BuiltBetween Train's practice round hands its lost matches to (its learn) and then studies them
+    (study_built): on db, the page's database, with the night's models (models: {"study", "open", "exam"}, a
+    test's "examiner" too), its exam the built agent's own (arena/rounds.py turn_examiner) unless the test
+    gives one, every lesson shown in steps.seen. Its calls are taken from the day's count beside the database
+    (arena/practice.py reports_of), as the round's are."""
+    from arena import practice, rounds as rounds_mod, run as run_mod
+    from engine.lessons import Lessons as EngineLessons
+    from kit import turn as turn_mod
+    agent = turn_mod.load(folder)
+    reports = practice.reports_of(Path(folder))
+    calls = run_mod.Calls(reports / run_mod.CALLS_FILE, run_mod.DEFAULT_CAP)
+    pool = rounds_mod.Pool(EngineLessons(db, agent.plug),
+                           hotfixes=lambda: rounds_mod.live_hotfixes(str(db_path), agent.name))
+    examiner = models.get("examiner") or rounds_mod.turn_examiner(agent, calls.model(judge_model))
+    marked = {"study": steps.marking(models["study"], LESSON), "open": models["open"], "exam": models["exam"]}
+    return rounds_mod.BuiltBetween(db, agent, reports=reports, judge_model=judge_model, calls=calls, pool=pool,
+                                   agent_model=agent_model, customer_model=customer_model, models=marked,
+                                   examiner=steps.gate_exam(examiner))

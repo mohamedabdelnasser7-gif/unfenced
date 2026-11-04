@@ -162,7 +162,7 @@ class NeverTryAgain(Base):
         class Judge:
             def chat(self, messages, tools=None, effort="medium", max_tokens=1500, whole=False):
                 return say(json.dumps(answer))
-        pool = type("Pool", (), {"refresh": lambda s: None, "live": lambda s, *a: [], "seen": []})()
+        pool = type("Pool", (), {"refresh": lambda s: None, "live": lambda s, *a: [], "seen": [], "busy": None})()
         with mock.patch.object(practice, "play", play):
             got = retry.retry(agent=agent.name, run=rep["run"], cards=[x["card"] for x in saved["lost"]], state=folder,
                               reports=self.root, pool=pool, agent_model=None, customer_model=None, built=agent,

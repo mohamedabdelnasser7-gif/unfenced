@@ -449,8 +449,9 @@ class Practice(run.Arena):
         self.played_rounds = []  # the run's rounds, for the item's scores and failed checks
 
     def handed(self):
-        """The lessons handed in every match: with study between rounds, the Pool's (the live corrections,
-        the kept lessons and the ones this run passed and handed on), at most MAX_PICK; else none."""
+        """The lessons handed in every match: with the agent's database, the Pool's (the live corrections,
+        the kept lessons, the lessons on trial live and the ones this run passed and handed on), at most
+        MAX_PICK, with study between rounds or without; with no database, none."""
         if self.lessons is None:
             return []
         from engine.lessons import MAX_PICK
@@ -1197,7 +1198,8 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
     lost matches go as cases and the lessons are written. The lessons that pass are handed in the next
     round with the corrections that passed on the live page (live_path, the database's path). Without
     them nothing is studied, the run plays one round unless rounds is given, and learn (if given) gets
-    each lost training match.
+    each lost training match. With db, every match is handed the kept lessons, the live corrections and
+    the lessons on trial (arena/rounds.py Pool, decision 112), studied between rounds or not.
     customers: how many made-up customers to write (arena/madeup.py for_agent count); gate_size: hold out
     exactly that many as a fixed test set, each played once a round. Both come from the level unless
     given, and are left out on the old gate (trust or gate) and in quick.
@@ -1283,13 +1285,14 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
         raise run.Refused(f"the gate plays {bar['matches']} test matches a round but the test set holds "
                           f"{len(held)} customers; each test customer plays once a round")
     between = pool = notes = None
-    if studies and rounds > 1:
+    if db is not None:  # the lessons it plays with, with or without study between rounds (the short run too)
         from arena import rounds as rounds_mod
         from engine.lessons import Lessons as EngineLessons
-        hot = None if live_path is None else (lambda: rounds_mod.live_hotfixes(live_path, agent.name))
+        hot = None if live_path is None else (lambda: rounds_mod.live_lessons(live_path, agent.name))
+        pool = rounds_mod.Pool(EngineLessons(db, agent.plug), hotfixes=hot)
+    if studies and rounds > 1:
         study = dict(study)  # the caller's models stay as given
         notes_model = study.pop("notes", None)  # the quick note's writer (arena/run.py reflection_models); none, no notes
-        pool = rounds_mod.Pool(EngineLessons(db, agent.plug), hotfixes=hot)
         between = rounds_mod.BuiltBetween(db, agent, reports=reports, judge_model=judge_model, calls=calls, pool=pool,
                                           agent_model=agent_model, customer_model=customer_model, models=study,
                                           examiner=study.get("examiner"))

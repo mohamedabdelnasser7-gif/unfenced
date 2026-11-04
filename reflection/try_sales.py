@@ -159,14 +159,15 @@ class TrySales:
 
     def _lessons(self, m):
         """What the turn is handed: the agent's kept lessons, and with the live database the corrections
-        that passed and run there (rounds.Pool, as the Arena hands them). Read only."""
+        that passed (or had a person's yes after the exam held them) and run there, and the lessons on
+        trial there (rounds.Pool and live_lessons, as the Arena hands them, decision 112). Read only."""
         from reflection import PLUG
         from reflection.exam import _Lessons
         lessons = m.lessons.get(PLUG.agent)
         if lessons is None:
             return _Lessons(None, None)
         path = getattr(m, "db_path", None)
-        pool = rounds.Pool(lessons, hotfixes=(lambda: rounds.live_hotfixes(path, PLUG.agent)) if path else None)
+        pool = rounds.Pool(lessons, hotfixes=(lambda: rounds.live_lessons(path, PLUG.agent)) if path else None)
         pool.refresh()
         return _Lessons(pool, None)
 

@@ -196,7 +196,7 @@ Decisions 47 to 52 were agreed together on 2026-10-31 ("Go for all"), from the o
 
 80. Correct this: each reply the agent lost a practice match on gets a Correct this box in the Arena view. It sends the same correction as the agent page (a hotfix through the full exam, 56) and never makes the Arena wait. Amends 75: the scoped exam is for the Arena only; a lesson that passes it takes the full exam once before it is handed to the live agent. 2026-11-02.
 
-81. Try again: after an Arena run stops and the user corrected lost replies, Try again replays only the practice matches the agent just lost, against the same customers, with its kept lessons and the corrections that passed. Try again never unlocks Connect; only a full run's gate does. 2026-11-02.
+81. Try again: after an Arena run stops and the user corrected lost replies, Try again replays only the practice matches the agent just lost, against the same customers, with its kept lessons and the corrections that passed. Try again never unlocks Connect; only a full run's gate does. 2026-11-02. Amended by 112.
 
 82. Judges get two things: the Sales agent, already trained, to chat with; and Quick start, to make an agent of their own choosing as proof the engine works for any job. Sales is not rebuilt in Quick start. 2026-11-03.
 
@@ -257,3 +257,5 @@ Decisions 47 to 52 were agreed together on 2026-10-31 ("Go for all"), from the o
 110. A broken never line fails the Arena gate at every level, whatever the win count, for every agent with never lines; a built agent's never line break is marked as a failed safety check. At low and medium only a broken never line fails it; a match that ends with no safe reply after send check refusals still counts only at high. An agent whose work touches diets, allergies or health starts at high. Why: the Family Dinner Planner passed medium at 7 of 10 while serving meat to a vegan family with a peanut allergy. 2026-11-04.
 
 111. A clear mistake teaches from one case: a broken never line or a failed fact check can make a lesson on its own, without the 5 cases from 3 sources floor or the gap test; the lesson still passes the exam, the gate and a trial before it is kept. Softer patterns keep the 75% chance with 5 cases from 3 sources on each side. ("Each lesson should be considered, not only when they are 3"; the owner left the exact rule to us.) 2026-11-04.
+
+112. A lesson on trial whose exam passed is handed to the agent in later Arena runs, Try again and Train too, not only kept lessons and corrections; read again at every call, so a pulled one stops at once. A person's yes on Today after a failed exam counts as passing for this, and the page chat hands the same lessons. Amends 81. Why: otherwise Train then Run the Arena again (104) changes nothing. 2026-11-04.

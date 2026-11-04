@@ -6,8 +6,10 @@ screen), Try again plays only the practice matches that run lost again, against 
 customers: each lost card's saved match (arena-matches.jsonl, the run's last lost match with that
 card) is played once more from the same customer opening with the same customer prompt, as the eval
 gate reruns a past win (arena/gate.py Gate). The agent plays with its kept lessons and, first, the
-corrections that passed their exam and run live as a hotfix (arena/rounds.py live_hotfixes and Pool,
-read again before every match). Each match is judged the way the Arena judges it (arena/verdict.py,
+corrections that passed their exam (or had a person's yes after it) and run live as a hotfix, then
+the live lessons on trial (decision 112; arena/rounds.py live_lessons and Pool, read again before
+every match). The item says what each match was handed (handed) and why the live database could
+not be read, if it could not (busy). Each match is judged the way the Arena judges it (arena/verdict.py,
 with the run's fact checks, and a card no offer covers by the close judge, arena/close.py, when a judge
 model is given) and every model call is counted on the Arena's own count file and cap
 (arena/run.py Calls), so Try again shares the day's cap with the Arena and the night.
@@ -22,7 +24,7 @@ import json
 import time
 from pathlib import Path
 
-from arena import factcheck, gate as gate_mod, match as match_mod, run as run_mod, verdict
+from arena import factcheck, gate as gate_mod, match as match_mod, rounds as rounds_mod, run as run_mod, verdict
 from kit.model import ModelError
 
 KIND = "arena_retry"
@@ -85,7 +87,7 @@ def retry(*, agent, run, cards, state, reports, pool, agent_model, customer_mode
     if built is not None:
         return _retry_built(built, run, cards, state, reports, pool, a_model, c_model, calls.model(judge_model),
                             calls, facts, now)
-    lessons = _Lessons(pool, None)
+    lessons = _Handed(_Lessons(pool, None))
     saved = saved_lost(state, run, cards)
     results, stopped, error = [], None, ""
     for card in cards:
@@ -102,6 +104,7 @@ def retry(*, agent, run, cards, state, reports, pool, agent_model, customer_mode
             results.append({"card": card, "result": NOT_PLAYED, "why": gate_mod.PROMPT_GONE})
             continue
         pool.refresh()  # the corrections that passed since the last match
+        lessons.ids = []
         try:
             m = match_mod.play(persona, agent_model=a_model, customer_model=c_model, prompt=prompt, lessons=lessons,
                                seed=past.get("id"), opening=match_mod.first_line(past), checker=factcheck.check,
@@ -132,7 +135,8 @@ def retry(*, agent, run, cards, state, reports, pool, agent_model, customer_mode
             if judged is None:
                 results.append({"card": card, "result": NOT_PLAYED, "why": "the judge's answer could not be read"})
                 continue
-        got = {"card": card, "result": WON_AGAIN if judged["won"] else STILL_LOST, "why": judged["why"]}
+        got = {"card": card, "result": WON_AGAIN if judged["won"] else STILL_LOST, "why": judged["why"],
+               "handed": list(lessons.ids)}
         if not judged["won"]:
             got["quote"] = judged["quote"]
         results.append(got)
@@ -171,10 +175,10 @@ def _retry_built(agent, run, cards, state, reports, pool, a_model, c_model, j_mo
             results.append({"card": card, "result": NOT_PLAYED, "why": NOT_SAVED})
             continue
         pool.refresh()  # the corrections that passed since the last match
-        judged = None
+        judged, handed = None, pool.live(agent.stage.name)[:MAX_PICK]
         try:
             m = practice.play(agent, persona, agent_model=a_model, customer_model=c_model, seed=past.get("id"),
-                              lessons=pool.live(agent.stage.name)[:MAX_PICK], opening=match_mod.first_line(past))
+                              lessons=handed, opening=match_mod.first_line(past))
             if m.get("ended") == match_mod.VOID:
                 stopped, error = run_mod.MODEL_ERROR, m.get("error") or ""
             elif not calls.reached:
@@ -195,21 +199,39 @@ def _retry_built(agent, run, cards, state, reports, pool, a_model, c_model, j_mo
         if not run_mod.can_buy(persona):  # a never customer: kept for a safety slip, so judged on those only
             won = not practice.failed_check(judged)
             judged = dict(judged, why=NEVER_SAFE) if won else judged
-        got = {"card": card, "result": WON_AGAIN if won else STILL_LOST, "why": judged["why"]}
+        got = {"card": card, "result": WON_AGAIN if won else STILL_LOST, "why": judged["why"],
+               "handed": rounds_mod.live_ids(handed)}
         if not won:
             got["quote"] = judged.get("quote")
         results.append(got)
     return _write(agent.name, run, cards, results, stopped, error, pool, calls, reports, now)
 
 
+class _Handed:
+    """The Sales matches' lessons (reflection/exam.py _Lessons) that note the id of each lesson handed in
+    the match, a correction's or live trial's by its live id (rounds.live_ids), for the item."""
+
+    def __init__(self, inner):
+        self.inner, self.ids = inner, []
+
+    def hand(self, case, action, stage, text, given, **kw):
+        picked = self.inner.hand(case, action, stage, text, given, **kw)
+        for i in rounds_mod.live_ids(picked):
+            if i not in self.ids:
+                self.ids.append(i)
+        return picked
+
+
 def _write(agent, run, cards, results, stopped, error, pool, calls, reports, now):
-    """The arena_retry item beside the database, with "file" set to its name."""
+    """The arena_retry item beside the database, with "file" set to its name. busy: why the live database
+    could not be read at the last match (Pool.busy), else None; each played card's handed: the ids of the
+    lessons its match was handed, so a record with no hotfixes says why."""
     at = now()
     rid = PREFIX + time.strftime("%Y%m%dT%H%M%S", time.gmtime(at))
     won = sum(r["result"] == WON_AGAIN for r in results)
     played = sum(r["result"] != NOT_PLAYED for r in results)
     item = {"agent": agent, "kind": KIND, "at": at, "run": rid, "retried": run, "results": results,
-            "stopped": stopped, "hotfixes": list(pool.seen), "calls": calls.taken,
+            "stopped": stopped, "hotfixes": list(pool.seen), "busy": pool.busy, "calls": calls.taken,
             "line": f"Try again played {played} of the {len(cards)} lost matches of run {run}: {won} won this time."}
     if error:
         item["error"] = error

@@ -108,17 +108,22 @@ class ThePool(Base):
         return {"id": -live_id, "live_id": live_id, "text": text, "stages": list(stages), "fields": [],
                 "state": KEPT, "score": 0}
 
-    def test_a_correction_is_handed_first_only_after_a_refresh(self):
+    def test_a_correction_is_handed_first_read_at_first_use_then_at_each_refresh(self):
+        """The Pool reads the live database at its first use when refresh was never called (Train's exam
+        never refreshes; tests/test_lesson_endpoints.py), then again only at each refresh."""
         pool, copy = self.pool()
         for i in range(MAX_PICK):
             kept_lesson(copy, f"Kept line number {chr(97 + i)}.", ["all"])
         self.got = [self.fix(7)]
-        self.assertNotIn(FIX, [p["text"] for p in pool.pick("greeting", "hi")])
-        pool.refresh()
         picked = pool.pick("greeting", "hi")
         self.assertEqual(picked[0]["text"], FIX)  # first, so the cap on lessons never cuts it
         self.assertEqual(len(picked), MAX_PICK)
         self.assertEqual(pool.seen, [7])
+        self.got = [self.fix(8, "Ask about the colour.")]
+        self.assertEqual(pool.pick("greeting", "hi")[0]["text"], FIX)  # not read again before a refresh
+        pool.refresh()
+        self.assertEqual(pool.pick("greeting", "hi")[0]["text"], "Ask about the colour.")
+        self.assertEqual(pool.seen, [7, 8])
 
     def test_one_pulled_live_since_is_no_longer_handed(self):
         pool, _ = self.pool()

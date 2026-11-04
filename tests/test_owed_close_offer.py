@@ -46,7 +46,7 @@ class TryAgainClose(unittest.TestCase):
         with mock.patch("arena.close.judge", return_value=dict(CLOSED)) as judge:
             results = self.go(judge_model=object())
         judge.assert_called_once()
-        self.assertEqual(results, [{"card": CARD, "result": retry.WON_AGAIN, "why": "correct close"}])
+        self.assertEqual(results, [{"card": CARD, "result": retry.WON_AGAIN, "why": "correct close", "handed": []}])
 
     def test_with_no_judge_model_it_stays_lost_as_before(self):
         with mock.patch("arena.close.judge") as judge:

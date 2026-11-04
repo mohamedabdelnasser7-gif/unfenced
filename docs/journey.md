@@ -110,6 +110,13 @@ These came in on the engfix2 and engfix3 branches.
 
 **Built agents could not be talked to.** Only Sales had a chat on its page. The assistant, the Family Dinner Planner and every agent made in Quick start could practise in the Arena, but you could not ask one anything, and the assistant's page ended with no Connect and no way to try it. Now every built agent has a page chat, cloned from Try Sales, that runs its real turn and tools, and every agent built later gets it the moment it exists. The assistant answers today's email from a sample mailbox, dated today and labelled as sample data, until email connects through Microsoft or Google sign-in. A pasted email can be summarised or answered as a draft, nothing is sent, and your rewrite of a draft goes in as a correction through the same exam.
 
+**Lessons that never reached the agent.** The owner approved a correction on Today and the next chats still did not use it. Following every lesson to every place that hands it found four breaks (decision 112):
+
+- Train never read corrections. Train for an agent made in Quick start built its lesson list but never read the live corrections, so its exam and its rerun of past wins played without them. Fix: the list now reads the live database at its first use.
+- A built agent's Arena with no study had no lessons. With one round, or no study models, the run built no lesson list at all: no kept lessons and no corrections. Fix: the list is built whenever the agent has a database, study or not.
+- Trials never reached later runs. A lesson on trial from Train, the night or an earlier run was handed only inside the run that made it. Fix: lessons on trial in the live database whose exam passed are handed in later Arena runs, Try again, Train and the page chat, read again at every call, so a pulled one stops at once.
+- An approved correction never reached the chat. A correction whose exam failed and that the owner then said yes to on Today was skipped everywhere, because only a passed exam counted. Fix: a person's yes after a failed exam now counts as passing; a yes from the high risk switch does not. Try again's record now also names the lessons each match was handed, so an empty list says why.
+
 ## Still open
 
 - The offers and fair close work (decision 105) is on its own branch and not yet merged here.

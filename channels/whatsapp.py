@@ -464,8 +464,10 @@ class App:
     """
 
     def __init__(self, chats, model, lessons, results, graph, limits=None, maxsize=MAX_QUEUE, fast=None, clock=None,
-                 connected=None):
-        """connected: None follows the user's Connect and Pull on the agent page (kit/connections.py,
+                 connected=None, built_fast=()):
+        """built_fast: the fast notes of built agents on this database (reflection/fast.py notes_for, decision
+        103), swept beside the Sales agent's; none today, since only the Sales agent answers on this channel.
+        connected: None follows the user's Connect and Pull on the agent page (kit/connections.py,
         read from the chats' database before every turn and tick); False keeps it silent and True
         answers unless the latest row is a Pull, for tests and the demo (main reads WHATSAPP_LIVE)."""
         self.chats, self.model, self.lessons, self.results, self.graph = chats, model, lessons, results, graph
@@ -474,6 +476,7 @@ class App:
         self.clock = clock or getattr(chats, "clock", time.time)  # the quiet tick's clock; tests set it
         self.started = self.clock()  # a quiet notice already due by now is never sent (sales/quiet.py)
         self.fast = fast  # fast reflection's notes (reflection.fast.FastNotes), or None for none
+        self.built_fast = [f for f in built_fast or () if f is not None]
         self.q = queue.Queue(maxsize=maxsize)
 
     def accept(self, items):
@@ -575,14 +578,15 @@ class App:
         return self.started if at is None else max(self.started, at)
 
     def sweep_once(self):
-        """One fast reflection sweep. Returns what it wrote; never raises."""
-        if self.fast is None:
-            return []
-        try:
-            return self.fast.sweep()
-        except Exception:
-            log.exception("the fast reflection sweep failed")
-            return []
+        """One fast reflection sweep: the Sales agent's notes, then each built agent's (built_fast). Returns
+        what they wrote; never raises, and one that fails never stops the others."""
+        out = []
+        for notes in ([self.fast] if self.fast is not None else []) + self.built_fast:
+            try:
+                out += notes.sweep()
+            except Exception:
+                log.exception("the fast reflection sweep failed")
+        return out
 
     def work(self):
         while True:

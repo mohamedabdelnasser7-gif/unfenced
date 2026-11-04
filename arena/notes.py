@@ -115,7 +115,7 @@ class RunNotes:
             return ()
         return tuple(got) if isinstance(got, (set, frozenset, list, tuple)) else ()
 
-    def for_prompt(self, chat_id=None, now=None):
+    def for_prompt(self, chat_id=None, now=None, source=None):
         """Every note held, oldest first, under the heading, for the end of the agent's prompt; ""
         with none. Every match of the run is the agent's next case, so the match's own chat id does
         not matter."""

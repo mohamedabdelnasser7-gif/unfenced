@@ -55,6 +55,10 @@ writes first (a lead it follows up), and the input is saved under a frame line s
 7. The pause switch (kit/switch.py, DECISIONS item 54): while the agent is paused the message is still
    saved, so the chat is whole when it resumes, and the turn ends "paused" with nothing sent and no
    model call, as sales/loop.py does for the Sales agent.
+8. Fast notes (owner decision 103): given fast= (reflection/fast.py notes_for for an agent whose plug names a
+   bad deciding result, or the Arena's quick notes in practice), the note for this case goes last in the
+   prompt under fast reflection's heading, read once a turn through sales/loop.py fast_note, the path the
+   Sales agent reads its note by; a note that cannot be read is left out and the reply goes on.
 
 built(db_folder) reads every agent folder under <db folder>/agents/ that loads; the night and the
 Morning page take these agents beside the repo's own (reflection/night.py other_plugs).
@@ -417,7 +421,7 @@ def _turn(agent, text, ctx, history, chats, chat_id, send, customer_id, lessons,
         except Exception:
             log.exception("store data unavailable; no price can pass the check this turn")
     convo = history + [{"role": "user", "content": text or "(empty message)"}]
-    system = system_prompt(agent, lessons, loop.fast_note(fast, chat_id))  # read once a turn
+    system = system_prompt(agent, lessons, loop.fast_note(fast, chat_id, source=customer_id))  # read once a turn
     failed, acted, refused = [], [], []
     said = "" if first else text  # the person's words the full check reads; a case input is not theirs
     try:

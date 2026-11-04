@@ -48,16 +48,22 @@ delivery places, so a note may name the Vapor or Cairo the customer typed, never
 place of more words passes only whole ("Sheikh Zayed", never "Zayed" alone), and a place of one
 word only in a sentence that also writes a delivery word ("Confirm Cairo for delivery").
 
+A built agent with real customers gets the same notes (owner decision 103, AgentNotes and notes_for):
+the same writer, the same guard over its own plug's high list (never_for), the same heading, read by
+kit/turn.py through sales/loop.py fast_note; an agent whose plug names no bad deciding result gets none.
+
 Every writer call is a model call, so it is counted in kit/limits.py under LIMIT_KEY, like a
 customer. A sweep stops once the writer is over a limit (FastNotes.sweep), so the endings left
 wait for the next sweep instead of losing their note (review round 2); a call refused all the
 same (another sweep took the last one first) gets no note, and the sweep goes on.
 """
 import json
+import logging
 import re
 
 from engine import fast as engine_fast
 from engine.log import case_key, source_key
+from engine import plug as plug_mod
 from engine.plug import Risk
 from engine.study import PartError
 from kit import limits as limits_mod
@@ -67,6 +73,8 @@ from kit.db import Db
 from kit.tools import store
 from reflection import PLUG
 from reflection.study import describe, read_json
+
+log = logging.getLogger("reflection.fast")
 
 HEADING = ("Try this instead (from Reflection, on this customer's last chat; for this chat only, and "
            "everything above still comes first):")
@@ -444,3 +452,53 @@ class FastNotes(engine_fast.FastNotes):
             return self.limits.over(LIMIT_KEY) is not None
         except Exception:
             return False
+
+
+class AgentNotes(engine_fast.FastNotes):
+    """A built agent's fast notes (owner decision 103: built agents with real customers get fast notes
+    too). The same engine notes, writer and guard as the Sales agent's: fast reflection's Writer, counted
+    under LIMIT_KEY (Metered), the never groups over the agent's own plug (never_for), and the store's
+    words only when it has the store tool. A case that ends with a bad deciding result of its plug gets
+    one note; its source's next case reads it last in its prompt under HEADING (kit/turn.py turn fast=,
+    through sales/loop.py fast_note, once a turn), until that case ends. Make one with notes_for, which
+    gives none for an agent whose plug names no bad deciding result. reader: the case's turns, when its
+    case id is a chat (chat_turns); a case that is no chat has none and the writer reads its rows."""
+
+    def __init__(self, db, agent, chats=None, writer=None, keep_days=engine_fast.KEEP_DAYS, limits=None):
+        self.chats = chats
+        self.limits = limits if limits is not None else limits_mod.Limits(db)
+        words = known if store.NAME in getattr(agent, "tools", ()) else None
+        super().__init__(db, agent.plug, writer=Metered(Writer() if writer is None else writer, self.limits),
+                         reader=None if chats is None else self._read, keep_days=keep_days,
+                         never=never_for(agent.plug.risk), known=words)
+
+    def _read(self, case_id):
+        try:
+            return chat_turns(self.chats, int(case_id))
+        except (TypeError, ValueError):
+            return []
+
+    def for_prompt(self, case_id, now=None, source=None):
+        """This case's note under HEADING, for the end of its prompt; "" when it has none. source: who
+        the case comes from, for a plug whose rows name it; left out when the case id names it."""
+        if self.plug.source.known_by == CASE_SOURCE:
+            source = None
+        elif source is None:
+            return ""
+        return engine_fast.slot(self.hand(case_id, source=source, now=now), HEADING)
+
+
+CASE_SOURCE = plug_mod.CASE  # the case id names its source
+
+
+def notes_for(db, agent, chats=None, writer=None, limits=None):
+    """AgentNotes for a built agent (kit/turn.py Agent) whose plug names a bad deciding result, else None:
+    with no bad result no case ends not good, so there is nothing to write (engine/fast.py). Never
+    raises: notes that cannot be set up are left off and the agent answers without them."""
+    try:
+        if not agent.plug.decides.bad:
+            return None
+        return AgentNotes(db, agent, chats=chats, writer=writer, limits=limits)
+    except Exception:
+        log.exception("fast notes for %s are off: they could not be set up", getattr(agent, "name", "an agent"))
+        return None

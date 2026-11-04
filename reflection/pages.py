@@ -55,7 +55,7 @@ from pathlib import Path
 
 from arena import levels as levels_mod
 from engine import lessons as lessons_mod
-from kit import sample as sample_mod
+from kit import bookings as bookings_mod, sample as sample_mod
 from reflection import console as console_mod
 from reflection import morning as mo
 from reflection import quickstart as qs_mod
@@ -1128,6 +1128,9 @@ def overview_tab(m, view, a, agent, st, ctx):
         made = "" if folder is None else "<small>Made up for practice until a real connection is set.</small>"
         left.append(f'<section class="grp sq" aria-labelledby="sd-h"><h3 id="sd-h">Sample data</h3><div class="lr">'
                     f'<b dir="auto">{h(line)}</b>{using}{made}</div></section>')
+        booked = bookings_html(bookings_mod.read(bookings_mod.path_of(folder))) if folder is not None else ""
+        if booked:  # what its live chats booked (kit/bookings.py), kept across Start over
+            left.append(booked)
         if tok:
             left.append(data_form(ctx, agent))
         own = m.offers(agent) if hasattr(m, "offers") else None
@@ -2080,6 +2083,20 @@ def data_form(ctx, agent):
 
 def sample_line(data):
     return f'<p class="quiet sdata">{icon("note")}{h(sample_mod.words(data))}</p>' if data else ""
+
+
+def bookings_html(rows, newest=3):
+    """The agent's Bookings line on its Overview: how many its live chats booked and the newest few, escaped; ""
+    when none."""
+    if not rows:
+        return ""
+    last = rows[::-1][:newest]  # the file keeps them oldest first
+    each = "".join(f'<small dir="auto">{h(" ".join(x for x in (b["item"], b["date"], b["start"] + " to " + b["end"]) if x))}'
+                   f'{h(", for " + b["who"]) if b.get("who") else ""}</small>' for b in last)
+    count = f"{len(rows)} booked" + (f", newest {len(last)}:" if len(rows) > len(last) else ":")
+    return (f'<section class="grp sq" aria-labelledby="bk-h"><h3 id="bk-h">Bookings</h3><div class="lr">'
+            f'<b>{h(count)}</b>{each}<small>Kept for every chat, Start over included. Sample data, nothing connected '
+            f'yet.</small></div></section>')
 
 
 def using_sample(folder, data):

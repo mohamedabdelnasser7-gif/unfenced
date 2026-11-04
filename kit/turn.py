@@ -82,7 +82,7 @@ from engine import plug as plug_mod
 from engine.lessons import slot
 from kit import offers as offers_mod, sample as sample_mod, send_check, switch, tools
 from kit.model import ModelError
-from kit.tools import draft_order, store
+from kit.tools import book, calendar_tool, draft_order, store
 from sales import loop
 from sales.stages import Stage
 
@@ -110,6 +110,7 @@ CHANNEL = "whatsapp"
 CASE_KEYS = ("input", "starts", "output", "ends")
 STARTS = ("person", "agent")  # who writes first in a case
 DATA_TOOL = "data"  # kit/tools/data.py: the agent's sample data, offered when its folder has some
+BOOK_TOOL = "book"  # kit/tools/book.py: offered with sample data when the card books things (a viewing, a slot)
 ACT_TOOL = "take_action"  # a case agent's declared actions (a tag, a close); runs nothing, is only recorded
 MAX_ACT_NOTE = 200
 FIRST = ("(A new case. You write first: nobody has written to you yet. The case you start from: {input}) "
@@ -285,6 +286,8 @@ def load(folder):
         offered += (DATA_TOOL,)
     if gives is not None and store.NAME not in offered and DATA_TOOL not in offered:  # where its offers show
         offered += (DATA_TOOL,)
+    if data is not None and BOOK_TOOL not in offered and calendar_tool.NAME not in offered and book.books(card):
+        offered += (BOOK_TOOL,)  # its card books things: book a row on its sample data, checked in code (kit/tools/book.py)
     stage = Stage(p.stages[0] if p.stages else "all", card["name"], card["does"], offered, ())
     if connected is None:  # a folder written by hand: the older rule
         talks, priced_only, stock = REPLY_ACTION in p.actions, False, True
@@ -435,13 +438,15 @@ def act_definition(agent):
 
 
 def turn(agent, text, *, chats, chat_id, model, send, customer_id, lessons=(), message=None, first=False,
-         channel=CHANNEL, fast=None):
+         channel=CHANNEL, fast=None, bookings=None):
     """One message from the person the agent serves. send(to, text) is the only way out.
     message: the channels/base.py Message the tools may read (who wrote, a voice note); made from
     text when None. first: text is the case's input and the agent writes first (no person wrote).
     channel: the channel the Message names when none is given (the Arena passes its practice one).
     fast: the fast notes (anything with for_prompt(chat_id): the Arena's RunNotes in practice); the note is read once a turn through sales/loop.py fast_note, the one
-    path Sales reads it by, and a note that cannot be read is left out, never stopping the reply."""
+    path Sales reads it by, and a note that cannot be read is left out, never stopping the reply.
+    bookings: the agent's shared bookings file (kit/bookings.py path_of its folder) for a live chat (the page chat),
+    so a booking holds for every chat; None (practice, exams) books on the case's copy only."""
     from channels.base import Message
     if first:
         text = FIRST.format(input=" ".join(str(text or "").split()))
@@ -451,7 +456,7 @@ def turn(agent, text, *, chats, chat_id, model, send, customer_id, lessons=(), m
     if switch.is_paused(agent.name, db=chats.db):  # saved above; nothing goes out while paused
         return TurnResult(PAUSED)
     ctx = tools.Context(chat_id=chat_id, stage=agent.stage, chats=chats, model=model, message=msg, send=send,
-                        stages={agent.stage.name: agent.stage}, data=agent.data)
+                        stages={agent.stage.name: agent.stage}, data=agent.data, bookings=bookings)
     items = sample_mod.store_items(agent.data) if store.NAME in agent.tools else []
     token = store.SAMPLE.set(items) if items else None  # its sample products when no Shopify keys are set
     gives = offers_mod.OFFERS.set(agent.offers or offers_mod.EMPTY)  # its own offers, never the store data's

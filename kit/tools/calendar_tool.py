@@ -13,15 +13,18 @@ onto_today): every meeting moves by the whole number of days that puts its first
 mailbox names as today, so "today's meetings" and "book it tomorrow" read the same day as the mail. Each answer
 says that date (today).
 
-A booking is on this case's copy of the calendar only: the meetings booked earlier in the same chat (its own
-tool rows, kit/chats.py steps) count as taken, and the demo file is never written.
+The meetings booked earlier in the same chat (its own tool rows, kit/chats.py steps) count as taken, and the
+demo file is never written. A live chat (the page chat, kit/turn.py turn bookings=) also books into the agent's
+shared bookings (kit/bookings.py, <db folder>/agents/<agent>/bookings.json), and every meeting there, from any
+chat of the agent, counts as taken too: a time another chat booked is refused in code with the next free time
+that day. Arena practice hands no bookings file, so a practice booking stays on the case's copy only.
 """
 import datetime as dt
 import json
 import re
 from pathlib import Path
 
-from kit import sample
+from kit import bookings, sample
 from kit.tools import mailbox
 
 NAME = "calendar"
@@ -118,6 +121,14 @@ def check(args, ctx):
     return True, ""
 
 
+def shared(ctx, date):
+    """The meetings other chats of this agent booked on date (kit/bookings.py), as calendar meetings; [] in
+    practice (no bookings file)."""
+    path = getattr(ctx, "bookings", None)
+    return [{"id": "shared", "date": b["date"], "title": "booked in another chat", "start": b["start"], "end": b["end"]}
+            for b in bookings.read(path) if b["date"] == date and b.get("case") != str(ctx.chat_id)]
+
+
 def run(args, ctx):
     _, rules, events = demo()
     at = mailbox.now()
@@ -128,7 +139,7 @@ def run(args, ctx):
     out = {"ok": True, "about": "the user's calendar", "data": sample.LABEL, "today": mailbox.today(at), "date": date,
            "rules": rules}
     if not start:
-        return dict(out, meetings=day)
+        return dict(out, meetings=day + shared(ctx, date))
     s, e = minutes(start), minutes(end)
     before, after = rules.get("no_meetings_before"), rules.get("no_meetings_after")
     why = None
@@ -136,13 +147,34 @@ def run(args, ctx):
         why = f"the user's rule: no meetings before {before}"
     elif after and e > minutes(after):
         why = f"the user's rule: no meetings after {after}"
-    else:
-        hit = next((m for m in day if s < minutes(m["end"]) and minutes(m["start"]) < e), None)
-        if hit is not None:
-            why = f"it clashes with {hit.get('title') or hit.get('id')} ({hit['start']} to {hit['end']})"
+
+    def clash(rows):
+        taken = day + [dict(b, title="booked in another chat") for b in rows if b["date"] == date]
+        hit = next((m for m in taken if s < minutes(m["end"]) and minutes(m["start"]) < e), None)
+        if hit is None:
+            return None
+        said = f"it clashes with {hit.get('title') or hit.get('id')} ({hit['start']} to {hit['end']})"
+        lo = minutes(before) if before else 0
+        hi = minutes(after) if after else 24 * 60
+        free = bookings.next_free([dict(m, date=date) for m in taken], date, e - s, lo, hi, s, step=15)
+        return said + (f"; the next free time that day is {free}" if free else "; that day has no free time this long")
+
+    path = getattr(ctx, "bookings", None)
+    title = " ".join(args.get("title", "").split())
+    if why is None and path is None:
+        why = clash([])
+    elif why is None:
+        try:
+            ok, got = bookings.add(path, {"item": "", "date": date, "start": start, "end": end,
+                                          "case": str(ctx.chat_id), "who": title}, clash)
+        except (bookings.Refused, OSError):
+            ok, got = False, "the shared calendar could not be written"
+        if not ok:
+            why = got
     if why:
-        return {"ok": False, "feedback": f"Not booked: {why}. Pick another time.", "date": date, "meetings": day,
-                "rules": rules, "data": sample.LABEL}
-    meeting = {"id": f"b{len(day) + 1}", "date": date, "title": " ".join(args["title"].split()), "start": start,
-               "end": end, "by": "assistant"}
-    return dict(out, booked=meeting, note="Booked on this case's copy of the calendar: no clash, inside the rules.")
+        return {"ok": False, "feedback": f"Not booked: {why}. Pick another time.", "date": date,
+                "meetings": day + shared(ctx, date), "rules": rules, "data": sample.LABEL}
+    meeting = {"id": f"b{len(day) + 1}", "date": date, "title": title, "start": start, "end": end, "by": "assistant"}
+    note = ("Booked on the agent's shared calendar: no clash with any chat, inside the rules." if path is not None
+            else "Booked on this case's copy of the calendar: no clash, inside the rules.")
+    return dict(out, booked=meeting, note=note)

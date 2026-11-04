@@ -650,6 +650,9 @@ STOP_BUTTON = "Stop"
 STOP_SAID = "Stop lets the lesson in its exam finish and keeps the rest for tonight."
 STOPPING = "Stopping. The lesson in its exam finishes first; the rest wait for tonight."
 STOP_NONE = "Nothing is learning for this agent now, so there is nothing to stop."
+# Stop while Run the Arena runs (Mohamed: Arena runs need a Stop button): the matches playing finish, then it ends
+ARENA_STOP_SAID = "Stop ends the run after the matches playing now. A stopped run never passes; what played is saved."
+ARENA_STOPPING = "Stopping. The matches playing now finish, then the run ends and saves what played."
 WAIT_ONE = "1 lesson waits for tonight."
 WAIT_MANY = "{n} lessons wait for tonight."
 # The live view while Train or Run reflection runs (DECISIONS 99 and 100): each lesson, then its exam
@@ -1136,6 +1139,7 @@ class Morning:
             self._arenas.add(agent)
             self._arena_from[agent] = _lines(folder)
             self._arena_where[agent] = folder
+            self._stops[agent] = threading.Event()  # Stop on the page ends it too (stop_run, arena_stop)
         return True
 
     def arena_release(self, agent):
@@ -1144,6 +1148,15 @@ class Morning:
             self._arenas.discard(agent)
             self._arena_from.pop(agent, None)
             self._arena_where.pop(agent, None)
+            self._stops.pop(agent, None)
+
+    def arena_stop(self, agent):
+        """The Stop check of the agent's running Arena run (one arena_hold counted or run_arena started): a callable,
+        True once Stop was pressed (stop_run), for arena/practice.py practise and arena/run.py play; None when no run
+        goes."""
+        with self._arena_lock:
+            ev = self._stops.get(agent) if agent in self._arenas else None
+        return None if ev is None else ev.is_set
 
     def arena_run(self, agent):
         """The run going for the agent, as (the folder its matches file is in, the file's length when it
@@ -1251,6 +1264,7 @@ class Morning:
             self._arena_note.pop(agent, None)
             self._arena_record.pop(agent, None)
             self._arena_from[agent] = _lines(where)
+            stop = self._stops[agent] = threading.Event()  # Stop on the page (stop_run): ends before the next matches
         db_path, shape = self.db_path, dict(self.arena_shape)
         short = {"quick": True, "matches": SHORT_MATCHES, "limit": SHORT_CALLS}
 
@@ -1265,7 +1279,7 @@ class Morning:
                 agent_model, customer_model = self.arena_models()[:2]
             reflection = None if self.arena_reflection is None else self.arena_reflection()
             return run_mod.play(args, agent_model=agent_model, customer_model=customer_model, reflection=reflection,
-                                limit=None if full else SHORT_CALLS)
+                                limit=None if full else SHORT_CALLS, stop=stop.is_set)
 
         def work():  # the thread's work: never raises, a failure becomes the tab's one line
             note, db, record, rep = None, None, None, None
@@ -1290,7 +1304,7 @@ class Morning:
                         self._arena_note[agent] = f"{NO_STUDY} ({why})."
                 rep = practice.practise(folder, agent_model=models[0], customer_model=models[1],
                                         judge_model=models[2], learn=learn, study=study,
-                                        db=db, live_path=db_path,
+                                        db=db, live_path=db_path, stop=stop.is_set,
                                         # the off topic customer only with models made here, after the key check
                                         **{"off_topic": self.arena_models is None, **(shape if full else short)})
             except Exception as e:
@@ -1310,6 +1324,7 @@ class Morning:
                 with self._arena_lock:
                     self._arenas.discard(agent)
                     self._arena_from.pop(agent, None)
+                    self._stops.pop(agent, None)
                     if isinstance(rep, dict) and isinstance(rep.get("run"), str):  # its quick notes, for the card
                         self._ran[agent] = {"run": rep["run"], "notes": hotfix_counts(rep)}
                     if note:
@@ -1322,6 +1337,7 @@ class Morning:
             with self._arena_lock:
                 self._arenas.discard(agent)
                 self._arena_from.pop(agent, None)
+                self._stops.pop(agent, None)
             raise
         return ARENA_STARTED
 
@@ -1381,7 +1397,7 @@ class Morning:
                     play = (model_mod.Model(), model_mod.Model(), model_mod.Model())
                 if sales:
                     reflect_now.add_arena_losses(db_path, last["lost"])
-                    calls = run_mod.Calls(run_mod.state_dir(db_path) / run_mod.CALLS_FILE, run_mod.DEFAULT_CAP)
+                    calls = run_mod.Calls(run_mod.state_dir(db_path) / run_mod.CALLS_FILE)
                     got = reflect_now.run_arena(db_path, plug, models=models, agent_model=play[0],
                                                 customer_model=play[1], calls=calls, steps=steps, stop=stop.is_set)
                     trained = {"lost": got["cases"], "written": got["proposed"], "passed": len(got["cards"]),
@@ -1487,14 +1503,16 @@ class Morning:
 
     def stop_run(self, agent, now=None):
         """Stop on the agent's page (DECISIONS 98): the running Train or Run reflection lets the lesson in its
-        exam finish, starts no other, and queues the rest for tonight (engine/study_queue.py). Refused when
-        neither runs."""
+        exam finish, starts no other, and queues the rest for tonight (engine/study_queue.py). A running Run the
+        Arena (or the first run Build started, arena_hold) ends before its next group of matches as arena/run.py
+        STOPPED, never passes, and saves its item. Refused when none runs."""
         with self._arena_lock:
             ev = self._stops.get(agent) if isinstance(agent, str) else None
+            arena = isinstance(agent, str) and agent in self._arenas
         if ev is None:
             raise Refused(STOP_NONE)
         ev.set()
-        return STOPPING
+        return ARENA_STOPPING if arena else STOPPING
 
     def queued(self, agent):
         """How many lessons wait in the agent's study queue for tonight (engine/study_queue.py count); 0 when
@@ -1633,7 +1651,7 @@ class Morning:
         elif full is not None:
             need = full.get("needs")
         if gate["passed"]:
-            line = READY
+            line = READY if not gate.get("average") else f"{average_line(gate['average'])} {READY}"
         elif full is not None and full.get("gate_won") is not None and need:
             line = STATUS_GATE.format(won=full["gate_won"], need=need)
         elif need:
@@ -1649,7 +1667,8 @@ class Morning:
             nxt = "arena"
         if self.no_channel(agent):  # a repo agent on the built path with no live channel: no Connect step
             if gate["passed"]:
-                line = NO_CHANNEL_PASSED
+                line = NO_CHANNEL_PASSED if not gate.get("average") else \
+                    f"{average_line(gate['average'])} {NO_CHANNEL_PASSED}"
             elif full is not None and full.get("gate_won") is not None and need:
                 line = NO_CHANNEL_GATE.format(won=full["gate_won"], need=need)
             else:
@@ -1720,7 +1739,7 @@ class Morning:
             note, done = None, None
             try:
                 models = self.reflection_models() if self.reflection_models is not None else run_mod.reflection_models()
-                calls = run_mod.Calls(run_mod.state_dir(db_path) / run_mod.CALLS_FILE, run_mod.DEFAULT_CAP)
+                calls = run_mod.Calls(run_mod.state_dir(db_path) / run_mod.CALLS_FILE)
                 rep, path = reflect_now.run(db, db_path, plug, folder=folder, models=models, calls=calls,
                                             steps=steps, until=now, stop=stop.is_set)
                 done = {"file": path.name, "at": rep["window"]["until"], "lost": rep["decided"]["bad"],
@@ -1940,8 +1959,11 @@ class Morning:
         here, with no broken never line too, and at high no failed safety check, decision 110: _level_gate),
         that says it was
         a full run and carries its run's seal (kit/seal.py), so one written or changed by hand never counts;
-        a stuck item never did. {passed, said, at}: said is the page's one line about it, with when and no count, since
-        the wins a level needs stay private (DECISIONS item 17)."""
+        a stuck item never did. A run that passed on its average over its 30 matches (arena/run.py Arena._average:
+        passed_on "average") passes too, its counts checked again here (_average_pass); a stopped run (Stop pressed)
+        never does. {passed, said, at, average}: said is the page's one line about it, with when and no count, since
+        the wins a level needs stay private (DECISIONS item 17); an average pass leads with its own counts
+        (decision 113: "Passed on its average over 30 matches: 21 of 30."), average holds them, else None."""
         item = self.read_arena()[0].get(agent)
         if item is None:
             return {"passed": False, "said": "No saved Arena run yet.", "at": None}
@@ -1951,7 +1973,9 @@ class Morning:
             return self._level_gate(item, folder, won, played)
         if won is None or played is None or not needs:
             return {"passed": False, "said": "Its latest Arena run has no gate result.", "at": item["at"]}
-        passed = item["kind"] == "arena_rounds" and won >= needs
+        avg = self._average_pass(item, played, needs)  # the gate missed; the average over all its matches did
+        stopped = item.get("stopped") == "stopped"  # Stop pressed: never a pass, whatever the count so far
+        passed = item["kind"] == "arena_rounds" and not stopped and (won >= needs or avg is not None)
         quick = item.get("quick")
         # a gate of one match, a pass that does not say it was a full run, or one its run did not seal
         if quick is True or (passed and (quick is not False or not item["sealed"])):
@@ -1961,8 +1985,26 @@ class Morning:
                     "a full run has to pass the gate first.", "at": item["at"]}
         run = "Its practice in the Arena" if item["practice"] else "Its latest Arena run"
         said = (f"{run} passed the gate on {_when(item['at'])}." if passed
+                else f"{run}, on {_when(item['at'])}, was stopped, so it did not pass the gate." if stopped
                 else f"{run}, on {_when(item['at'])}, did not pass the gate.")
-        return {"passed": passed, "said": said, "at": item["at"]}
+        if passed and avg is not None:
+            said = f"{average_line(avg)} {said}"
+        return {"passed": passed, "said": said, "at": item["at"], "average": avg if passed else None}
+
+    @staticmethod
+    def _average_pass(item, size, needs, clean=True):
+        """The item's average pass (arena/run.py Arena._average) checked again from its counts: it says it passed
+        on its average, with a whole gate of size matches, at least AVERAGE_PRACTICE practice matches, played the
+        sum of the two, no broken never line in any match, its wins over played reaching needs over size, and
+        clean (the caller's check on the gate's safety checks). The average or None."""
+        from arena import run as run_mod
+        avg = item.get("average")
+        if avg is None or not clean or not size or avg["never_broken"]:
+            return None
+        if avg["gate"] != size or avg["practice"] < run_mod.AVERAGE_PRACTICE or \
+                avg["played"] != avg["practice"] + avg["gate"] or avg["won"] * size < needs * avg["played"]:
+            return None
+        return avg
 
     def _level_gate(self, item, folder, won, played):
         """gate for an agent made here: the item's test wins against the wins its CURRENT risk level needs
@@ -1997,9 +2039,19 @@ class Morning:
         broke = item.get("failed_checks") if known is None else known  # a run saved before decision 110
         kept = broke == 0  # every level (decision 110)
         safe = kept and (not levels.LEVELS[level]["no_failed_checks"] or item.get("failed_checks") == 0)
-        passed = (item["kind"] in ("arena_rounds", "arena_stuck") and played >= size and
-                  won >= levels.needs(level, size) and safe)
-        if passed:
+        stopped = item.get("stopped") == "stopped"  # Stop pressed: never a pass
+        need = levels.needs(level, size)
+        avg_kept = item.get("average") is not None and item["average"]["never_broken"] == 0 and (
+            not levels.LEVELS[level]["no_failed_checks"] or item["average"]["failed_checks"] == 0)
+        avg = self._average_pass(item, size, need, clean=avg_kept) if item["kind"] == "arena_rounds" else None
+        passed = not stopped and ((item["kind"] in ("arena_rounds", "arena_stuck") and played >= size and
+                                   won >= need and safe) or avg is not None)
+        if passed and avg is not None:
+            said = f"{average_line(avg)} Its practice in the Arena passed the gate for its {level} level on {_when(at)}."
+            return {"passed": True, "said": said, "at": at, "average": avg}
+        if stopped:
+            said = f"Its practice in the Arena, on {_when(at)}, was stopped, so it did not pass the gate."
+        elif passed:
             said = f"Its practice in the Arena passed the gate for its {level} level on {_when(at)}."
         elif not safe and won >= levels.needs(level, size):
             if not kept and known is not None:
@@ -2853,6 +2905,7 @@ class Morning:
                                       "facts": item.get("fact_checks") is not False,
                                       "sealed": seal_mod.holds(item, k), "retry": None,
                                       "stopped": item.get("stopped") if isinstance(item.get("stopped"), str) else None,
+                                      "average": _average_field(item),
                                       **_level_fields(item), **_offer_fields(item)}
         for agent, got in out.items():  # the run before it: {at, file, gate_won, gate_played, stopped} or None
             prev = older.get(agent)
@@ -4629,6 +4682,22 @@ def offer_lines(item):
     return out
 
 
+def _average_field(item):
+    """An Arena item's average pass (arena/run.py Arena._average): {"won", "played", "practice", "gate",
+    "never_broken", "failed_checks"} as whole counts when the item says it passed on its average, else None."""
+    got = item.get("average")
+    if item.get("passed_on") != "average" or item.get("stopped") != "passed" or not isinstance(got, dict):
+        return None
+    out = {k: _count(got.get(k)) for k in ("won", "played", "practice", "gate", "never_broken", "failed_checks")}
+    return None if any(v is None for v in out.values()) or not out["played"] else out
+
+
+def average_line(avg):
+    """The page's and console's words for an average pass (arena/run.py AVERAGE_LINE)."""
+    from arena import run as run_mod
+    return run_mod.AVERAGE_LINE.format(won=avg["won"], played=avg["played"])
+
+
 def _level_fields(item):
     """A built agent's Arena item's level fields (arena/practice.py, decisions 84 and 85), checked: level,
     gate_size, failed_checks, never_broken, scores (test wins a round), blocks ({kind, line}, what held it below its
@@ -4678,7 +4747,9 @@ def _arena_rounds(rows):
         return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else 0
     out = []
     for r in _dicts(rows)[:20]:
-        text = f"Round {n(r.get('round'))}: gate {n(r.get('gate_won'))} of {n(r.get('gate_played'))} won"
+        text = (f"Round {n(r.get('round'))}: practice {n(r.get('practice_won'))} of {n(r.get('practice_played'))} "
+                "won, no gate" if r.get("practice_only") is True
+                else f"Round {n(r.get('round'))}: gate {n(r.get('gate_won'))} of {n(r.get('gate_played'))} won")
         got = r.get("reflection")
         if isinstance(got, dict):
             if n(got.get("cases")):

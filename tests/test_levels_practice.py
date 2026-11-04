@@ -1,8 +1,9 @@
 """The risk level shapes a built agent's practice (decisions 84 and 85, arena/practice.py practise):
-the gate size and the wins it needs, the rounds, the matches a round and the call cap (1,500 for a
-high run only), no failed safety check at any level (decision 110), and the item's level, gate size, failed checks,
+the gate size and the wins it needs, the rounds, the matches a round and the call cap (the day's setting,
+arena/run.py daily_cap; a high run takes at least 1,500), no failed safety check at any level (decision 110), and the item's level, gate size, failed checks,
 round scores and quick mark. Across the three agents of tests/three_agents.json. A fake model only."""
 import json
+import os
 import shutil
 import tempfile
 import unittest
@@ -56,12 +57,12 @@ class Folder(unittest.TestCase):
 
 
 class TheLevelShapesTheRun(Folder):
-    def test_no_level_file_plays_medium_ten_and_ten_at_most_two_rounds_cap_1000(self):
+    def test_no_level_file_plays_medium_ten_and_ten_at_most_three_rounds_at_the_days_cap(self):
         rep = self.practise(self.stock(), World())
         self.assertEqual(rep["stopped"], run.PASSED)
         self.assertEqual((rep["trust"]["matches"], rep["trust"]["wins"], rep["trust"]["level"]), (10, 7, "medium"))
         self.assertFalse(rep["trust"]["no_failed_checks"])  # other failed checks count at high only (decision 110)
-        self.assertEqual(rep["calls"]["cap"], 1000)
+        self.assertEqual(rep["calls"]["cap"], run.daily_cap())  # the day's setting, 3000 when not set
         self.assertEqual((rep["rounds"][0]["training"]["played"], rep["rounds"][0]["gate"]["played"]), (10, 10))
         item = self.item(rep)
         self.assertEqual({k: item[k] for k in ("level", "gate_size", "failed_checks", "scores", "quick", "needs")},
@@ -69,14 +70,15 @@ class TheLevelShapesTheRun(Folder):
                           "needs": 7})
 
     def test_high_plays_twenty_test_matches_needs_sixteen_and_its_cap_is_1500(self):
-        rep = self.practise(self.stock("high"), World())
+        with mock.patch.dict(os.environ, {run.CAP_ENV: "1000"}):  # a day's setting below the high floor
+            rep = self.practise(self.stock("high"), World())
         self.assertEqual(rep["stopped"], run.PASSED)
         self.assertEqual((rep["trust"]["matches"], rep["trust"]["wins"]), (20, 16))
         self.assertTrue(rep["trust"]["no_failed_checks"])
         self.assertEqual(rep["calls"]["cap"], 1500)
         self.assertEqual(rep["rounds"][0]["gate"]["played"], 20)
         self.assertEqual(self.item(rep)["gate_size"], 20)
-        self.assertEqual(run.DEFAULT_CAP, 1000)  # the cap is set per run, never by changing the default
+        self.assertEqual(run.DEFAULT_CAP, 3000)  # the cap is set per run, never by changing the default
 
     def test_without_study_between_rounds_it_plays_one_round_and_says_so(self):
         climbing = ["won"] + ["won"] * 5 + ["lost"] * 5 + ["won"] + ["won"] * 6 + ["lost"] * 4 + ["won"] * 11
@@ -112,7 +114,7 @@ class ZeroFailedChecksAtHigh(Folder):
     def test_one_broken_never_line_holds_back_nineteen_of_twenty(self):
         one_round = ["won"] + ["won"] * 19 + ["broke"]
         world = World(judge=judge_by(one_round * 3))
-        rep = self.practise(self.stock("high"), world, matches=1, rounds=3)
+        rep = self.practise(self.stock("high"), world, matches=1, rounds=4)  # stuck after 3 gated rounds
         self.assertNotEqual(rep["stopped"], run.PASSED)
         self.assertEqual([r["gate"]["won"] for r in rep["rounds"]], [19, 19, 19])
         self.assertEqual([r["gate"]["failed_checks"] for r in rep["rounds"]], [1, 1, 1])
@@ -170,6 +172,9 @@ class AWholeGate(Folder):
 class TheCap(Folder):
     def setUp(self):
         super().setUp()
+        p = mock.patch.dict(os.environ, {run.CAP_ENV: "1000"})  # the day's setting at 1000: high's floor is above it
+        p.start()
+        self.addCleanup(p.stop)
         self.folder = self.stock("high")
         madeup.for_agent(self.folder, "stock_watch", turn.load(self.folder).card, World())  # saved customers
 
@@ -196,8 +201,8 @@ class TheCap(Folder):
 
 class ThreeKinds(Folder):
     def test_each_plays_to_its_suggested_level(self):
-        want = {"support_calm_helper": (20, 16, 1500), "lead_trial_booker": (20, 16, 1500),
-                "coffee_caption_writer": (10, 7, 1000)}
+        want = {"support_calm_helper": (20, 16, 3000), "lead_trial_booker": (20, 16, 3000),
+                "coffee_caption_writer": (10, 7, 3000)}  # the day's 3000 is above high's 1,500 floor
         for name in THREE:
             with self.subTest(agent=name):
                 folder = agent_folder(self.root, name)

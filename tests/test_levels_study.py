@@ -1,12 +1,15 @@
 """Study between rounds for a built agent (decisions 84 and 85, arena/rounds.py BuiltBetween, arena/practice.py
 practise study= and db=): each lost practice match becomes a case in the agent's own database, the study
 writes lessons there, a lesson that passes its exam is handed in the next round, and the run climbs to its
-level, stops flat, or stops at its cap (1,500 for a high run, 1,000 for a normal one). A fake model only."""
+level, stops flat, or stops at its cap (the day's UNFENCED_DAILY_CALLS setting, 3000 when not set, and at least
+1,500 for a high run; decision 113). A fake model only."""
 import json
+import os
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from arena import levels, practice, run
 from engine.lessons import WAITING
@@ -103,9 +106,10 @@ class Base(unittest.TestCase):
 
 
 class ItClimbs(Base):
-    def test_a_high_run_climbs_across_three_rounds_to_twenty_of_twenty(self):
+    def test_a_high_run_climbs_across_three_rounds_to_twenty_of_twenty(self):  # rounds=4: three gated rounds
         folder = self.stock("high")
-        rep = self.run_it(folder, [[FIRST], [SECOND]], live_path=self.root / "ascent.db")
+        with mock.patch.dict(os.environ, {run.CAP_ENV: "1000"}):  # a setting under the floor: high keeps 1,500
+            rep = self.run_it(folder, [[FIRST], [SECOND]], live_path=self.root / "ascent.db", rounds=4)
         self.assertEqual(rep["stopped"], run.PASSED)
         self.assertEqual([r["gate"]["won"] for r in rep["rounds"]], [0, 10, 20])
         self.assertEqual([r["reflection"]["handed"] for r in rep["rounds"][:2]], [1, 1])
@@ -119,17 +123,22 @@ class ItClimbs(Base):
         self.assertIn(SECOND, mine)
         self.assertEqual(sorted(self.exams.seen), sorted([FIRST, SECOND]))
 
-    def test_a_medium_run_stops_after_two_rounds_while_it_climbs_and_keeps_the_1000_cap(self):
-        rep = self.run_it(self.stock(), [[FIRST], [SECOND]])
-        self.assertEqual((rep["stopped"], [r["gate"]["won"] for r in rep["rounds"]]), (run.ROUNDS, [0, 5]))
-        self.assertEqual(rep["calls"]["cap"], 1000)
+    def test_a_medium_run_climbs_across_three_rounds_at_the_days_cap(self):  # rounds=4: three gated rounds
+        rep = self.run_it(self.stock(), [[FIRST], [SECOND]], rounds=4)
+        self.assertEqual((rep["stopped"], [r["gate"]["won"] for r in rep["rounds"]]), (run.PASSED, [0, 5, 10]))
+        self.assertEqual(rep["calls"]["cap"], run.daily_cap())
+        self.assertEqual(run.daily_cap(), 3000)
         item = self.item(rep)
-        self.assertEqual((item["scores"], item["gate_size"], item["studied"]), ([0, 5], 10, True))
-        self.assertEqual(self.world.studied, 1)
+        self.assertEqual((item["scores"], item["gate_size"], item["studied"]), ([0, 5, 10], 10, True))
+        self.assertEqual(self.world.studied, 2)  # the study runs between rounds 1 and 2, and 2 and 3
 
-    def test_low_also_plays_two_rounds_at_the_1000_cap(self):
-        rep = self.run_it(self.stock("low"), [[FIRST]])
-        self.assertEqual((rep["stopped"], len(rep["rounds"]), rep["calls"]["cap"]), (run.PASSED, 2, 1000))
+    def test_low_plays_its_second_round_as_practice_with_the_lesson_at_the_days_cap(self):
+        rep = self.run_it(self.stock("low"), [[FIRST]])  # the default shape (decision 113)
+        self.assertEqual((rep["stopped"], len(rep["rounds"]), rep["calls"]["cap"]), (run.ROUNDS, 2, 3000))
+        two = rep["rounds"][1]
+        self.assertEqual((two.get("practice_only"), two["gate"]["played"]), (True, 0))
+        self.assertEqual((two["training"]["won"], two["training"]["played"]), (5, 10))  # the lesson was handed
+        self.assertNotIn("passed_on", rep)  # 5 of 30 is under 15 of 30
 
     def test_a_lesson_that_waits_for_yes_is_never_handed(self):
         folder = self.stock("high")
@@ -147,7 +156,7 @@ class ItClimbs(Base):
                 folder = agent_folder(root, name)
                 levels.write(folder, "medium")
                 rep = self.run_it(folder, [[FIRST]], root=root)
-                self.assertEqual(len(rep["rounds"]), 2)
+                self.assertEqual(len(rep["rounds"]), 2)  # practice and gate, then practice only (decision 113)
                 self.assertTrue(rep["rounds"][0]["reflection"]["cases"])
                 self.assertTrue(self.item(rep, root)["studied"])
 
@@ -171,17 +180,17 @@ class ItClimbs(Base):
         self.assertEqual(self.world.handed_seen[0], (1, False))
 
     def test_a_lesson_that_passes_its_exam_but_loses_a_past_win_is_not_handed(self):
-        rep = self.run_it(self.stock("high"), [[FIRST], [BREAKS]])
+        rep = self.run_it(self.stock("high"), [[FIRST], [BREAKS]], rounds=4)  # three gated rounds
         two = rep["rounds"][1]["reflection"]
         self.assertEqual((two["passed"], two["refused"], two["handed"]), (0, 1, 0))
         self.assertGreater(two["broke"], 0)
-        self.assertEqual([r["gate"]["won"] for r in rep["rounds"]], [0, 10, 10])
+        self.assertEqual([r["gate"]["won"] for r in rep["rounds"] if not r.get("practice_only")], [0, 10, 10])
         self.assertIn(BREAKS, self.exams.seen)  # it passed the exam itself; the rerun of the past wins held it
 
 
 class ItStops(Base):
     def test_flat_when_no_lesson_passes_the_exam(self):
-        rep = self.run_it(self.stock("high"), [[FIRST], [SECOND]], refuse=(FIRST, SECOND))
+        rep = self.run_it(self.stock("high"), [[FIRST], [SECOND]], refuse=(FIRST, SECOND), rounds=4)  # 3 gated
         self.assertEqual((rep["stopped"], [r["gate"]["won"] for r in rep["rounds"]]), (run.STUCK, [0, 0, 0]))
         item = self.item(rep)
         self.assertEqual((item["kind"], item["scores"]), ("arena_stuck", [0, 0, 0]))
@@ -190,7 +199,7 @@ class ItStops(Base):
         self.assertNotIn("cap", kinds)
 
     def test_flat_when_the_study_finds_no_lesson(self):
-        rep = self.run_it(self.stock("high"), [])
+        rep = self.run_it(self.stock("high"), [], rounds=4)  # three gated rounds, so it can stop flat
         self.assertEqual(rep["stopped"], run.STUCK)
         self.assertIn("no_lesson", [b["kind"] for b in self.item(rep)["blocks"]])
 

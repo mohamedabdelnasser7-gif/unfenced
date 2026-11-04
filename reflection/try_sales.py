@@ -144,7 +144,7 @@ class TrySales:
     def _model(self, m):
         if m.reports is None:
             raise Refused(NO_FOLDER)
-        calls = run.Calls(m.reports / run.CALLS_FILE, run.DEFAULT_CAP)
+        calls = run.Calls(m.reports / run.CALLS_FILE)
         if calls.problem:
             raise Refused(f"Not answered: {calls.problem}.")
         if calls.count >= calls.cap:

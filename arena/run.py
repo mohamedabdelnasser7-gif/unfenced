@@ -1,7 +1,7 @@
 """The Arena loop and its gate (new, 2026-10-30; DECISIONS items 4, 7, 14, 17, 18, 30, 48, 51).
 
-    python3 -I arena/run.py --cards DIR --matches N [--rounds 5] [--held-out persona-03,persona-07]
-        [--trust FILE] [--customer-prompt FILE] [--cap 1000] [--state DIR] [--db PATH]
+    python3 -I arena/run.py --cards DIR --matches N [--rounds 2] [--held-out persona-03,persona-07]
+        [--trust FILE] [--customer-prompt FILE] [--cap 3000] [--state DIR] [--db PATH]
         [--replay FILE [--replay-max 10]] [--fact-checks on|off] [--seed 0] [--json] [--quick]
 
 Each round: N training matches, each card drawn by its arena_weight from the cards the agent may
@@ -38,10 +38,21 @@ outside it, shaped like {"sales": {"matches": 4, "wins": 3, "zero_failed_checks"
 numbers, not a real level). With none, the public placeholder below asks 7 of 10 gate matches won. zero_failed_checks (on unless the level says
 false; --fact-checks overrides it): a match with any failed fact check is lost (arena/verdict.py).
 
-The loop stops on a pass, at the model call cap, at a model that does not answer (that match is
+The loop stops on a pass, at the model call cap, at Stop (stop, the page's Stop button: it ends as
+"stopped" before the next group of matches, never passes, and saves its item so the page shows what played), at a model that does not answer (that match is
 dropped as a capped one is, never counted as lost; the report names the error), or after
 NO_GAIN_ROUNDS rounds in a row with no more gate wins than the best round before; then the stuck point is written next to the database
-(or in --state) as arena-<agent>-<time>.json, an item for the Morning page. between(round), when
+(or in --state) as arena-<agent>-<time>.json, an item for the Morning page. The run's shape (Mohamed
+2026-11-05, decision 113): at most 30 matches. Round 1 is 10 practice matches and the gate; a gate that reaches
+the level (with its clean checks) passes at once, after 20 matches. When it misses, the study runs, then round 2
+(DEFAULT_ROUNDS 2) plays 10 more practice matches with the new lessons and no gate (practice_only), and the run
+ends. With more rounds asked, only the last one is practice only. It then passes on its average (_average) when
+every planned match was played and judged, at least AVERAGE_PRACTICE of them practice, the wins of all of them
+over all of them reach the level's wins over its gate size (21 of 30 at 7 of 10), no gate is held by the round
+rule's checks (_clean: for a built agent, no broken never line and at high no failed safety check) and no match
+of the run broke a never line. Its report and item say "passed_on": "average" with the counts; else it stops as
+"rounds" and the item shows the losses. --quick plays its one round with its gate and never passes on its
+average. between(round), when
 given, runs before each round after the first. With --db and more than one round the CLI fills it
 (arena/rounds.py, DECISIONS item 9a): the night study on the round's lost training matches, every
 new lesson through the eval gate, and only the lessons that pass and may go ahead with no further
@@ -76,7 +87,7 @@ and 40). The made-up set is DEMO_CARDS (demo/personas/cards); the tests use it a
 arena/real/.
 
 Model calls: every call of the agent and of the customer counts against the cap a day (Cairo
-day), default 1000, saved in arena-calls.json after each call under a lock (arena-calls.lock), so
+day), default the UNFENCED_DAILY_CALLS setting in env or .env (daily_cap: 3000 when it is not set), saved in arena-calls.json after each call under a lock (arena-calls.lock), so
 the count holds across runs and two runs at once share one cap. A count file that is there but
 cannot be read, or holds no whole count for today, counts as the cap reached (Calls.problem says
 why, and so does the report) until it is fixed or removed, so a broken count never starts at 0.
@@ -136,8 +147,11 @@ AGENT = "sales"
 DEFAULT_CARDS = ROOT / "arena" / "real" / "cards"  # the cleaned real cards (DECISIONS items 23 and 40)
 DEMO_CARDS = ROOT / "demo" / "personas" / "cards"  # the made-up set: the tests use it
 CALLS_FILE, MATCHES_FILE = "arena-calls.json", "arena-matches.jsonl"
-DEFAULT_CAP = 1000
-DEFAULT_ROUNDS = 5
+DEFAULT_CAP = 3000  # model calls a day when UNFENCED_DAILY_CALLS is not set; read the cap with daily_cap()
+CAP_ENV = "UNFENCED_DAILY_CALLS"  # in env or .env (.env.example)
+DEFAULT_ROUNDS = 2  # decision 113: round 1 practice and gate, round 2 practice only (Arena run)
+AVERAGE_PRACTICE = 20  # the fewest practice matches an average pass reads: two rounds of 10 (Arena._average)
+AVERAGE = "average"  # the report's and item's passed_on when the run passed on its average
 NO_GAIN_ROUNDS = 2
 HELD_OUT_SHARE = 0.3
 GATE_CAP = 0.3  # decision 101: no one card group plays more than 3 of 10 gate matches (scaled to the gate's size)
@@ -145,6 +159,8 @@ GROWN = "grown-"  # the id of a card grown from real chats (arena/grow.py): it t
 PUBLIC_TRUST = {"matches": 10, "wins": 7, "zero_failed_checks": True}  # the Sales level, public (DECISIONS item 63)
 TZ = "Africa/Cairo"
 PASSED, CAP, STUCK, ROUNDS, MODEL_ERROR = "passed", "cap", "stuck", "rounds", "model_error"
+STOPPED = "stopped"  # the person pressed Stop (Morning.stop_run): the run ended there and never passes
+AVERAGE_LINE = "Passed on its average over {played} matches: {won} of {played}."
 # What play returns for a match it played but could not judge (arena/practice.py: the judge's answer could not
 # be read twice): the run goes on, the match counts neither won nor lost, and the round counts it as unjudged.
 UNJUDGED = "unjudged"
@@ -161,11 +177,12 @@ QUICK_STATE = ROOT / "data" / "arena-quick"
 
 
 PARALLEL_ENV = "UNFENCED_ARENA_PARALLEL"  # in env or .env (.env.example)
-MAX_PARALLEL = 5  # matches at once at most, and when PARALLEL_ENV is not set (Mohamed 2026-11-05)
+MAX_PARALLEL = 10  # Mohamed 2026-11-05: up to 10 matches at a time, 10 by default (decision 113)
 
 
 def _parallel():
-    """PARALLEL_ENV from env: 1 to MAX_PARALLEL matches at a time, MAX_PARALLEL when it is not set or not a number."""
+    """PARALLEL_ENV from env: 1 to MAX_PARALLEL matches at a time, MAX_PARALLEL when it is not set or not a
+    number."""
     raw = os.environ.get(PARALLEL_ENV, "").strip()
     try:
         n = int(raw) if raw else MAX_PARALLEL
@@ -180,6 +197,28 @@ def _parallel():
 PARALLEL = None
 WRITE_LOCK = threading.Lock()  # one writer at a time on a matches file (append_line)
 _LANE = threading.local()  # box: what a match played beside others sets, folded in by Arena.run in match order
+
+
+def last_gate(rounds):
+    """The gate of the last round that played one (a practice only round has none, decision 113)."""
+    gated = [r for r in rounds if not r.get("practice_only")]
+    return (gated or rounds)[-1]["gate"]
+
+
+def practice_counts(rounds):
+    """{"won", "played"}: the practice matches of every round."""
+    return {"won": sum(r["training"]["won"] for r in rounds), "played": sum(r["training"]["played"] for r in rounds)}
+
+
+def daily_cap():
+    """The day's model call cap: CAP_ENV from env (main loads .env first), read at each use, a whole number of at
+    least 1; DEFAULT_CAP when it is not set or not a number."""
+    raw = os.environ.get(CAP_ENV, "").strip()
+    try:
+        n = int(raw) if raw else DEFAULT_CAP
+    except ValueError:
+        n = DEFAULT_CAP
+    return max(n, 1)
 
 
 def parallel():
@@ -274,9 +313,10 @@ class Calls:
     a file. count is the day's count when last read; taken, the calls this object took. problem: why
 the count file could not be read, when it could not; then every take() is refused as at the cap."""
 
-    def __init__(self, path, cap=DEFAULT_CAP, day=None, limit=None):
-        """limit: at most this many calls by this object (the quick run), on top of the day's cap."""
-        self.path, self.cap = Path(path), int(cap)
+    def __init__(self, path, cap=None, day=None, limit=None):
+        """cap: None for the day's setting (daily_cap). limit: at most this many calls by this object (the quick
+        run), on top of the day's cap."""
+        self.path, self.cap = Path(path), daily_cap() if cap is None else int(cap)
         if self.cap < 1:
             raise Refused("--cap must be at least 1")
         self.limit = None if limit is None else int(limit)
@@ -604,6 +644,8 @@ def load_trust(path, agent=AGENT):
 class Arena:
     agent = AGENT  # the name its report and Morning page item carry; arena/practice.py sets its own
     halt, error, off_error = _Laned(), _Laned(), _Laned()  # set by a match: per lane when matches play together
+    stop = None  # a callable, True once Stop was pressed (Morning.stop_run); play and practise set it
+    average = None  # the average pass's counts, set by run when the run passed on its average (_average)
 
     def __init__(self, cards, *, agent_model, customer_model, calls, trust=None, prompt=match_mod.GENERIC_PROMPT,
                  prompt_file=None, held_out=None, matches=10, rounds=DEFAULT_ROUNDS, fact_checks=None, seed=0,
@@ -830,9 +872,15 @@ class Arena:
         """The quick notes for match_mod.play (fast=, which it hands to loop.turn)."""
         return {} if self.notes is None else {"fast": self.notes}
 
+    def _stop_asked(self):
+        """True once Stop was pressed: the run ends before its next group of matches (or study)."""
+        return self.stop is not None and bool(self.stop())
+
     def run(self):
         rounds, best, flat, stopped = [], None, 0, ROUNDS
         for r in range(1, self.rounds + 1):
+            if r > 1 and self._stop_asked():
+                return self._report(rounds, STOPPED)
             if r > 1 and self.between is not None:
                 got = self.between(r - 1)
                 if isinstance(got, dict):  # arena/rounds.py: the night study and the gate on the round before
@@ -846,9 +894,13 @@ class Arena:
                     return self._report(rounds, CAP)
             one = {"round": r, "training": {"played": 0, "won": 0, "cases": []},
                    "gate": {"played": 0, "won": 0, "lost": []}, "sales": 0, "closes": 0}
+            if self._practice_only(r):  # the last round: practice with the new lessons, no gate (decision 113)
+                one["practice_only"] = True
             rounds.append(one)
             k, size = 1, parallel()
             while k <= self.matches:  # in groups of PARALLEL: a group plays with the notes and pool as it began
+                if self._stop_asked():
+                    return self._report(rounds, STOPPED)
                 jobs = []
                 handed = bool(self.notes is not None and getattr(self.notes, "held", None))  # this group plays with notes
                 while k <= self.matches and len(jobs) < size:
@@ -872,9 +924,13 @@ class Arena:
                     if out is None:
                         return self._report(rounds, self.halt)
                     self._fold_practice(one, card, out, handed)
+            if one.get("practice_only"):
+                break
             plan = gate_plan(self.gate_cards, self.trust["matches"], self.gate_rng, self.gate_most,
                              once=getattr(self, "once", False))
             for start in range(0, self.trust["matches"], size):  # the plan is fixed; each group's ids in order
+                if self._stop_asked():
+                    return self._report(rounds, STOPPED)
                 jobs = [(plan[k - 1], self.gate_id(r, k), {})  # the real mix, at most gate_most of a card group
                         for k in range(start + 1, min(start + size, self.trust["matches"]) + 1)]
                 for out in self._together(jobs):
@@ -889,7 +945,48 @@ class Arena:
             if flat >= NO_GAIN_ROUNDS:
                 stopped = STUCK
                 break
+        self.average = self._average(rounds)  # the gate missed: the run may still pass on its average
+        if self.average is not None:
+            return self._report(rounds, PASSED)
         return self._report(rounds, stopped)
+
+    def _practice_only(self, r):
+        """Round r plays practice matches and no gate: the last round of a run of more than one (decision 113)."""
+        return not self.quick and self.rounds > 1 and r == self.rounds
+
+    def _average(self, rounds):
+        """The average pass, once the loop ended with no gate passed: {"won", "played", "practice", "gate",
+        "never_broken", "failed_checks"} when every round was played to its end with its last one practice only,
+        every practice and gate match judged (each round its whole practice, each gate its whole size), at least
+        AVERAGE_PRACTICE practice matches, no gate held by the round rule's checks (_clean), no match of the run
+        that broke a never line, and the wins of all the matches over all of them at least the level's wins over
+        its gate size; else None. Never for --quick."""
+        size = self.trust["matches"]
+        if self.quick or len(rounds) != self.rounds or not rounds or not rounds[-1].get("practice_only"):
+            return None
+        gates = [r for r in rounds if not r.get("practice_only")]
+        if not gates or any(r["gate"]["played"] != size or r["gate"].get("unjudged") for r in gates):
+            return None
+        if any(r["training"]["played"] != self.matches or r["training"].get("unjudged") for r in rounds):
+            return None
+        practice, gate = sum(r["training"]["played"] for r in rounds), sum(r["gate"]["played"] for r in gates)
+        if practice < AVERAGE_PRACTICE or not all(self._clean(r) for r in gates):
+            return None
+        never = sum(r["training"].get("never_broken", 0) for r in rounds) + sum(
+            r["gate"].get("never_broken", 0) for r in gates)
+        if never:
+            return None
+        won = sum(r["training"]["won"] for r in rounds) + sum(r["gate"]["won"] for r in gates)
+        played = practice + gate
+        if won * size < self.trust["wins"] * played:
+            return None
+        return {"won": won, "played": played, "practice": practice, "gate": gate, "never_broken": 0,
+                "failed_checks": sum(r["gate"].get("failed_checks", 0) for r in gates)}
+
+    def _clean(self, one):
+        """No check the round rule refuses on failed in the round's gate. The Sales agent's round rule is its wins
+        alone (a failed fact check already loses its match), so always True here; arena/practice.py adds its own."""
+        return True
 
     def _together(self, jobs):
         """Plays jobs [(card, match_id, play keywords)] at once, one thread each (one alone plays here as
@@ -975,6 +1072,8 @@ class Arena:
         if handed:
             one["training"]["notes_handed"] = one["training"].get("notes_handed", 0) + 1
         one["training"]["won"] += judged["won"]
+        if judged.get("never_broken"):  # a built agent's broken never line: it holds the average pass (decision 113)
+            one["training"]["never_broken"] = one["training"].get("never_broken", 0) + 1
         self._count(one, judged)
         if off:
             one["training"]["off_topic"] = {"card": card["id"], "about": card["about"],
@@ -1050,11 +1149,15 @@ class Arena:
             rep["calls"]["run_limit"], rep["calls"]["run_used"] = self.calls.limit, self.calls.taken
         if stopped == MODEL_ERROR:
             rep["error"] = self.error
+        if stopped == PASSED and self.average is not None:
+            rep["passed_on"], rep["average"] = AVERAGE, dict(self.average)
         if stopped == STUCK:
             rep["stuck"] = self.stuck_item(rounds)
-        elif rounds and (stopped == PASSED or self.quick or any("reflection" in r for r in rounds)):
+        elif rounds and (stopped in (PASSED, STOPPED) or self.quick or rounds[-1].get("practice_only")
+                         or any("reflection" in r for r in rounds)):
             # a round one pass unlocks Connect too; a short run (quick) always saves its item, so the page shows
-            # its losses and the next step, and never unlocks Connect with it (Morning.gate reads quick)
+            # its losses and the next step, and never unlocks Connect with it (Morning.gate reads quick); so does a
+            # run that played its practice only round and missed its average, as the stuck one did (decision 113)
             rep["item"] = self.rounds_item(rounds, stopped)
         return rep
 
@@ -1068,14 +1171,18 @@ class Arena:
             keep = None if got is None else {k: got.get(k) for k in (
                 "after_round", "cases", "proposed", "passed", "refused", "waits_for_yes", "handed", "fixed", "broke",
                 "calls", "stopped")}
-            out.append({"round": r["round"], "gate_won": r["gate"]["won"], "gate_played": r["gate"]["played"],
-                        "reflection": keep})
+            row = {"round": r["round"], "gate_won": r["gate"]["won"], "gate_played": r["gate"]["played"],
+                   "reflection": keep}
+            if r.get("practice_only"):  # no gate in it (decision 113): its practice counts instead
+                row.update(practice_only=True, practice_won=r["training"]["won"],
+                           practice_played=r["training"]["played"])
+            out.append(row)
         return out
 
     def rounds_item(self, rounds, stopped):
         """The run's rounds with their Reflection counts as a Morning page item, written next to
         the database as the stuck item is (a run that got stuck writes that one, with the same rows)."""
-        last = rounds[-1]["gate"]
+        last = last_gate(rounds)
         item = {"agent": self.agent, "kind": "arena_rounds", "at": self.now(), "run": self.run_id, "stopped": stopped,
                 "rounds": len(rounds), "gate_won": last["won"], "gate_played": last["played"],
                 "needs": self.trust["wins"], "quick": self.quick, "fact_checks": self.facts, "lost": last["lost"][:3],
@@ -1083,6 +1190,15 @@ class Arena:
                 **Arena.offer_counts(self, rounds),
                 "line": f"The Arena ran {len(rounds)} round{'' if len(rounds) == 1 else 's'} and stopped, {stopped}: "
                         f"{last['won']} of {last['played']} gate matches won in the last, {self.trust['wins']} needed."}
+        if stopped == PASSED and self.average is not None:
+            item.update(passed_on=AVERAGE, average=dict(self.average), line=AVERAGE_LINE.format(**self.average))
+        elif stopped == STOPPED:
+            item["line"] = f"You stopped the Arena in round {len(rounds)}, so it did not pass."
+        elif stopped == ROUNDS and rounds[-1].get("practice_only"):  # the gate missed and the average did too
+            t = practice_counts(rounds)
+            item["line"] = (f"The Arena played {t['played'] + last['played']} matches and did not pass: {last['won']} "
+                            f"of {last['played']} gate matches won, {self.trust['wins']} needed, and "
+                            f"{t['won'] + last['won']} of {t['played'] + last['played']} in all.")
         return self._write_item(item)
 
     def offer_counts(self, rounds):
@@ -1094,7 +1210,7 @@ class Arena:
 
     def stuck_item(self, rounds):
         """The stuck point as a Morning page item, written next to the database."""
-        last = rounds[-1]["gate"]
+        last = last_gate(rounds)
         item = {"agent": self.agent, "kind": "arena_stuck", "at": self.now(), "run": self.run_id,
                 "rounds": len(rounds), "gate_won": last["won"], "gate_played": last["played"],
                 "needs": self.trust["wins"], "fact_checks": self.facts, "lost": last["lost"][:3],
@@ -1416,6 +1532,10 @@ def text(rep):
              f"  trust level: {rep['trust']['wins']} of {rep['trust']['matches']} gate matches; "
              f"fact checks {'on' if rep['fact_checks'] else 'off'}",
              f"  cards: {len(rep['training_cards'])} to train on, held out of training {', '.join(rep['held_out_cards'])}"]
+    if rep.get("passed_on") == AVERAGE and isinstance(rep.get("average"), dict):  # no round alone passed
+        lines.append("  " + AVERAGE_LINE.format(**rep["average"]))
+    elif rep["stopped"] == STOPPED:
+        lines.append("  stopped by you before its next group of matches; a stopped run never passes")
     mix = rep.get("gate_mix")
     if mix:  # decision 101: the gate's real mix and its cap, and the line when the cap was relaxed
         lines.append(f"  gate: {mix['cards']} card{'' if mix['cards'] == 1 else 's'} that can buy, each at its real share of "
@@ -1430,7 +1550,8 @@ def text(rep):
     for r in rep["rounds"]:
         t, g = r["training"], r["gate"]
         lines.append(f"  round {r['round']}: training {t['won']} of {t['played']} won, {len(t['cases'])} cases to "
-                     f"Reflection; gate {g['won']} of {g['played']} won")
+                     + ("Reflection; no gate (practice only)" if r.get("practice_only")
+                        else f"Reflection; gate {g['won']} of {g['played']} won"))
         said = notes_mod.summary(t.get("notes") or [], t.get("notes_handed", 0))
         if said:  # written, stopped by the guard (by mark) and handed, every round (losses part E)
             lines.append("    " + said)
@@ -1531,7 +1652,7 @@ def parser():
     ap.add_argument("--held-out", default="", help="card ids held out, comma separated")
     ap.add_argument("--trust", default=None, help="the trust levels file, outside the repo")
     ap.add_argument("--customer-prompt", default=None, help="the tuned customer prompt, outside the repo")
-    ap.add_argument("--cap", type=int, default=DEFAULT_CAP, help="model calls a day")
+    ap.add_argument("--cap", type=int, default=None, help=f"model calls a day ({CAP_ENV}, else {DEFAULT_CAP})")
     ap.add_argument("--exam-cap", type=int, default=None, help="model calls one lesson's exam may take between rounds")
     ap.add_argument("--state", default=None, help="the folder for the call count and the matches, for a run with no --db")
     ap.add_argument("--db", default=None, help="the Sales agent's database: the Arena practises on its copy, <db>.arena beside it")
@@ -1568,12 +1689,13 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
     return 0 if rep["stopped"] == PASSED else 1
 
 
-def play(args, *, agent_model=None, customer_model=None, reflection=None, limit=None):
+def play(args, *, agent_model=None, customer_model=None, reflection=None, limit=None, stop=None):
     """One Arena run from parsed options (parser): the report, or Refused (or an error main names). The command
     line (main) and the Morning page's Run the Arena (reflection/morning.py run_arena) both run it. A real run
     makes its models here (agent_model or customer_model None), after the caller checked the key. limit: at
     most this many model calls in this run, on top of the day's cap (the page's short run); --quick's own
-    QUICK_CALLS otherwise."""
+    QUICK_CALLS otherwise. stop: a callable, True once Stop was pressed (the page's Morning.stop_run), checked
+    before every group of matches; the run then ends as STOPPED."""
     db, live = None, []
     try:
         cards = load_cards(args.cards)
@@ -1660,6 +1782,7 @@ def play(args, *, agent_model=None, customer_model=None, reflection=None, limit=
                       learn=learn, between=between, lessons=lessons, state=state, pool=practice,
                       before_match=before_match, notes=notes, judge_model=judge_model, off_topic=made)
         arena.quick = bool(args.quick)
+        arena.stop = stop
         rep = arena.run()
         if planned is not None:
             rep["replay"] = (arena.replay(*planned) if rep["stopped"] == PASSED

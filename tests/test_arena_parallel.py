@@ -1,4 +1,4 @@
-"""Arena matches up to 5 at a time (arena/run.py PARALLEL): the same saved run as one by one, groups that really
+"""Arena matches several at a time (arena/run.py PARALLEL, 1 to 10, 10 when unset): the same saved run as one by one, groups that really
 overlap, the cap inside a group, quick notes carried group to group, whole lines on the matches file."""
 import json
 import os
@@ -59,16 +59,18 @@ class Same(P):
         one, lines_one = self.go(1, "one")
         three, lines_three = self.go(3, "three")
         self.assertEqual(lines_three, lines_one)  # the same matches, in the same order, byte for byte
+        # the saved item's seal is keyed by a random key in each run's own folder (kit/seal.py), so it is left out
+        self.assertNotEqual(one["item"].pop("seal"), three["item"].pop("seal"))
         self.assertEqual(json.dumps(three, sort_keys=True), json.dumps(one, sort_keys=True))
         self.assertEqual(three["stopped"], one["stopped"])
         self.assertEqual([r["gate"]["lost"] for r in three["rounds"]], [r["gate"]["lost"] for r in one["rounds"]])
         self.assertTrue(any(r["gate"]["lost"] for r in one["rounds"]))  # the test has losses to compare
         self.assertTrue(no_match_threads())
 
-    def test_the_setting_is_one_to_five_and_five_when_unset(self):
-        self.assertEqual(run.MAX_PARALLEL, 5)
-        for raw, want in (("", 5), ("1", 1), ("2", 2), ("3", 3), ("4", 4), ("5", 5), ("6", 5), ("9", 5), ("0", 1),
-                          ("x", 5)):
+    def test_the_setting_is_one_to_ten_and_ten_when_unset(self):
+        self.assertEqual(run.MAX_PARALLEL, 10)
+        for raw, want in (("", 10), ("1", 1), ("2", 2), ("3", 3), ("9", 9), ("10", 10), ("11", 10), ("0", 1),
+                          ("x", 10)):
             with self.subTest(raw=raw), mock.patch.dict(os.environ, {run.PARALLEL_ENV: raw}):
                 self.assertEqual(run._parallel(), want)
         with mock.patch.object(run, "PARALLEL", None), mock.patch.dict(os.environ, {run.PARALLEL_ENV: "2"}):

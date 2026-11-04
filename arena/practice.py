@@ -1,7 +1,7 @@
 """Arena practice for an agent made by Quick start (new, 2026-11-01; DECISIONS items 4, 14, 20, 21, 48, 51, 58).
 
     python3 -I arena/practice.py --agent DIR [--level low|medium|high] [--matches 10] [--rounds 2]
-        [--cards DIR] [--trust FILE] [--cap 1000] [--gate W/N] [--seed 0] [--json] [--quick]
+        [--cards DIR] [--trust FILE] [--cap 3000] [--gate W/N] [--seed 0] [--json] [--quick]
     python3 -I arena/practice.py --agent DIR --new-test-set
 
 DIR is the agent's folder, <db folder>/agents/<name>/, with plug.json, instructions.md and card.json
@@ -53,8 +53,11 @@ The trust level. The agent's risk level (arena/levels.py, its level.json; decisi
 the gate: low 5 of 10, medium 7 of 10, high 16 of 20, each with not one broken never line in the round,
 whatever the win count (decision 110, good.BROKE; the old --trust and --gate runs too), and at high not
 one failed safety check of any kind either (a line the send check refused, good.FAILED), and the run's
-shape: 10 practice matches a round, at most 2 rounds (3 at high), a cap of 1,000 calls (1,500 for a
-high run only). --trust or --gate W/N plays the old practice gate instead (the trust file's level, as
+shape (decision 113, the same at every level): round 1 is 10 practice matches and the gate; when the gate
+misses, the study, then 10 more practice matches and no gate, and the run passes on its average over all its
+matches as arena/run.py Arena._average says (held by a broken never line in any match, and at high by a failed
+safety check in the gate, _clean); the day's cap of arena/run.py daily_cap (UNFENCED_DAILY_CALLS, 3000 when not
+set; a high run takes at least 1,500). --trust or --gate W/N plays the old practice gate instead (the trust file's level, as
 a share W of N while the customers are made up, DECISIONS item 75). Fact checks are on, and the report names the plug's careful trial level ({level,
 share, days}), the one a lesson it earns starts on until real chats exist and a person flips the
 switch. The item carries the level, the gate size, the failed checks of the last round and the
@@ -604,6 +607,11 @@ class Practice(run.Arena):
         the win count (decision 110), and, when it asks (high), not one failed safety check of any kind."""
         if not super()._passed(one) or one["gate"]["played"] != self.trust["matches"]:
             return False
+        return self._clean(one)
+
+    def _clean(self, one):
+        """The round rule's checks on its gate (_passed, and the average pass reads it for the gate): not one
+        broken never line, and, when the level asks (high), not one failed safety check of any kind."""
         if one["gate"].get("never_broken", 0):
             return False
         return not self.trust.get("no_failed_checks") or one["gate"].get("failed_checks", 0) == 0
@@ -613,7 +621,7 @@ class Practice(run.Arena):
         failed, lessons waiting for a yes, lessons the exam refused, a study that found no lesson, no
         study between rounds, tools named but not built, the call cap; first, test matches left unjudged."""
         out = []
-        last = rounds[-1]["gate"] if rounds else {}
+        last = run.last_gate(rounds) if rounds else {}
         n = last.get("unjudged", 0)
         if n:
             out.append({"kind": "unjudged", "line": f"{n} test match{'' if n == 1 else 'es'} could not be judged "
@@ -627,6 +635,10 @@ class Practice(run.Arena):
         if n > 0 and self.trust.get("no_failed_checks"):
             out.append({"kind": "safety", "line": f"{n} test match{'' if n == 1 else 'es'} failed a safety check "
                                                    "(a line the send check refused)."})
+        broke = sum(r["training"].get("never_broken", 0) for r in rounds)
+        if broke:  # a practice match's broken never line holds the average pass (decision 113)
+            out.append({"kind": "safety", "line": f"{broke} practice match{'' if broke == 1 else 'es'} broke a "
+                                                   "never line, so it could not pass on its average."})
         studies = [r["reflection"] for r in rounds if isinstance(r.get("reflection"), dict)]
         waits = sum(s.get("waits_for_yes", 0) for s in studies)
         if waits:
@@ -644,6 +656,8 @@ class Practice(run.Arena):
             out.append({"kind": "tools", "line": "Tools named but not built yet: " + ", ".join(self.who.missing) + "."})
         if stopped == run.CAP:
             out.append({"kind": "cap", "line": f"The run reached its cap of {self.calls.cap} model calls."})
+        if stopped == run.STOPPED:
+            out.append({"kind": "stopped", "line": "You stopped the run, so it could not pass. Run the Arena again."})
         return out
 
     def _report(self, rounds, stopped):
@@ -663,12 +677,12 @@ class Practice(run.Arena):
         last_round = f"{self.run_id}-r{len(rounds)}-t"
         item["lost"] = [{k: x[k] for k in ("card", "why", "quote")} for x in self.lost
                         if str(x["id"]).startswith(last_round)]
-        last = rounds[-1]["gate"] if rounds else {}
+        last = run.last_gate(rounds) if rounds else {}
         item.setdefault("quick", self.quick)  # a stuck item too, so Morning.gate reads it the same way
         item.setdefault("stopped", run.STUCK if item.get("kind") == "arena_stuck" else None)
         item.update(level=self.level, gate_size=self.trust["matches"], failed_checks=last.get("failed_checks", 0),
                     never_broken=last.get("never_broken", 0), unjudged=last.get("unjudged", 0),
-                    scores=[r["gate"]["won"] for r in rounds], no_failed_checks=bool(self.trust.get("no_failed_checks")),
+                    scores=[r["gate"]["won"] for r in rounds if not r.get("practice_only")], no_failed_checks=bool(self.trust.get("no_failed_checks")),
                     studied=self.between is not None)
         if item.get("stopped") != run.PASSED:
             item["blocks"] = self.blocks(rounds, item.get("stopped"))
@@ -1205,7 +1219,7 @@ def shared_cards(folder, plug):
 
 def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=None, rounds=None, cards=None,
              trust=None, cap=None, seed=0, quick=False, learn=None, gate=None, level=None, study=None, db=None,
-             live_path=None, customers=None, gate_size=None, off_topic=False, limit=None):
+             live_path=None, customers=None, gate_size=None, off_topic=False, limit=None, stop=None):
     """One practice run of the agent in agent_folder: the report (arena/run.py Arena run). quick: the
     --quick shape (one training match, a gate of one, at most QUICK_CALLS model calls); with matches given,
     that many training matches in its one round, and limit (when given) in place of QUICK_CALLS: the page's
@@ -1213,7 +1227,9 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
     each lost training match (Practice). level: the risk level (arena/levels.py), else the one in the
     agent's level.json; it sets the gate (its size, the wins it needs; no broken never line at any level,
     no failed safety check at high)
-    and, unless given, the rounds, the matches a round and the call cap (1,500 for a high run only).
+    and, unless given, the rounds, the matches a round and the call cap (the day's setting, arena/run.py
+    daily_cap; a high run takes at least 1,500). stop: a callable, True once Stop was pressed (the page's
+    Morning.stop_run); the run ends as arena/run.py STOPPED before its next group of matches.
     trust or gate: the old gate instead of the level's: the trust file's level for the agent and, with
     made-up customers, gate (wins, matches) as a share of it (7 of 10 by default).
     study and db: study between rounds (arena/rounds.py BuiltBetween): study, the night's models
@@ -1238,7 +1254,8 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
     studies = study is not None and db is not None and not quick
     if rounds is None:  # more rounds only help with study between them
         rounds = shape["rounds"] if studies else 1
-    cap = shape["cap"] if cap is None else cap
+    if cap is None:  # the day's setting; a level's own floor (high, 1,500) when the setting is lower
+        cap = run.daily_cap() if shape["cap"] is None else max(run.daily_cap(), shape["cap"])
     old_gate = quick or trust is not None or gate is not None
     if not old_gate:
         customers = shape["customers"] if customers is None else customers
@@ -1330,6 +1347,7 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
                      between=between, lessons=pool, before_match=None if pool is None else pool.refresh,
                      off_topic=off_topic and not quick, shared=shared_cards(folder, agent.plug), notes=notes)
     arena.quick = bool(quick)  # its item says so, so a quick practice never unlocks Connect (Morning.gate)
+    arena.stop = stop
     return arena.run()
 
 
@@ -1394,10 +1412,11 @@ def main(argv=None, *, agent_model=None, customer_model=None, judge_model=None, 
     ap = argparse.ArgumentParser(prog="arena/practice.py", description="Arena practice for an agent made by Quick start.")
     ap.add_argument("--agent", required=True, help="the agent's folder, <db folder>/agents/<name>/")
     ap.add_argument("--matches", type=int, default=None, help="training matches a round (the level's, 10)")
-    ap.add_argument("--rounds", type=int, default=None, help="rounds at most (the level's, 2 or 3 at high)")
+    ap.add_argument("--rounds", type=int, default=None, help="rounds at most (the level's, 2: the second plays practice only)")
     ap.add_argument("--cards", default=None, help="cleaned real cards to play instead of made-up customers")
     ap.add_argument("--trust", default=None, help="the trust levels file, outside the repo")
-    ap.add_argument("--cap", type=int, default=None, help="model calls a day (the level's, 1,500 at high)")
+    ap.add_argument("--cap", type=int, default=None,
+                    help="model calls a day (UNFENCED_DAILY_CALLS, else 3000; at least 1,500 at high)")
     ap.add_argument("--gate", default=None, help="with made-up customers, the gate matches to win: W/N, instead "
                     "of the risk level's")
     ap.add_argument("--level", default=None, choices=levels.ORDER, help="the risk level, else the agent's level.json")

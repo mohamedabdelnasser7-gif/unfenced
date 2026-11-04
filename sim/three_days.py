@@ -181,7 +181,7 @@ def build(folder, *, seed=None):
 def _practice(cards, aside, reports, seed, t):
     """A small simulated practice run in the Arena at night: the Arena's own run and its own saved
     item (stuck_item, next to the database), labelled simulated. The matches stay aside."""
-    calls = arena_run.Calls(aside / "calls.json", arena_run.DEFAULT_CAP, day=_date(t))
+    calls = arena_run.Calls(aside / "calls.json", day=_date(t))
     rep = arena_run.Arena(cards, agent_model=arena_scripted.PracticeAgent(), customer_model=arena_scripted.PracticePersona(), calls=calls,
                           trust=dict(ARENA_TRUST), held_out=list(ARENA_HELD), matches=2, rounds=3, seed=seed, state=aside, reports=reports,
                           now=lambda: t).run()

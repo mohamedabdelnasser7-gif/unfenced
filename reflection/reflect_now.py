@@ -394,7 +394,7 @@ def train_between(db, db_path, folder, *, models, agent_model, customer_model, j
     from kit import turn as turn_mod
     agent = turn_mod.load(folder)
     reports = practice.reports_of(Path(folder))
-    calls = run_mod.Calls(reports / run_mod.CALLS_FILE, run_mod.DEFAULT_CAP)
+    calls = run_mod.Calls(reports / run_mod.CALLS_FILE)
     pool = rounds_mod.Pool(EngineLessons(db, agent.plug),  # read at its first use, again before each exam and gate
                            hotfixes=lambda: rounds_mod.live_lessons(str(db_path), agent.name))
     examiner = models.get("examiner") or rounds_mod.turn_examiner(agent, calls.model(judge_model))

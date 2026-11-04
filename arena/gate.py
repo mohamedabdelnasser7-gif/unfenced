@@ -264,7 +264,7 @@ class Fresh:
     between rounds, arena/rounds.py), so the rerun takes from the run's count; else a new count on
     the file next to the database, read as it is at each exam."""
 
-    def __init__(self, examiner, kept, *, state, agent_model=None, customer_model=None, cap=run_mod.DEFAULT_CAP,
+    def __init__(self, examiner, kept, *, state, agent_model=None, customer_model=None, cap=None,
                  calls=None, judge_model=None):
         self.examiner, self.kept, self.state, self.cap = examiner, kept, state, cap
         self.agent_model, self.customer_model = agent_model, customer_model
@@ -493,7 +493,7 @@ class FreshTurn(Fresh):
 
 
 def wrap_turn(examiner, kept, *, agent, state, reports, agent_model=None, customer_model=None, judge_model=None,
-              cap=run_mod.DEFAULT_CAP, calls=None):
+              cap=None, calls=None):
     """A built agent's examiner with the Arena rerun of its past practice wins after it (FreshTurn):
     state, the agent's folder (arena-matches.jsonl, arena/practice.py); reports, the folder beside the
     database (arena-calls.json). calls: a call count already open (Run reflection's), the rerun's models
@@ -502,7 +502,7 @@ def wrap_turn(examiner, kept, *, agent, state, reports, agent_model=None, custom
                      customer_model=customer_model, judge_model=judge_model, cap=cap, calls=calls)
 
 
-def wrap(examiner, kept, *, db, agent_model=None, customer_model=None, cap=run_mod.DEFAULT_CAP, calls=None):
+def wrap(examiner, kept, *, db, agent_model=None, customer_model=None, cap=None, calls=None):
     """The examiner with the Arena rerun after it (Fresh), reading the past wins next to the
     agent's database (db, its path; arena/run.py state_dir: the matches, the call count and the
     stuck item live there, never in a shared temp folder) at each exam; the examiner as it is when

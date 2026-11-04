@@ -1148,9 +1148,10 @@ class QuickStart:
                     study = run_mod.reflection_models()
                 except run_mod.Refused:
                     study = None
+            stop = held.arena_stop(agent) if held is not None and hasattr(held, "arena_stop") else None
             practice.practise(agent_folder, agent_model=model_mod.Model(), customer_model=model_mod.Model(),
                               judge_model=model_mod.Model(), learn=learn, study=study, db=db, live_path=db_path,
-                              off_topic=True)
+                              off_topic=True, stop=stop)  # Stop on the Arena tab ends it (Morning.stop_run)
             line = PRACTICE_DONE
         except Exception as e:  # a thread nobody waits on: what went wrong becomes the agent's line
             line = PRACTICE_NOT_RUN.format(why=" ".join(str(e).split())[:200] or type(e).__name__)

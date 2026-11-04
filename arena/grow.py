@@ -892,7 +892,7 @@ def night(db_path, plug, recipe_path, since, until, folder=None, own=True, share
     except (hist.Refused, Refused) as e:
         rep["stopped"] = str(e)
         return rep
-    calls = arena_run.Calls(folder / arena_run.CALLS_FILE, arena_run.DEFAULT_CAP)
+    calls = arena_run.Calls(folder / arena_run.CALLS_FILE)
     tagger = tag_mod.Tagger(model=calls.model(tag_model()), cap=MAX_NEW, recipe=recipe)
     link = None
     if shared_root is not None:

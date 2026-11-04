@@ -847,7 +847,7 @@ def main(argv=None, *, model=None):
     ap.add_argument("--state", default=str(paths.DATA / "assistant"), help="the Arena's folder: outside the repo or in data/")
     ap.add_argument("--picture", default=None, help="a user picture from assistant/mbox.py")
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--cap", type=int, default=arena_run.DEFAULT_CAP)
+    ap.add_argument("--cap", type=int, default=None, help="model calls a day (UNFENCED_DAILY_CALLS, else 3000)")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
     try:

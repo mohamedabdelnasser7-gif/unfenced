@@ -59,7 +59,8 @@ class Base(unittest.TestCase):
         cards = [card(1, "size"), card(2, "price"), card(3, "fit")]
         a = run.Arena(cards, agent_model=Agent(), customer_model=Customer(buyers), state=self.dir,
                       calls=run.Calls(self.dir / run.CALLS_FILE, 1000), held_out=["persona-02", "persona-03"],
-                      trust={"matches": 4, "wins": 3, "zero_failed_checks": True}, matches=1, now=lambda: NOW)
+                      trust={"matches": 4, "wins": 3, "zero_failed_checks": True}, matches=1, now=lambda: NOW,
+                      rounds=4)  # the old shape: two gated rounds with no gain make it stuck (decision 113 plays 2 by default)
         rep = a.run()
         self.assertEqual(rep["stopped"], run.STUCK)
         # both held-out customers in the item's lost matches, whichever the gate drew in its last round

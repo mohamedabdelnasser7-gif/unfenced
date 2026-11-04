@@ -218,7 +218,9 @@ class RunTheArenaStudies(Page):
         self.m.run_arena("stock_watch", full=True)
         self.starts[0][0]()
         got = self.m.read_arena()[0]["stock_watch"]
-        self.assertEqual((got["studied"], got["scores"]), (True, [0, 5]))
+        self.assertEqual((got["studied"], got["scores"]), (True, [0]))  # one gate, then practice only (decision 113)
+        self.assertEqual(len(got["rounds"]), 2)  # its two round lines
+        self.assertIn("Round 2: practice 5 of 10 won, no gate.", got["rounds"][1])
         texts = [les["text"] for les in EngineLessons(self.db, turn.load(self.folder).plug).mine()]
         self.assertIn(FIRST, texts)
 

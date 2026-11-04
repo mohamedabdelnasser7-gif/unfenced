@@ -309,7 +309,8 @@ class Gate(Base):
                     self.assertTrue(all(not cards[i]["unwinnable"] for i in test))
                     self.assertTrue({i for i, c in cards.items() if c["unwinnable"]} <= practice_ids)
                     gates, training = self.by_round(log, "g"), self.by_round(log, "t")
-                    self.assertEqual(sorted(gates), ["r1", "r2"])
+                    self.assertEqual(sorted(gates), ["r1"])  # round 2 plays practice only (decision 113)
+                    self.assertEqual(sorted(training), ["r1", "r2"])
                     for r, ids in gates.items():  # each test customer exactly once a round
                         self.assertEqual(sorted(ids), sorted(test), r)
                     for r, ids in training.items():  # the 10 practice customers, each once

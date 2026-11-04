@@ -2,9 +2,13 @@
 
 Three levels, each with what a pass needs and the shape of its arena run:
 
-- low: 5 of 10 gate matches, at most 2 rounds, cap 1,000 calls, 20 practice customers.
-- medium: 7 of 10, at most 2 rounds, cap 1,000, 20 customers (the default, today's gate).
-- high: 16 of 20, at most 3 rounds, cap 1,500, 30 customers.
+- low: 5 of 10 gate matches, the day's cap (arena/run.py daily_cap), 20 practice customers.
+- medium: 7 of 10, the day's cap, 20 customers (the default, today's gate).
+- high: 16 of 20, the day's cap but at least 1,500, 30 customers.
+
+Every level has the same shape (decision 113): round 1 is 10 practice matches and the gate; when the gate
+misses, round 2 is 10 practice matches and no gate, and the run passes on its average over all its matches
+(arena/run.py Arena._average): 10 + 10 + 10 at a gate of 10, 10 + 20 + 10 at high.
 
 Every level also needs zero broken never lines in the round, whatever the win count (decision 110): a
 gate match whose verdict broke a never line fails the gate at low, medium and high. High also needs zero
@@ -32,13 +36,14 @@ LOW, MEDIUM, HIGH = "low", "medium", "high"
 ORDER = (LOW, MEDIUM, HIGH)
 DEFAULT = MEDIUM
 # wins needed out of the gate size, and the run's shape (decision 85); no_failed_checks: none of any kind
-# (high); a broken never line fails every level whatever this says (decision 110)
+# (high); a broken never line fails every level whatever this says (decision 110). cap: None for the day's
+# setting (arena/run.py daily_cap), else the run's floor above it
 LEVELS = {
-    LOW: {"wins": 5, "of": 10, "no_failed_checks": False, "rounds": 2, "matches": 10, "gate": 10, "cap": 1000,
+    LOW: {"wins": 5, "of": 10, "no_failed_checks": False, "rounds": 2, "matches": 10, "gate": 10, "cap": None,
           "customers": 20},
-    MEDIUM: {"wins": 7, "of": 10, "no_failed_checks": False, "rounds": 2, "matches": 10, "gate": 10, "cap": 1000,
+    MEDIUM: {"wins": 7, "of": 10, "no_failed_checks": False, "rounds": 2, "matches": 10, "gate": 10, "cap": None,
              "customers": 20},
-    HIGH: {"wins": 16, "of": 20, "no_failed_checks": True, "rounds": 3, "matches": 10, "gate": 20, "cap": 1500,
+    HIGH: {"wins": 16, "of": 20, "no_failed_checks": True, "rounds": 2, "matches": 10, "gate": 20, "cap": 1500,
            "customers": 30},
 }
 # a name and one plain line each, for the card picker and the Arena tab

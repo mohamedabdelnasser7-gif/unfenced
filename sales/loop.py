@@ -273,7 +273,8 @@ def _answer(t, convo, msg, vocab, sizes, names=frozenset(), *, results, send):
         reply = _draft(t, convo)
         passed, feedback = send_check.check(reply, t.customer_text, t.amounts, vocab, sizes,
                                             orders=order_names(ctx.chats, chat_id),
-                                            links=store_links(ctx.chats, chat_id), names=names)
+                                            links=store_links(ctx.chats, chat_id), names=names,
+                                            totals=tool_amounts(ctx.chats, chat_id))
         if passed:
             send(msg.customer_id, reply)
             n = ctx.chats.add_step(chat_id, "assistant", content=reply)
@@ -447,6 +448,22 @@ def store_links(chats, chat_id):
         log.exception("could not read the store links in this chat")
         return set()
     return links
+
+
+def tool_amounts(chats, chat_id):
+    """Every amount a tool that gives amounts (tools.AMOUNT_TOOLS) gave in this chat, any turn, in the order
+    given: the parts a total in a reply may add up (kit/send_check.py is_total). Only a tool result counts,
+    never the customer's text. Never raises: on an error no part is given, so a total must be a tool amount."""
+    found = []
+    try:
+        for s in chats.steps(chat_id):
+            if s["role"] != "tool" or s["name"] not in tools.AMOUNT_TOOLS:
+                continue
+            found.extend(sorted(send_check.amounts_in(json.loads(s["content"] or "null"))))
+    except Exception:
+        log.exception("could not read the tool amounts in this chat")
+        return []
+    return found
 
 
 def _placed(customer_text, made):

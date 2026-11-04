@@ -161,10 +161,82 @@ class ABootAfterTheAmountMustOfferTheExtraFree(unittest.TestCase):
                       "Printing is available. It is 400 EGP, and it is included with any Elite.",
                       "طباعة الاسم متاحة. سعرها 400 جنيه" + AC + " وهدية مع أي Elite.",
                       "Tba3et el esm available. B 400 EGP, w bbalash m3 ay Elite.",
+                      "طباعة الاسم متاحة. سعرها 400 جنيه" + AC + " وببلاش مع أي جزمة Elite.",
                       "Printing on your boot is 400 EGP.",
                       "Name printing is 400 EGP for each pair."):
             with self.subTest(reply=reply):
                 self.assertEqual(prices(reply), [])
+
+
+class RoundTwoGuards(unittest.TestCase):
+    """Review pricectx round 2: a clause that opens with a word for a boot prices the boot (finding 1),
+    a free word about delivery offers no extra (finding 2), and a boot word joins the extra only when it
+    opens the clause with no amount between (finding 3). The last list kills the reverts of item 4."""
+
+    def setUp(self):
+        clean_env(self)
+
+    def test_a_clause_that_opens_with_a_boot_word_fails(self):
+        for reply in ("Printing is available. The boot is 400 EGP, free printing with an Elite.",
+                      "Printing is available. Boot price 400 EGP, free with an Elite.",
+                      "Printing is available. The shoe is 400 EGP, free with an Elite.",
+                      "طباعة الاسم متاحة. الجزمة بـ 400 جنيه" + AC + " ومجانية مع أي Elite.",
+                      "Tba3et el esm available. El gazma b 400 EGP, w free m3 ay Elite."):
+            with self.subTest(reply=reply):
+                self.assertTrue(any("400" in w for w in prices(reply)), prices(reply))
+
+    def test_a_price_per_pair_passes(self):
+        for reply in ("Printing is available. Per pair it is 400 EGP, free with an Elite.",
+                      "Printing is available. For each pair it is 400 EGP, free with an Elite.",
+                      "Printing is available. It is 400 EGP a pair, free with an Elite.",
+                      "Printing is available. It is 400 EGP per pair, free with an Elite.",
+                      "طباعة الاسم متاحة. لكل جزمة 400 جنيه" + AC + " ومجانية مع أي Elite."):
+            with self.subTest(reply=reply):
+                self.assertEqual(prices(reply), [])
+
+    def test_a_free_word_about_delivery_offers_no_extra(self):
+        for reply in ("Printing is available. Total is 400 EGP, free delivery with the Elite.",
+                      "Printing is available. It is 400 EGP, free delivery with the Elite.",
+                      "Printing is available. Your total is 400 EGP, free shipping on the Elite.",
+                      "Printing is available. The price is 400 EGP, includes free delivery for the Elite.",
+                      "طباعة الاسم متاحة. الإجمالي 400 جنيه" + AC + " والتوصيل مجاني مع الـ Elite.",
+                      "طباعة الاسم متاحة. الإجمالي 400 جنيه" + AC + " توصيل ببلاش مع الـ Elite.",
+                      "Tba3et el esm available. El total 400 EGP, delivery bbalash m3 el Elite."):
+            with self.subTest(reply=reply):
+                self.assertTrue(any("400" in w for w in prices(reply)), prices(reply))
+
+    def test_delivery_in_its_own_clause_keeps_the_free_offer(self):
+        """Only the clause with the free word is read for delivery; the 60 fails on its own here (the
+        demo store's free delivery offer sets every fee to 0), the 400 stays the printing's."""
+        found = prices("طباعة الاسم متاحة. سعرها 400 جنيه" + AC + " ومجانية مع أي Elite" + AC + " والتوصيل 60 جنيه.")
+        self.assertFalse(any("400" in w for w in found), found)
+
+    def test_a_boot_word_that_does_not_join_the_extra_passes(self):
+        for reply in ("Send me your shoe size and printing is 400 EGP.",
+                      "Tell me your shoe size and name printing costs 400 EGP.",
+                      "Pick any boot and printing is 400 EGP.",
+                      "Every pair comes in a box and printing is 400 EGP.",
+                      "Your boot costs 16,500 EGP plus printing at 400 EGP.",
+                      "ابعتلي مقاس الجزمة والطباعة بـ 400 جنيه.",
+                      "الجزمة بـ 16500 جنيه والطباعة بـ 400 جنيه.",
+                      "Ab3atly maas el gazma w el tba3a b 400 EGP.",
+                      "El gazma b 16500 EGP w el tba3a b 400 EGP.",
+                      "Choose your boot and the printing costs 400 EGP extra.",
+                      "Any boot can take printing for 400 EGP.",
+                      "Each pair with name printing costs 400 EGP more.",
+                      "Boot plus printing comes to 16,900 EGP.",
+                      "Boot plus printing is 16,900 EGP and printing alone is 400 EGP."):
+            with self.subTest(reply=reply):
+                self.assertEqual(prices(reply), [])
+
+    def test_the_surviving_reverts_fail(self):
+        for reply in ("Printing is available. It is 400 EGP, free - Elite.",
+                      "الجزمة بالطباعة بـ 400 جنيه.",
+                      "The boot and printing is 400 EGP.",
+                      "El gazma m3 el tba3a b 400 EGP.",
+                      "El gazma w el tba3a b 400 EGP."):
+            with self.subTest(reply=reply):
+                self.assertTrue(any("400" in w for w in prices(reply)), prices(reply))
 
 
 if __name__ == "__main__":

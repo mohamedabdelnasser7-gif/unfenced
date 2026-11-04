@@ -66,6 +66,10 @@ CREATE INDEX IF NOT EXISTS demo_orders_whatsapp ON demo_orders (whatsapp);
 CREATE INDEX IF NOT EXISTS demo_orders_phone ON demo_orders (phone);
 """
 
+# Columns added after the table was first made (decision 105): read by ALTER TABLE when missing.
+ORDER_COLUMNS = (("payment", "TEXT NOT NULL DEFAULT ''"), ("discount", "TEXT NOT NULL DEFAULT '0'"),
+                 ("discounts", "TEXT NOT NULL DEFAULT '[]'"))
+
 # Statuses as the model reads them.
 FINISHED = ("delivered", "refused")
 
@@ -129,6 +133,11 @@ class Book:
     def __init__(self, db):
         self.db = db
         self.db.script(SCHEMA)
+        with self.db.tx() as c:  # a demo_orders table made before offers
+            have = {r[1] for r in c.execute("PRAGMA table_info(demo_orders)")}
+            for name, decl in ORDER_COLUMNS:
+                if name not in have:
+                    c.execute(f"ALTER TABLE demo_orders ADD COLUMN {name} {decl}")
 
     # pending drafts
 
@@ -163,6 +172,8 @@ class Book:
         tags = ["whatsapp", "sales-agent", f"cod-risk-{risk['level']}"]
         if draft["whatsapp"]:
             tags.append(whatsapp_tag(draft["whatsapp"]))
+        if draft.get("payment"):
+            tags.append(f"payment-{draft['payment']}")
         if on_shopify():
             return _shopify_create(draft, chat_id, tags)
         with self.db.tx() as c:
@@ -170,12 +181,13 @@ class Book:
             name = f"#{FIRST_ORDER_NUMBER - 1 + n}"
             c.execute(
                 "INSERT INTO demo_orders (id, name, chat_id, whatsapp, phone, customer, governorate, address, items, "
-                "subtotal, fee, total, status, cod_risk, risk_reasons, tags, placed_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'received', ?, ?, ?, ?)",
+                "subtotal, fee, total, status, cod_risk, risk_reasons, tags, placed_at, payment, discount, discounts) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'received', ?, ?, ?, ?, ?, ?, ?)",
                 (n, name, chat_id, draft["whatsapp"], draft["phone"], draft["name"], draft["governorate"],
                  draft["address"], json.dumps(draft["items"], ensure_ascii=False), draft["subtotal"], draft["fee"],
                  draft["total"], risk["level"], json.dumps(risk["reasons"], ensure_ascii=False), json.dumps(tags),
-                 time.time()))
+                 time.time(), draft.get("payment") or "", str(discount_of(draft)),
+                 json.dumps(draft.get("discounts") or [], ensure_ascii=False)))
         return {"order": name, "store": "demo"}
 
     def demo_order(self, name):
@@ -298,10 +310,27 @@ def _variant_id(sku):
     return ids[0]
 
 
+def discount_of(draft):
+    """The draft's discounts added up, a Decimal (0 when it has none)."""
+    return sum((money(d["discount"]) for d in draft.get("discounts") or []), Decimal(0))
+
+
 def draft_order_input(draft, chat_id, tags, variant_ids):
-    """The DraftOrderInput for one confirmed draft. Risk reasons stay off the note, which a customer may see."""
+    """The DraftOrderInput for one confirmed draft. Risk reasons stay off the note, which a customer may see.
+    The offers' discount goes on as the order's appliedDiscount, a fixed amount (not checked against live
+    docs, 2026-11-04)."""
     if not draft.get("currency"):
         raise StoreError("the store data has no currency")
+    out = _draft_input(draft, chat_id, tags, variant_ids)
+    off = discount_of(draft)
+    if off > 0:
+        out["appliedDiscount"] = {"valueType": "FIXED_AMOUNT", "value": float(off), "amountWithCurrency": {
+            "amount": str(off), "currencyCode": draft["currency"]},
+            "title": ", ".join(d["what"] for d in draft["discounts"])[:255]}
+    return out
+
+
+def _draft_input(draft, chat_id, tags, variant_ids):
     return {
         "lineItems": [_line_input(i, variant_ids) for i in draft["items"]],
         "shippingLine": {"title": f"Delivery, {draft['area']}",

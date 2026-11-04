@@ -13,6 +13,7 @@ from kit.tools import draft_order
 from tests.fake_model import FakeModel, clean_env, say
 from tests.test_fixes_j import MaskTest, SendCheckBase, TurnBase, confirm_from_history, summary_reply
 from tests.test_orders import ME, tool_call
+from kit import offers
 
 LINE = "اوردرك اتسجل برقم #1001، والإجمالي 33,060 جنيه."
 
@@ -128,6 +129,17 @@ class DeadlineReaderTest(unittest.TestCase):
         conn = type("Conn", (), {"settimeout": lambda self, t: calls.append(t), "recv_into": lambda self, buf: 0})()
         DeadlineReader(conn, time.monotonic() + 0.5, per_read=10).readinto(bytearray(1))
         self.assertEqual((calls[0] < 1, calls[-1]), (True, 10))
+
+
+def setUpModule():
+    """These tests read the zone fees (60, 85) as they were before decision 105: the store with no offers.
+    The offers' own paths are in tests/test_offers.py and tests/test_offers_paths.py."""
+    global _OFFERS_TOKEN
+    _OFFERS_TOKEN = offers.OFFERS.set(offers.EMPTY)
+
+
+def tearDownModule():
+    offers.OFFERS.reset(_OFFERS_TOKEN)
 
 
 if __name__ == "__main__":

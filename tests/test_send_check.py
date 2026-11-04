@@ -6,6 +6,7 @@ from sales.loop import LIMIT_LINE, MODEL_DOWN, PHOTO_NOT_OPENED, VOICE_NOT_HEARD
 from kit.send_check import amounts_in, check, detect_script, prices_in, size_number_amounts, stock_counts
 from kit.tools import store
 from tests.fake_model import clean_env
+from kit import offers
 
 AR = "عندكم جزم مقاس ٤٣؟"
 FRANCO = "3ndko gezam size 43?"
@@ -651,6 +652,17 @@ class OrderSummary(unittest.TestCase):
         for reply, n in (("+1500", 1500), ("Total +1500", 1500), ("1+1500", 1500)):
             with self.subTest(reply=reply):
                 self.assertEqual(prices_in(reply), [n])
+
+
+def setUpModule():
+    """These tests read the zone fees (60, 85) as they were before decision 105: the store with no offers.
+    The offers' own paths are in tests/test_offers.py and tests/test_offers_paths.py."""
+    global _OFFERS_TOKEN
+    _OFFERS_TOKEN = offers.OFFERS.set(offers.EMPTY)
+
+
+def tearDownModule():
+    offers.OFFERS.reset(_OFFERS_TOKEN)
 
 
 if __name__ == "__main__":

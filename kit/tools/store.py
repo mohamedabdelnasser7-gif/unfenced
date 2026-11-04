@@ -14,6 +14,10 @@ url live; in the demo store a stand-in link on an .example host (demo_images in
 demo/catalogue.json, kept out of the seed mutation's variables), never a real brand's image.
 Only an https link with no space in it goes out. The send check lets a reply carry a link only
 when the store tool gave it in that chat (sales/loop.py store_links).
+
+Every result carries the store's offers (decision 105, kit/offers.py): the offer lines, the payment
+methods and how many offers one order takes, from the agent's own offers or the store data's. A delivery
+offer that brings the fee down replaces the zones' fees among the amounts a reply may quote.
 """
 import contextvars
 import html
@@ -23,7 +27,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from kit import env, net
+from kit import env, net, offers
 from kit.send_check import amount
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -40,6 +44,7 @@ DEFINITION = {"type": "function", "function": {
     "description": (
         "Look up the store's products: names, prices, tiers, sizes, stock level (in stock, few left or out) when the store tracks it, "
         "and each product's image link when it has one. "
+        "Every answer also lists the store's offers and payment methods: offer only those. "
         "Search in English words "
         "like 'phantom' or 'name printing'. Leave query empty to get every product."),
     "parameters": {
@@ -70,12 +75,25 @@ def run(args, ctx):
     q = (args.get("query") or "").lower()
     words = [w for w in re.findall(r"\w+", q) if len(w) > 1]
     if not words:
-        return {"ok": True, "items": items}
+        return _with_offers({"ok": True, "items": items})
     hits = [i for i in items if all(w.rstrip("s") in _haystack(i) for w in words)]
     hits = hits or [i for i in items if any(w.rstrip("s") in _haystack(i) for w in words)]
     if not hits:
-        return {"ok": True, "items": items, "note": "Nothing matched the search, so this is every product."}
-    return {"ok": True, "items": hits}
+        return _with_offers({"ok": True, "items": items, "note": "Nothing matched the search, so this is every product."})
+    return _with_offers({"ok": True, "items": hits})
+
+
+def _with_offers(out):
+    """The result with the store's offers, payment methods and the offer limit, when it has any."""
+    data = offers.current()
+    lines, methods, limit = offers.for_tool(data), offers.payment_methods(data), offers.limit_line(data)
+    if lines:
+        out["offers"] = lines
+    if methods:
+        out["payment_methods"] = methods
+    if limit:
+        out["offer_limit"] = limit
+    return out
 
 
 def _haystack(item):
@@ -231,10 +249,15 @@ def delivery():
 def price_points():
     """Every price and fee in the store and delivery data, for the send check.
 
-    Kept as written: 16500.00 is 16500, and 16500.50 stays 16500.50, never cut to 16500.
+    Kept as written: 16500.00 is 16500, and 16500.50 stays 16500.50, never cut to 16500. A zone's fee is
+    the fee after a delivery offer (kit/offers.py delivery_fee): with free delivery no zone fee is quoted.
     """
     values = [v["price"] for item in catalogue() for v in item.get("variants", []) if "price" in v]
-    values += [zone["fee"] for zone in delivery().get("zones", []) if "fee" in zone]
+    data = offers.current()
+    for zone in delivery().get("zones", []):
+        fee = offers.delivery_fee(data, zone["fee"]) if "fee" in zone else None
+        if fee is not None and amount(fee) != 0:
+            values.append(fee)
     return {a for a in map(amount, values) if a is not None}
 
 

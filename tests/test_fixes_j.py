@@ -19,6 +19,7 @@ from reflection.lessons import Lessons
 from reflection.results import Results
 from tests.fake_model import FakeModel, Outbox, clean_env, say
 from tests.test_orders import ME, order_args, tool_call
+from kit import offers
 
 BOOTS = "Nike Mercurial Vapor 17"
 
@@ -429,6 +430,16 @@ class NoRedirectTest(unittest.TestCase):
         cm.exception.close()
         self.assertEqual((cm.exception.code, hits), (302, [("POST", "/a", "test-token-not-real")]))
 
+
+def setUpModule():
+    """These tests read the zone fees (60, 85) as they were before decision 105: the store with no offers.
+    The offers' own paths are in tests/test_offers.py and tests/test_offers_paths.py."""
+    global _OFFERS_TOKEN
+    _OFFERS_TOKEN = offers.OFFERS.set(offers.EMPTY)
+
+
+def tearDownModule():
+    offers.OFFERS.reset(_OFFERS_TOKEN)
 
 
 if __name__ == "__main__":

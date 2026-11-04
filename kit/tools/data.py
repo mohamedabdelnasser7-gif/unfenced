@@ -4,11 +4,14 @@ The rows are the agent's sample data (kit/sample.py): made up at Build to fit it
 made up, plus any the user added, marked as theirs. kit/turn.py offers this tool to an agent whose
 folder has sample data and hands the rows over in the turn's Context (data). Search words narrow the
 rows; an empty query gives them all, up to MAX_ROWS.
+
+An agent with offers (kit/offers.py, set for the turn by kit/turn.py) gets them on every answer, as
+"offers": what this agent may give, even when it has no rows (decision 105).
 """
 import json
 import re
 
-from kit import sample
+from kit import offers, sample
 
 NAME = "data"
 MAX_ROWS = 60
@@ -17,7 +20,8 @@ DEFINITION = {"type": "function", "function": {
     "description": (
         "Look up the records your work reads (products and stock, tickets, leads, briefs, whatever this agent "
         "works from). They are sample data: most rows are made up for practice, some may be added by the user; "
-        "each row says which. Use only what the rows say. Leave query empty to get every row."),
+        "each row says which. Use only what the rows say. It also lists the offers this agent may give, when it has "
+        "any. Leave query empty to get every row."),
     "parameters": {
         "type": "object",
         "properties": {"query": {"type": "string", "description": "Short search words, or empty."}},
@@ -37,7 +41,10 @@ def check(args, ctx):
 
 
 def run(args, ctx):
+    gives = offers.for_tool(offers.own())
     data = getattr(ctx, "data", None)
+    if not data and gives:
+        return {"ok": True, "about": "what this agent may give", "rows": [], "offers": gives}
     if not data:
         return {"ok": False, "feedback": "This agent has no data yet."}
     rows = sample.rows_of(data)
@@ -55,6 +62,8 @@ def run(args, ctx):
         out["note"] = f"Only the first {MAX_ROWS} rows; search to narrow them."
     if note:
         out["note"] = note
+    if gives:
+        out["offers"] = gives
     return out
 
 

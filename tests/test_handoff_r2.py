@@ -18,6 +18,7 @@ from kit import send_check
 from kit.tools import store
 from reflection import PLUG, exam
 from tests.fake_model import FakeModel, clean_env, say
+from kit import offers
 
 EN = "Do you have the adidas boots in 43?"
 FR = "bekam el vapor ya basha?"
@@ -288,6 +289,17 @@ class Gaps(Base):
 
     def test_an_enclosing_mark_on_no_letter_goes(self):
         self.assertIn(17400, read("The price is Vapor 17⃝,400 EGP."))
+
+
+def setUpModule():
+    """These tests read the zone fees (60, 85) as they were before decision 105: the store with no offers.
+    The offers' own paths are in tests/test_offers.py and tests/test_offers_paths.py."""
+    global _OFFERS_TOKEN
+    _OFFERS_TOKEN = offers.OFFERS.set(offers.EMPTY)
+
+
+def tearDownModule():
+    offers.OFFERS.reset(_OFFERS_TOKEN)
 
 
 if __name__ == "__main__":

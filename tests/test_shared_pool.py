@@ -485,6 +485,15 @@ class WriterAndLink(unittest.TestCase):
         self.assertIsNone(got["pattern"])
         self.assertIn("copied", got["why"])
 
+    def test_a_pattern_copying_five_words_of_its_lesson_is_dropped(self):
+        lesson = {"id": 7, "text": "Explain the quiet setting first when the grower asks about noise twice."}
+        copied = "When the grower asks about noise, explain the quiet setting before anything else."
+        self.assertEqual(shared.check(copied), [])  # clean on its own: only the copy drops it
+        got = shared.Link("support", OWNER_A, writer_of(copied), self.root).give_lesson("desk", lesson)
+        self.assertIsNone(got["pattern"])
+        self.assertIn("copied", got["why"])
+        self.assertEqual(shared.Pool("support", self.root).patterns, [])
+
 
 class PracticeCards(unittest.TestCase):
     def test_shared_lost_patterns_become_cards_holding_no_chat(self):

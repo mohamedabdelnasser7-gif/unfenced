@@ -83,13 +83,13 @@ class SharedLessons(unittest.TestCase):
             self.pool.add(shared.LESSON, text if n == 0 else NEAR, o, f"lesson:x:{n}")
         return self.pool.shared(shared.LESSON)[0]["id"] if len(set(owners)) >= 2 else None
 
-    def night(self, exam=None, others=(), writer=None, fit=None, give=shared.GIVE):
+    def night(self, exam=None, others=(), writer=None, fit=None, give=shared.GIVE, limit=study.LIMIT):
         self.mine = Lessons(self.db, self.new, judge=always_low, exam=exam)
         self.fit = fit or fk.Fit({PATTERN: "fully", SIB: "fully", FAR: "partly"})
         self.link = shared.Link.for_agent(self.new, self.folder, writer or writer_of(), self.root, give=give)
         s = Study(self.db, self.new, proposer=fk.Proposer(), tagger=fk.Tagger(), fit=self.fit,
                   adapter=fk.Adapter({PATTERN: MINE, SIB: SIB_MINE, FAR: FAR_MINE}), others=list(others),
-                  lessons=self.mine, shared=self.link)
+                  lessons=self.mine, shared=self.link, limit=limit)
         return s.run(fk.SINCE, UNTIL, now=NOW)
 
     def by_text(self):
@@ -123,6 +123,13 @@ class SharedLessons(unittest.TestCase):
         self.assertIsNone(self.mine.trial(les["id"]))
         self.assertIn(study.POOL_NO_GATE, rep["notes"])
         self.assertNotIn("kept", {x["state"] for x in self.mine.mine()})
+
+    def test_at_most_limit_patterns_are_read_a_night(self):
+        self.seen_at("north", "south")
+        for n, o in enumerate(("north", "south")):
+            self.pool.add(shared.LESSON, FILTERS, o, f"lesson:y:{n}")
+        self.assertEqual(len(self.pool.shared(shared.LESSON)), 2)
+        self.assertEqual(len(self.night(exam=passing, limit=1)["shared"]["lessons"]), 1)
 
     def test_a_pattern_seen_at_one_owner_is_not_read(self):
         self.seen_at("north", "north")
@@ -200,6 +207,14 @@ class SharedLessons(unittest.TestCase):
         rep = self.night(exam=passing, writer=shared.Writer(model=model))
         self.assertEqual(len(model.calls), 1)
         self.assertEqual([g["why"] for g in rep["shared"]["given"]], ["the writer failed (PartError)"])
+
+    def test_a_lesson_still_on_trial_is_not_given(self):
+        mine = Lessons(self.db, self.new, judge=always_low)
+        lid = mine.add("Explain the quiet setting first when the grower asks about noise twice.", ["all"],
+                       yes_by="owner", skip_exam=True)
+        self.assertEqual(mine.get(lid)["state"], "trying")
+        rep = self.night(exam=passing)  # the writer has no script: asking it would be a row here
+        self.assertEqual(rep["shared"]["given"], [])
 
     def test_a_lesson_from_the_pool_is_not_given_back(self):
         self.seen_at("north", "south")

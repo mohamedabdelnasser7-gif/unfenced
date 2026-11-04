@@ -108,6 +108,8 @@ These came in on the engfix2 and engfix3 branches.
 
 **One bad round could write a lesson per loss.** The review found that a round where the agent kept quoting the same wrong price made one lesson for every lost match, because each loss named its own amount, and each lesson then took its exam and gate calls, enough to use up a practice run's call budget before its gate was played. Fact check losses now count as one mistake per check, so 25 wrong prices make one lesson, and a study asks about the first 3 distinct mistakes only; the rest stay in the log, marked not asked.
 
+**Built agents could not be talked to.** Only Sales had a chat on its page. The assistant, the Family Dinner Planner and every agent made in Quick start could practise in the Arena, but you could not ask one anything, and the assistant's page ended with no Connect and no way to try it. Now every built agent has a page chat, cloned from Try Sales, that runs its real turn and tools, and every agent built later gets it the moment it exists. The assistant answers today's email from a sample mailbox, dated today and labelled as sample data, until email connects through Microsoft or Google sign-in. A pasted email can be summarised or answered as a draft, nothing is sent, and your rewrite of a draft goes in as a correction through the same exam.
+
 ## Still open
 
 - The offers and fair close work (decision 105) is on its own branch and not yet merged here.
@@ -115,4 +117,5 @@ These came in on the engfix2 and engfix3 branches.
 - The cleaner can miss a rare surname or a number written in words (decisions 23 and 40).
 - Hand-off to a person is a later feature (decision 53). A live off-topic check on every real reply is next (decision 89).
 - The personal assistant's night and command line Arena still play simulated days; its page practises case by case (decisions 71 and 109).
+- The assistant's sample day now moves with the date: its mailbox and calendar land on today each time they are read, and the mailbox holds 16 emails, not 12. Its past Arena wins were played on the old fixed mailbox, and its Arena has not been run again since.
 - One agent with several kinds of case is next, not built (decision 69).

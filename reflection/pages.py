@@ -27,6 +27,11 @@ Morning methods only, so no engine rule lives here.
                    it lost matches, Try again plays only those again with the corrections that passed
                    (Morning.try_again, arena/retry.py); each retried tile then says Won again or Still lost.
 
+    /try/<agent>   the page chat on the Live tab of every agent with an agent folder (built here or by /new, an
+                   example, the personal assistant), cloned from Try Sales (reflection/try_sales.py TryAgent): its
+                   real turn and tools on sample data, nothing sent; /try/<agent>/clear starts over and
+                   /try/<agent>/correct (Use my version) sends the user's rewrite of a draft through Morning.correct.
+
 A correction sent on an agent's page that is high risk waits for a yes on Today (Morning.correct); its
 card says why in one plain sentence (plain_risk), never the engine's word lists, and the Hotfix chip
 marks a correction that runs in the chats. With demo days each day shows its own morning (day.json); with --db too a Live tab follows the days and
@@ -66,6 +71,18 @@ NAMES = mo.AGENT_NAMES
 CORRECTED = lessons_mod.HOTFIX_SOURCE  # the source line of a correction (Morning.correct, Lessons.correct)
 _AGENT = re.compile(r"^[a-z][a-z_]{0,30}$")
 ROLLBACK = "/rollback"  # /agents/<name>/rollback: the plan a rollback would carry out, and its one button
+# The page chat of an agent with an agent folder (Pages.action_for, try_mod.TryAgent): send, Start over, Use my version
+_TRY = re.compile(r"^/try/([a-z][a-z_]{0,30})(/clear|/correct)?$")
+MINE = "The user rewrote your draft as: {text}"  # Use my version, the correction it sends (Morning.correct)
+MINE_ROOM = mo.MAX_LEN - len(MINE.format(text=""))  # characters of the user's own version a correction holds
+CHAT_LINE = "Write to it, or paste what it works on, and it answers with its own tools on sample data. Nothing is sent."
+MINE_NOTE = (f"Your version goes to the agent as a correction, at most {MINE_ROOM} characters. It takes the short exam "
+             "first, the same way as the box on Overview.")
+MINE_HINT = f"This draft is longer than {MINE_ROOM} characters. Write the line you would change."
+MINE_SAME = "Change the draft first, then press Use my version."
+# Bytes in one POST to /try/<agent> (morning.py do_POST): a message of MAX_PASTE characters of 3 bytes each, which
+# the form sends as 9 (%E2%80%9C), and room for the other fields, so a long paste gets the chat's own refusal
+MAX_TRY_BODY = try_mod.MAX_PASTE * 9 + 4096
 # The build page's one script (LOCKS "App pages", 2A), allowed by its hash in the /new policy only: while a
 # build runs it fetches the page again with the X-Poll header (the console's way, so the one-time
 # message stays) and swaps the thread; when the build is done it runs the countdown to the Arena, which
@@ -212,6 +229,7 @@ class Pages:
     live: the Morning on the real database, a Live tab after the days (no Sample data label there)."""
 
     LIVE = "live"
+    MAX_TRY_BODY = MAX_TRY_BODY  # the server's cap on a POST to /try/<agent> (morning.py do_POST)
 
     def __init__(self, morning=None, *, days=None, at=None, live=None, model=None, try_model=None, background=None):
         """at: {day: the time that day's page shows}, a sample's own clock; the real clock otherwise
@@ -229,6 +247,10 @@ class Pages:
         self.background = (model is None) if background is None else bool(background)
         self.run = None
         self.try_sales = try_mod.TrySales(try_model)  # its own database in memory, never the page's
+        # the same chat on the page of every agent with an agent folder (try_mod.TryAgent, cloned from Try Sales):
+        # one per agent, made the first time that agent's chat is used (chat), never for a name the page lacks
+        self.try_model = try_model
+        self.try_agents = {}
         # the page's own answers, taken by the server next to morning.TWO_TAB_ACTIONS
         self.actions = {"/quickstart": lambda m, f, now=None: self._say(m, mo._field(f, "text"), now),
                         "/quickstart/build": lambda m, f, now=None: self._build(m, now, _level(f)),
@@ -251,6 +273,59 @@ class Pages:
                                                                        now=now),
                         # Run reflection on the Overview (Morning.run_reflection), with the same refusals
                         REFLECT_PATH: lambda m, f, now=None: self._reflect(m, mo._field(f, "agent"), now)}
+
+    def action_for(self, path):
+        """The answer for a POST path the actions table does not hold: /try/<agent>, /try/<agent>/clear and
+        /try/<agent>/correct (Use my version), the page chat of an agent with an agent folder (chat). None for any
+        other path and for a name no agent on the page has (the server says Not found); Sales keeps its own routes."""
+        hit = _TRY.match(path or "")
+        if hit is None or hit.group(1) == mo.SALES.agent:
+            return None
+        agent, what = hit.group(1), hit.group(2) or ""
+        if not any(agent in getattr(x, "plugs", {}) for x in self._mornings()):
+            return None
+        if what == "/clear":
+            return lambda m, f, now=None: self._try(lambda mm, now=None: self.chat(mm, agent).clear(mm, now), m, now)
+        if what == "/correct":
+            return lambda m, f, now=None: self._mine(m, agent, mo._field(f, "text"), now)
+        return lambda m, f, now=None: self._try(lambda mm, text, now=None: self.chat(mm, agent).say(mm, text, now),
+                                                m, now, mo._field(f, "text"))
+
+    def _mornings(self):
+        return [x for x in (self.morning, self.live, *self.days.values()) if x is not None]
+
+    def chat(self, m, agent):
+        """The page chat of agent on m (try_mod.TryAgent), made the first time: only for an agent on m, other than
+        Sales, with an agent folder (Morning.agent_folder: built here or by /new, an example, or a repo agent on
+        the built path); else Refused."""
+        if not self.has_chat(m, agent):
+            raise try_mod.Refused(try_mod.NOT_HERE.format(agent=agent if _AGENT.match(str(agent)) else "that"))
+        got = self.try_agents.get(agent)
+        if got is None:
+            got = self.try_agents[agent] = try_mod.TryAgent(agent, self.try_model)
+        return got
+
+    @staticmethod
+    def has_chat(m, agent):
+        """Does agent get the page chat on m: any agent on it, other than Sales (Try Sales), with an agent folder."""
+        if not isinstance(agent, str) or agent == mo.SALES.agent or agent not in getattr(m, "plugs", {}):
+            return False
+        return hasattr(m, "agent_folder") and m.agent_folder(agent) is not None
+
+    def _mine(self, m, agent, text, now):
+        """Use my version: the user's rewrite of a draft in the page chat, a correction down the same exam and
+        hotfix path as the box on Overview (Morning.correct, by the user)."""
+        box = self._try(lambda mm, now=None: self.chat(mm, agent), m, now)
+        words = " ".join(str(text or "").split())
+        if not words:
+            raise mo.Refused("Write your version first.")
+        if words in {" ".join(str(r).split()) for t in box.thread() for r in t["replies"]}:
+            raise mo.Refused(MINE_SAME)  # the agent's own draft unchanged is not the user's version
+        line = MINE.format(text=words)
+        if len(line) > mo.MAX_LEN:
+            raise mo.Refused(f"Your version is {len(words)} characters. A correction holds at most {MINE_ROOM}, so "
+                             "keep the part that matters.")
+        return m.correct(agent, line, now=now, by=mo.BY)
 
     def back(self, value):
         """Where an answer returns to: one of the page's own paths, with the demo day; else /."""
@@ -465,7 +540,7 @@ class Pages:
         now = self.at.get(day) if self.demo else None
         self.settle(m)
         ctx = {"token": token, "q": q, "day": day, "path": path, "m": m, "now": now, "try": self.try_html,
-               "look": looked_at(m, path, query), "query": query}
+               "chat": self.chat_html, "look": looked_at(m, path, query), "query": query}
         if path == "/":
             return self.shell(today(m.view(now=now), ctx), "today", ctx, flash)
         if path == "/agents":
@@ -516,6 +591,51 @@ class Pages:
             form = f'<p class="quiet">{try_mod.NO_KEY}</p>'
         return (f'<section class="say try sq" aria-label="Try Sales"><span class="lab">Try Sales</span>{thread}{form}'
                 '</section>')
+
+    def chat_html(self, ctx, agent):
+        """The page chat of an agent with an agent folder (TryAgent, cloned from try_html): the thread as written,
+        each reply with the tools it used and Edit this draft (Use my version, a correction), the box, Send and
+        Start over, and what it runs on. Empty for an agent with no chat here."""
+        m = ctx["m"]
+        if not self.has_chat(m, agent):
+            return ""
+        t = self.try_agents.get(agent)  # made the first time the chat is used (chat)
+        kit = m.case_kit(agent) if hasattr(m, "case_kit") else None
+        who = name(agent)
+        rows = []
+        for turn in (t.thread() if t is not None else []):
+            rows.append(f'<p class="said me" dir="auto">{h(turn["said"])}</p>')
+            for r in turn["replies"]:
+                rows.append(f'<p class="said ag" dir="auto">{h(r)}</p>')
+                if ctx["token"]:
+                    draft = " ".join(str(r).split())  # as Use my version reads it; empty with a hint when too long
+                    fill, hint = (draft, "") if len(draft) <= MINE_ROOM else ("", f' placeholder="{h(MINE_HINT)}"')
+                    rows.append(f'<details class="mine"><summary>Edit this draft</summary><form method="post" '
+                                f'action="/try/{h(agent)}/correct">{_hidden(ctx)}<div class="box"><textarea name="text" '
+                                f'aria-label="Your version of the draft" maxlength="{MINE_ROOM}" dir="auto" required'
+                                f'{hint}>{h(fill)}</textarea></div>'
+                                f'<div class="say-f"><p class="quiet">{icon("loop")}{MINE_NOTE}</p><button class="send" '
+                                f'type="submit">Use my version{icon("arrow")}</button></div></form></details>')
+            if turn.get("tools"):
+                rows.append(f'<p class="used">Tools used: {h(", ".join(turn["tools"]))}.</p>')
+            if not turn["replies"]:
+                rows.append(f'<p class="said no">No reply ({h(turn["outcome"].replace("_", " "))}).</p>')
+        thread = f'<div class="thread">{"".join(rows)}</div>' if rows else ""
+        note = try_mod.AGENT_NOTE.format(name=who) + (f" {kit.CHAT_NOTE}" if getattr(kit, "CHAT_NOTE", None) else "")
+        hint = getattr(kit, "CHAT_HINT", None) or "Write to it the way the person it works for would."
+        form = ""
+        ready = t.ready() if t is not None else try_mod.can_answer(self.try_model)
+        if ctx["token"] and ready:
+            over = _post(ctx, f"try/{h(agent)}/clear", "Start over", "over") if rows else ""
+            form = (f'<form id="try-say" method="post" action="/try/{h(agent)}">{_hidden(ctx)}<div class="box"><textarea '
+                    f'name="text" aria-label="Your message to {h(who)}" maxlength="{try_mod.MAX_PASTE}" dir="auto" '
+                    f'required placeholder="{h(hint)}"></textarea></div></form><div class="say-f"><p class="quiet">'
+                    f'{icon("chat")}{h(note)}</p>{over}<button class="send" type="submit" form="try-say">Send'
+                    f'{icon("arrow")}</button></div>')
+        elif not ready:
+            form = f'<p class="quiet">{try_mod.AGENT_NO_KEY}</p>'
+        return (f'<section class="say try sq" aria-label="Talk to {h(who)}"><span class="lab">Talk to {h(who)}</span>'
+                f'{thread}{form}</section>')
 
     def shell(self, body, on, ctx, flash, script=None):
         q = ctx["q"]
@@ -1006,6 +1126,10 @@ def overview_tab(m, view, a, agent, st, ctx):
         if go:
             left.append(f'<section class="grp sq" aria-labelledby="ra-h"{arena_live(m, agent)}><h3 id="ra-h">'
                         f'The Arena</h3><small class="quiet">No practice run saved yet.</small>{go}</section>')
+    if tok and folder is not None and Pages.has_chat(m, agent):  # the page chat is on Live (Pages.chat_html)
+        left.append(f'<section class="grp sq" aria-labelledby="tk-h"><div class="grp-h"><h3 id="tk-h">Talk to '
+                    f'{h(name(agent))}</h3><a class="lk" href="{tab_href(ctx, agent, "live")}">Open the chat</a></div>'
+                    f'<small class="quiet">{CHAT_LINE}</small></section>')
     learn = run_reflection(m, a, agent, ctx, ctx["path"] + ctx["q"])
     if learn:  # Run reflection beside it, for any agent on the page
         left.append(f'<section class="grp sq" aria-labelledby="rf-h"{reflect_live(m, agent)}><h3 id="rf-h">'
@@ -1083,8 +1207,15 @@ def arena_track(m, agent, ctx):
         cls = "next" if status["next"] == key else "done" if done else ""
         tick = f'<small>{mo.DONE_WORD}</small>' if cls == "done" else ""
         steps.append(f'<li class="{cls}">{h(word)}{tick}</li>' if cls else f"<li>{h(word)}{tick}</li>")
+    kit = m.case_kit(agent) if hasattr(m, "case_kit") else None
+    connect = getattr(kit, "CONNECT_STEP", None)
+    if connect:  # a repo agent on the built path whose channel is next (the assistant's email): a step, no button
+        steps.append(f'<li class="soon">{h(connect)}</li>')  # next to build, so never lit as the next step
     out = [f'<p class="stl" role="status">{h(status["line"])}</p>',
            f'<ol class="trk" aria-label="Arena steps">{"".join(steps)}</ol>']
+    if connect:
+        out.append(f'<p class="trkc"><b>{h(connect)}.</b> {h(kit.CONNECT_LINE)} <a class="lk" '
+                   f'href="{tab_href(ctx, agent, "live")}">Open the chat</a></p>')
     if status["ready"] and agent in m.plugs:
         conns = m.connection_view(agent)
         if conns:
@@ -1425,6 +1556,8 @@ def live_tab(m, view, a, agent, st, ctx):
     tok = ctx["token"] if a["buttons"] else None
     if tok and agent == mo.SALES.agent and ctx.get("try") is not None:
         left.append(ctx["try"](tab_ctx(ctx, agent, "live")))
+    elif tok and ctx.get("chat") is not None:  # every other agent with an agent folder: the same chat (Pages.chat_html)
+        left.append(ctx["chat"](tab_ctx(ctx, agent, "live"), agent))
     right = ('<section class="grp sq" aria-labelledby="lt-h"><h3 id="lt-h">Every step</h3><div class="nr"><p>'
              f'Each chat, each tool call and each check is in the console. <a class="lk" href="/console?agent='
              f'{h(agent)}&amp;view=deploy{day}">Open console</a></p></div></section>') if agent in m.plugs else ""

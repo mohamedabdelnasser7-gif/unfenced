@@ -52,7 +52,8 @@ class Picture(unittest.TestCase):
 
     def test_the_picture_from_the_demo(self):
         p = self.pic
-        self.assertEqual(p["messages"], {"inbox": 12, "sent": 9, "skipped": 0})
+        self.assertEqual(p["messages"], {"inbox": 16, "sent": 9, "skipped": 0})
+        self.assertEqual(p["busy_hours"], [8, 9, 12, 13])  # the mail still waiting for a reply leaves them as they were
         # Maya and Sara both have a 15 minute median over 3 replies; the tie goes by address
         self.assertEqual([(r["who"], r["median_minutes"]) for r in p["fast_replies"]][:2],
                          [("maya@northwind.test", 15), ("sara@kitehouse.test", 15)])

@@ -4179,13 +4179,17 @@ def _handler(morning, token, pages=None):
             multi = MULTIPART.get(path) if sheet or path in table else None
             act = (lambda m, f, now=None: m.late_sheet(_field(f, "agent"), _sheet(f), now=now)) if sheet else \
                 table.get(path)
+            cap = multi[2] if multi else MAX_BODY
+            if act is None and pages is not None and hasattr(pages, "action_for"):  # /try/<agent>: the page chat
+                act = pages.action_for(path)
+                cap = max(MAX_BODY, getattr(pages, "MAX_TRY_BODY", MAX_BODY))  # room for a pasted email (pages.py)
             if act is None:
                 return self._send(404, "Not found.\n")
             try:
                 length = int(self.headers.get("Content-Length") or "")
             except ValueError:
                 return self._send(411, "A length is needed.\n")
-            if not 0 <= length <= (multi[2] if multi else MAX_BODY):
+            if not 0 <= length <= cap:
                 return self._send(413, "Too long.\n")
             kind = (self.headers.get("Content-Type") or "").lower()
             if not kind.startswith("multipart/form-data" if multi else "application/x-www-form-urlencoded"):

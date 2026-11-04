@@ -1,5 +1,5 @@
 # For judges
-*Created: 2026-10-31. Last updated: 2026-11-04 (decision 110, the example agent starts at high).*
+*Created: 2026-10-31. Last updated: 2026-11-04 (decisions 104 and 110, example agent at high, page chat).*
 
 Every model this project calls is a Meta model: Muse Spark on the Meta Model API, or Muse Spark Open on Baseten. You do not need to connect any other account. The store name is made up; the products and prices are real; the practice customers are built from real chats with names, numbers and addresses removed.
 
@@ -48,6 +48,8 @@ Run the Arena, Train and Run reflection use your model key and count toward the 
 ## Chat with the Sales agent
 
 Open Agents, then Sales. The Try Sales box sits on its page. Write to it the way a customer would, about a product, a size or delivery, and the trained Sales agent answers on the demo store with your own model key. No real order or message goes out, and these chats never count for the gate, the exam or Connect. Start over opens a new chat. Each answer counts toward the same daily model call cap as the Arena.
+
+Every other agent on Agents, the personal assistant, the Family Dinner Planner and any agent you build, has the same chat on its Live tab: it answers with its own tools on sample data, nothing is sent, and Use my version under a draft sends your rewrite as a correction. Ask the assistant "summarize my emails for today" or paste an email.
 
 With no key in `.env`, the box says so and points you to the recorded replay below.
 

@@ -1013,7 +1013,7 @@ class Morning:
                 else:
                     models = self.retry_models()
                 pool = rounds_mod.Pool(lessons, hotfixes=lambda: rounds_mod.live_hotfixes(db_path, agent))
-                extra = {}
+                extra = {"judge_model": models[2] if len(models) > 2 else None}  # Sales: the close judge (decision 105)
                 if built:  # an agent made here: its own practice play and judge (arena/retry.py built)
                     from kit import turn as turn_mod
                     extra = {"built": turn_mod.load(folder), "judge_model": models[2] if len(models) > 2 else models[0]}

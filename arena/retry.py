@@ -8,7 +8,8 @@ card) is played once more from the same customer opening with the same customer 
 gate reruns a past win (arena/gate.py Gate). The agent plays with its kept lessons and, first, the
 corrections that passed their exam and run live as a hotfix (arena/rounds.py live_hotfixes and Pool,
 read again before every match). Each match is judged the way the Arena judges it (arena/verdict.py,
-with the run's fact checks) and every model call is counted on the Arena's own count file and cap
+with the run's fact checks, and a card no offer covers by the close judge, arena/close.py, when a judge
+model is given) and every model call is counted on the Arena's own count file and cap
 (arena/run.py Calls), so Try again shares the day's cap with the Arena and the night.
 
 It writes one item next to the database, kind arena_retry: the run it retried and, for each card,
@@ -22,6 +23,7 @@ import time
 from pathlib import Path
 
 from arena import factcheck, gate as gate_mod, match as match_mod, run as run_mod, verdict
+from kit.model import ModelError
 
 KIND = "arena_retry"
 PREFIX = "retry-"  # the retry's run id starts with it: arena-<agent>-retry-<time>.json beside the run's item
@@ -114,11 +116,39 @@ def retry(*, agent, run, cards, state, reports, pool, agent_model, customer_mode
             results.append({"card": card, "result": NOT_PLAYED, "why": "the try stopped here"})
             continue
         judged = verdict.judge(m, facts=facts)
+        if judged.get("needs_close") and judge_model is not None:  # a card no offer covers: the close judge (decision 105)
+            try:
+                judged = _close(m, persona, calls.model(judge_model), facts)
+            except run_mod.CapReached:
+                judged = None
+            except ModelError as e:
+                stopped, error = run_mod.MODEL_ERROR, " ".join(str(e).split())[:200] or type(e).__name__
+                results.append({"card": card, "result": NOT_PLAYED, "why": "the try stopped here"})
+                continue
+            if calls.reached:
+                stopped = run_mod.CAP
+                results.append({"card": card, "result": NOT_PLAYED, "why": "the try stopped here"})
+                continue
+            if judged is None:
+                results.append({"card": card, "result": NOT_PLAYED, "why": "the judge's answer could not be read"})
+                continue
         got = {"card": card, "result": WON_AGAIN if judged["won"] else STILL_LOST, "why": judged["why"]}
         if not judged["won"]:
             got["quote"] = judged["quote"]
         results.append(got)
     return _write(agent, run, cards, results, stopped, error, pool, calls, reports, now)
+
+
+def _close(m, persona, model, facts):
+    """arena/close.py judge on a card no offer covers, asked once more when its answer cannot be read, as the
+    Arena does (arena/run.py _judge_close); None when the second cannot be read either."""
+    from arena import close as close_mod, offers as offers_mod
+    for _ in range(2):
+        try:
+            return close_mod.judge(m, persona, offers_mod.current(), model, facts=facts)
+        except close_mod.Unreadable:
+            continue
+    return None
 
 
 def _retry_built(agent, run, cards, state, reports, pool, a_model, c_model, j_model, calls, facts, now):

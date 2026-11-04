@@ -394,6 +394,8 @@ def build(args, ctx):
     }
     if payment:
         draft["payment"] = payment
+    if place.get("offer_id"):
+        draft["offer_id"] = place["offer_id"]  # the delivery offer that set the fee, kept with the order
     if got["discounts"]:
         draft["discounts"] = [{"offer": d["offer"], "what": d["what"], "discount": str(d["discount"])}
                               for d in got["discounts"]]

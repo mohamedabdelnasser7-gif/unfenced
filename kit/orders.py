@@ -174,6 +174,8 @@ class Book:
             tags.append(whatsapp_tag(draft["whatsapp"]))
         if draft.get("payment"):
             tags.append(f"payment-{draft['payment']}")
+        if draft.get("offer_id"):  # the delivery offer that set the fee (decision 105)
+            tags.append(f"offer-{draft['offer_id']}")
         if on_shopify():
             return _shopify_create(draft, chat_id, tags)
         with self.db.tx() as c:

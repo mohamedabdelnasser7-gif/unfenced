@@ -530,6 +530,20 @@ CSP = ("default-src 'none'; style-src 'sha256-" + base64.b64encode(hashlib.sha25
 
 STALE_PLAN = "Not rolled back: the lessons changed after the plan was shown. Look at the plan again."
 TRY_NOT_BUILT = "Try again is not built for this agent yet, so nothing was started."
+ARENA_NOT_HERE = "Run the Arena is for an agent made here, so nothing was started."
+ARENA_STARTED = "The Arena is running. Its practice matches show here as it plays; it takes a few minutes."
+
+
+def _lines(folder):
+    """Lines in an agent's Arena matches file (arena/run.py MATCHES_FILE); 0 with none or no folder."""
+    from arena import run as run_mod
+    if folder is None:
+        return 0
+    try:
+        with open(Path(folder) / run_mod.MATCHES_FILE, "rb") as f:
+            return sum(1 for _ in f)
+    except OSError:
+        return 0
 NO_EXAM = "A correction takes a short exam first, and this agent has no exam here yet, so nothing was added."
 
 
@@ -629,6 +643,13 @@ class Morning:
         self._trying, self._try_note, self._try_lock = set(), {}, threading.Lock()
         self.retry_models = None
         self.retry_start = lambda work, name: threading.Thread(target=work, name=name, daemon=True).start()
+        # Run the Arena (run_arena), cloned from Try again: the agents with a run going, the matches file's
+        # length when each started, what went wrong with the last one, its models (None: kit.model.Model;
+        # a test hands (agent, customer, judge) fakes), how it starts, and the practice's shape (a test's)
+        self._arenas, self._arena_note, self._arena_from, self._arena_lock = set(), {}, {}, threading.Lock()
+        self.arena_models = None
+        self.arena_start = lambda work, name: threading.Thread(target=work, name=name, daemon=True).start()
+        self.arena_shape = {}
 
     def add_built(self):
         """Wire each agent Quick start built since the page started into the running page, as
@@ -683,13 +704,15 @@ class Morning:
         rated = lessons.rate(text)  # the judge, outside the transaction (edit)
         return self.edit(lesson_id, text, now=now, exam=result, rated=rated)
 
-    def correct(self, agent, line, now=None):
+    def correct(self, agent, line, now=None, by=None):
         """A correction or an idea the user sends on an agent's page: a hotfix (DECISIONS 56,
         Lessons.correct). It takes the short exam first, the one the page already runs (outside the
         transaction); once it passes it starts at once on half the chats, whatever the level, and never
         waits behind a lesson on trial. A high risk one, or one the exam holds, waits for a yes on Today
         (engine.lessons WANTS_YES). An agent with no exam here is refused: a correction never starts
-        untested. The night's Reflection reads it like any idea; its source is Lessons.HOTFIX_SOURCE."""
+        untested. The night's Reflection reads it like any idea; its source is Lessons.HOTFIX_SOURCE.
+        by: who sent it, kept as its yes_by; None is the page's own (self.by, the user). The console
+        sends "operator" (reflection/console.py), down the same path and the same exam."""
         lessons, text, stage = self._idea_checked(agent, line, plug_mod.ALL)  # a refused line takes no exam
         result = self._correction_exam(lessons, text)
         if result is None:
@@ -698,7 +721,7 @@ class Morning:
         with self.page.one():
             lessons, text, stage = self._idea_checked(agent, line, plug_mod.ALL)  # again: the lessons may have moved
             try:
-                new_id = lessons.correct(text, [stage], yes_by=self.by, exam=result, now=now, rated=rated)
+                new_id = lessons.correct(text, [stage], yes_by=by or self.by, exam=result, now=now, rated=rated)
             except ValueError as e:
                 raise Refused(f"The correction was refused: {e}.") from None
             state = lessons.get(new_id)["state"]
@@ -797,6 +820,94 @@ class Morning:
             raise
         return retry_mod.STARTED
 
+    def arena_running(self, agent):
+        """True while a Run the Arena runs for the agent (run_arena)."""
+        with self._arena_lock:
+            return agent in self._arenas
+
+    def arena_note(self, agent):
+        """Why the agent's last Run the Arena could not run, or None (run_arena)."""
+        with self._arena_lock:
+            return self._arena_note.get(agent)
+
+    def arena_played(self, agent):
+        """The practice matches the running Run the Arena played so far: the lines its matches file gained
+        since it started (arena/run.py MATCHES_FILE, in the agent's folder); 0 when none runs."""
+        with self._arena_lock:
+            start = self._arena_from.get(agent) if agent in self._arenas else None
+        if start is None:
+            return 0
+        return max(0, _lines(self.agent_folder(agent)) - start)
+
+    def run_arena(self, agent, now=None):
+        """Run the Arena on an agent's page (arena/practice.py practise): a full practice run of an agent
+        made here against made-up customers, with its sample data, in a background thread, so the page
+        returns at once and its Arena tab polls the progress. Refused for any other agent (the Sales agent
+        runs through arena/run.py), when a run goes for the agent already, when the day's model call cap
+        has no room, or with no model key. Each lost match becomes a case the night studies, as after
+        Build (QuickStart._practise). Its item saves beside the database and shows on the Arena tab."""
+        from arena import retry as retry_mod, run as run_mod
+        folder = self.agent_folder(agent)
+        if agent == SALES.agent or folder is None or folder.is_symlink() or not folder.is_dir():
+            raise Refused(ARENA_NOT_HERE)
+        if not retry_mod.has_room(run_mod.state_dir(self.db_path)):
+            raise Refused("The day's model call cap has no room left, so nothing was started. Run it again "
+                          "tomorrow, Cairo time.")
+        if self.arena_models is None:
+            from kit import model as model_mod
+            if not model_mod.has_key():
+                raise Refused("No model key is set, so the Arena cannot play. Put META_API_KEY or "
+                              "BASETEN_API_KEY in .env and start the page again.")
+        with self._arena_lock:
+            if agent in self._arenas:
+                raise Refused("The Arena is running for this agent already. Its matches show here as it plays.")
+            self._arenas.add(agent)
+            self._arena_note.pop(agent, None)
+            self._arena_from[agent] = _lines(folder)
+        db_path, shape = self.db_path, dict(self.arena_shape)
+
+        def work():  # the thread's work: never raises, a failure becomes the tab's one line
+            note, db = None, None
+            try:
+                from arena import practice
+                if self.arena_models is None:
+                    from kit import model as model_mod
+                    models = (model_mod.Model(), model_mod.Model(), model_mod.Model())
+                else:
+                    models = self.arena_models()
+                learn = None
+                try:  # each lost match becomes a case the night studies (arena/learn_built.py), when it is here
+                    from arena import learn_built
+                except ImportError:
+                    learn_built = None
+                if learn_built is not None:
+                    from kit import turn as turn_mod
+                    db = Db(db_path)  # its own connection: the page's answers keep theirs
+                    learn = learn_built.learner(db, turn_mod.load(folder).plug)
+                practice.practise(folder, agent_model=models[0], customer_model=models[1], judge_model=models[2],
+                                  learn=learn, **shape)
+            except Exception as e:
+                note = f"The last run could not finish ({' '.join(str(e).split())[:200] or type(e).__name__})."
+            finally:
+                if db is not None:
+                    try:
+                        db.close()
+                    except Exception:
+                        pass
+            with self._arena_lock:
+                self._arenas.discard(agent)
+                self._arena_from.pop(agent, None)
+                if note:
+                    self._arena_note[agent] = note
+        try:
+            self.arena_start(work, f"arena-{agent}")
+        except Exception:
+            with self._arena_lock:
+                self._arenas.discard(agent)
+                self._arena_from.pop(agent, None)
+            raise
+        return ARENA_STARTED
+
     def paused(self, agent):
         """True while the agent's pause switch is on (kit/switch.py). Reads only: a database with no
         switch table yet is not paused, and a page view never makes the table."""
@@ -851,6 +962,34 @@ class Morning:
         except turn_mod.Refused:
             return []
         return [c for c in conn_mod.CHANNELS if c in tools]
+
+    def agent_folder(self, agent):
+        """The folder of an agent Quick start built, beside the database; None for any other agent or with
+        no database path (the sample days)."""
+        if agent not in self.built or self.db_path is None:
+            return None
+        from kit import turn as turn_mod
+        return Path(self.db_path).resolve().parent / turn_mod.AGENTS / agent
+
+    def sample_data(self, agent):
+        """The built agent's sample data (kit/sample.py read), or None."""
+        from kit import sample
+        folder = self.agent_folder(agent)
+        return None if folder is None else sample.read(folder)
+
+    def add_data(self, agent, text, raw=b"", now=None):
+        """Rows or a file the user adds to a built agent's sample data, marked as the user's (kit/sample.py
+        add): parsed in code as JSON, CSV or plain lines, never run, every value capped and plain. Its next
+        practice and its tools read them. Refused, with nothing saved, for any other agent."""
+        from kit import sample
+        folder = self.agent_folder(agent)
+        if folder is None or folder.is_symlink() or not folder.is_dir():
+            raise Refused("Only an agent made here takes sample data.")
+        try:
+            n = sample.add(folder, text, raw or b"")
+        except sample.Refused as e:
+            raise Refused(str(e)) from None
+        return f"Added {n} {'row' if n == 1 else 'rows'} to its sample data. Its next practice reads them."
 
     def gate(self, agent):
         """Did the agent's latest Arena gate pass? From the newest Arena item saved next to the database
@@ -2939,11 +3078,16 @@ ACTIONS = {"/stop": lambda m, f, now=None: m.stop(_field(f, "lesson"), _field(f,
                                                             now=now),
            "/mode": lambda m, f, now=None: m.answer_mode(_field(f, "agent"), _field(f, "card"), _field(f, "choice"),
                                                          _field(f, "name") if "name" in f else "", now=now)}
-SHEET_PATH = "/late_sheet"  # the one POST that takes a file: multipart, its own size cap (MAX_SHEET)
+SHEET_PATH = "/late_sheet"  # a POST that takes a file: multipart, its own size cap (MAX_SHEET)
 SHEET_FIELDS = ("token", "back", "agent", "sheet")
+DATA_PATH = "/agents/data"  # rows or a file added to a built agent's sample data (Morning.add_data): multipart too
+DATA_FIELDS = ("token", "back", "agent", "text", "file")
+MAX_DATA_POST = 160 * 1024  # bytes in one sample data POST: the file (kit/sample.py MAX_UPLOAD) and the pasted text
+# the multipart POSTs: their fields, the one field that is a file, and the whole request's cap
+MULTIPART = {SHEET_PATH: (SHEET_FIELDS, "sheet", MAX_SHEET), DATA_PATH: (DATA_FIELDS, "file", MAX_DATA_POST)}
 
 
-def sheet_fields(content_type, body):
+def sheet_fields(content_type, body, fields=SHEET_FIELDS, file="sheet"):
     """{name: [value]} from the sheet upload's multipart/form-data body: the file (sheet) as bytes,
     every other field as text. Read with the standard library's email parser, at most one part per
     field it takes and only those fields; ValueError for anything else, so nothing is saved."""
@@ -2956,16 +3100,16 @@ def sheet_fields(content_type, body):
         msg = BytesParser(policy=policy.HTTP).parsebytes(
             b"MIME-Version: 1.0\r\nContent-Type: " + ct.encode("latin-1") + b"\r\n\r\n" + body)
         parts = msg.get_payload() if msg.is_multipart() else None
-        if not isinstance(parts, list) or not 0 < len(parts) <= len(SHEET_FIELDS):
+        if not isinstance(parts, list) or not 0 < len(parts) <= len(fields):
             raise ValueError("not a sheet upload")
         out = {}
         for part in parts:
             name = part.get_param("name", header="content-disposition")
-            if part.get_content_disposition() != "form-data" or name not in SHEET_FIELDS or name in out \
+            if part.get_content_disposition() != "form-data" or name not in fields or name in out \
                     or part.is_multipart():
                 raise ValueError("not a sheet upload")
             data = part.get_payload(decode=True) or b""
-            out[name] = [data if name == "sheet" else data.decode("utf-8")]
+            out[name] = [data if name == file else data.decode("utf-8")]
     except ValueError:
         raise
     except Exception:  # the email parser's own errors: still not a sheet upload
@@ -2973,8 +3117,8 @@ def sheet_fields(content_type, body):
     return out
 
 
-def _sheet(form):
-    got = form.get("sheet") or [b""]
+def _sheet(form, name="sheet"):
+    got = form.get(name) or [b""]
     return got[0] if isinstance(got[0], bytes) else b""
 
 
@@ -2983,7 +3127,10 @@ def _sheet(form):
 A3_ONLY = ("/idea", "/edit")
 TWO_TAB_ACTIONS = {**{k: v for k, v in ACTIONS.items() if k not in A3_ONLY},
                    # Try again on the Arena screen (Morning.try_again): the two tab page only
-                   "/tryagain": lambda m, f, now=None: m.try_again(_field(f, "agent"), now=now)}
+                   "/tryagain": lambda m, f, now=None: m.try_again(_field(f, "agent"), now=now),
+                   # rows or a file the user adds to a built agent's sample data (kit/sample.py)
+                   DATA_PATH: lambda m, f, now=None: m.add_data(_field(f, "agent"), _field(f, "text"),
+                                                                 _sheet(f, "file"), now=now)}
 
 
 def make_server(morning, *, port=int(PORT_DEFAULT), token=None, pages=None):
@@ -3039,8 +3186,10 @@ def _handler(morning, token, pages=None):
                 got = pages.get(parts.path, query, token, flash)
                 if got is None:
                     return self._send(404, "Not found.\n")
-                box["flash"] = None
-                return self._send(200, got, page=True, csp=pages.csp)
+                if self.headers.get("X-Poll") != "1":  # the console's refresh leaves the one-time message alone
+                    box["flash"] = None
+                csp = pages.csp_for(parts.path) if hasattr(pages, "csp_for") else pages.csp
+                return self._send(200, got, page=True, csp=csp)
             if urllib.parse.urlsplit(self.path).path != "/":
                 return self._send(404, "Not found.\n")
             flash, box["flash"] = box["flash"], None
@@ -3052,6 +3201,7 @@ def _handler(morning, token, pages=None):
             table = ACTIONS if pages is None else {**TWO_TAB_ACTIONS, **getattr(pages, "actions", {})}  # + Quick start
             path = urllib.parse.urlsplit(self.path).path
             sheet = path == SHEET_PATH  # the sheet upload: a file, so multipart and its own size cap
+            multi = MULTIPART.get(path) if sheet or path in table else None
             act = (lambda m, f, now=None: m.late_sheet(_field(f, "agent"), _sheet(f), now=now)) if sheet else \
                 table.get(path)
             if act is None:
@@ -3060,14 +3210,14 @@ def _handler(morning, token, pages=None):
                 length = int(self.headers.get("Content-Length") or "")
             except ValueError:
                 return self._send(411, "A length is needed.\n")
-            if not 0 <= length <= (MAX_SHEET if sheet else MAX_BODY):
+            if not 0 <= length <= (multi[2] if multi else MAX_BODY):
                 return self._send(413, "Too long.\n")
             kind = (self.headers.get("Content-Type") or "").lower()
-            if not kind.startswith("multipart/form-data" if sheet else "application/x-www-form-urlencoded"):
+            if not kind.startswith("multipart/form-data" if multi else "application/x-www-form-urlencoded"):
                 return self._send(415, "A form is needed.\n")
             try:
-                if sheet:
-                    form = sheet_fields(self.headers.get("Content-Type"), self.rfile.read(length))
+                if multi:
+                    form = sheet_fields(self.headers.get("Content-Type"), self.rfile.read(length), multi[0], multi[1])
                 else:
                     form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"), keep_blank_values=True,
                                                  max_num_fields=8)
@@ -3088,6 +3238,9 @@ def _handler(morning, token, pages=None):
                 box["flash"] = str(e)
             except (ValueError, sqlite3.Error) as e:
                 box["flash"] = f"Not done: {e}"
+            to = getattr(box["flash"], "location", None)  # an answer that names where the page goes next (Build)
+            if to and pages is not None and hasattr(pages, "land"):
+                back = pages.land(to, back)
             self._send(303, "Done.\n", location=back)
 
     return Handler

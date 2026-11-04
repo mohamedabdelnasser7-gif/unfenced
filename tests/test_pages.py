@@ -194,6 +194,23 @@ class TwoTabs(unittest.TestCase):
         self.assertIn("Practice matches", build)
         self.assertNotIn(">won", build.split("</style>")[1].lower())
 
+    def test_build_page_says_plainly_there_is_nothing_to_do(self):
+        build = self.get("/new/build", {"agent": ["sales"]})
+        self.assertIn("Nothing to do here while it practises.", build)
+        self.assertNotIn("one note when it is ready", build)  # no such note is sent
+
+    def test_name_taken_refusal_links_to_that_agent(self):
+        said = "There is an agent called sales already. Give this one another name in the box."  # quickstart.py
+        page = self.p.get("/new", {}, "t", said)
+        self.assertIn(f'<p class="flash" role="status">{said} <a href="/agents/sales">Open ', page)
+        gone = "There is an agent called stock_watch already. Give this one another name in the box."  # no such page
+        page = self.p.get("/new", {}, "t", gone)
+        self.assertIn(f'<p class="flash" role="status">{gone}</p>', page)
+        other = "Not done: sales <b>x</b>"
+        page = self.p.get("/agents", {}, "t", other)
+        self.assertIn('<p class="flash" role="status">Not done: sales &lt;b&gt;x&lt;/b&gt;</p>', page)
+        self.assertEqual(pages.flash_html(None, {"m": self.m, "q": ""}), "")
+
     def test_back_stays_on_the_page(self):
         for bad in ("https://evil.example/", "//evil.example/x", "/agents/../x", "/morning"):
             self.assertEqual(self.p.back(bad), "/")

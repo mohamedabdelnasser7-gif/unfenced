@@ -13,11 +13,11 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from kit.tools import cod_risk, delivery, draft_order, find_order, store, switch_stage, voice_note
+from kit.tools import cod_risk, data, delivery, draft_order, find_order, store, switch_stage, voice_note
 
 log = logging.getLogger("kit.tools")
 
-TOOLS = {m.NAME: m for m in (store, voice_note, delivery, draft_order, cod_risk, find_order, switch_stage)}
+TOOLS = {m.NAME: m for m in (store, voice_note, delivery, draft_order, cod_risk, find_order, switch_stage, data)}
 
 # Control tools are offered in every stage where the agent replies, on top of the stage's own list.
 CONTROL = ("switch_stage",)
@@ -28,11 +28,13 @@ CONTROL = ("switch_stage",)
 # catalogue, and subtotal, fee and total worked out in code from the catalogue and delivery data.
 # find_order: the total of each of the customer's own past orders, from the store's own record
 # (found by the chat's WhatsApp number, matched exactly in code), so a past order's real total
-# passes. Its items carry no line price today. cod_risk is for the team only and adds none.
+# passes. Its items carry no line price today. data: a price, fee, total or subtotal in the agent's own
+# sample data (kit/sample.py), read from its file in code, rows made up at Build or added by the user,
+# never from the model's arguments. cod_risk is for the team only and adds none.
 # A new tool joins this list only in the PR that builds it, with a line here naming which of
 # its keys (price, fee, total, subtotal) the server computes. A voice note or any other free
 # text never adds an amount.
-AMOUNT_TOOLS = ("store", "delivery", "draft_order", "find_order")
+AMOUNT_TOOLS = ("store", "delivery", "draft_order", "find_order", "data")
 
 
 @dataclass
@@ -47,6 +49,7 @@ class Context:
     stages: dict = field(default_factory=dict)
     cache: dict = field(default_factory=dict)  # per-turn results a tool keeps (the voice note, heard once)
     lesson_ids: set = field(default_factory=set)  # the lessons handed so far this turn; a tool's own rows keep them
+    data: Any = None                # a Quick start agent's sample data (kit/sample.py), read by the data tool
 
 
 def offered(stage):

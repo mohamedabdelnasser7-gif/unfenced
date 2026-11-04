@@ -59,7 +59,7 @@ CUSTOMER = "201000000099"  # a made-up number in a throwaway database
 KEEP_OUT = ("SHOPIFY_STORE", "SHOPIFY_TOKEN", "OPERATOR_WHATSAPP")
 START = "(The chat starts now. Write your first message to the store.)"
 CUSTOMER_EFFORT = "low"
-CUSTOMER_TOKENS = 400
+CUSTOMER_TOKENS = 2000  # reasoning included: at 400 the customer's line came back empty
 
 GENERIC_PROMPT = (
     "You are a customer writing to an online shop on WhatsApp. You want $want. Your worry is "

@@ -12,7 +12,10 @@ writes (reflection/quickstart.py):
                    and the rest is checked for shape and left alone. A card with no case is a chat
                    case, as every card was before.
 
-load(folder) reads them, under size caps and with no link followed, into an Agent. turn() runs one
+load(folder) reads them, under size caps and with no link followed, into an Agent. An agent Build made
+(its card names its tools) is read with the fixes Build makes now, so one built before them gets them
+too (reflection/quickstart.py at_load); its files are never written. A folder written by hand and the
+Sales agent are read as they are. turn() runs one
 message from the person the agent serves, the way sales/loop.py runs a Sales turn, cut down to
 what any agent has. With first=True the text is the case's input, not a person's message: the agent
 writes first (a lead it follows up), and the input is saved under a frame line so later turns read it.
@@ -26,10 +29,15 @@ writes first (a lead it follows up), and the input is saved under a frame line s
    what it connects by its own keys (reflection/quickstart.py TOOLS): QUICK_TOOLS reads those as the
    kit/tools files behind them, and whatsapp as the channel the chat is on, no tool. A name with no
    tool file is left out and listed in Agent.missing. At most MAX_TOOL_STEPS tool steps a turn
-   and MAX_CALLS_PER_STEP calls a step, then the model must answer in words.
-4. The send check: the full check (kit/send_check.py) when the card connects whatsapp or store (it
-   talks to customers or quotes the store), so script, style, amounts from tools only, stock counts
-   and links all hold; a folder written by hand, whose card names no tools, keeps the older rule: the
+   and MAX_CALLS_PER_STEP calls a step, then the model must answer in words. A folder with sample data
+   (kit/sample.py, sample-data.json: made up at Build, rows the user added) also offers the data tool
+   (DATA_TOOL), and for one with the store tool and no Shopify keys the store reads its sample products.
+4. The send check: the full check (kit/send_check.py) when the card connects whatsapp, store, orders
+   or delivery (it talks to customers or quotes the store), so script, style, amounts from tools only
+   and links all hold. For an agent Build made, the amounts rule reads only numbers that are prices or
+   fees (a currency next to it, or a price word before it), never an order number, a ticket id, a
+   postal code, a date, a time or a count, and the stock count rule holds only with the store tool;
+   the Sales agent (sales/loop.py) keeps the whole check. A folder written by hand, whose card names no tools, keeps the older rule: the
    full check when the plug declares a "reply" action, as the Sales plug does. The house style part
    only (banned words, dashes, emoji, markdown) for any other agent, whose replies are not a store's
    answers to a customer: a ticket agent that names a refund amount is not held to store prices. A failed reply is never sent: the model
@@ -60,7 +68,7 @@ from pathlib import Path
 
 from engine import plug as plug_mod
 from engine.lessons import slot
-from kit import send_check, switch, tools
+from kit import sample as sample_mod, send_check, switch, tools
 from kit.model import ModelError
 from kit.tools import draft_order, store
 from sales import loop
@@ -89,6 +97,7 @@ FULL_CHECK_TOOLS = ("whatsapp", "store", "orders", "delivery")  # a card that co
 CHANNEL = "whatsapp"
 CASE_KEYS = ("input", "starts", "output", "ends")
 STARTS = ("person", "agent")  # who writes first in a case
+DATA_TOOL = "data"  # kit/tools/data.py: the agent's sample data, offered when its folder has some
 ACT_TOOL = "take_action"  # a case agent's declared actions (a tag, a close); runs nothing, is only recorded
 MAX_ACT_NOTE = 200
 FIRST = ("(A new case. You write first: nobody has written to you yet. The case you start from: {input}) "
@@ -112,6 +121,9 @@ class Agent:
     stage: Stage
     full_check: bool
     acts: tuple = ()      # the declared actions take_action offers (a card with a case only)
+    data: dict | None = None  # its sample data (kit/sample.py), read by the data tool and the store tool
+    priced_only: bool = False  # the full check holds only prices and fees to the data (an agent Build made)
+    stock: bool = True    # the full check's stock count rule (an agent with the store tool, or written by hand)
 
 
 def _read(folder, name):
@@ -234,15 +246,36 @@ def load(folder):
         extra = sorted(set(p.risk.tools) - connected)
         if extra:
             raise Refused(f"plug.json names tools the card does not connect: {', '.join(extra)}")
+        p, instructions = _fixed(folder, raw, p, instructions, text, connected)
     offered, missing = tools_of(p)
+    data = sample_mod.read(folder)
+    if data is not None and DATA_TOOL not in offered:  # the rows it works from with no real connection
+        offered += (DATA_TOOL,)
     stage = Stage(p.stages[0] if p.stages else "all", card["name"], card["does"], offered, ())
     if connected is None:  # a folder written by hand: the older rule
-        talks = REPLY_ACTION in p.actions
-    else:
-        talks = bool(connected & set(FULL_CHECK_TOOLS))
+        talks, priced_only, stock = REPLY_ACTION in p.actions, False, True
+    else:  # an agent Build made: the amounts rule reads prices and fees only, the stock rule needs the store
+        talks, priced_only, stock = bool(connected & set(FULL_CHECK_TOOLS)), True, "store" in connected
     acts = tuple(a for a in p.actions if a != REPLY_ACTION) if "case" in card else ()
     return Agent(name=p.agent, folder=folder, plug=p, instructions=instructions, card=card, tools=offered,
-                 missing=missing, stage=stage, full_check=talks, acts=acts)
+                 missing=missing, stage=stage, full_check=talks, acts=acts, data=data, priced_only=priced_only,
+                 stock=stock)
+
+
+def _fixed(folder, raw, p, instructions, card_text, connected):
+    """(plug, instructions) of an agent Build made, read with the fixes Build makes now, for one built
+    before them (reflection/quickstart.py at_load: its high risk cleaned in code, an action for every
+    step its case needs, the house style and how it acts in its instructions). Nothing is written back:
+    the files stay as they are. A fixed plug the engine refuses leaves the agent as it was read."""
+    from reflection import quickstart  # here, not at the top: Quick start reads this module too
+    plug, words = quickstart.at_load(raw, instructions, json.loads(card_text), connected)
+    if plug is raw:
+        return p, words
+    try:
+        return plug_mod.from_dict(plug, folder), words
+    except (ValueError, RecursionError) as e:
+        log.warning("agent %s read without the newer fixes: %s", p.agent, e)
+        return p, instructions
 
 
 def built(db_folder, most=MAX_AGENTS):
@@ -288,7 +321,8 @@ def _check(agent, reply, customer_text, amounts, vocab, sizes, names, chats, cha
         problems = send_check.style_problems(reply)
         return (not problems), " ".join(dict.fromkeys(problems))
     return send_check.check(reply, customer_text, amounts, vocab, sizes, orders=loop.order_names(chats, chat_id),
-                            links=loop.store_links(chats, chat_id), names=names)
+                            links=loop.store_links(chats, chat_id), names=names, priced_only=agent.priced_only,
+                            stock=agent.stock)
 
 
 PRACTICE_CHANNEL = "practice"
@@ -333,7 +367,17 @@ def turn(agent, text, *, chats, chat_id, model, send, customer_id, lessons=(), m
     if switch.is_paused(agent.name, db=chats.db):  # saved above; nothing goes out while paused
         return TurnResult(PAUSED)
     ctx = tools.Context(chat_id=chat_id, stage=agent.stage, chats=chats, model=model, message=msg, send=send,
-                        stages={agent.stage.name: agent.stage})
+                        stages={agent.stage.name: agent.stage}, data=agent.data)
+    items = sample_mod.store_items(agent.data) if store.NAME in agent.tools else []
+    token = store.SAMPLE.set(items) if items else None  # its sample products when no Shopify keys are set
+    try:
+        return _turn(agent, text, ctx, history, chats, chat_id, send, customer_id, lessons, first)
+    finally:
+        if token is not None:
+            store.SAMPLE.reset(token)
+
+
+def _turn(agent, text, ctx, history, chats, chat_id, send, customer_id, lessons, first):
     amounts, vocab, sizes, names = set(), frozenset(), frozenset(), frozenset()
     if store.NAME in agent.tools:
         try:

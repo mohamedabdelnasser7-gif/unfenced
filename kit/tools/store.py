@@ -15,6 +15,7 @@ demo/catalogue.json, kept out of the seed mutation's variables), never a real br
 Only an https link with no space in it goes out. The send check lets a reply carry a link only
 when the store tool gave it in that chat (sales/loop.py store_links).
 """
+import contextvars
 import html
 import json
 import re
@@ -49,6 +50,9 @@ DEFINITION = {"type": "function", "function": {
 }}
 
 _cache = {"at": 0.0, "items": None}
+# A Quick start agent's sample products (kit/sample.py store_items), set by kit/turn.py for one turn of an
+# agent that has them. Read only when no Shopify keys are set: real keys always win.
+SAMPLE = contextvars.ContextVar("store_sample", default=None)
 
 
 def check(args, ctx):
@@ -81,10 +85,15 @@ def _haystack(item):
 # data
 
 def catalogue(fresh=False):
-    """Every product as a list of plain dicts, cached for a few minutes."""
+    """Every product as a list of plain dicts, cached for a few minutes. With no Shopify keys, an agent's
+    sample products (SAMPLE) when this turn has them."""
+    real = bool(env.get("SHOPIFY_STORE") and env.get("SHOPIFY_TOKEN"))
+    sample = None if real else SAMPLE.get()
+    if sample is not None:
+        return sample
     if not fresh and _cache["items"] is not None and time.time() - _cache["at"] < CACHE_SECONDS:
         return _cache["items"]
-    if env.get("SHOPIFY_STORE") and env.get("SHOPIFY_TOKEN"):
+    if real:
         items = _from_shopify()
     else:
         items = _from_demo(DEMO_CATALOGUE)

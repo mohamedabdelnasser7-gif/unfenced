@@ -121,6 +121,9 @@ GROWN = "grown-"  # the id of a card grown from real chats (arena/grow.py): it t
 PUBLIC_TRUST = {"matches": 10, "wins": 7, "zero_failed_checks": True}  # the Sales level, public (DECISIONS item 63)
 TZ = "Africa/Cairo"
 PASSED, CAP, STUCK, ROUNDS, MODEL_ERROR = "passed", "cap", "stuck", "rounds", "model_error"
+# What play returns for a match it played but could not judge (arena/practice.py: the judge's answer could not
+# be read twice): the run goes on, the match counts neither won nor lost, and the round counts it as unjudged.
+UNJUDGED = "unjudged"
 # --quick, the short run for judges (docs/judges.md): one round of one training match and a gate of
 # one match, at most QUICK_CALLS model calls in the run, its files under the ignored data/ folder.
 QUICK_TRUST = {"matches": 1, "wins": 1, "zero_failed_checks": True}
@@ -460,6 +463,9 @@ class Arena:
                 out = self.play(card, f"{self.run_id}-r{r}-t{k:02d}", training=True)
                 if out is None:
                     return self._report(rounds, self.halt)
+                if out is UNJUDGED:
+                    one["training"]["unjudged"] = one["training"].get("unjudged", 0) + 1
+                    continue
                 m, judged = out
                 one["training"]["played"] += 1
                 one["training"]["won"] += judged["won"]
@@ -474,6 +480,9 @@ class Arena:
                 out = self.play(card, f"{self.run_id}-r{r}-g{k:02d}")
                 if out is None:
                     return self._report(rounds, self.halt)
+                if out is UNJUDGED:
+                    one["gate"]["unjudged"] = one["gate"].get("unjudged", 0) + 1
+                    continue
                 m, judged = out
                 one["gate"]["played"] += 1
                 one["gate"]["won"] += judged["won"]
@@ -501,6 +510,9 @@ class Arena:
                 if self.halt == MODEL_ERROR:
                     out["error"] = self.error
                 break
+            if got is UNJUDGED:
+                out["unjudged"] = out.get("unjudged", 0) + 1
+                continue
             m, judged = got
             out["played"] += 1
             out["won"] += judged["won"]

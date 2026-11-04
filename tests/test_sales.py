@@ -173,7 +173,7 @@ class Turns(unittest.TestCase):
         self.assertEqual(results[1], {"ok": False, "feedback": "Tool arguments must be a JSON object."})
 
     def test_only_listed_tool_results_add_amounts(self):
-        self.assertEqual(tools.AMOUNT_TOOLS, ("store", "delivery", "draft_order", "find_order"))
+        self.assertEqual(tools.AMOUNT_TOOLS, ("store", "delivery", "draft_order", "find_order", "data"))
         self.assertNotIn("cod_risk", tools.AMOUNT_TOOLS)  # for the team only
         fake = types.SimpleNamespace(
             NAME="fake", DEFINITION={"type": "function", "function": {"name": "fake", "parameters": {}}},

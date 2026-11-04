@@ -1,6 +1,7 @@
-"""Run reflection on an agent's page (DECISIONS items 92 and 93): that agent's night now, with the
-real models on the real database, started from the page (Morning.run_reflection, pages.py
-REFLECT_PATH) and run in the page's background thread, as Run the Arena is.
+"""Run reflection on an agent's page (DECISIONS items 92, 93 and 102): that agent's night now, on its real
+customer chats, with the real models on the real database, started from the page (Morning.run_reflection,
+pages.py REFLECT_PATH) and run in the page's background thread, as Run the Arena is. And Train on the
+Arena tab (DECISIONS 104, Morning.run_train): Reflection on every match the newest full Arena run lost.
 
 It is the night study of reflection/night.py night(), the same function the scheduled night and the
 manual command run: the trial check, the practice matches of an agent Quick start built written as
@@ -23,13 +24,16 @@ holder (holder()); the next press takes it over once that process is gone (gone)
 Steps marks where it is for the page: reading lost chats until the proposer or the idea part first
 asks its model, writing a lesson from then, the exam once a lesson takes it.
 
-The Sales agent practises on a copy of its database, <db>.arena (arena/run.py arena_copy), so the
-chats it lost in the Arena are cases there, never in the live log (DECISIONS 46 and 96). While that copy
-holds them, its Run reflection studies them there (run_arena): the study and the eval gate the Arena runs
-between rounds (arena/rounds.py Between), on the night's study models, then the full exam, and only a
-lesson that passes both is written to the live database (rounds.hand_live), so no live customer meets a
-lesson that was not examined. With no Arena loss in the copy it runs the night on the live database, as
-for any agent. The day's call count, the night lock and the steps are the same.
+Train studies the Arena's losses, never Run reflection (DECISIONS 102 and 104). The Sales agent practises
+on a copy of its database, <db>.arena (arena/run.py arena_copy), so the matches it lost in the Arena are
+cases there, never in the live log (DECISIONS 46 and 96): its lost training matches as it plays, its lost
+gate matches once Train starts (add_arena_losses). Train studies them there (run_arena): the study and the
+eval gate the Arena runs between rounds (arena/rounds.py Between), on the night's study models, then the
+full exam, and only a lesson that passes both is written to the live database (rounds.hand_live), so no
+live customer meets a lesson that was not examined. An agent made here: every lost match of the run as a
+case in its own database (built_cases), then the study between rounds for it (arena/rounds.py
+BuiltBetween: train_between, study_built). Train takes calls from the day's count too, and shows its steps
+and lessons the same way; it holds no night lock, as Run the Arena holds none.
 """
 import functools
 import os
@@ -39,8 +43,8 @@ import threading
 import time
 from pathlib import Path
 
-PLAY, READ, LESSON, EXAM = "play", "read", "lesson", "exam"
-STEPS = (PLAY, READ, LESSON, EXAM)  # PLAY: Train's practice round, before its reflection reads what it lost
+READ, LESSON, EXAM = "read", "lesson", "exam"
+STEPS = (READ, LESSON, EXAM)
 PASSED, FAILED, NOT_RUN, IN_EXAM = "passed", "failed", "not run", "in exam"  # a seen lesson's exam (Steps.seen)
 PAGE_HOLDER = "page"  # how the night lock names a holder that is Run reflection (scheduler.py night_lock)
 
@@ -93,9 +97,9 @@ def exam_word(result):
 
 
 class Steps:
-    """Where a running reflection is: READ, then LESSON, then EXAM; it never steps back. Train starts at
-    PLAY (its practice round). seen: each lesson as it takes its exam, then the exam's word, for the page's
-    live view (DECISIONS 99 and 100), with the corrections sent while it runs (Morning.correct)."""
+    """Where a running reflection or Train is: READ, then LESSON, then EXAM; it never steps back. seen: each
+    lesson as it takes its exam, then the exam's word, for the page's live view (DECISIONS 99 and 100), with
+    the corrections sent while it runs (Morning.correct)."""
 
     def __init__(self, start=READ):
         self._at, self._lock = start, threading.Lock()
@@ -277,8 +281,46 @@ def arena_losses(db_path, agent):
         return []
 
 
+def add_arena_losses(db_path, matches):
+    """Before Train on the Sales agent (DECISIONS 104): each lost match in matches (the newest full run's, as
+    its matches file saved them) that is no case in the Arena's copy yet, written there (arena/learn.py
+    to_case): its gate matches, since only a lost training match becomes a case as it plays. Returns how many
+    were written; 0 with no copy (a link or none is never written through)."""
+    from arena import learn as learn_mod
+    from kit.db import Db
+    from reflection import PLUG as SALES
+    path = arena_path(db_path)
+    if path.is_symlink() or not path.is_file():
+        return 0
+    have = {case for case, _ in arena_losses(db_path, SALES.agent)}
+    todo = [m for m in matches if not m.get("won") and learn_mod.case_id(m["id"]) not in have]
+    if not todo:
+        return 0
+    copy = Db(str(path))
+    try:
+        for m in todo:
+            learn_mod.to_case(copy, m, {"won": False, "why": m.get("why"), "quote": m.get("quote")}, m["id"])
+    finally:
+        copy.close()
+    return len(todo)
+
+
+def built_cases(db, plug, matches):
+    """Before Train on an agent made here (DECISIONS 104): each lost match in matches (the newest full run's)
+    as a case in db under plug (arena/learn_built.py to_case; one already written, as its training losses
+    are while it plays, is left as it is), gate matches included. Returns their case ids, in order."""
+    from arena import learn_built
+    out = []
+    for m in matches:
+        if m.get("won"):
+            continue
+        out.append(learn_built.to_case(db, plug, m, {"won": False, "why": m.get("why"), "quote": m.get("quote")},
+                                       m["id"]))
+    return out
+
+
 def run_arena(db_path, plug, *, models, agent_model, customer_model, calls, steps, until=None, stop=None):
-    """Run reflection on the Sales agent's Arena losses (arena_losses): the study between rounds and its
+    """Train on the Sales agent's Arena losses (arena_losses): the study between rounds and its
     eval gate (arena/rounds.py Between) on the Arena's copy, read from the oldest of those losses, then the
     full exam before a lesson that passed is written to the live database at db_path. models: {"study",
     "open", "exam"} (arena/run.py reflection_models; a test adds "examiner" and "full", as arena/run.py main
@@ -328,10 +370,10 @@ def run_arena(db_path, plug, *, models, agent_model, customer_model, calls, step
 
 
 def study_built(db, db_path, between, *, steps, stop=None):
-    """Train's reflection for an agent Quick start built (DECISIONS 102): the study between Arena rounds
-    (arena/rounds.py BuiltBetween, made by train_between) on the practice matches its round lost, which its
-    learn() wrote as cases in db, as arena/practice.py runs it between two rounds. Returns its counts with
-    "cases" and "cards", the ids of the lessons that passed, and "lost", the cases studied."""
+    """Train for an agent Quick start built (DECISIONS 104): the study between Arena rounds (arena/rounds.py
+    BuiltBetween, made by train_between) on between.pending, the cases of the matches the newest full run
+    lost (built_cases), as arena/practice.py runs it between two rounds. Returns its counts with "cases" and
+    "cards", the ids of the lessons that passed, and "lost", the cases studied."""
     lost = len(between.pending)
     between.stop = stop
     out = between(1)
@@ -341,8 +383,8 @@ def study_built(db, db_path, between, *, steps, stop=None):
 
 
 def train_between(db, db_path, folder, *, models, agent_model, customer_model, judge_model, steps):
-    """The BuiltBetween Train's practice round hands its lost matches to (its learn) and then studies them
-    (study_built): on db, the page's database, with the night's models (models: {"study", "open", "exam"}, a
+    """The BuiltBetween Train studies the newest full run's lost matches with (study_built, its pending set
+    from built_cases): on db, the page's database, with the night's models (models: {"study", "open", "exam"}, a
     test's "examiner" too), its exam the built agent's own (arena/rounds.py turn_examiner) unless the test
     gives one, every lesson shown in steps.seen. Its calls are taken from the day's count beside the database
     (arena/practice.py reports_of), as the round's are."""

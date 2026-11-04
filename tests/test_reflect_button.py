@@ -109,7 +109,8 @@ class Base(unittest.TestCase):
 
 class TheButton(Base):
     def test_on_the_overview_with_the_owners_words_under_it_and_not_on_the_arena_tab(self):
-        # DECISIONS 102: Run reflection stays for real customer chats, on the Overview; the Arena tab has Train
+        # DECISIONS 102 and 104: Run reflection stays for real customer chats, on the Overview; the Arena tab has
+        # Run the Arena (Train only after a run that did not pass)
         self.lose()
         page = self.page()
         form = page.split(f'action="{pages.REFLECT_PATH}"')[1].split("</form>")[0]
@@ -121,7 +122,8 @@ class TheButton(Base):
         arena = self.page(query=ARENA_TAB)
         self.assertNotIn(f'action="{pages.REFLECT_PATH}"', arena)
         self.assertNotIn(mo.REFLECT_SAID, arena)
-        self.assertIn(f'action="{mo.TRAIN_PATH}"', arena)
+        self.assertIn(f'action="{pages.ARENA_PATH}"', arena)
+        self.assertNotIn(f'action="{mo.TRAIN_PATH}"', arena)
         self.assertEqual(mo.REFLECT_BUTTON, "Run reflection")
         self.assertEqual(mo.REFLECT_SAID, "This is the learning step. The agent reads the chats it lost, writes every "
                          "lesson it finds in them, and tests each one on a full exam before it can reach a real "
@@ -164,8 +166,8 @@ class TheButton(Base):
 class Wording(Base):
     def test_no_lost_chats(self):
         page = self.page()
-        self.assertEqual(mo.NO_LOST, "No lost chats to learn from yet. In the Arena, Train practises and learns from what it "
-                                    "loses.")
+        self.assertEqual(mo.NO_LOST, "No lost chats to learn from yet. In the Arena, Train learns from the matches a "
+                                    "run loses.")
         self.assertIn(f'<p class="no-yet" role="status">{mo.NO_LOST}</p>', page)
         self.assertNotIn(f'action="{pages.REFLECT_PATH}"', page)
         self.assertIn(f'disabled>{pages.icon("loop")}{mo.REFLECT_BUTTON}</button>', page)
@@ -232,7 +234,7 @@ class Refusals(Base):
         self.p.quick._running.add("stock_watch")
         with self.assertRaises(mo.Refused) as e:
             go(self.m, {"agent": ["stock_watch"]})
-        self.assertIn("first short practice", str(e.exception))
+        self.assertIn("Its first Arena run is still running.", str(e.exception))
         self.p.quick._running.discard("stock_watch")
         self.assertEqual(self.starts, [])
         self.assertEqual(go(self.m, {"agent": ["stock_watch"]}), mo.REFLECT_STARTED)

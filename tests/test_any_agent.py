@@ -518,9 +518,10 @@ class RunTheArena(unittest.TestCase):
         self.assertIn("No model key", str(e.exception))
         self.assertEqual(self.starts, [])
         self.assertFalse(self.m.arena_running("stock_watch"))
-        sales = self.p.get("/agents/sales", ARENA_TAB, "t")  # Sales too (decisions 96 and 102): Train, Take the gate
-        self.assertIn(f'action="{mo.TRAIN_PATH}"', sales)
-        self.assertIn(f"{mo.GATE_BUTTON}</button>", sales)
+        sales = self.p.get("/agents/sales", ARENA_TAB, "t")  # Sales too (decisions 96 and 104): Run the Arena first
+        self.assertIn(f'action="{pages.ARENA_PATH}"', sales)
+        self.assertIn(f"{mo.ARENA_BUTTON}</button>", sales)
+        self.assertNotIn(f'action="{mo.TRAIN_PATH}"', sales)  # Train only after a run that did not pass
 
     def test_a_run_that_fails_says_why_and_the_button_comes_back(self):
         self.m.arena_models = lambda: (tap.raises, tap.raises, tap.raises)
@@ -541,7 +542,7 @@ class RunTheArena(unittest.TestCase):
         self.p.quick._running.add("stock_watch")
         with self.assertRaises(mo.Refused) as e:
             go(self.m, {"agent": ["stock_watch"]})
-        self.assertIn("first short practice", str(e.exception))
+        self.assertIn("Its first Arena run is still running.", str(e.exception))
         self.p.quick._running.discard("stock_watch")
         self.assertEqual(go(self.m, {"agent": ["stock_watch"]}), mo.ARENA_STARTED)
 

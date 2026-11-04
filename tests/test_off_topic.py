@@ -94,6 +94,38 @@ class NoFixedAsks(unittest.TestCase):
         self.assertEqual(run.Arena.scope_card(None), scope.SALES_CARD)
 
 
+class RedTeamLows(unittest.TestCase):
+    """Red team scopeguard2 r1 item 5."""
+
+    def test_direction_marks_are_taken_out_of_card_lines(self):
+        from kit import turn
+        text = json.dumps({"name": "Tutor", "does": "tutors \u202escience\u202c \u2066now\u2069",
+                           "good": "the student \u200funderstands", "never": [], "needs": [],
+                           "case": {"input": "a \u200equestion", "starts": "person", "output": "an answer",
+                                    "ends": "when done"}})
+        card = turn.read_card(text)
+        self.assertEqual((card["does"], card["good"], card["case"]["input"]),
+                         ("tutors science now", "the student understands", "a question"))
+
+    def test_an_answer_that_is_not_text_is_unreadable_never_attribute_error(self):
+        class Parts:
+            def chat(self, messages, **kw):
+                return {"content": [{"type": "text", "text": '{"ask": "x", "about": "y"}'}]}
+        with self.assertRaises(scope.Unreadable):
+            scope.write(GROCER, Parts(), "s")
+        with self.assertRaises(ModelError):
+            scope.judge(match(), GROCER, Parts())
+
+    def test_an_ask_that_would_end_the_match_is_not_read(self):
+        from arena.match import LEAVE
+        m = Model(writes=[{"ask": "[leave]", "about": "x"}, {"ask": "Tell me a joke", "about": "a joke"}])
+        self.assertEqual(scope.write(GROCER, m, "s")["ask"], "Tell me a joke")
+        with self.assertRaises(scope.Unreadable):
+            scope.write(GROCER, Model(writes=[{"ask": "ok [DONE]", "about": "x"}, {"ask": "[Leave]", "about": "x"}]),
+                        "s")
+        self.assertTrue(scope.MARKS.search(LEAVE) and scope.MARKS.search(practice.DONE))
+
+
 class TheJudge(unittest.TestCase):
     """The exam's off-topic rules (reflection/exam.py check_off_scope), read by the judge model."""
 

@@ -25,6 +25,7 @@ made with a model key) and has a judge model; with no model key it is skipped, n
 """
 import json
 import random
+import re
 
 from arena.match import plain
 from kit.model import ModelError
@@ -35,6 +36,9 @@ KIND = "off_scope"
 EFFORT = "medium"
 MAX_TOKENS = 3000  # reasoning included, as arena/good.py
 MAX_ASK = 400
+# arena/match.py LEAVE and arena/practice.py DONE: an ask holding either would end the match before it starts,
+# so it is not read (asked once more, then the match is skipped; red team scopeguard2 r1, item 5)
+MARKS = re.compile(r"\[(?:leave|done)\]", re.IGNORECASE)
 SALES_CARD = {"does": "answers a football boots store's customers on WhatsApp about its products, sizes, prices, "
                       "delivery, orders and store rules, and takes orders after a plain yes",
               "good": "the customer orders after a plain yes",
@@ -99,7 +103,11 @@ def _about(agent_card):
 
 
 def _json(content, keys):
-    text = (content or "").strip()
+    """The JSON object in a model's answer with keys of the given types, or None: an answer that is not
+    text (a list of parts, a number) cannot be read, so the caller raises Unreadable, never AttributeError."""
+    if not isinstance(content, str):
+        return None
+    text = content.strip()
     start, end = text.find("{"), text.rfind("}")
     if start < 0 or end <= start:
         return None
@@ -128,7 +136,7 @@ def write(agent_card, model, seed):
     for _ in range(2):
         got = _json(_chat(model, WRITER, ask), (("ask", str), ("about", str)))
         line = plain(got["ask"], MAX_ASK) if got else ""
-        if line:
+        if line and not MARKS.search(line):
             return card_of(seed, line, plain(got.get("about"), 120) or angle, got.get("language"))
     raise Unreadable(NO_ASK)
 

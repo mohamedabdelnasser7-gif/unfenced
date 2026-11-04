@@ -49,6 +49,9 @@ class Constants(unittest.TestCase):
     def test_softer_patterns_keep_the_old_bar(self):
         self.assertEqual((study.CHANCE, study.MIN_CASES, study.MIN_SOURCES), (0.75, 5, 3))
 
+    def test_a_study_asks_about_three_clear_mistakes_at_most(self):
+        self.assertEqual(study.MISTAKES_A_RUN, 3)
+
 
 class Built(unittest.TestCase):
     """A built agent (the made-up waterer) with its practice losses written by arena/learn_built.py."""
@@ -59,8 +62,8 @@ class Built(unittest.TestCase):
         self.plug = plugs.load(plugs.WATERER, self)
         self.lessons = Lessons(self.db, self.plug, judge=always_low)
 
-    def lose(self, why, mid="m1", failed=None):
-        learn_built.to_case(self.db, self.plug, match("Water bed one.", "Watered it twice.", failed),
+    def lose(self, why, mid="m1", failed=None, customer="Water bed one."):
+        learn_built.to_case(self.db, self.plug, match(customer, "Watered it twice.", failed),
                             {"won": False, "why": why, "quote": {"turn": 1, "who": "agent", "text": ""}}, mid, now=AT)
         return learn_built.case_id(self.plug.agent, mid)
 
@@ -102,6 +105,35 @@ class Built(unittest.TestCase):
         self.lose(f"{good.BROKE}: it watered the bed twice", mid="m2")
         rep = self.run_night(MISTAKE)
         self.assertEqual([m["verdict"] for m in rep["mistakes"]], [study.LESSON, study.SAME_MISTAKE])
+        self.assertEqual(len(self.proposer.calls), 1)
+
+    def test_a_lesson_copying_the_case_goes_high_and_waits(self):
+        said = "Please water the left bed by the old fence today."
+        self.lose(f"{good.BROKE}: it watered the bed twice", customer=said)
+        copy = dict(MISTAKE, lesson="Water the left bed by the old fence before noon.")
+        rep = self.run_night(copy)
+        self.assertEqual([m["verdict"] for m in rep["mistakes"]], [study.LESSON])
+        (card,) = rep["cards"]
+        self.assertEqual((card["risk"], card["state"]), ("high", "waiting"))
+        self.assertIn("core: copied from source", card["risk_why"])
+
+    def test_a_high_risk_mistake_lesson_waits_for_a_yes(self):
+        self.lessons = Lessons(self.db, self.plug, judge=lambda text, high_about, low_about: risk.HIGH)
+        self.lose(f"{good.BROKE}: it watered the bed twice")
+        rep = self.run_night(MISTAKE)
+        self.assertEqual([m["verdict"] for m in rep["mistakes"]], [study.LESSON])
+        (card,) = rep["cards"]
+        self.assertEqual((card["risk"], card["state"]), ("high", "waiting"))
+        self.assertNotIn("core: copied from source", card["risk_why"])
+        (les,) = self.lessons.mine()
+        self.assertEqual(les["state"], "waiting")
+
+    def test_many_send_check_losses_make_one_lesson(self):
+        for n in range(4):
+            why = f"an amount no tool gave: {n + 1},000 EGP"
+            self.lose(f"{good.FAILED}: {why}", mid=f"m{n}", failed=[{"check": "send_check", "why": why}])
+        rep = self.run_night(MISTAKE)
+        self.assertEqual([m["verdict"] for m in rep["mistakes"]], [study.LESSON] + [study.SAME_MISTAKE] * 3)
         self.assertEqual(len(self.proposer.calls), 1)
 
     def test_only_the_first_lesson_of_the_answer_is_written(self):
@@ -165,15 +197,40 @@ class SalesFactCheck(unittest.TestCase):
         self.db = Db(":memory:")
         self.addCleanup(self.db.close)
 
-    def lose(self, why, failed=None):
+    def lose(self, why, failed=None, mid="x1"):
         learn.to_case(self.db, match("How much is it?", "It is a price the store never set.", failed),
-                      {"won": False, "why": why, "quote": {"turn": 1, "who": "agent", "text": ""}}, "x1", now=AT)
+                      {"won": False, "why": why, "quote": {"turn": 1, "who": "agent", "text": ""}}, mid, now=AT)
 
     def run_night(self, candidate):
         lessons = SalesLessons(self.db, judge=always_low)
-        rep = Study(self.db, SALES, proposer=fk.Proposer(candidate), tagger=fk.Tagger(),
+        self.proposer = fk.Proposer(candidate)
+        rep = Study(self.db, SALES, proposer=self.proposer, tagger=fk.Tagger(),
                     lessons=lessons).run(fk.SINCE, fk.UNTIL, now=fk.NOW)
         return rep, lessons
+
+    def test_many_losses_on_one_check_make_one_lesson(self):
+        for n in range(25):  # each line names its own amount, the check is the same
+            why = f"{n + 1},000 EGP is not a store price, fee or tool amount"
+            self.lose(f"{verdict.FAILED}: price: {why}", failed=[{"check": "price", "why": why}], mid=f"x{n}")
+        rep, lessons = self.run_night(dict(MISTAKE, lesson=FACT_LINE, stages=["all"]))
+        verdicts = [m["verdict"] for m in rep["mistakes"]]
+        self.assertEqual((len(verdicts), verdicts.count(study.LESSON), verdicts.count(study.SAME_MISTAKE)), (25, 1, 24))
+        self.assertEqual(len(self.proposer.calls), 1)
+        self.assertEqual([les["text"] for les in lessons.mine()], [FACT_LINE])
+
+    def test_past_the_cap_the_rest_are_not_asked(self):
+        checks = {"price": "9,000 EGP is not a store price", "size": "size 50 is not a size of the boot",
+                  "stock": "the boot is out, the reply says available", "delivery": "90 EGP is not the delivery fee",
+                  "order": "the reply says the order is placed, but no tool placed one"}
+        for n, (check, why) in enumerate(checks.items()):
+            self.lose(f"{verdict.FAILED}: {check}: {why}", failed=[{"check": check, "why": why}], mid=f"x{n}")
+        rep, lessons = self.run_night(dict(MISTAKE, lesson=FACT_LINE, stages=["all"]))
+        verdicts = [m["verdict"] for m in rep["mistakes"]]
+        self.assertEqual(len(verdicts), 5)
+        self.assertEqual(verdicts.count(study.NOT_ASKED_CAP), 2)
+        self.assertEqual(verdicts[-2:], [study.NOT_ASKED_CAP] * 2)  # the first three are asked
+        self.assertEqual(len(self.proposer.calls), study.MISTAKES_A_RUN)
+        self.assertEqual(len({m["case_id"] for m in rep["mistakes"]}), 5)  # every case named, none dropped
 
     def test_one_failed_fact_check_alone_makes_a_lesson(self):
         self.lose(f"{verdict.FAILED}: price: a price the store never set",

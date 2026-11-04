@@ -39,7 +39,11 @@ a lesson card through the agent's own lessons and risk check.
    no floor of cases or sources and no gap test; the case itself is the evidence. The proposer is
    given that one case, marked "mistake" with its kind, and the first lesson it gives is written as
    in 5, its source line saying "from one clear mistake: <kind>"; one lesson a case, and one a night
-   for the same verdict line. It still takes the exam and the gate before use, then a trial. Softer
+   for the same mistake: the same verdict line for a broken never line, the same check for a failed
+   fact check (its kind and check name, so many losses on one check make one lesson; mistake_of key).
+   A study asks about the first MISTAKES_A_RUN distinct mistakes only, the rest "not asked" with their
+   cases kept in the log, so one round of lost matches cannot spend the run's calls on lessons, each
+   with its exam and gate. It still takes the exam and the gate before use, then a trial. Softer
    patterns, the ones the proposer and the tagger compare, keep the gap rule above. A night that has
    stopped (see 10) asks the proposer for no more of them; the cases stay in the log.
 5. Write. Each winner, strongest first, goes through Lessons.propose with its stage tags,
@@ -157,6 +161,7 @@ from engine.plug import ALL, SLOW
 CHANCE = 0.75     # the chance the named side is better, decided item 7
 MIN_CASES = 5     # cases on each side
 MIN_SOURCES = 3   # different sources on each side
+MISTAKES_A_RUN = 3  # distinct clear mistakes one study asks the proposer about (see 4); the rest are not asked
 ANSWER_MAX = 12   # items one answer of the proposer or the idea part may hold: a size bound on one
                   # call (the study parts' answers fit MAX_TOKENS in reflection/study.py), not a
                   # count of lessons; past it an item is named in the report (DECISIONS item 98)
@@ -177,6 +182,7 @@ SAME_MISTAKE = "the same mistake as another case tonight"
 NO_MISTAKE_LESSON = "the proposer gave no lesson for it"
 ONE_A_CASE = "one lesson from one clear mistake"
 NOT_ASKED = "not asked: the study stopped first; the case stays in the log"
+NOT_ASKED_CAP = f"not asked: {MISTAKES_A_RUN} clear mistakes a study; the case stays in the log"
 LESSON, KNOWN, FEW_CASES, FEW_SOURCES, NO_GAP = (
     "lesson", "already a lesson", "too few cases", "too few sources", "gap not clear")
 PULLED_BEFORE = "pulled before"
@@ -473,7 +479,8 @@ class Study:
     def _mistakes(self, cases, given, known, pulled, texts, rep, since, until):
         """The night's clear mistakes (see 4): each lost case mistake_of names gives the proposer that one
         case, marked with its kind, and the first lesson it gives is written with no count and no gap test.
-        rep["mistakes"] names each as {case_id, kind, why, lesson, lesson_id, verdict, cases_with}."""
+        rep["mistakes"] names each as {case_id, kind, why, lesson, lesson_id, verdict, cases_with}. Only the
+        first MISTAKES_A_RUN distinct mistakes (on mistake_of's key) are asked; the rest are NOT_ASKED_CAP."""
         seen = set()
         for c in cases:
             m = mistake_of(c)
@@ -482,10 +489,13 @@ class Study:
             rec = {"case_id": c.id, "kind": m["kind"], "why": m["why"], "lesson": None, "lesson_id": None,
                    "verdict": None, "cases_with": [c.id], "mistake": True}
             rep["mistakes"].append(rec)
-            if m["why"] in seen:
+            if m["key"] in seen:
                 rec["verdict"] = SAME_MISTAKE
                 continue
-            seen.add(m["why"])
+            if len(seen) >= MISTAKES_A_RUN:
+                rec["verdict"] = NOT_ASKED_CAP
+                continue
+            seen.add(m["key"])
             if self._halted():
                 rec["verdict"] = NOT_ASKED
                 continue
@@ -1258,10 +1268,13 @@ def _view(plug, case, texts, *, blind):
 
 
 def mistake_of(case):
-    """The clear mistake a lost case ended on (see 4), as {kind, why}, or None. Read from the verdict the
+    """The clear mistake a lost case ended on (see 4), as {kind, why, key}, or None. Read from the verdict the
     last turn of a lost Arena or practice case carries (arena/learn.py, arena/learn_built.py), before its
     deciding row; only a row our own Arena wrote ("arena": true) counts, so no live or imported row can
-    make one."""
+    make one. key is what makes two mistakes the same: for a failed fact check its kind and check name
+    (the text before the second colon, "failed fact check: <check>"; a built agent's send check has one
+    check, so it is its start), since the rest of the line carries the case's own figures and names; for a
+    broken never line the whole line."""
     if case.status != BAD:
         return None
     for r in reversed(case.rows[:case.cut]):
@@ -1273,7 +1286,14 @@ def mistake_of(case):
             return None
         for start, kind in MISTAKES:
             if verdict.startswith(start):
-                return {"kind": kind, "why": verdict[:300]}
+                why = verdict[:300]
+                if start == FAILED_FACT:
+                    key = (kind, ":".join(verdict.split(":", 2)[:2]).strip())
+                elif start == FAILED_SEND:
+                    key = (kind, start)
+                else:
+                    key = (kind, why)
+                return {"kind": kind, "why": why, "key": key}
         return None
     return None
 

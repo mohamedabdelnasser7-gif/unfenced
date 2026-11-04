@@ -87,12 +87,23 @@ matches. A level that asks for more test matches than there are test customers i
 come from the risk level unless given (arena/levels.py shape: 20 and 10, or 30 and 20 at high). On
 the old gate (--trust or --gate) and in --quick, with no gate_size, the split and the weighted draws
 are arena/run.py's, as before.
+
+The test set is kept (fixed_test). The first run's test ids are saved in the agent's folder,
+test-set.json beside card.json, each with the card fingerprint of the person it names, and later runs
+hold out the same people. A customer with a training match on record (any match in
+arena-matches.jsonl that is not a test match, a quick run's too) is never a test customer, so when the
+level is raised (10 to 20 test customers) or the saved ones are short, new customers that never
+trained fill the gap, and the writer writes more when too few are left. Saved test customers a smaller
+run does not need sit out (they never train). A test-set.json or a matches file that is there but
+cannot be read stops the run (fail closed).
 """
 import argparse
 import hashlib
 import json
 import math
+import os
 import re
+import secrets
 import string
 import sys
 from pathlib import Path
@@ -534,14 +545,30 @@ def test_set(cards, size):
     a hash of their fingerprint and id, so the same ids come back while card.json is unchanged. A card
     that cannot reach it, or one grown from real chats, is never in it. run.Refused when too few can,
     or when none would be left to train on."""
-    if isinstance(size, bool) or not isinstance(size, int) or size < 1:
-        raise run.Refused("the test set is a whole number of customers, at least 1")
+    _whole(size)
     winnable = [c for c in cards if run.can_buy(c) and not str(c["id"]).startswith(run.GROWN)]
     if len(winnable) < size:
         raise run.Refused(f"the test set needs {size} customers that can reach the good result; "
                           f"{len(winnable)} can")
     if size >= len(cards):
         raise run.Refused("the test set would hold every customer; leave at least one to practise on")
+    return _choose(winnable, size)
+
+
+def _whole(size):
+    if isinstance(size, bool) or not isinstance(size, int) or size < 1:
+        raise run.Refused("the test set is a whole number of customers, at least 1")
+
+
+TEST_FILE = "test-set.json"
+MAX_TEST_FILE = 64 * 1024
+_TEST_MATCH = re.compile(r"-r\d+-g\d+$")  # a test match's id ends -r<round>-g<k> (arena/run.py Arena.run)
+_ANY = object()  # a training match whose saved person names no card fingerprint: the id counts whatever it is
+
+
+def _choose(winnable, size):
+    """size of the winnable cards, each kind in its share (the largest remainders first), each kind's
+    cards in the order of a hash of their fingerprint and id."""
     kinds = {}
     for c in winnable:
         kinds.setdefault(str(c.get("kind") or ""), []).append(c)
@@ -552,6 +579,105 @@ def test_set(cards, size):
     return sorted(c["id"] for k, v in kinds.items() for c in sorted(v, key=_rank)[:quota[k]])
 
 
+def read_test(folder):
+    """The saved test customers, [(id, fingerprint)], [] when there is no test-set.json. run.Refused when
+    it is there but cannot be read, is a link or is not a list of them (fail closed)."""
+    path = Path(folder) / TEST_FILE
+    if not path.exists() and not path.is_symlink():
+        return []
+    bad = run.Refused(f"the agent's {TEST_FILE} cannot be read, so the run did not start; it keeps the test "
+                      "customers, so it is never guessed")
+    try:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_TEST_FILE:
+            raise bad
+        got = json.loads(path.read_text(encoding="utf-8")).get("test")
+    except (OSError, ValueError, AttributeError, RecursionError):
+        raise bad from None
+    if not isinstance(got, list):
+        raise bad
+    out = []
+    for e in got:
+        if not isinstance(e, dict) or not isinstance(e.get("id"), str) or \
+                not isinstance(e.get("from_card"), (str, type(None))):
+            raise bad
+        out.append((e["id"], e["from_card"]))
+    return out
+
+
+def write_test(folder, entries):
+    """Writes test-set.json whole (a hidden file renamed into place); refuses a link."""
+    folder = Path(folder)
+    path = folder / TEST_FILE
+    if path.is_symlink():
+        raise run.Refused(f"the agent's {TEST_FILE} is a link")
+    text = json.dumps({"test": [{"id": i, "from_card": f} for i, f in entries]}, ensure_ascii=False) + "\n"
+    tmp = folder / f".{TEST_FILE}.{secrets.token_hex(4)}.tmp"
+    try:
+        with open(tmp, "x", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
+def trained(folder):
+    """{(card id, fingerprint)} of every match on record in the folder's arena-matches.jsonl that is not a
+    test match: the people that played a training match (a quick run's and Try again's too). A line
+    that cannot be read is skipped, as every reader of the file does; a file that is there but cannot
+    be read is run.Refused (fail closed)."""
+    path = Path(folder) / run.MATCHES_FILE
+    if not path.exists() and not path.is_symlink():
+        return set()
+    out = set()
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    m = json.loads(line)
+                except (ValueError, RecursionError):
+                    continue
+                if not isinstance(m, dict) or not isinstance(m.get("card"), str):
+                    continue
+                if isinstance(m.get("id"), str) and _TEST_MATCH.search(m["id"]):
+                    continue
+                who = m.get("persona")
+                out.add((m["card"], who.get("from_card", _ANY) if isinstance(who, dict) else _ANY))
+    except (OSError, UnicodeDecodeError):
+        raise run.Refused("the agent's saved matches cannot be read, so the run did not start; they say "
+                          "which customers trained, and a test customer never has") from None
+    return out
+
+
+def fixed_test(cards, size, saved, done):
+    """(held ids, spare ids, short): the test set for this run (DECISIONS item 85). saved: read_test;
+    done: trained. A card is eligible when it can reach the good result, is not grown from real
+    chats and never played a training match. The saved test customers that are still eligible come
+    first; when they are more than size, size of them are held (each kind in its share) and the rest
+    are spare (left out of the run, so they never train); when fewer, eligible new ones fill the gap
+    by test_set's order. short: how many more customers the writer must make (0 when it holds)."""
+    def eligible(c):
+        f = c.get("from_card")
+        return (run.can_buy(c) and not str(c["id"]).startswith(run.GROWN)
+                and (c["id"], f) not in done and (c["id"], _ANY) not in done)
+    by_id = {c["id"]: c for c in cards}
+    keep = [by_id[i] for i, f in saved if i in by_id and by_id[i].get("from_card") == f and eligible(by_id[i])]
+    keep = list({c["id"]: c for c in keep}.values())
+    if len(keep) >= size:
+        held = _choose(keep, size)
+        spare = sorted(c["id"] for c in keep if c["id"] not in held)
+    else:
+        mine = {c["id"] for c in keep}
+        new = [c for c in cards if c["id"] not in mine and eligible(c)]
+        if len(keep) + len(new) < size:
+            return None, [], size - len(keep) - len(new)
+        held, spare = sorted([c["id"] for c in keep] + _choose(new, size - len(keep))), []
+    if len(cards) - len(held) - len(spare) < 1:  # none left to practise on
+        return None, [], 1
+    return held, spare, 0
+
+
+MAX_TOP_UPS = 5  # writes of more customers when too few never trained (fixed_test short)
 NOT_RUN = (run.Refused, turn_mod.Refused, run.CapReached, ModelError, OSError, ValueError, RecursionError)
 
 
@@ -599,14 +725,38 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
     if agent.name == run.AGENT:
         raise run.Refused("the Sales agent practises through arena/run.py")
     calls = run.Calls(reports / run.CALLS_FILE, cap, limit=run.QUICK_CALLS if quick else None)
-    if cards:
-        played = run.load_cards(check_cards(cards, folder))
-        made_up, behaviour_from = any(c.get("made_up") is True for c in played), 0
-    else:
-        profiles = madeup.owner_cards(folder)
-        played, _ = madeup.for_agent(folder, agent.name, agent.card, calls.model(customer_model), profiles,
-                                     count=customers)
-        made_up, behaviour_from = True, len(profiles or ())
+    held = None
+    if gate_size is not None:  # the saved test set and the training on record, read before any model call
+        _whole(gate_size)
+        saved, done = read_test(folder), trained(folder)
+    for _ in range(MAX_TOP_UPS + 1):
+        if cards:
+            played = run.load_cards(check_cards(cards, folder))
+            made_up, behaviour_from = any(c.get("made_up") is True for c in played), 0
+        else:
+            profiles = madeup.owner_cards(folder)
+            played, _ = madeup.for_agent(folder, agent.name, agent.card, calls.model(customer_model), profiles,
+                                         count=customers)
+            made_up, behaviour_from = True, len(profiles or ())
+            if gate_size is not None and saved:  # the saved test customers play even past count (a lowered level)
+                source = madeup.fingerprint(agent.card) if profiles is None else madeup.blend_source(agent.card, profiles)
+                on_disk = {c["id"]: c for c in madeup.read(folder / madeup.FOLDER, agent.name, agent.card, source) or []}
+                have = {c["id"] for c in played}
+                back = {i: on_disk[i] for i, f in saved if i not in have and i in on_disk and on_disk[i].get("from_card") == f}
+                if back:
+                    played = sorted(played + list(back.values()), key=lambda c: c["id"])
+        if gate_size is None:
+            break
+        held, spare, short = fixed_test(played, gate_size, saved, done)
+        if held is not None:
+            played = [c for c in played if c["id"] not in spare]
+            break
+        if cards or customers is None or customers + short > madeup.MAX_CUSTOMERS:
+            break
+        customers += short  # more people that never trained, written by the same writer on the same cap
+    if gate_size is not None and held is None:
+        raise run.Refused(f"the test set needs {gate_size} customers that can reach the good result and never "
+                          "played a training match, with one left to practise on; too few are left")
     bar = dict(run.QUICK_TRUST) if quick else run.load_trust(trust, agent=agent.name)
     if old_gate:  # the old gate: a trust file or --gate set it
         if made_up:
@@ -614,7 +764,16 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
     else:
         bar = for_level(level, bar, agent.plug)
         bar["made_up"] = made_up
-    held = None if gate_size is None else test_set(played, gate_size)
+    if held is not None:  # kept for the next run: the same people, each with the card it was written from
+        by_id = {c["id"]: c.get("from_card") for c in played}
+        mine = set(held)
+        entries = [(i, by_id[i]) for i in held]
+        for i, f in saved:  # saved ones not played this run stay saved while they never trained
+            if i not in mine and (i, f) not in done and (i, _ANY) not in done and \
+                    (i not in by_id or by_id[i] == f):
+                entries.append((i, f))
+                mine.add(i)
+        write_test(folder, entries)
     if held is not None and bar["matches"] > len(held):
         raise run.Refused(f"the gate plays {bar['matches']} test matches a round but the test set holds "
                           f"{len(held)} customers; each test customer plays once a round")

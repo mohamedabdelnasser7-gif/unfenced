@@ -18,12 +18,13 @@ def main():
     ap.add_argument("--db")
     ap.add_argument("--until", type=float)
     ap.add_argument("--limit", type=float)
+    ap.add_argument("--deadline", type=float)
     args = ap.parse_args()
     if args.limit is not None:
         from reflection import scheduler
         scheduler.guard(args.limit)
     mode = os.environ.get("NIGHT_CHILD_MODE", "exit 0")
-    seen = {"pid": os.getpid(), "cwd": os.getcwd(), "argv": sys.argv[1:], "until": args.until,
+    seen = {"pid": os.getpid(), "cwd": os.getcwd(), "argv": sys.argv[1:], "until": args.until, "deadline": args.deadline,
             "store": os.environ.get("SHOPIFY_STORE")}
     (Path(args.db).parent / "child.json").write_text(json.dumps(seen), encoding="utf-8")
     print(f"stand in night of {args.plug}: {mode}", flush=True)

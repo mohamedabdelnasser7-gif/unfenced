@@ -37,6 +37,13 @@ soon as the pipe from the server closes (guard), so a server that stops mid nigh
 stops, never leaves a night running with no limit. Its printed lines go to NIGHTS_LOG next to the
 database.
 
+A deadline (DECISIONS item 98). Each night is given --deadline: the next MORNING_HOUR (09:00) in
+NIGHT_TZ, or GRACE seconds before the child's own limit when that comes first, so the lesson in its
+exam can end and the rest is saved before the kill. Past it the study examines no more lessons:
+every one it found and did not examine is queued in the agent's database, and the next night (or a
+Run reflection) takes them first (engine/study.py step 10). With NIGHT_HOUR 3 and LIMIT 5 hours, the
+limit comes first: the night queues from 07:30.
+
 The night itself asks the courier's API first (reflection/night.py courier_check), so the results
 it brings count that night.
 
@@ -71,6 +78,8 @@ OFF = "off"
 TICK = 60.0                  # seconds between looks
 STALE = 6 * 3600.0           # seconds: a lock or a started run this old is a crash's
 LIMIT = 5 * 3600.0           # seconds a night's child process may run before it is killed
+MORNING_HOUR = 9             # the night examines no lesson from this hour in NIGHT_TZ on (DECISIONS item 98)
+GRACE = 30 * 60.0            # seconds before LIMIT the deadline falls, so the queue is saved before the kill
 NIGHTS_LOG = "nights.log"    # next to the database: what each night's child printed
 NIGHTS_LOG_MAX = 5 * 1024 * 1024  # bytes; past it the log starts again, the last one kept as nights.log.1
 TIMEOUT = "timeout"
@@ -155,18 +164,32 @@ def agents(db_path, root=ROOT):
     return out
 
 
+def deadline_for(now, zone, limit=LIMIT):
+    """The night's deadline (DECISIONS item 98): the next MORNING_HOUR:00 in zone after now, or
+    limit - GRACE seconds after now when that is sooner. Past it the study queues what it has not
+    examined (engine/study.py step 10)."""
+    local = datetime.fromtimestamp(now, zone)
+    morning = local.replace(hour=MORNING_HOUR, minute=0, second=0, microsecond=0)
+    if morning <= local:
+        morning = (local + timedelta(days=1)).replace(hour=MORNING_HOUR, minute=0, second=0, microsecond=0)
+    return min(morning.timestamp(), float(now) + float(limit) - GRACE)
+
+
 class TimedOut(Exception):
     """A night's child process ran past its limit and was killed."""
 
 
-def run_night(plug_path, db_path, now, *, limit=LIMIT, module="reflection.night"):
+def run_night(plug_path, db_path, now, *, deadline=None, limit=LIMIT, module="reflection.night"):
     """One agent's night, the manual command (reflection/night.py main) in a child process from the
-    repo root, given limit (--limit) and a pipe from this process on its stdin, which nothing writes
+    repo root, given deadline (--deadline, when given: no lesson is examined past it, the rest is
+    queued), limit (--limit) and a pipe from this process on its stdin, which nothing writes
     to: the child ends itself at limit or when the pipe closes (guard). Its exit code; TimedOut when
     it ran past limit seconds, killed here or by its own alarm. module: the command to run (the
     tests give a small stand in)."""
     cmd = [sys.executable, "-m", module, "--plug", str(plug_path), "--db", str(db_path), "--until", repr(float(now)),
            "--limit", repr(float(limit))]
+    if deadline is not None:
+        cmd += ["--deadline", repr(float(deadline))]
     with _output(db_path) as out:
         child = subprocess.Popen(cmd, cwd=str(ROOT), stdin=subprocess.PIPE, stdout=out, stderr=subprocess.STDOUT,
                                  start_new_session=True)
@@ -242,7 +265,8 @@ def _kill(child):
 
 class Scheduler:
     """The nights for one database. when: (hour, zone), None for off, read from the env when
-    left out. run(plug path, db path, now) -> exit code runs one night; clock() -> now; find() ->
+    left out. run(plug path, db path, now, deadline=...) -> exit code runs one night, deadline the
+    night's (deadline_for: the next 09:00 in the zone, or before the child's limit); clock() -> now; find() ->
     [(agent, plug path)]. The tests give them, so nothing sleeps and no night really runs."""
 
     def __init__(self, db, db_path, *, when=FROM_ENV, run=None, clock=time.time, find=None, stale=STALE, holder=None):
@@ -275,7 +299,8 @@ class Scheduler:
                 if not self._lock(self.clock()) or not self._claim(agent, night, self.clock()):
                     continue
                 try:
-                    code = self.run(path, self.db_path, self.clock())
+                    start = self.clock()
+                    code = self.run(path, self.db_path, start, deadline=deadline_for(start, self.when[1]))
                     state, why = (DONE, None) if code == 0 else (FAILED, f"exit {code}")
                 except TimedOut:
                     state, why = FAILED, TIMEOUT

@@ -92,5 +92,80 @@ class TheStrictRuleStays(unittest.TestCase):
         self.assertTrue(prices("Printing is available. It costs 450 EGP, free with an Elite."))
 
 
+class ABootAfterTheAmountMustOfferTheExtraFree(unittest.TestCase):
+    """The sentence before holds only while every boot or tier after the amount offers the extra free
+    with it, or carries its own boot price. Otherwise the amount is the boot's (review pricectx round
+    1, finding 1)."""
+
+    def setUp(self):
+        clean_env(self)
+
+    def test_a_boot_priced_at_the_extras_amount_fails(self):
+        for reply in ("Printing is available. The price is 400 EGP, for the Elite.",
+                      "We do name printing. The total is 400 EGP, with the Vapor 17 Elite.",
+                      "Name printing is available. It is 400 EGP, the Vapor 17 Elite.",
+                      "Name printing is available. Our cheapest boot: 400 EGP, the Phantom 6 Academy.",
+                      "Printing is available. Price: 400 EGP, Vapor 17 Elite.",
+                      "Printing is available. That one is 400 EGP, the Elite.",
+                      "Name printing is available. 400 EGP for the boot, Elite tier.",
+                      "Name printing is available. The boot alone is 400 EGP, Vapor 17 Elite.",
+                      "Printing is available. Boot plus printing comes to 400 EGP, Elite.",
+                      "Printing is available. Your total is 400 EGP, Elite plus printing.",
+                      "طباعة الاسم متاحة. السعر 400 جنيه" + AC + " للـ Elite.",
+                      "طباعة الاسم متاحة. الجزمة بـ 400 جنيه" + AC + " Elite.",
+                      "Tba3et el esm available. El se3r 400 EGP, lel Elite.",
+                      "Tba3et el esm available. El gazma b 400 EGP, Elite.",
+                      "Printing is great, but the price is 400 EGP, for the Elite.",
+                      "With printing, total 400 EGP, Vapor 17 Elite.",
+                      "Printing is available. Total with delivery is 460 EGP, for the Elite.",
+                      "Printing is available. Total with delivery is 485 EGP, Vapor 17 Elite.",
+                      "Printing is available. Which boot do you like? It is 400 EGP, the Elite.",
+                      "Printing is available. Great choice! The Elite is 400 EGP.",
+                      "Printing is available. It is 400 EGP, Vapor 17 Elite with free printing.",
+                      "Printing is available. It is 400 EGP, the Elite with 0 EGP delivery.",
+                      "Printing is available. It is 400 EGP, the Elite with free delivery.",
+                      "Printing is available. It is 400 EGP, the Mercurial; Vapor 17 too."):
+            with self.subTest(reply=reply):
+                amount = "485" if "485" in reply else "460" if "460" in reply else "400"
+                self.assertTrue(any(amount in w for w in prices(reply)), prices(reply))
+
+    def test_the_customer_naming_the_extra_gives_no_pass(self):
+        self.assertTrue(prices("Price is 400 EGP, for the Elite.", "Do you do name printing?"))
+        self.assertTrue(prices("Price is 400 EGP, for the Elite."))
+
+    def test_a_boot_cut_by_a_mark_before_the_amount_fails(self):
+        """The text up to the clause's end is read whole: "The Mercurial; Vapor 17" names the boot even
+        though neither clause names it alone (review pricectx round 1, finding 3)."""
+        for reply in ("Name Printing is great. The Mercurial; Vapor 17 is 400 EGP, free printing too.",
+                      "Name Printing is great. Vapor 17 (Elite) costs 400 EGP, free printing too.",
+                      "Name Printing is great. Vapor - 17 Elite, 400 EGP, free printing too."):
+            with self.subTest(reply=reply):
+                self.assertTrue(prices(reply), reply)
+
+    def test_a_boot_word_joined_to_the_extra_fails(self):
+        for reply in ("Boot plus printing comes to 400 EGP, Elite.",
+                      "Boot plus printing comes to 400 EGP.",
+                      "Your boot with printing is 400 EGP.",
+                      "الجزمة مع الطباعة بـ 400 جنيه."):
+            with self.subTest(reply=reply):
+                self.assertTrue(prices(reply), reply)
+
+    def test_the_extra_offered_free_or_a_boot_with_its_own_price_passes(self):
+        for reply in ("Printing costs 400 EGP, free with an Elite.",
+                      "Printing is available. It costs 400 EGP, free with an Elite.",
+                      "Name printing is available. It is 400 EGP, and the Elite is 16,500 EGP.",
+                      "Name printing is available. It is 400 EGP, and with the Elite it is 16,900 EGP.",
+                      "Two stickers with your name cost 400 EGP, free with an Elite.",
+                      "Your name on the shoe costs 400 EGP, free with an Elite.",
+                      "We have printing. Your name on two stickers costs 400 EGP, free with an Elite.",
+                      "Printing is available. It is 400 EGP, and it is included with any Elite.",
+                      "طباعة الاسم متاحة. سعرها 400 جنيه" + AC + " وهدية مع أي Elite.",
+                      "Tba3et el esm available. B 400 EGP, w bbalash m3 ay Elite.",
+                      "Printing on your boot is 400 EGP.",
+                      "Name printing is 400 EGP for each pair."):
+            with self.subTest(reply=reply):
+                self.assertEqual(prices(reply), [])
+
+
 if __name__ == "__main__":
     unittest.main()

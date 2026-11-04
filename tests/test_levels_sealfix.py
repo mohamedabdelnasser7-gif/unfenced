@@ -113,6 +113,7 @@ class CorrectionRoundCards(Base):
         folder = self.folders[NAME]
         self.practise(NAME, 20, 10)
         (folder / practice.TEST_FILE).write_text('{"test": [', encoding="utf-8")
+        shutil.rmtree(folder / madeup.FOLDER)  # so a round past the check would ask the writer first
         writer = Writer()
         with self.assertRaises(run.Refused):
             self.round_of(folder, writer).cards()

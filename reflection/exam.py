@@ -94,8 +94,9 @@ SENTENCE = re.compile(r"[.!?؟\n]+")
 SCOPE_WORDS = 45  # words in a reply that declines, at most (words)
 FOLD = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ؤ": "و", "ئ": "ي", "ة": "ه", "ى": "ي", "ـ": None})
 TASHKEEL = re.compile("[\u064b-\u0652\u0670]")
-# Arabic endings joined to a word: its, their, your, my, our, the plural. ة (folded ه) turns to ت before one.
-AR_SUFFIX = "(?:هما|ها|هم|كم|كي|ك|ه|ي|نا|ات|ين)"
+# Arabic endings joined to a word: its, their, your, my, our, the plural, the dual (بصلتين). ة (folded ه) turns
+# to ت before one.
+AR_SUFFIX = "(?:هما|ها|هم|كم|كي|ك|ه|ي|نا|ات|ين|تين)"
 # Joined before an Arabic word: و, ال and وال, بال, فال, كال, عال, لل; a lone ب, ف or ل only with ال (_took).
 AR_PREFIX = "(?:و?(?:[بفك]?ال|لل|عال)|و)?"
 # The demo store's own words, from demo/catalogue.json's product titles and types (the file's "variables"),
@@ -357,12 +358,19 @@ def check_rule_change(s, did):
     return "a code or a percent the store never gave" if CODE_LIKE.search(left) else ""
 
 
+def _hidden(ch):
+    """A mark that shows no letter of its own: a format mark (zero width space, joiner, direction mark) or a
+    combining mark outside tashkeel (a combining grapheme joiner, an overlay); tashkeel is folded away later."""
+    cat = unicodedata.category(ch)
+    return cat == "Cf" or (cat.startswith("M") and not TASHKEEL.match(ch))
+
+
 def _plain(text, marks=""):
-    """Text as off_scope reads it: each format mark (zero width space, joiner, direction mark) taken out, so
-    one never splits a word, or with marks=" " read as a space, so marks between words never join them;
-    hyphens and underscores read as spaces; Arabic folded (one alef, ه for ة, ي for ى, no hamza seat, short
-    vowel or tatweel)."""
-    text = "".join(marks if unicodedata.category(ch) == "Cf" else ch for ch in str(text))
+    """Text as off_scope reads it: in its NFKC form (fullwidth letters and Arabic presentation forms as plain
+    letters); each hidden mark (_hidden) taken out, so one never splits a word, or with marks=" " read as a
+    space, so marks between words never join them; hyphens and underscores read as spaces; Arabic folded (one
+    alef, ه for ة, ي for ى, no hamza seat, short vowel or tatweel). Red team scopeguard2 r2, item 5."""
+    text = "".join(marks if _hidden(ch) else ch for ch in unicodedata.normalize("NFKC", str(text)))
     text = re.sub(r"[-_\u2010-\u2015\u2212]+", " ", text)
     return TASHKEEL.sub("", text.translate(FOLD))
 

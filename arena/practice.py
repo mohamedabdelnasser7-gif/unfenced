@@ -471,7 +471,7 @@ class Practice(run.Arena):
 
     def play(self, card, match_id, *, opening=None, lessons=None, replay=None, training=False):
         try:
-            if self.before_match is not None:  # Pool.refresh: the live corrections, read again
+            if self.before_match is not None and not run.laned():  # Pool.refresh: the live corrections, read again
                 self.before_match()
             m = play(self.who, card, agent_model=self.agent_model, customer_model=self.customer_model, seed=match_id,
                      lessons=lessons if lessons is not None else self.handed(), opening=opening,
@@ -495,12 +495,15 @@ class Practice(run.Arena):
             self.off_error = judged["error"]
             return run.JUDGE_FAILED
         if judged is None:  # read twice and still unreadable: unjudged, the run goes on
+            if run.in_lane("unread", 1):  # played beside others: counted in match order (_settle)
+                return run.UNJUDGED
             self.unread += 1
             if self.unread >= UNREAD_IN_A_ROW:
                 self.halt, self.error = run.MODEL_ERROR, UNREAD.format(n=self.unread)
                 return None
             return run.UNJUDGED
-        self.unread = 0
+        if not run.in_lane("unread", 0):
+            self.unread = 0
         if judged.get("void"):  # an off topic ask the judge read as on topic: neither won nor lost
             return run.VOIDED
         judged["failed_check"] = failed_check(judged)  # counted per gate round (arena/run.py Arena.run)
@@ -513,24 +516,41 @@ class Practice(run.Arena):
         # only practice matches a customer could have won, never off topic: the item's lost, what Try again
         # plays (81); a never customer only when its loss failed a safety check, a slip of the agent's own
         if not judged["won"] and training and not scope.is_off(card) and (run.can_buy(card) or judged["failed_check"]):
-            self.lost.append({"id": match_id, "card": m["card"], "why": judged["why"], "quote": judged["quote"]})
+            run.later(self.lost.append, {"id": match_id, "card": m["card"], "why": judged["why"],
+                                         "quote": judged["quote"]})
         self.save(m)
         return m, judged
+
+    def _settle(self, out, box):
+        """arena/run.py Arena._settle, and the unjudged matches in a row counted in match order, as play
+        counts them when it plays alone."""
+        out = super()._settle(out, box)
+        if box.get("unread") == 1:
+            self.unread += 1
+            if self.unread >= UNREAD_IN_A_ROW:
+                self.halt, self.error = run.MODEL_ERROR, UNREAD.format(n=self.unread)
+                return None
+        elif box.get("unread") == 0:
+            self.unread = 0
+        return out
 
     def save(self, m):
         """Appends match m to the agent's matches file with the run's seal on the line (kit/seal.py, the
         key beside the gate item's, reports_of), so trained reads its test_match field only on a line the
         run wrote; m itself is left as it is. A match that is not a test match adds its customer to the
         sealed roster first (keep_trained), so the roster is beside every sealed line and deleting the
-        line later never hides that the customer trained."""
+        line later never hides that the customer trained. Inside a match played beside others it waits
+        for Arena.run to fold the match in (arena/run.py later), so the roster and the file are written
+        from one thread in match order."""
+        if run.laned():
+            return run.later(self.save, m)
         self.state.mkdir(parents=True, exist_ok=True)
         test = m.get(TEST_KEY) is True and isinstance(m.get("id"), str) and bool(_TEST_MATCH.search(m["id"]))
         who = m.get("persona")
         keep_trained(self.state, () if test else
                      [(m["card"], who.get("from_card", _ANY) if isinstance(who, dict) else _ANY)])
         line = seal.sign(dict(m), reports_of(self.state))
-        with open(self.state / run.MATCHES_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(line, ensure_ascii=False) + "\n")
+        run.append_line(self.state / run.MATCHES_FILE, json.dumps(line, ensure_ascii=False))
 
     def pick(self, deck, r, k):
         """The training draw. With a fixed test set (once): the next card of this round's shuffled bag of

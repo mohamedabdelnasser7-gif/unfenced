@@ -324,8 +324,10 @@ class EnvExample(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
 
     def test_every_name_is_one_the_code_reads(self):
-        """No stray name: each is a route's key or model env in kit/model.py."""
+        """No stray name: each is a route's key or model env in kit/model.py, or the Arena's matches at once."""
+        from arena import run as arena_run
         known = {n for r in (kit_model.OPEN, kit_model.SPARK_META) for n in (r.key_env, r.model_env)}
+        known.add(arena_run.PARALLEL_ENV)
         lines = (ROOT / ".env.example").read_text(encoding="utf-8").splitlines()
         self.assertEqual({x.split("=")[0] for x in lines if x and not x.startswith("#")}, known)
 

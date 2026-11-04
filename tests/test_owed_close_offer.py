@@ -134,3 +134,42 @@ class EachSizeTakesItsOwnStockWord(unittest.TestCase):
         self.assertEqual(self.stock("Nike Mercurial Vapor 17 فئة Elite مقاس 40 غير متوفر، والمتاح مقاس 43"),
                          ["Nike Mercurial Vapor 17 Elite 40 is in stock, the reply says out",
                           "Nike Mercurial Vapor 17 Elite 43 is out, the reply says available"])
+
+
+class LostAfterTheLargerAsk(unittest.TestCase):
+    """Live run 20261104T172523: a cut answer was asked again larger, that ask got a network failure, and the
+    match was dropped. Now that ask is asked once more too: at most three sends a call."""
+
+    def test_cut_then_lost_then_good(self):
+        import secrets
+        import urllib.error
+        from kit import model as kit_model
+        from tests.test_judge_keys import HI, META_URL, Transport, env_with, ok
+        env_with(self, META_API_KEY=secrets.token_urlsafe(16))
+        t = Transport(meta=[ok("half", reason="length"), urllib.error.URLError("down"), ok("whole")])
+        with self.assertLogs("kit.model", level="WARNING"):
+            got = kit_model.Model(opener=t).chat(HI, max_tokens=1500, whole=True)
+        self.assertEqual((got["content"], t.hosts()), ("whole", [META_URL] * 3))
+        budgets = [json.loads(r.data)["max_completion_tokens"] for r in t.seen]
+        self.assertEqual(budgets, [1500, 4000, 4000])
+
+
+class JudgeSeesWhatTheToolsReturned(unittest.TestCase):
+    """With no sample file, the judge's records are what the agent's tools returned in the case."""
+
+    def test_the_tool_results_go_to_the_judge_as_data(self):
+        from arena import good, practice
+        seen = practice.seen_of([("store", {"items": [{"title": "Boot", "stock": "few left"}]}), ("take_action", {})])
+        self.assertEqual(seen, [{"tool": "store", "result": {"items": [{"title": "Boot", "stock": "few left"}]}}])
+        asked = []
+
+        class Judge:
+            def chat(self, messages, **k):
+                asked.append(json.loads(messages[1]["content"]))
+                return {"content": json.dumps({"reached": True, "broke_never": False, "turn": 1, "why": "ok"})}
+        match = {"turns": [{"n": 1, "customer": "", "replies": ["Report: Boot is low."], "tools": ["store"],
+                            "actions": [], "failed": [], "seen": seen}]}
+        card = {"good": "a report", "never": []}
+        got = good.judge(match, card, Judge(), plug=None, data=None)
+        self.assertTrue(got["won"])
+        self.assertEqual(asked[0]["data"], seen)

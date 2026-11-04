@@ -158,6 +158,20 @@ DONE_MARK = re.compile(re.escape(DONE), re.IGNORECASE)
 MAX_TURNS = match_mod.MAX_TURNS
 GATE = (7, 10)  # the practice gate with made-up customers: wins of matches, as a share (DECISIONS item 75)
 AGENT_SILENT = "the agent's model did not answer"
+SEEN_CHARS = 6000  # each tool result kept on a turn for the judge, cut to this many characters of JSON
+
+
+def seen_of(ran):
+    """What the tools returned on a turn, [{"tool", "result"}], each result cut to SEEN_CHARS of JSON, so the
+    judge checks the agent against the records it read (live run 20261104T172523: an agent on the demo store
+    had no sample file, and the judge, given no records, could not tell a right report from a wrong one)."""
+    out = []
+    for name, result in ran:
+        if name == turn_mod.ACT_TOOL:
+            continue
+        text = json.dumps(result, ensure_ascii=False)
+        out.append({"tool": name, "result": result if len(text) <= SEEN_CHARS else text[:SEEN_CHARS] + "..."})
+    return out
 UNREAD_IN_A_ROW = 3  # unjudged matches in a row that stop a run (arena/tag.py MAX_FAILS, the Tagger's rule)
 UNREAD = "the judge's answer could not be read for {n} matches in a row"
 PROMPT = (
@@ -331,6 +345,7 @@ def play(agent, card, *, agent_model, customer_model, seed=0, max_turns=MAX_TURN
                 order = order or bool(made)
                 one = {"n": n, "customer": "" if agent_first else line, "replies": sent, "outcome": out.outcome,
                        "tools": [name for name, _ in ran if name != turn_mod.ACT_TOOL],
+                       "seen": seen_of(ran),  # what the tools returned, for the judge (arena/good.py)
                        "actions": [a["action"] for a in out.actions], "acted": list(out.actions),
                        "failed": out.failed, "order": bool(made),
                        "refused": list(getattr(out, "refused", None) or [])}  # refused drafts, quotes held back

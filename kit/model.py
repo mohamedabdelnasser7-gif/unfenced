@@ -37,7 +37,9 @@ stops the second ask, and its error goes up as the wrapper's own would.
 A call that got no answer at all (a timeout, a network failure, a 5xx or a 429, after the fallback
 leg when there is one) is asked once more the same way, at the same budget, counted the same way
 (2026-11-04: a live run on the Meta key alone, which has no fallback, dropped a match on one such
-failure). One second ask at most per call, whichever the reason.
+failure). A larger ask after a cut or empty answer that then gets no answer is asked once more too, at
+its larger budget (a live run lost a match to a network failure on that second ask), so a call is sent
+at most three times: once, once larger, once again on no answer.
 """
 import contextlib
 import contextvars
@@ -215,8 +217,9 @@ class Model:
             log.warning("%s gave %s at %s tokens; asked once more at %d", self.route.name,
                         "a cut off answer" if cut else "an empty answer", max_tokens, bigger)
             self.last_route = self.last_model = None
-            message, failed, _, _ = self._ask(messages, tools, effort, bigger, whole)
-        elif failed is not None and lost:  # no answer at all: once more, same budget, counted the same
+            message, failed, _, lost = self._ask(messages, tools, effort, bigger, whole)
+            max_tokens = bigger
+        if failed is not None and lost:  # no answer at all: once more, same budget, counted the same
             for take in _COUNTERS.get():
                 take()
             # The failure names the route and a status or an error type only, never the request.

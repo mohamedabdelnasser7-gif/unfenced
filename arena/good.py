@@ -174,6 +174,10 @@ def judge(match, card, model, facts=True, plug=None, data=None, offers=None):
     rows = sample.for_prompt(data)
     if rows:  # the sample data the agent and the practice customer read (kit/sample.py)
         ask["data"] = json.loads(rows)
+    else:  # no sample file: the records are what its tools returned in the case (arena/practice.py seen_of)
+        seen = [s for t in turns for s in t.get("seen") or []]
+        if seen:
+            ask["data"] = seen
     close = match.get("close") is True
     if close:  # decision 105: a card no offer covers wins on a correct close
         from kit import offers as kit_offers

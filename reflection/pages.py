@@ -1196,6 +1196,7 @@ def new_agent(m, quick, ctx, run=None):
                 "</section></div>")
     out = []
     data = m.sample_data(built) if built and not building else None  # made at Build, shown on its card
+    sheet = bool(built and not building and tok and m.agent_folder(built) is not None)  # the Add data box shows
     split = run is not None and run.error is None  # turns after Build was pressed show under its steps
     head = turns[:min(run.base, len(turns))] if split else turns
     later = iter(turns[len(head):])
@@ -1206,7 +1207,7 @@ def new_agent(m, quick, ctx, run=None):
             out.append(f'<div class="bot">{_who()}<p class="uf" dir="auto">{h(t["follow"])}</p></div>')
             continue
         card = [f'<div class="bot">{_who()}<p class="uf" dir="auto">{h(t["follow"])}</p><div class="acard sq">'
-                f'<span class="lab">Agent card</span>{plan_card(t["card"], data)}']
+                f'<span class="lab">Agent card</span>{plan_card(t["card"], data, sheet)}']
         if t["question"] and not built and not building:
             card.append(f'<p class="uq" dir="auto">{h(t["question"])}</p>')
         if built or building or run is not None and run.error is None:
@@ -1228,7 +1229,7 @@ def new_agent(m, quick, ctx, run=None):
         practice = quick.practice_line(built) if built else None
         if practice:
             out.append(f'<div class="bot">{_who()}<p role="status">{h(practice)}</p></div>')
-        if built and not building and tok and m.agent_folder(built) is not None:  # it can take more data
+        if sheet:  # it can take more data
             out.append(f'<div class="bot">{_who()}{data_form(ctx, built)}</div>')
     for t in run.taken if split else ():
         out.append(f'<div class="you"><span dir="auto">{h(t["said"])}</span></div>')
@@ -1274,11 +1275,22 @@ STORE_SAMPLE = "Sample data until the store is connected"  # the store need with
 # before Build, that the agent records it and the user does that part until it is connected.
 STEP_WAIT = "Until it is connected, it records the {thing} as {done} and you do that part."
 DATA_NOTE = "Paste rows (CSV or JSON) or plain lines, or choose a file. They are added as yours."
+DATA_ID = "add-data"  # the Add data box's id, so a need tile's "Use a sheet instead" can point at it
+# A need tile that is not connected opens (its +) to how that one connection is made. Page text, never a
+# model's. Keys only ever go in .env (docs/judges.md); the page never takes a key.
+HOW_STORE = ("Put your Shopify store address (SHOPIFY_STORE, like name.myshopify.com) and its Admin API token "
+             "(SHOPIFY_TOKEN) in .env, then start the page again. Until then it works from sample data.")
+HOW_WHATSAPP = "Put the values from your WhatsApp Business number ({keys}) in .env, then start the page again. {next}"
+HOW_OTHER = "Unfenced cannot connect this yet. Until it can, the agent works from sample data."
+SHEET = "Use a sheet instead"
+SHEET_NOW = ": add your rows or a CSV file in the Add data box."
+SHEET_LATER = ": once it is built, add your rows or a CSV file in the Add data box under its steps."
+MCP_NEXT = "Connect through MCP: coming next"  # every tile, greyed, never a link
 
 
 def data_form(ctx, agent):
     """The box that adds rows or a file to a built agent's sample data (Morning.add_data)."""
-    return (f'<section class="say sq" aria-label="Add sample data"><form method="post" action="{mo.DATA_PATH}" '
+    return (f'<section class="say sq" id="{DATA_ID}" aria-label="Add sample data"><form method="post" action="{mo.DATA_PATH}" '
             f'enctype="multipart/form-data">{_hidden(ctx, agent=agent)}<span class="lab">Add data</span><div class="box">'
             f'<textarea name="text" aria-label="Rows or text to add" maxlength="{sample_mod.MAX_TEXT}" dir="auto" '
             'placeholder="name, price, stock"></textarea></div><div class="say-f"><label class="quiet pick">'
@@ -1313,11 +1325,36 @@ def need_state(n, data):
     return (SAMPLE_STATE if data else "Not connected yet"), False
 
 
-def plan_card(card, data=None):
+def how_to_connect(n):
+    """The plain steps for one need's connection: the store and WhatsApp by their keys in .env, any
+    other need by what it reads from until a connection exists."""
+    if n["tool"] == "store":
+        return HOW_STORE
+    if n["tool"] == "whatsapp":
+        return HOW_WHATSAPP.format(keys=", ".join(need_keys("whatsapp")), next=QUICK_NEXT.format(name="WhatsApp"))
+    return HOW_OTHER
+
+
+def need_tile(n, said, on, waits, sheet):
+    """One need on the card. Connected: its check and its line. Not connected: its + opens how to connect
+    that one need, and a sheet in its place (the Add data box, Morning.add_data). Every tile says MCP is
+    coming next, greyed and not a link. Nothing here holds Build back."""
+    text = (f'<div><b dir="auto">{h(n["what"])}</b><small>{h(said)}</small>{waits}'
+            f'<small class="mcp" aria-disabled="true">{MCP_NEXT}</small></div>')
+    if on:
+        return f'<div class="file on"><span class="fi">{icon("check")}</span>{text}<span></span></div>'
+    use = (f'<a href="#{DATA_ID}">{SHEET}</a>{SHEET_NOW}' if sheet else f"<b>{SHEET}</b>{SHEET_LATER}")
+    return (f'<details class="need"><summary class="file">'
+            f'<span class="fi">{icon("plus")}</span>{text}</summary><div class="how"><p>{h(how_to_connect(n))}</p>'
+            f"<p>{use}</p></div></details>")
+
+
+def plan_card(card, data=None, sheet=False):
     """The model's card as one plain white card, then what it needs, each marked connected or not yet.
     One case is: what arrives, what the agent gives and when it is over, in the model's words under the
     page's labels, and a line when the agent writes first; then the good and the bad result (DECISIONS
-    item 68). The user changes any of them by a message in the box; the model writes the card again."""
+    item 68). The user changes any of them by a message in the box; the model writes the card again.
+    sheet: the Add data box is on the page, so a need's "Use a sheet instead" links to it."""
     never = "".join(f'<li dir="auto">{h(x)}</li>' for x in card["never"])
     rows = [("What it does", f'<p dir="auto">{h(card["does"])}</p>')]
     case = card.get("case")
@@ -1341,9 +1378,7 @@ def plan_card(card, data=None):
             said, on = need_state(n, data)
             waits = "" if on else "".join(f"<small>{h(STEP_WAIT.format(thing=t, done=d))}</small>" for t, d in steps
                                           if qs_mod.step_need(card, (t, d)) is n)
-            out.append(f'<div class="file{" on" if on else ""}"><span class="fi">'
-                       f'{icon("check" if on else "plus")}</span><div><b dir="auto">{h(n["what"])}</b>'
-                       f"<small>{h(said)}</small>{waits}</div><span></span></div>")
+            out.append(need_tile(n, said, on, waits, sheet))
         out.append("</div>")
     out.append(sample_line(data))
     return "".join(out)

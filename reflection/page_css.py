@@ -585,6 +585,18 @@ textarea.typed{width:100%; border:0; background:transparent; resize:none; outlin
 .bp .file small{display:block; font:400 13px/18px var(--font); color:var(--ink-2)}
 .bp .file > span:last-child:empty{display:none}
 .bp .file.on .fi{background:var(--sage); color:#fff}
+.bp details.need>summary{list-style:none; cursor:pointer}
+.bp details.need>summary::-webkit-details-marker{display:none}
+.bp details.need>summary:hover .fi{background:var(--card-3)}
+.bp details.need>summary:focus-visible{outline:2px solid var(--ink); outline-offset:2px}
+.bp details.need[open]>summary .fi{background:var(--ink); color:#fff}
+.bp details.need[open]>summary .fi svg.i{transform:rotate(45deg)}
+.bp .need .how{margin:6px 0 0; padding:10px 14px; border-radius:16px; background:#fff; box-shadow:inset 0 0 0 1px rgba(42,51,50,.07); font:400 13px/19px var(--font); color:var(--ink-2); overflow-wrap:anywhere}
+.bp .need .how p{margin:0}
+.bp .need .how p + p{margin-top:8px}
+.bp .need .how b, .bp .need .how a{font-weight:500; color:var(--ink)}
+.bp .need .how a{text-decoration:underline; text-underline-offset:2px}
+.bp .file small.mcp{margin-top:2px; font-size:12px; color:var(--ink-3); cursor:default}
 .bp .uq{margin:14px 2px 0; font:500 17px/24px var(--font); overflow-wrap:anywhere}
 .bp .cact{display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; margin-top:16px}
 .bp .cact form{margin:0}

@@ -2,6 +2,7 @@
 gym lead follower, a coffee caption writer). tests/three_agents.json holds their cards, plugs, first
 instructions and night lessons as the real model wrote them; nothing here calls the network."""
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,6 +14,7 @@ from kit.chats import Chats
 from kit.db import Db
 from reflection import quickstart as qs
 from tests.fake_model import FakeModel, clean_env, say, tool_call
+from tests.test_any_agent import PageCase
 
 THREE = json.loads((Path(__file__).resolve().parent / "three_agents.json").read_text(encoding="utf-8"))
 
@@ -287,6 +289,96 @@ class EveryStepHasAnAction(unittest.TestCase):
         self.assertIn("declare it as an action the agent records", qs.BUILD_PROMPT)
         self.assertIn("instructions say when it takes each declared action", qs.BUILD_PROMPT)
         self.assertNotIn("is not connected yet: leave it out", qs.BUILD_PROMPT)
+
+
+def tiles(html):
+    """Each need tile of a card, from its start to the next tile's (the last one to the card's end)."""
+    cuts = [m.start() for m in re.finditer(r'<details class="need">|<div class="file on">', html)]
+    return [html[x:y] for x, y in zip(cuts, cuts[1:] + [len(html)])]
+
+
+class ConnectionTiles(unittest.TestCase):
+    """The + on a need tile was only an icon: nothing told the user how to connect it or what to do instead."""
+
+    def setUp(self):
+        from unittest import mock
+        import os
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("SHOPIFY", "WHATSAPP"))}
+        p = mock.patch.dict(os.environ, env, clear=True)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def card(self, needs):
+        return dict(THREE["lead_trial_booker"]["card"], needs=needs)
+
+    def test_each_tile_opens_how_to_connect_that_one_need_with_a_sheet_and_mcp_greyed(self):
+        from reflection import pages
+        html = pages.plan_card(THREE["lead_trial_booker"]["card"])
+        got = tiles(html)
+        self.assertEqual(len(got), 3)
+        for t in got:
+            self.assertTrue(t.startswith('<details class="need"><summary class="file"'), t)
+            self.assertIn(pages.icon("plus"), t[:t.index("</summary>")])
+            self.assertIn(pages.SHEET + "</b>" + pages.SHEET_LATER, t)  # before Build: no box to link to yet
+            self.assertEqual(t.count(pages.MCP_NEXT), 1)
+        leads, chat, calendar = got
+        self.assertIn(pages.HOW_OTHER, leads)
+        self.assertIn(pages.HOW_OTHER, calendar)
+        for key in ("WHATSAPP_APP_SECRET", "WHATSAPP_VERIFY_TOKEN", "WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID"):
+            self.assertIn(key, chat)
+        self.assertIn(pages.QUICK_NEXT.format(name="WhatsApp"), chat)
+        self.assertNotIn("Connected", html)  # WhatsApp is on the card as connected, but no keys are set
+        self.assertNotIn('href="#', html)
+        self.assertNotIn("<a", html.split(pages.MCP_NEXT)[0][-200:])
+
+    def test_the_sheet_links_to_the_add_data_box_once_it_is_on_the_page(self):
+        from reflection import pages
+        html = pages.plan_card(THREE["lead_trial_booker"]["card"], sheet=True)
+        self.assertEqual(html.count(f'<a href="#{pages.DATA_ID}">{pages.SHEET}</a>{pages.SHEET_NOW}'), 3)
+        self.assertIn(f'id="{pages.DATA_ID}"', pages.data_form({"token": "t", "q": "", "path": "/new"}, "x"))
+
+    def test_the_store_tile_says_connected_only_with_its_keys_and_any_tool_gets_a_plain_line(self):
+        from unittest import mock
+        import os
+        from reflection import pages
+        needs = [{"what": "Your store's products", "tool": "store", "connected": True},
+                 {"what": "Your CRM contacts", "tool": "crm", "connected": False},
+                 {"what": "Orders", "tool": "orders", "connected": True}]
+        html = pages.plan_card(self.card(needs))
+        store, crm, orders = tiles(html)
+        self.assertIn(pages.HOW_STORE, store)
+        self.assertIn(pages.STORE_SAMPLE, store)
+        self.assertNotIn("Connected", store)
+        self.assertIn(pages.HOW_OTHER, crm)
+        self.assertTrue(orders.startswith('<div class="file on">'))  # no keys needed: connected, no + to open
+        self.assertIn(pages.MCP_NEXT, orders)
+        self.assertNotIn("<details", orders)
+        with mock.patch.dict(os.environ, {"SHOPIFY_STORE": "x.myshopify.com", "SHOPIFY_TOKEN": "t"}):
+            store = tiles(pages.plan_card(self.card(needs)))[0]
+        self.assertTrue(store.startswith('<div class="file on">'))
+        self.assertIn("Connected: Store", store)
+        self.assertIn(pages.MCP_NEXT, store)
+
+
+class TilesOnThePage(PageCase):
+    """On the page: Build stays open with every need unconnected, and once built the sheet line reaches the box."""
+
+    def test_build_is_offered_with_nothing_connected_and_the_built_page_links_the_box(self):
+        from reflection import pages
+        from tests.test_quickstart import card_reply, exam_reply, no_keys, plug_reply
+        from tests.test_any_agent import sample_reply
+        self.m.db_path = str(self.folder / "ascent.db")  # the live page, so the built agent joins it
+        with no_keys():
+            self.page(card_reply(), plug_reply(), exam_reply(), sample_reply())
+            self.send("an agent for my stock")
+            before = self.get()
+            self.assertIn('action="/quickstart/build"', before)
+            self.assertEqual(before.count('<details class="need">'), 2)
+            self.assertNotIn(f'href="#{pages.DATA_ID}"', before)
+            self.build()
+            after = self.get()
+        self.assertIn(f'id="{pages.DATA_ID}"', after)
+        self.assertEqual(after.count(f'href="#{pages.DATA_ID}"'), 2)
 
 
 if __name__ == "__main__":

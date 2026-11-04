@@ -53,14 +53,18 @@ no two customers are the same person. An old folder written from the same card i
 its cards stay as they are, byte for byte, and only the new files are written (save_new); a folder
 holding more than N gives N of them, the mix's share of each kind. When the cap is reached mid write
 the customers written so far are saved (the next run writes the rest) and the run stops with a
-plain line saying how many were written. count=None is the old shape: one call, KINDS, or one
-customer for each real card.
+plain line saying how many were written. A batch answer that is empty or cannot be read is asked once
+more (that call counts on the cap too); when the second cannot be read either, the batch is skipped,
+and the run goes on with the customers written when they are enough for a run (playable), saying so in
+a Note line, and the next run writes the rest; with too few it stops as a model fault. count=None is
+the old shape: one call, KINDS, or one customer for each real card.
 """
 import hashlib
 import json
 import math
 import os
 import re
+import sys
 from pathlib import Path
 
 from kit.model import ModelError
@@ -75,7 +79,9 @@ MAX_INPUT = 1200  # characters of a case's first input (a ticket, a brief, a thr
 FOLDER = "practice-cards"
 CARD_FILE = re.compile(r"persona-\d{2}\.json")
 EFFORT = "medium"
-MAX_TOKENS = 4000
+# Reasoning counts against max_tokens: on the Meta key (muse-spark) a batch call that also passed the
+# people already written spent 4000 thinking and came back with empty content and no error, twice.
+MAX_TOKENS = 16000
 REAL_FOLDER = "real-cards"  # in the owner's folder; the hyphen keeps it from ever being an agent's name
 MIN_REAL = 2
 MAX_REAL = 8  # real cards blended at most, the heaviest first
@@ -156,6 +162,9 @@ def _input(v):
 
 class Unreadable(ModelError):
     """The model's practice customers could not be read; a model fault, never a loss."""
+
+
+UNREAD = "the practice customers the model wrote could not be read"
 
 
 def fingerprint(card):
@@ -485,25 +494,36 @@ def _number(c):
 
 
 def _ask(card, model, system, ask, written):
-    """One batch call: the people the model wrote (a list), told the people already written."""
+    """One batch call: the people the model wrote (a list), told the people already written. An
+    empty or unreadable answer is asked once more (that call counts on the cap too, as every call
+    through the model handed in does); a second one raises Unreadable."""
     if written:
         ask = {**ask, "already": [{"want": c["want"], "opening": opening_of(c)} for c in written]}
         system += ALREADY_PART
-    out = model.chat([{"role": "system", "content": system_for(system, card)},
-                      {"role": "user", "content": json.dumps(ask, ensure_ascii=False)}],
-                     effort=EFFORT, max_tokens=MAX_TOKENS)
-    got = _json(out.get("content") if isinstance(out, dict) else None)
-    people = got.get("customers") if got else None
-    if not isinstance(people, list):
-        raise Unreadable("the practice customers the model wrote could not be read")
-    return people
+    for _ in range(2):
+        out = model.chat([{"role": "system", "content": system_for(system, card)},
+                          {"role": "user", "content": json.dumps(ask, ensure_ascii=False)}],
+                         effort=EFFORT, max_tokens=MAX_TOKENS)
+        got = _json(out.get("content") if isinstance(out, dict) else None)
+        people = got.get("customers") if got else None
+        if isinstance(people, list):
+            return people
+    raise Unreadable(UNREAD)
 
 
-def write_many(card, model, slots, have, new, *, system, ask_of, build):
+def playable(cards):
+    """True when cards are enough for a run: two or more, and one that can reach the good result."""
+    return len(cards) >= 2 and any(not c["unwinnable"] for c in cards)
+
+
+def write_many(card, model, slots, have, new, *, system, ask_of, build, unread=None):
     """The new customers for slots (each a kind, or a real card's behaviour), BATCH at most a call,
     appended to new as they are made, so a caller stopped by the cap keeps them. have: the cards
     already written, kept as they are. A person already written (person) is asked for once more in
-    one call, then dropped. build(i, slot, got): one card numbered i, or None."""
+    one call, then dropped. build(i, slot, got): one card numbered i, or None. A batch whose answer
+    could not be read, asked twice (_ask), is skipped and the next batch is asked; at the end
+    Unreadable is raised only when the cards written are not enough for a run (playable). unread: a
+    list each slot left unwritten that way is appended to, so the caller can say so."""
     seen = {person(c) for c in have}
     start = max((_number(c) for c in have), default=0)
 
@@ -519,11 +539,22 @@ def write_many(card, model, slots, have, new, *, system, ask_of, build):
             seen.add(person(c))
             new.append(c)
 
+    unread = [] if unread is None else unread
+
+    def asked(batch):
+        try:
+            return _ask(card, model, system, ask_of(batch), have + new)
+        except Unreadable:
+            unread.extend(batch)
+            return []
+
     for i in range(0, len(slots), BATCH):
         batch, again = slots[i:i + BATCH], []
-        take(batch, _ask(card, model, system, ask_of(batch), have + new), again)
+        take(batch, asked(batch), again)
         if again:  # once more, told everyone written so far; a second match is dropped
-            take(again, _ask(card, model, system, ask_of(again), have + new), None)
+            take(again, asked(again), None)
+    if unread and not playable(have + new):
+        raise Unreadable(UNREAD)
     return new
 
 
@@ -568,9 +599,9 @@ def _shaped(agent_folder, agent, card, model, profiles, count, folder, source, s
         system = BLEND_SYSTEM
     if not slots:
         return kept, False
-    new = []
+    new, unread = [], []
     try:
-        write_many(card, model, slots, kept, new, system=system, ask_of=ask_of, build=build)
+        write_many(card, model, slots, kept, new, system=system, ask_of=ask_of, build=build, unread=unread)
     except run_mod.CapReached as e:
         if new and len(kept) + len(new) >= 2:
             (save_new if have else save)(folder, new if have else kept + new)
@@ -579,8 +610,12 @@ def _shaped(agent_folder, agent, card, model, profiles, count, folder, source, s
             f"{'and saved, and the next run writes the rest' if new and len(kept) + len(new) >= 2 else 'and none saved'}"
         ) from None
     cards = kept + new
-    if len(cards) < 2 or not any(not c["unwinnable"] for c in cards):
+    if not playable(cards):
         raise Unreadable("the model wrote too few practice customers that can be played")
+    if unread:
+        print(f"Note: {len(cards)} of {count} practice customers were written: the model's answer for "
+              f"{len(unread)} more could not be read, asked twice. This run goes on with these "
+              f"{len(cards)}, and the next run writes the rest.", file=sys.stderr)
     if have:
         save_new(folder, new)
     else:

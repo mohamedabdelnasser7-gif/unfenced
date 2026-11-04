@@ -1,0 +1,26 @@
+# Red team round 3 (last): unfenced, branch handoff, fix diff fcfa213..abc8a36
+*Created: 2026-11-01. Last updated: 2026-11-01.*
+
+Red team (Fable 5.1, max), saved by root from the hand-back. Probes in the session scratchpad redteam-handoff-r3/ (probes_r3.py, run_r3.py, sweep_r3.py, make_fixed_r3.py, fixed/send_check.py, outputs *.out). No .env, data/, private data or arena/real opened; no model call or network. Line numbers are abc8a36. Readings: new abc8a36, prev fcfa213, old 8621b0d, fix = patched copy.
+
+Verdict: every round 2 blocker is closed and every good reply passes. 4 blocking variants (1 high, 3 medium), 1 low, 1 ruled out.
+
+1. BLOCKING, HIGH. k price after a model number passes. `_store_word_thousands_re` (:479-483) wants store word, then at most ":" or ",", then the k number; a model number between ("Phantom 6: 8.5k") reads 6 as the number and gives up; `model_thousands` (:456) wants k right after the model number. "F50" is dropped by the `[a-z]{3,}` filter. Signs other than ":" "," and the decimal comma "17,5k" also open it.
+   Pass in new and prev: `Phantom 6: 8.5k.`, `Phantom 6, 8.5k.`, `Phantom 6 8.5k.`, `Phantom 6 - 8.5k.`, `Phantom 6: 8,5k`, `Phantom 6: 8.5 thousand.`, `Superfly 11: 11k.`, `Vapor 17: 17.5k.`, `F50: 15k.`, `el phantom 6: 8.5k`, `Elite (17.5k).`, `Elite = 17.5k.`, `Elite 17,5k.`, `Elite: 17,5k.`, `Vapor 17 Elite (17.5k)`.
+   Fix (tested; "Hoodie 1.5k", "We have 1k followers on Instagram.", "Phantom 6: 16,500 EGP." still pass): store words include `[a-z]+\d{1,2}` tokens; regex allows an optional model number `(?:[\s-]*\d{1,2}(?!\d))?` and a sign `[:,=(-]?` before `(\d+(?:[.,]\d+)?)\s*(?:k|thousands?)`.
+2. BLOCKING, MEDIUM. Allow list strips the model number (a) before a blank outside NARROW_BLANKS (:174): controls U+0085, U+001C-001F, U+000B, U+000C, U+000D (not removed by `_plain` :670), U+205F, U+2008; (b) before a glued letter that draws as a dot or apostrophe (U+A78F, U+1427, U+18DF, U+0887, U+0971, U+A78B, U+A78C), because `\w` joins it and CUE_AMOUNT (:214) hides the 17. SeparatorSweep starts at 0x20 and skips Cc, Zl, Zp, Lo, Ll, Lu, Nl, No.
+   Pass: `The price is Vapor 17,\x85400 EGP.` (and \x1c, \x0b, \x0c, \r), `Vapor 17,` + U+205F/U+2008 + `400 EGP`, `سعر Vapor ١٧، ٤٠٠ جنيه` with those blanks, `se3r el Vapor 17,\x1d400 geneh`, `The price is Vapor 17ꞏ400 EGP.`, `17ᐧ400`, `17ꞌ400`, Arabic and Franco twins.
+   Fix (tested): `_plain` maps \r\n, \r, U+2028, U+2029 to a line break and deletes controls [\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x85]; NARROW_BLANKS = every blank except plain space, no break space and ideographic space; MODIFIER_IN_NUMBER = any non-ASCII non-Arabic letter glued between a digit and a group of three reads as an apostrophe (exact patterns in fixed/send_check.py; the hand-back text garbled the blank range); add the 7 letters to NUMBER_LOOKALIKES; sweep test from 0x00 with Cc, Zl, Zp, Nl, No and a "separator then character" slot.
+3. BLOCKING, MEDIUM. Missing thousands words: alaf, elf, الآف, ألآف (THOUSANDS_WORDS :364, MAGNITUDE_WORDS :340-341).
+   Pass: `se3r el Vapor 17 alaf geneh`, `Vapor 17 alaf.`, `el phantom 6 alaf`, `se3r el Vapor 17 elf geneh`, `سعر Vapor 17 الآف`, `سعر Vapor 17 ألآف جنيه`.
+   Fix: add the four to both lists.
+4. BLOCKING, MEDIUM. Count shapes missed: (a) REMAIN (:382-383) only at clause end or before a short word list; (b) COUNT_BRIDGE (:379) lacks "currently"; (c) have shape (:508-509) knows only "pairs"; (d) Franco bas/bass and "3andena N pairs"; (e) Arabic متوفر.
+   Pass: `Only Vapor 17 remain right now.`, `3 remain so hurry.`, `Only 3 pairs currently available.`, `We have 3 pieces in 43.`, `We have 3 pcs in 43.`, `We have Vapor 17 units in 43.`, `3 goz bas`, `3andena 3 pairs bs`, `متوفر 3 بس`, `المتوفر 3`.
+   New false refusals (prev passes): `The Superfly 11 remains in our range.`, `... remains at the same price.`, `... remains only in 43.`
+   Fix (tested): REMAIN by grammar (remaining and plural remain always; singular remains only at clause end, before now/today, or before "in <size>"); add currently, bas, bass to COUNT_BRIDGE; have shape takes pieces, pcs, pc, units and 3andena/3ndena/3andi; جوز shapes with bas/bass and pairs/pieces after عندنا; متوفر forms before the number, متوفرين after. Left by design: "N pieces in 43" alone, `عندنا 3 بس`, `3 mawgood bs`.
+5. LOW, not blocking. "w/" read as "with" and the time words (:126, :129) open lenient English a little (`aywa w/ 16,500 EGP.`, `3am and el price is 16,500 EGP.`); script only, no money. False refusal: `We open at 9am, 3am is too early.`
+6. RULED OUT. Lm and Mc joins on a right number read right.
+
+Adjacent, not blocking: spaced shapes (`Vapor 17 ꞏ 400 EGP`, `Vapor 17 ( 400 EGP)`, superscript and circled digits) show a visible gap or glyph; glued Nl/No numbers close with the widened MODIFIER_IN_NUMBER; `Vapor 17 g.`, `gnee`, `EG` not known currency spellings; `Size 43-3 left` by the hyphen code rule.
+
+Cleared: all 18 round 2 look-alikes glued and after a blank, the narrow blanks, ألاف, تلاف, talaf, the round 2 count and Franco cases, and all 54 good replies with the fix applied (run_fixed_r3b.out). The builder's test file was not run (it imports kit.tools.store, which reads data/).

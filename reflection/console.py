@@ -40,6 +40,7 @@ from engine import exam as exam_mod
 from engine import lessons as lessons_mod
 from engine.lessons import KEPT, PULLED, TRYING, WAITING
 from kit import connections as conn_mod
+from kit import sample as sample_mod
 
 NOT_SAVED = "not saved for this turn"
 RECENT = 600            # seconds: a record this new marks its stage as running
@@ -81,6 +82,8 @@ def collect(m, agent, now=None):
     _db(m, agent, out, rec)
     _nights(m, agent, rec)
     out["calls"] = _calls(m, now)
+    sample = getattr(m, "sample_data", None)  # a built agent's sample data, in the card's words
+    out["sample"] = sample_mod.words(sample(agent)) if callable(sample) else ""
     out["gate"] = m.gate(agent) if agent in m.plugs else None
     out["records"].sort(key=lambda r: (r["sort"], r["seq"]))
     out["running"] = running(m, agent, out["records"], now)
@@ -214,7 +217,8 @@ def _db(m, agent, out, rec):
     for les in lessons:
         status = _status(les, held)
         row = {"id": les["id"], "text": les["text"], "source": les.get("source") or "", "status": status,
-               "state": les["state"], "added_at": les["added_at"], "raw": les}
+               "state": les["state"], "added_at": les["added_at"], "risk": les.get("risk"),
+               "why": risk_reason(les.get("risk_why")) if les.get("risk") == "high" else "", "raw": les}
         by_id[les["id"]] = row
         out["lessons"].append(row)
         rec.add("R", les["added_at"], f"lesson {les['id']} added ({status.lower()}): {les['text']}", les,
@@ -253,6 +257,34 @@ def _db(m, agent, out, rec):
     for cn in conns:
         rec.add("D", cn["at"], f"{'connected to' if cn['on'] else 'pulled from'} {cn['channel']}: {cn['why']}", cn)
     out["conns"] = conns
+
+
+def risk_reason(risk_why):
+    """Why a high risk lesson waits, from its risk_why as the engine saved it (engine/risk.py classify,
+    reasons joined by "; ", never rewritten): "high risk: money (fee, refund)". The code check's
+    "group: mark" lines go under their group (a pattern by its group alone), a core mark and the judge's
+    answer by name. Nothing saved: NOT_SAVED."""
+    lines = [x.strip() for x in str(risk_why or "").split("; ") if x.strip()]
+    if not lines:
+        return f"high risk: {NOT_SAVED}"
+    groups, out = {}, []
+    for x in lines:
+        group, _, mark = x.partition(": ")
+        if not mark:
+            out.append(x)
+        elif group == "core":
+            out.append(mark)
+        elif group == "judge":
+            out.append(f"judge {mark.removesuffix(', counted as high')}")
+        else:
+            if group not in groups:
+                groups[group] = []
+                out.append(group)  # shown with spaces: personal_data is "personal data"
+            if not (mark.startswith("/") and mark.endswith("/")) and mark not in groups[group]:
+                groups[group].append(mark)
+    said = [(x.replace("_", " ") + (f" ({', '.join(groups[x])})" if groups[x] else "")) if x in groups else x
+            for x in dict.fromkeys(out)]
+    return "high risk: " + ", ".join(said)
 
 
 def _status(les, held):
@@ -441,6 +473,8 @@ table{border-collapse:collapse;width:100%;font:inherit}
 th{position:sticky;top:0;background:var(--panel);text-align:left;font-weight:500;color:var(--dim);font-size:12px;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
 td{padding:6px 10px;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:top}
 td.sit{white-space:normal;min-width:220px}
+td.sit small.why{display:block;margin-top:3px;font-size:11px;color:var(--red)}
+.sline{grid-column:1/-1;margin:0;color:var(--dim);font-size:12px}
 tr.sel td{background:#1a2230}
 tr:hover td{background:var(--panel2)}
 td.dim,.dim{color:var(--dim)}
@@ -686,6 +720,8 @@ def cards_html(data):
         sub = f"No calls counted today | full exam cap {FULL_CAP} a lesson"
     out.append(f'<div class="card"><div class="lb"><span>Model calls today</span>{chip}</div><div class="big">{h(big)}</div>'
                f'<div class="sub">{h(sub)}</div></div>')
+    if data.get("sample"):  # a built agent's sample data, the card's own line
+        out.append(f'<p class="sline mono">{h(data["sample"])}</p>')
     return "".join(out)
 
 
@@ -844,8 +880,9 @@ def reflect_html(data, st, day):
         key = f"l.{x['id']}"
         cls = {"KEPT": "ok", "TRIAL": "run", "HELD": "bad"}.get(x["status"], "")
         rows.append(f'<tr class="{"sel" if st["row"] == key else ""}"><td class="mono"><a href="{href(st, day, row=key, pane="")}">'
-                    f'{x["id"]}</a></td><td class="sit"><a href="{href(st, day, row=key, pane="")}">{h(x["text"])}</a></td>'
-                    f'<td class="dim">{h(_short(x["source"]))}</td><td><span class="badge {cls}">{x["status"]}</span></td></tr>')
+                    f'{x["id"]}</a></td><td class="sit"><a href="{href(st, day, row=key, pane="")}">{h(x["text"])}</a>'
+                    + (f'<small class="why">{h(x["why"])}</small>' if x.get("why") else "")
+                    + f'</td><td class="dim">{h(_short(x["source"]))}</td><td><span class="badge {cls}">{x["status"]}</span></td></tr>')
     table = (f'<div class="tbl"><table><thead><tr><th>ID</th><th>Lesson</th><th>From</th><th>Status</th></tr></thead>'
              f'<tbody>{"".join(rows)}</tbody></table></div>' if rows else '<p class="empty">No lessons yet.</p>')
     return ('<div class="ph"><h2>Reflection</h2><span class="n">night reports, exams and every lesson</span></div>'
@@ -995,6 +1032,8 @@ def _panel(kind, x, data):
     les = x
     saw = _box("Lesson", les["text"]) + _box("From", les["source"] or NOT_SAVED)
     dec = _box("Status", les["status"])
+    if les.get("why"):  # a high risk lesson: why it waits, as its risk check saved it
+        dec += _box("Why it waits" if les["status"] in ("HELD", "WAITING") else "Risk", les["why"], "bad")
     if les.get("exam"):
         ex = les["exam"]
         dec += _box("Exam", ("passed" if ex["passed"] else "held") + (f", {ex['got']} of {ex['total']}" if ex["total"] else ""),

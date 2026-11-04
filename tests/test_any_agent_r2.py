@@ -15,6 +15,9 @@ from kit.db import Db
 from reflection import quickstart as qs
 from tests.fake_model import FakeModel, clean_env, say, tool_call
 from tests.test_any_agent import PageCase
+from tests.test_console import Base as ConsoleBase
+from engine import lessons as lessons_mod
+from reflection import console
 
 THREE = json.loads((Path(__file__).resolve().parent / "three_agents.json").read_text(encoding="utf-8"))
 
@@ -379,6 +382,81 @@ class TilesOnThePage(PageCase):
             after = self.get()
         self.assertIn(f'id="{pages.DATA_ID}"', after)
         self.assertEqual(after.count(f'href="#{pages.DATA_ID}"'), 2)
+
+
+
+class WhyItWaits(ConsoleBase):
+    """The console showed HELD with no reason: nobody could tell a lesson waited for its money words."""
+
+    HIGH = "Waive the delivery fee and offer a refund when the order is late."
+    LOW = "Greet the customer warmly before you answer."
+
+    def setUp(self):
+        super().setUp()
+        self.plug = self.m.plugs["sales"]
+        les = lessons_mod.Lessons(self.db, self.plug, judge=lambda *a: risk_mod.LOW)
+        self.high = les.propose(self.HIGH, ["all"], source="night study", sources=[])
+        self.low = les.propose(self.LOW, ["all"], source="night study", sources=[])
+
+    def rows(self):
+        with self.db.tx() as c:
+            return [tuple(r) for r in c.execute("SELECT * FROM lessons ORDER BY id")]
+
+    def test_a_high_lesson_says_why_from_the_risk_check_and_a_low_one_says_nothing(self):
+        before = self.rows()
+        data = console.collect(self.m, "sales")
+        rows = {x["id"]: x for x in data["lessons"]}
+        level, found = risk_mod.classify(self.HIGH, self.plug.risk, lambda *a: risk_mod.LOW)
+        self.assertEqual(level, risk_mod.HIGH)
+        why = rows[self.high]["why"]
+        self.assertEqual(why, console.risk_reason("; ".join(found)))
+        self.assertTrue(why.startswith("high risk: "), why)
+        self.assertIn("refund", why)
+        self.assertEqual(rows[self.low]["why"], "")
+        table = self.page(view="reflect")
+        self.assertEqual(table.count('<small class="why">'), 1)
+        self.assertIn(f'{self.HIGH}</a><small class="why">{console.h(why)}</small>', table)
+        dec = self.page(view="reflect", row=f"l.{self.high}", pane="dec").split('class="drawer"')[1]
+        self.assertIn("Why it waits", dec)
+        self.assertIn(console.h(why), dec)
+        low = self.page(view="reflect", row=f"l.{self.low}", pane="dec").split('class="drawer"')[1]
+        self.assertNotIn("Why it waits", low)
+        self.assertNotIn("high risk", low)
+        self.assertEqual(self.rows(), before)  # read only
+
+    def test_the_reason_reads_every_kind_of_saved_line_and_never_fills_in(self):
+        self.assertEqual(console.risk_reason("money: fee; money: refund"), "high risk: money (fee, refund)")
+        self.assertEqual(console.risk_reason("core: link; personal_data: phone; money: /\\d{3,}/; tool: orders"),
+                         "high risk: link, personal data (phone), money, tool (orders)")
+        self.assertEqual(console.risk_reason("judge: unsure, counted as high"), "high risk: judge unsure")
+        for empty in (None, "", " "):
+            self.assertEqual(console.risk_reason(empty), f"high risk: {console.NOT_SAVED}")
+        with self.db.tx() as c:  # a high lesson saved with no reasons: the console says so, never guesses one
+            bare = c.execute("INSERT INTO lessons (agent, text, stages, fields, risk, state, source, origin, kind, "
+                             "added_at) VALUES ('sales', 'Offer the bundle.', ',all,', ',,', 'high', 'waiting', "
+                             "'seed', 'agent', 'pattern', 1)").lastrowid
+        rows = {x["id"]: x for x in console.collect(self.m, "sales")["lessons"]}
+        self.assertEqual(rows[bare]["why"], f"high risk: {console.NOT_SAVED}")
+        self.assertNotIn(console.NOT_SAVED, rows[self.high]["why"])
+
+
+class SampleDataInTheConsole(PageCase):
+    def setUp(self):
+        PageCase.setUp(self)
+        self.m.db_path = str(self.folder / "ascent.db")
+
+    def test_a_built_agent_shows_its_sample_data_line_as_on_its_card(self):
+        from tests.test_any_agent import CARD_LINE, sample_reply
+        from tests.test_quickstart import card_reply, exam_reply, no_keys, plug_reply
+        with no_keys():
+            self.page(card_reply(), plug_reply(), exam_reply(), sample_reply())
+            self.send("an agent for my stock")
+            self.build()
+            page = self.p.get("/console", {"agent": ["stock_watcher"]}, "t")
+            sales = self.p.get("/console", {"agent": ["sales"]}, "t")
+        self.assertEqual(page.count('<p class="sline mono">'), 1)
+        self.assertIn(f'<p class="sline mono">{console.h(CARD_LINE)}</p>', page)
+        self.assertNotIn('class="sline', sales)
 
 
 if __name__ == "__main__":

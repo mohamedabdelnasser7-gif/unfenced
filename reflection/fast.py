@@ -191,6 +191,13 @@ NOTE_LOW = "Low risk: tone, wording, the order of questions, when to ask for the
 # guard's side, so the lesson risk check (engine/risk.py) reads its words as before.
 _WHOLE_WORDS = {"discount": ("on us",), "policy": ("final", "finals")}
 # a word that opens a new clause, so a verb after it is not the topic's own
+# A topic the customer finds too high or asks about is a condition, never what the topic is or holds (Arena run
+# 20261104T143545, cause 8): "When the customer says the price is too high, offer the lower tier" and "If the
+# total is asked, list each tool price" carry no amount. A number or an amount is still stopped by the
+# engine's own marks (engine/fast.py NUMBERS), and a discount by the discount patterns here.
+_ONLY_A_CONDITION = (r"(?![\s,]+(?:(?:too|so|very|really|a\s+bit|a\s+little)\s+)?(?:high|steep|expensive)\b"
+                     r"|[\s,]+(?:too|so|very|really)\s+much\b|[\s,]+a\s+lot\b"
+                     r"|[\s,]+(?:asked|mentioned|raised|questioned|brought\s+up)\b)")
 _NOT_A_CLAUSE = (r"(?!(?:once|when|whenever|if|after|before|until|unless|then|as|so|and|but|or|because|while"
                  r"|they|you|we|he|she|it|i)\b)")
 _NEVER_PATTERNS = (
@@ -205,7 +212,7 @@ _NEVER_PATTERNS = (
     # isn't"; review round 2); a word between never opens a new clause ("delivery once they are ready")
     ("policy", r"\b(?:price|cost|total|delivery|shipping|fee|charge)s?(?:['’]s\b|\s+(?:" + _NOT_A_CLAUSE + r"[a-z]+\s+){0,2}?"
                r"(?:is|are|was|were|will|wo|does|do|did|ca|can|includes?|included|including|covers?|covered"
-               r"|comes?|stays?|has|have|goes|gets)(?:n['’]?t)?\b)"),
+               r"|comes?|stays?|has|have|goes|gets)(?:n['’]?t)?\b)" + _ONLY_A_CONDITION),
     # red team and review round 2: paraphrases that passed
     ("promise", r"\btak(?:e|es|ing|en)\s+(?:(?:it|them|that|this|those|the\s+[a-z]+)\s+)?back\b"),
     ("discount", r"\b(?:go|goes|going|come|comes|coming|move|get)\s+(?:a\s+(?:bit|little)\s+)?(?:lower|down)\b"),

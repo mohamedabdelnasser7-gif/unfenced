@@ -164,6 +164,8 @@ ICON = dict(mo.ICONS, pen='<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5
 # a person reads why the card waits, never the engine's word lists.
 PLAIN_RISK = {"number": "it talks about a number, like a price, a size or a delivery time",
               "money": "it talks about money", "spend": "it talks about spending money",
+              "amount": "it states an amount of money", "discount": "it offers a discount or something free",
+              "payment": "it changes how the customer pays",
               "promise": "it makes a promise to the customer", "policy": "it touches store policy",
               "personal_data": "it touches someone's personal data", "other_brands": "it names other brands",
               "goes_out": "it sends something out in your name", "calendar": "it changes your calendar",

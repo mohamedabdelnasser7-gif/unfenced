@@ -162,5 +162,71 @@ class InTheEngine(unittest.TestCase):
         self.assertIs(Lessons(db).judge, risk.no_judge)
 
 
+
+class _Always(str):
+    """A str that says it equals anything: not the plain string "low"."""
+
+    def __eq__(self, other):
+        return True
+
+    __hash__ = str.__hash__
+
+
+class FailClosed(unittest.TestCase):
+    """Engfix round 3, fix 2: a lesson the code check does not mark is low only on the judge's plain
+    "low". Every other answer, a missing one and a judge error make it high, through risk.classify and
+    through engine/lessons.py (a low lesson starts a trial with no yes, a high one waits). Fake judges."""
+
+    def judges(self):
+        def boom(text, high, low):
+            raise RuntimeError("judge down")
+        out = {"unsure": lambda *a: risk.UNSURE, "high": lambda *a: risk.HIGH, "missing": lambda *a: None,
+               "empty": lambda *a: "", "upper LOW": lambda *a: "LOW", "spaced": lambda *a: " low",
+               "sentence": lambda *a: "low, only tone", "a list": lambda *a: ["low"],
+               "a dict": lambda *a: {"answer": "low"}, "a number": lambda *a: 0, "True": lambda *a: True,
+               "a str that equals anything": lambda *a: _Always("x"), "error": boom}
+        return out
+
+    def test_only_the_plain_low_is_low(self):
+        self.assertEqual(risk.classify(TONE, PLUG.risk, lambda *a: "low"), (risk.LOW, ["judge: low"]))
+        for name, j in self.judges().items():
+            with self.subTest(judge=name):
+                level, why = risk.classify(TONE, PLUG.risk, j)
+                self.assertEqual(level, risk.HIGH)
+                self.assertNotEqual(why, ["judge: low"])
+
+    def test_in_the_engine_only_the_plain_low_starts_a_trial(self):
+        db = Db(":memory:")
+        self.addCleanup(db.close)
+        low = EngineLessons(db, PLUG, judge=lambda *a: "low")
+        got = low.get(low.propose(TONE, ["all"], sources=[]))
+        self.assertEqual((got["risk"], got["state"]), (risk.LOW, "trying"))
+        for name, j in self.judges().items():
+            with self.subTest(judge=name):
+                d = Db(":memory:")
+                self.addCleanup(d.close)
+                les = EngineLessons(d, PLUG, judge=j)
+                got = les.get(les.propose(TONE, ["all"], sources=[]))
+                self.assertEqual(got["risk"], risk.HIGH)
+                self.assertNotEqual(got["state"], "trying")
+
+    def test_through_the_meta_judge_an_unreadable_answer_is_high(self):
+        for out in (say("low."), say(""), {"role": "assistant"}, call("store", query="x"), None):
+            with self.subTest(out=out):
+                self.assertEqual(risk.classify(TONE, PLUG.risk, Judge(FakeModel(lambda m, t, out=out: out)))[0],
+                                 risk.HIGH)
+
+        def boom(messages, tools):
+            raise TimeoutError("slow")
+        self.assertEqual(risk.classify(TONE, PLUG.risk, Judge(FakeModel(boom)))[0], risk.HIGH)
+
+    def test_the_prompt_names_money_promises_payment_and_data_in_any_wording(self):
+        _, fake = ask(say("low"))
+        self.assertIn("Also always high, in any language or wording: anything that changes what the customer "
+                      "pays, gets for free, is promised, how they pay, or what happens to their data, and anything sent "
+                      "or published to a customer or the public with no yes.",
+                      fake.calls[0]["messages"][0]["content"])
+
+
 if __name__ == "__main__":
     unittest.main()

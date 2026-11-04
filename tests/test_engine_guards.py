@@ -126,11 +126,11 @@ class RiskForms(unittest.TestCase):
     """Each form a number or a risk word can take still reads as high on the code check alone."""
 
     def test_still_high(self):
-        for text in ("Say ௰ for the pair.",            # a number sign with no digit value
+        for text in ("Say ௰ EGP for the pair.",        # a number sign with no digit value, as an amount
                      "Say ፻ for both.",
-                     "قول إن التَّوْصِيل سريع.",         # short vowels over a listed word
-                     "Tell them the ｐｒｉｃｅ first.",  # wide letters
-                     "Give them a ﬁve off.",             # a joined fi
+                     "قول إن التوصيل بُكْرَة.",          # short vowels over a listed word
+                     "Tell them the ｄｉｓｃｏｕｎｔ first.",  # wide letters
+                     "Give them ﬁve pounds off.",        # a joined fi
                      "Say it comes on  time."):          # two spaces inside a listed phrase
             with self.subTest(text=text):
                 self.assertEqual(risk.classify(text, PLUG.risk, always_low)[0], risk.HIGH)

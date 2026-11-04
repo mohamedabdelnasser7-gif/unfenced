@@ -155,7 +155,8 @@ class Examiner(unittest.TestCase):
     def setUp(self):
         self.runs = []
 
-    def fake_run(self, plug, model, *, kept=None, lesson=None, stop_at_first=False, sits=None, safety=None):
+    def fake_run(self, plug, model, *, kept=None, lesson=None, stop_at_first=False, sits=None, safety=None,
+                 empty_raises=False):
         self.runs.append({"lesson": lesson, "stop": stop_at_first, "sits": None if sits is None else len(sits)})
         bad = lambda n, check: Row(n, "abcd"[n - 1], "guard", False, check, "why", ((check, "why"),))  # noqa: E731
         good = lambda n: Row(n, "abcd"[n - 1], "guard", True)  # noqa: E731
@@ -185,7 +186,9 @@ class Examiner(unittest.TestCase):
         kept.ids.append(7)  # a lesson kept since: the run without is made again
         ex("Fix both.", ("asking",))
         self.assertEqual([(x["lesson"] is None, x["stop"], x["sits"]) for x in self.runs],
-                         [(True, False, 4), (False, False, 4), (False, False, 4), (True, False, 4), (False, False, 4)])
+                         [(True, False, 4), (False, False, 4), (False, False, 4),
+                          (False, False, 1), (False, False, 1), (True, False, 1), (True, False, 1),  # the recheck of 2
+                          (True, False, 4), (False, False, 4)])
         self.assertEqual(ex._kept_ids(), (1, 3, 7))
         e1, e2 = engine_exam.effect(r1.pairs), engine_exam.effect(r2.pairs)
         self.assertEqual((r1.passed, e1["fixed"], e1["broke"], r1.calls), (True, 2, 0, 6 + 4))

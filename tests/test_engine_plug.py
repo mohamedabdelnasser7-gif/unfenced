@@ -70,10 +70,14 @@ class SalesPlug(unittest.TestCase):
         for t in PLUG.risk.tools:
             self.assertIn(t, TOOLS)
 
-    def test_risk_list_has_the_four_approved_groups(self):
-        groups = {g for g, _ in PLUG.risk.words}
-        self.assertEqual(groups, {"number", "promise", "policy", "personal_data"})
+    def test_risk_list_has_the_six_narrow_groups(self):
+        """Engine fix A (2026-11-03): amounts, discounts, promises, payment, policy changes and data beyond
+        the order; a bare number, the order details and stock talk are no longer on it."""
+        groups = {g for g, _ in PLUG.risk.words} | {g for g, _ in PLUG.risk.patterns}
+        self.assertEqual(groups, {"amount", "discount", "promise", "payment", "policy", "personal_data"})
+        self.assertNotIn("number", {g for g, _ in PLUG.risk.words})
         self.assertIn("tone", PLUG.risk.low_about)
+        self.assertIn("order details", PLUG.risk.low_about)
 
     def test_the_log_refuses_an_outcome_the_plug_did_not_declare(self):
         r = Results(Db(":memory:"))

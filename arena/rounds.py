@@ -297,7 +297,7 @@ def full_examiner(plug, kept, model):
     scoped exam takes once more before hand_live writes it to the live database, so nothing reaches
     real customers on the scoped exam alone (DECISIONS item 75: the scoped exam is for the Arena)."""
     from reflection import exam as exam_mod_sales
-    return exam_mod_sales.Examiner(plug, kept=kept, model=model, count=True)
+    return exam_mod_sales.Examiner(plug, kept=kept, model=model, count=True, cap=FULL_CAP)  # the reruns stay inside it
 
 
 class Between:

@@ -22,7 +22,7 @@ from reflection import pages
 ROOT = Path(__file__).resolve().parent.parent
 NOW = 1_793_000_000.0
 LOW = "When someone asks for a photo, send the product link first."
-HIGH = "When someone asks about the price, send the total with delivery first."
+HIGH = "When someone asks about the price, say the total is 1450 EGP with delivery."
 
 
 def low(text, high_about, low_about):

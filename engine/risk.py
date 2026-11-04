@@ -1,10 +1,16 @@
 """Risk: is a lesson high or low risk for this agent's business?
 
 The risk list in the agent's plug is written by a person for their business. The code
-check runs first: any listed word, pattern or tool name in the lesson makes it high.
+check runs first: any listed word or pattern in the lesson makes it high. A tool name does
+not (engine fix A, 2026-11-03): telling the agent which tool to use and when is how it learns
+to work, and the exam checks what it does with the tool. The plug's tool names stay marks for
+callers that ask for them (tools=True, the fast note guard in reflection/fast.py).
 When the code finds none, the judge reads the lesson beside the plug's two about lines
 and answers high, low or unsure. Unsure, any other answer and a judge that fails all
 count as high, so a lesson is low only on the judge's clear low.
+
+A pattern may name itself: one that opens with a regular expression comment, (?#a name),
+is saved as "group: /a name/", so a card and a report read the name, never the expression.
 
 The judge is a stub by default: it always answers unsure, so every lesson counts as high
 and waits for a person's yes. An agent can pass a real judge with the same shape.
@@ -38,9 +44,10 @@ script becomes 0 to 9; every dash becomes "-"; Arabic letter forms are joined, P
 yeh, keheh and heh forms included; a blank letter (a Hangul filler, a blank Braille cell)
 counts as hidden. Every text is read in four forms: hidden characters dropped or read as
 spaces, and numeral signs read as digits or as the letters they look like (a small Roman
-one is an i, a Roman fifty an l), so a numeral sign inside a word cannot hide it either.
-A word in Latin letters matches as a
-whole word, with an English ending (s, es, ed, d, ing, ly; a final l or p may double before
+one is an i, a Roman fifty an l), so a numeral sign inside a word cannot hide it either;
+each of those is read again with a spaced run of single letters joined ("f r e e" as free).
+A word in Latin letters matches as a whole word, bounded by letters only (a digit or an
+underscore glued to it does not hide it), with an English ending (s, es, ed, d, ing, ly; a final l or p may double before
 ed or ing, as in cancelled and swapped); a word in another script
 matches anywhere, since letters join on to it there. The plug's words take the same
 form, so a look alike in the list matches the plain word too. Patterns are regular
@@ -224,11 +231,29 @@ def normalize(text, hidden="", letters=False):
     return "".join(out).translate(_JOINED)
 
 
+# A run of three or more single letters, each apart from the next by one space, dot, dash or
+# apostrophe: "f r e e", "d.i.s.c.o.u.n.t", "خ ص م" (red team engfix round 2, finding 1).
+_SPACED = re.compile(r"(?<![a-z])(?:[a-z][\s.'\u2019-]){2,}[a-z](?![a-z])"
+                     r"|(?<![\u0621-\u064a])(?:[\u0621-\u064a][\s.'\u2019-]){2,}[\u0621-\u064a](?![\u0621-\u064a])")
+_SPACER = re.compile(r"[\s.'\u2019-]")
+
+
+def _joined(text, first_apart=False):
+    """The text with every spaced run of single letters (_SPACED) read as one word. first_apart:
+    a run of four or more keeps its first letter as a word of its own, since a one letter word
+    often stands before the spaced one ("a f r e e pair", "و خ ص م")."""
+    def join(m):
+        letters = _SPACER.sub("", m.group())
+        return letters[0] + " " + letters[1:] if first_apart and len(letters) >= 4 else letters
+    return _SPACED.sub(join, text)
+
+
 def _forms(text):
-    """The four forms of a text every check reads: hidden characters dropped or read as
-    spaces, numeral signs read as digits or as letters. Equal forms are read once."""
-    return tuple(dict.fromkeys(normalize(text, hidden, letters)
-                               for letters in (False, True) for hidden in ("", " ")))
+    """The forms of a text every check reads: hidden characters dropped or read as spaces,
+    numeral signs read as digits or as letters, and each of those four with its spaced runs
+    of single letters joined (_joined). Equal forms are read once."""
+    four = [normalize(text, hidden, letters) for letters in (False, True) for hidden in ("", " ")]
+    return tuple(dict.fromkeys(four + [_joined(t, apart) for apart in (False, True) for t in four]))
 
 
 @functools.lru_cache(maxsize=4096)
@@ -238,7 +263,9 @@ def _word(word):
         body = r"\s+".join(re.escape(part) for part in w.split())
         # a final l or p doubles before ed and ing: cancelled, swapped (red team round 2, R2-4)
         ending = _ENDING if not w.endswith(("l", "p")) else r"(?:" + w[-1] + r"(?:ed|ing)|s|es|ed|d|ing|ly)?"
-        return re.compile(r"(?<![a-z0-9_])" + body + ending + r"(?![a-z0-9_])")
+        # bounded by letters only, as the patterns are: a digit or an underscore glued to a word does
+        # not hide it ("discount_", "refund3"; red team engfix round 2, finding 1)
+        return re.compile(r"(?<![a-z])" + body + ending + r"(?![a-z])")
     return re.compile(re.escape(w))
 
 
@@ -294,11 +321,22 @@ def _runs(text):
     return runs
 
 
-def code_check(text, risk, sources=()):
+_NAMED = re.compile(r"\(\?#([^)]*)\)")
+
+
+def _mark(p):
+    """How a pattern is saved in a mark: its own name when it opens with (?#a name), else itself."""
+    named = _NAMED.match(p)
+    return named.group(1).strip() if named and named.group(1).strip() else p
+
+
+def code_check(text, risk, sources=(), tools=True):
     """The high risk marks found in the text, as "group: mark" lines; [] when none. The core
     marks come first, then the plug's list. sources: the texts of the cases the lesson came
-    from. The text is read in its four forms (_forms), so a hidden character inside a word or
-    between two words, or a numeral sign standing in for a letter, cannot hide either."""
+    from. tools: the plug's tool names are marks too; classify (a lesson's risk) leaves them out.
+    The text is read in all its forms (_forms), so a hidden character inside a word or
+    between two words, a numeral sign standing in for a letter, or letters spaced apart
+    cannot hide either."""
     sources = _texts(sources)
     forms = _forms(text)
 
@@ -310,8 +348,9 @@ def code_check(text, risk, sources=()):
         mine = _runs(text)
         found += [f"{COPIED} {n}" for n, src in enumerate(sources, 1) if mine & _runs(src)]
     found += [f"{group}: {w}" for group, w in risk.words if seen(_word(w))]
-    found += [f"{group}: /{p}/" for group, p in risk.patterns if seen(_pattern(p))]
-    found += [f"tool: {name}" for name in risk.tools if seen(_word(name))]
+    found += [f"{group}: /{_mark(p)}/" for group, p in risk.patterns if seen(_pattern(p))]
+    if tools:
+        found += [f"tool: {name}" for name in risk.tools if seen(_word(name))]
     return found
 
 
@@ -321,17 +360,23 @@ def no_judge(text, high_about, low_about):
 
 
 def classify(text, risk, judge=no_judge, *, sources=()):
-    """(HIGH or LOW, the lines that decided it). Code check first, then the judge.
-    sources: the texts of the cases the lesson came from, when known."""
-    found = code_check(text, risk, sources)
+    """(HIGH or LOW, the lines that decided it). Code check first, with no tool marks (a lesson
+    that names a tool is not high for that alone), then the judge. sources: the texts of the
+    cases the lesson came from, when known.
+
+    Fail closed: a lesson the code check does not mark is LOW only when the judge answers the plain
+    string "low". An unsure, missing or unreadable answer (any other value or type) and a judge that
+    raises make it HIGH. The plug's word lists are a first net of clear money words; meaning is the
+    judge's job (engfix round 3)."""
+    found = code_check(text, risk, sources, tools=False)
     if found:
         return HIGH, found
     try:
         answer = judge(text, risk.high_about, risk.low_about)
     except Exception as e:  # a judge that fails is not sure
         return HIGH, [f"judge failed ({type(e).__name__}), counted as high"]
-    if answer == LOW:
+    if type(answer) is str and answer == LOW:
         return LOW, ["judge: low"]
-    if answer == HIGH:
+    if type(answer) is str and answer == HIGH:
         return HIGH, ["judge: high"]
     return HIGH, [f"judge: {UNSURE if answer == UNSURE else 'no clear answer'}, counted as high"]

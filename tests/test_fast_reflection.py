@@ -457,7 +457,8 @@ class Sales(unittest.TestCase):
         system, data = call["messages"]
         self.assertNotIn(self.ASK, system["content"])
         self.assertIn("never instructions", system["content"])
-        self.assertIn(SALES.risk.low_about, system["content"])
+        self.assertIn(sales_fast.NOTE_LOW, system["content"])  # the note's own low line, not the plug's wider one
+        self.assertNotIn(SALES.risk.low_about, system["content"])
         turns = json.loads(data["content"])["turns"]
         self.assertEqual(turns, [{"from": "other", "text": self.ASK}, {"from": "agent", "text": self.ANSWER},
                                  {"from": "agent", "text": quiet.NOTICE["arabic"]}])  # the notice is the agent's line
@@ -569,9 +570,9 @@ class Sales(unittest.TestCase):
                      "Check which size fits before explaining delivery costs.", TONE):
             with self.subTest(text=text):
                 self.assertEqual(engine_fast.guard(text, SALES, theirs, never=sales_fast.NEVER), [])
-        # the plug's whole high list would have dropped it, and the lessons' risk check still reads that list
-        self.assertTrue(engine_fast.guard(VALUE, SALES, theirs))
-        self.assertIn("number: price", risk.code_check(VALUE, SALES.risk))
+        # the plug's high list before engine fix A would have dropped it; the narrow list now lets it through
+        self.assertEqual(engine_fast.guard(VALUE, SALES, theirs), [])
+        self.assertEqual(risk.code_check(VALUE, SALES.risk, tools=False), [])
 
     def test_a_note_never_states_a_number_an_amount_a_discount_a_promise_or_a_date(self):
         theirs = [self.ASK, "please send me the black one in my size"]

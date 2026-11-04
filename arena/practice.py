@@ -100,6 +100,13 @@ kinds always follow the shape's mix (easy, unsure and hard as test_set draws the
 trained, never trusted. A test-set.json or a matches file that is there but
 cannot be read, a line of it that cannot be read, or a matches file deleted while test-set.json is
 there stops the run (fail closed).
+
+The shared pool across owners (reflection/shared.py, DECISIONS item 83). An agent in an agents/
+folder practises against the lost patterns of its kind seen at 2 or more owners too, as the Sales
+Arena does (arena/grow.py decks): the shared folder beside the database (shared_root), read as
+practice_cards gives them, each a fresh practice customer holding the pattern alone. They join the
+training draw only, after the gate cards are split off, so they never take the gate; each weighs as
+much as an average training card, and the report counts them (shared_cards).
 """
 import argparse
 import hashlib
@@ -372,12 +379,14 @@ def read_gate(text):
 class Practice(run.Arena):
     """arena/run.py Arena with a new agent's match and verdict, and a Morning page item every run."""
 
-    def __init__(self, agent, cards, *, judge_model, made_up, behaviour_from=0, learn=None, once=False, **kw):
+    def __init__(self, agent, cards, *, judge_model, made_up, behaviour_from=0, learn=None, once=False, shared=(),
+                 **kw):
         self.agent, self.who, self.made_up, self.lost = agent.name, agent, bool(made_up), []
         self.once, self.bags = bool(once), {}  # once: each card once a round (a fixed test set)
         self.behaviour_from = behaviour_from  # the owner's real cards that lent the customers their behaviour
         self.unread = 0  # unjudged matches in a row (UNREAD_IN_A_ROW stops the run)
         super().__init__(cards, learn=learn, **kw)  # learn(m, judged, mid): a lost training match becomes a case
+        self.shared_cards = self._train_on(shared)
         self.judge_model = self.calls.model(judge_model)
         self.prompt_sha, self.prompt_file = match_mod.prompt_sha(prompt_for(agent.card)), None
         self.level = self.trust.get("level")  # the risk level the run plays to (arena/levels.py), None for --gate
@@ -390,6 +399,18 @@ class Practice(run.Arena):
             return []
         from engine.lessons import MAX_PICK
         return self.lessons.live(self.who.stage.name)[:MAX_PICK]
+
+    def _train_on(self, shared):
+        """The shared pool's practice customers (see the module lines) into the training draw only,
+        each at the average training card's weight; the gate cards are split already. Returns how many."""
+        shared = [dict(c) for c in shared or () if str(c.get("id", "")).startswith(run.GROWN)]
+        if not shared or not self.train:
+            return 0
+        weight = sum(max(0.0, float(c.get("arena_weight", 1.0))) for c in self.train) / len(self.train) or 1.0
+        for c in shared:
+            c["arena_weight"] = weight
+        self.train = self.train + shared
+        return len(shared)
 
     def play(self, card, match_id, *, opening=None, lessons=None, replay=None, training=False):
         try:
@@ -492,7 +513,7 @@ class Practice(run.Arena):
         self.played_rounds = rounds
         rep = super()._report(rounds, stopped)
         rep.update(made_up=self.made_up, behaviour_from=self.behaviour_from, tools=list(self.who.tools),
-                   tools_left_out=list(self.who.missing))
+                   tools_left_out=list(self.who.missing), shared_cards=self.shared_cards)
         if "stuck" not in rep and "item" not in rep:
             rep["item"] = self.rounds_item(rounds, stopped)
         return rep
@@ -540,6 +561,9 @@ def text(rep):
     else:
         who = "made up from the agent's card, no real chats yet" if rep["made_up"] else "real cards"
     lines.append("  practice customers: " + who)
+    if rep.get("shared_cards"):
+        lines.append(f"  {rep['shared_cards']} more practice customers from the shared pool of this kind, patterns "
+                     "seen at 2 or more owners, training only")
     lines.append("  tools: " + (", ".join(rep["tools"]) or "none")
                  + (f"; named in the plug but not built: {', '.join(rep['tools_left_out'])}" if rep["tools_left_out"] else ""))
     return "\n".join(lines)
@@ -754,6 +778,21 @@ MAX_TOP_UPS = 5  # writes of more customers when too few never trained (fixed_te
 NOT_RUN = (run.Refused, turn_mod.Refused, run.CapReached, ModelError, OSError, ValueError, RecursionError)
 
 
+def shared_cards(folder, plug):
+    """The shared pool's practice customers for the agent in folder (see the module lines): read from
+    the shared folder beside the database when the folder sits in an agents/ folder, else none."""
+    from arena import grow
+    from reflection import shared as shared_mod
+    folder = Path(folder)
+    if folder.parent.name != "agents":
+        return []
+    try:
+        but = shared_mod.owner_id(folder) or None
+    except (shared_mod.Refused, OSError):  # an owner id that cannot be read: no shared card, not its own
+        return []
+    return shared_mod.practice_cards(grow.kind_of(plug), folder.parent.parent / shared_mod.SHARED_DIR, but=but)
+
+
 def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=None, rounds=None, cards=None,
              trust=None, cap=None, seed=0, quick=False, learn=None, gate=None, level=None, study=None, db=None,
              live_path=None, customers=None, gate_size=None):
@@ -865,7 +904,8 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
                      held_out=held, once=held is not None,
                      agent_model=agent_model, customer_model=customer_model, calls=calls, trust=bar,
                      matches=matches, rounds=rounds, seed=seed, state=folder, reports=reports, learn=learn,
-                     between=between, lessons=pool, before_match=None if pool is None else pool.refresh)
+                     between=between, lessons=pool, before_match=None if pool is None else pool.refresh,
+                     shared=shared_cards(folder, agent.plug))
     arena.quick = bool(quick)  # its item says so, so a quick practice never unlocks Connect (Morning.gate)
     return arena.run()
 

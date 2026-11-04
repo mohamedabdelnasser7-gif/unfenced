@@ -24,7 +24,7 @@ from sim import three_days
 
 ROOT = Path(__file__).resolve().parent.parent
 NOW = 1_793_000_000.0
-HIGH = "When someone asks about the price, send the total with delivery first."
+HIGH = "When someone asks about the price, say the total is 1450 EGP with delivery."
 LOW = "Ask which colour they like before you send the summary."
 SIZE = "Ask which size they wear before naming ours."
 

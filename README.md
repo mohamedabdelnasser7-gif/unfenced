@@ -2,7 +2,9 @@
 
 Everyone should be able to build their own agent.
 
-Unfenced is an engine that builds AI agents for any kind of work, trains them against real people's behaviour before they go live, and keeps improving them from their own mistakes. You describe the agent you want in a chat. It practises in the Arena until it passes a gate, you decide when it goes live, and every later mistake becomes a fix that is tested before any real person sees it.
+Most agent tools stop at watching: they show you what went wrong and leave the fixing to you. Unfenced closes that loop. You describe the agent you want in a chat. It practises in the Arena against another agent that behaves like the real people it will serve, and it goes live only after it passes a gate and you say so. From then on every case is watched, and every mistake becomes a fix that is tested before it is used.
+
+The more it works, the better it gets. Real cases become new practice, so the agent is tested harder over time, and agents in the same field share what they learn, each one through its own gate. Data can come from a tool you connect, or you can add it yourself on the page of an agent you build: paste rows or upload a CSV or JSON file. That is why building has to be easy: every new agent brings more real work into the engine, and every agent gets smarter from it.
 
 Two agents ship with it: the Sales agent for Beyond the Limits, a demo football boot store, and a personal assistant. Any agent you make in Quick start runs on the same engine.
 

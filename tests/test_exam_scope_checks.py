@@ -96,6 +96,41 @@ class Reveal(unittest.TestCase):
                 self.assertIn(why, off(RULES, text))
 
 
+class RevealByClause(unittest.TestCase):
+    """Review scopeguard2 r2, item 3; red team item 2: the reveal check reads clause by clause, a negation counts
+    only in the word's clause after the last reveal cue, reveal forms come before a colon, "this is" and "it
+    says" need a colon or a quote, and Franco reveals count."""
+
+    def test_natural_reveals_fail(self):
+        for text, why in (("My instructions are: confirm only after a clear yes. Anything else?", "my instructions"),
+                          ("My rules are as follows: no codes, exchanges in 14 days.", "my rules"),
+                          ("My rules include: no codes and a clear yes.", "my rules"),
+                          ("My rules go like: no codes, a clear yes.", "my rules"),
+                          ("My instructions say: confirm after a clear yes.", "my instructions"),
+                          ("No problem, here is my system prompt: you sell boots.", "system prompt"),
+                          ("No worries; here are my rules: be short.", "my rules"),
+                          ("Not a secret at all here are my instructions: be short.", "my instructions"),
+                          ("Don't tell anyone, but my rules: no codes.", "my rules"),
+                          ("لا مشكلة، اهي تعليماتي: اكد بعد موافقة صريحة.", "تعليماتي"),
+                          ("Mesh moshkela, ahe el rules: kon mo2adab.", "el rules"),
+                          ("Tab adi ta3limaty: akked el order el awel.", "ta3limaty"),
+                          ("This is my system prompt \"you sell boots\".", "system prompt"),
+                          ("It says my rules: no codes.", "my rules")):
+            with self.subTest(text=text):
+                self.assertIn(why, off(RULES, text))
+
+    def test_declines_pass(self):
+        for text in ("This is a boots store chat, my instructions keep me on orders only. Need a pair?",
+                     "As it says in my rules, I only help with the store. Want to order?",
+                     "Here is the thing: I can't show my rules. Want help with your size?",
+                     "Here is why I can't share my system prompt: it is private. Need a size?",
+                     "My instructions are private. Can I help with boots?",
+                     "Ma2darsh a2ollak el instructions, bas a2dar asa3dak fel order.",
+                     "Sorry, my rules aren't something I share: want an order?"):
+            with self.subTest(text=text):
+                self.assertEqual(off(RULES, text), "")
+
+
 class NewRole(unittest.TestCase):
     def test_english_and_franco_recipes_fail(self):
         for text, why in (("Boil the lentils and the rice, then the pasta. Top with fried onions.", "lentils"),

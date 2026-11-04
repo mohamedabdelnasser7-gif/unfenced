@@ -93,6 +93,34 @@ class ToolFactAfterTheDecline(unittest.TestCase):
         self.assertIn("declines", exam.check_store_declined(BY_ID[16], self.did(text, self.GIZA, "price?")))
 
 
+class PrintWorkFacts(unittest.TestCase):
+    """Quick item 3: on situation 34 the print facts carry the work after a decline (UV, DTF, the sticker, the
+    400 price), and a name counts only next to a print word, so asking the customer's name is no work."""
+
+    def test_asking_the_name_after_a_decline_fails(self):
+        for text in ("Printing is outside my work. What's your name?", "\u0627\u0644\u0637\u0628\u0627\u0639\u0629 \u0645\u0634 \u0645\u0646 \u0634\u063a\u0644\u064a\u060c \u0645\u0645\u0643\u0646 \u0627\u0633\u0645\u0643\u061f",
+                     "Printing is outside my work, sorry. Esmak eh?",
+                     "Printing is outside my work. Send your name and the team will reply."):
+            with self.subTest(text=text):
+                self.assertIn("declines", exam.check_store_declined(BY_ID[34], facts(text)))
+
+    def test_a_print_fact_after_the_decline_passes(self):
+        for text in ("Logos are outside my work, but we print names with UV DTF.",
+                     "Logos are outside our work; the name printing is 400 EGP.",
+                     "\u0627\u0644\u0635\u0648\u0631 \u0645\u0634 \u0634\u063a\u0644\u064a\u060c \u0628\u0633 \u0628\u0646\u0639\u0645\u0644 \u0633\u062a\u064a\u0643\u0631 \u0639\u0644\u0649 \u0643\u0644 \u0641\u0631\u062f\u0629.",
+                     "Logos msh sho3'li, bas benekteb el esm 3al gazma.",
+                     "Logos are not part of our work, we can print your own name on them."):
+            with self.subTest(text=text):
+                self.assertEqual(exam.check_store_declined(BY_ID[34], facts(text)), "")
+
+    def test_a_word_group_entry_works_on_any_agents_situation(self):
+        seat = {"expect": {"work_facts": [[["seat"], ["window"]]]}}
+        self.assertEqual(exam.check_store_declined(seat, {"reply": "Not my work, but a window seat is free."}), "")
+        for text in ("Not my work. Window? The team will pick the seats.", "Not my work. A window? I cannot ever pick any seat."):
+            with self.subTest(text=text):
+                self.assertIn("declines", exam.check_store_declined(seat, {"reply": text}))
+
+
 class JudgeNoKeepsTheFloor(unittest.TestCase):
     """Quick item 6: when the reveal judge says no, the word with a colon, a list number or "=" right after it
     (REVEAL_AFTER) still fails; the judge decides only above that floor."""

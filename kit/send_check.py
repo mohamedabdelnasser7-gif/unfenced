@@ -8,7 +8,8 @@ Rules (from the store rules, the 27 Oct morning review and Mohamed's calls on 28
 2. Banned words: الجوز / el goz, مرتاح, sympathy lines.
 3. Style: no em or en dashes, no hyphen with spaces used as a dash, no emoji, no markdown **.
 4. Every number that reads as an amount must exist in the store or delivery data, or in
-   this turn's store results. A number reads as an amount when it sits next to a currency
+   this turn's store results, or be a total of amounts the tools gave in this chat (2026-11-04: up to 4
+   different ones, each up to 3 times, so a tier plus its printing passes; is_total). A number reads as an amount when it sits next to a currency
    word or sign, when it comes after a price word (سعر, بـ, price, costs, for, is and a few
    more) or right after a city or governorate (Cairo 70), or when it has 3 or more digits,
    all of them counted (1.500), with or without any word next to it (a bare 500, or 500
@@ -1379,6 +1380,48 @@ def amounts_in(obj):
     return found
 
 
+# A total the reply works out from the tools' own numbers (Arena run 20261104T143545, cause 3): a tier plus
+# its printing (7500 + 400), or 3 of one item plus the delivery fee (3 x 11000 + 60). Only amounts a tool
+# gave in this chat count as parts, never the whole catalogue, and only the latest MAX_SUM_PARTS of them, so
+# a made-up total still fails.
+MAX_SUM_PARTS = 12  # the latest distinct amounts of the chat a total may add up
+SUM_MOST_KINDS = 4  # up to 4 different amounts in one total
+SUM_MOST_EACH = 3  # each taken up to 3 times
+
+
+def sum_parts(amounts):
+    """The amounts a total may add up: the latest MAX_SUM_PARTS distinct positive amounts of amounts (in
+    the order the tools gave them, latest last), largest first."""
+    seen = []
+    for a in reversed(list(amounts or ())):
+        n = amount(a)
+        if n is not None and n > 0 and n not in seen:
+            seen.append(n)
+        if len(seen) >= MAX_SUM_PARTS:
+            break
+    return sorted(seen, reverse=True)
+
+
+def is_total(n, parts):
+    """True when n is a sum of the amounts in parts (sum_parts): up to SUM_MOST_KINDS different ones, each up to
+    SUM_MOST_EACH times, at least two in all, so 7900 from 7500 and 400, and 33060 from 11000 three times and
+    60, pass; one amount once is a price, not a total."""
+    if n is None or n <= 0 or not parts:
+        return False
+
+    def go(i, left, kinds, units):
+        if left == 0:
+            return units >= 2
+        if i == len(parts) or kinds == SUM_MOST_KINDS or parts[i] * SUM_MOST_EACH * (SUM_MOST_KINDS - kinds) < left:
+            return False  # parts run largest first, so nothing after i can reach left either
+        for q in range(SUM_MOST_EACH, 0, -1):
+            if parts[i] * q <= left and go(i + 1, left - parts[i] * q, kinds + 1, units + q):
+                return True
+        return go(i + 1, left, kinds, units)
+
+    return go(0, n, 0, 0)
+
+
 def style_problems(text):
     """Feedback for the house style: banned words, dashes, spaced hyphens, emoji, markdown bold."""
     return [fb for _, fb in named_style(text)]
@@ -1404,7 +1447,7 @@ def named_style(text):
 
 
 def check(reply, customer_text="", amounts=(), vocabulary=frozenset(), sizes=(), orders=(), links=(), names=(),
-          priced_only=False, stock=True):
+          priced_only=False, stock=True, totals=()):
     """(passed, feedback) for one reply.
 
     amounts: every price and fee in the store and delivery data, plus amounts from this turn's store tools.
@@ -1416,16 +1459,18 @@ def check(reply, customer_text="", amounts=(), vocabulary=frozenset(), sizes=(),
     names: the store's product titles, so a model number ("Phantom 6") is never read as an amount.
     priced_only: only numbers that read as prices or fees are held to amounts (prices_in), for any
     agent but Sales. stock: False leaves out the stock count rule, for an agent with no store.
+    totals: every amount a tool gave in this chat, in order (sales/loop.py tool_amounts), so a total that adds
+    up some of them passes (is_total); a number no sum of them makes still fails.
     """
     problems = named_problems(reply, customer_text, amounts, vocabulary, sizes, orders, links, names,
-                              priced_only=priced_only, stock=stock)
+                              priced_only=priced_only, stock=stock, totals=totals)
     if problems:
         return False, " ".join(dict.fromkeys(fb for _, fb in problems))
     return True, ""
 
 
 def named_problems(reply, customer_text="", amounts=(), vocabulary=frozenset(), sizes=(), orders=(), links=(),
-                   names=(), priced_only=False, stock=True):
+                   names=(), priced_only=False, stock=True, totals=()):
     """Every rule the reply breaks, as (check name, feedback) pairs, in the order check() gives
     them; [] when it passes. The names: empty, links, script, banned, dashes, emoji, markdown, sympathy,
     amounts, digits and stock. check() is this list joined, so the exam (reflection/exam.py) reads
@@ -1446,8 +1491,9 @@ def named_problems(reply, customer_text="", amounts=(), vocabulary=frozenset(), 
             problems.append(("sympathy", f'Remove the sympathy line ("{line}"). {NO_SYMPATHY}'))
             break
     allowed = {n for n in (amount(a) for a in amounts) if n is not None}
+    parts = sum_parts(totals)
     wrong = sorted({p for p in prices_in(reply, sizes, orders, names, priced_only, said_orders(customer_text))
-                    if p not in allowed})
+                    if p not in allowed and not is_total(p, parts)})
     if wrong:
         nums = ", ".join(s if len(s) <= MAX_INT_DIGITS else s[:MAX_INT_DIGITS] + "..." for s in map(str, wrong))
         problems.append(("amounts", f"These amounts are not in the store or delivery data: {nums}. {FROM_TOOLS} "

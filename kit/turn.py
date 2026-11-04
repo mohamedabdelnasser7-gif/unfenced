@@ -382,7 +382,7 @@ def _check(agent, reply, customer_text, amounts, vocab, sizes, names, chats, cha
         return (not problems), " ".join(dict.fromkeys(problems))
     return send_check.check(reply, customer_text, amounts, vocab, sizes, orders=loop.order_names(chats, chat_id),
                             links=loop.store_links(chats, chat_id), names=names, priced_only=agent.priced_only,
-                            stock=agent.stock)
+                            stock=agent.stock, totals=loop.tool_amounts(chats, chat_id))
 
 
 PRACTICE_CHANNEL = "practice"

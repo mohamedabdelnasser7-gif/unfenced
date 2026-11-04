@@ -160,8 +160,9 @@ class Facts(unittest.TestCase):
             self.assertEqual(self.names("The Phantom 6 Elite in size 43 is available."), [])
             self.assertEqual(self.names("The Phantom 6 Pro in size 45 is sold out."), ["stock"])
             self.assertEqual(self.names("The Phantom 6 Elite in size 45 is sold out."), [])
-        # The demo store does not track stock: no level, so no stock claim fails either way.
-        self.assertEqual(self.names("The Phantom 6 Elite in size 45 is available."), [])
+        # The demo store does not track stock: no level, so saying it is in stock fails as no stock data
+        # (Arena run 20261104T143545, cause 7), and saying it is out fails nothing.
+        self.assertEqual(self.names("The Phantom 6 Elite in size 45 is available."), ["stock"])
         self.assertEqual(self.names("The Phantom 6 Elite in size 45 is sold out."), [])
 
     def test_size(self):

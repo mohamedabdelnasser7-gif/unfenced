@@ -58,11 +58,14 @@ class RunNotes:
         self.plug, self.writer, self.never, self.known, self.heading = plug, writer, never, known, heading
         self.held = []  # {"text", "answer", "match"} a lost match, oldest first, at most MAX_NOTES
         self.log = []   # one row a lost match: {"match", "note", "answer", "why"}, and a row each time a note is dropped
+        self._stopped = None  # the text of the note the guard stopped last (_write), for its row
 
     def after_loss(self, match, judged, match_id):
         """Write the note for one lost practice match and hold it, with the agent's losing reply, when
         the guard lets them through. Returns its row: {"match", "note": the text or None, "answer": the
-        losing reply held or None, "why": why there is no note or None}."""
+        losing reply held or None, "why": why there is no note or None}; a note the guard stopped keeps its
+        text under "stopped_note" so it can be judged later (Arena run 20261104T143545, cause 8). The run
+        summary reads only note, answer and why, so its counts stay as they were."""
         turns = turns_of(match)
         view = {"ended_with": (judged or {}).get("why") or LOST, "good_result": self.plug.decides.good,
                 "steps": [], "turns": turns}
@@ -70,6 +73,8 @@ class RunNotes:
         text, why = self._write(view, theirs)
         answer = self._answer(turns, theirs)
         row = {"match": match_id, "note": text, "answer": answer, "why": why}
+        if self._stopped is not None:
+            row["stopped_note"] = self._stopped
         self.log.append(row)
         if text is not None or answer is not None:
             self.held.append({"text": text, "answer": answer, "match": match_id})
@@ -91,7 +96,9 @@ class RunNotes:
         return said[-1]
 
     def _write(self, view, theirs):
-        """(the note, None) or (None, why there is none), as engine FastNotes writes one."""
+        """(the note, None) or (None, why there is none), as engine FastNotes writes one. A note the guard
+        stops is kept in self._stopped until the next call, for its row (after_loss)."""
+        self._stopped = None
         try:
             raw = self.writer(self.plug, view)
         except PartError as e:
@@ -105,6 +112,7 @@ class RunNotes:
         text = raw.strip()
         found = engine_fast.guard(text, self.plug, theirs, never=self.never, known=self._known())
         if found:
+            self._stopped = text
             return None, "stopped: " + "; ".join(found)
         return text, None
 

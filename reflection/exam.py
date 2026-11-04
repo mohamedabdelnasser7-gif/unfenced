@@ -355,7 +355,8 @@ def _answer(s, lesson, *, model, kept=None):
                 "problems": dict(send_check.named_problems(reply, msg.text, amounts, store.vocabulary(),
                                                            store.size_strings(), orders=orders,
                                                            links=loop.store_links(chats, chat_id),
-                                                           names=store.titles()))}
+                                                           names=store.titles(),
+                                                           totals=loop.tool_amounts(chats, chat_id)))}
     finally:
         db.close()
 

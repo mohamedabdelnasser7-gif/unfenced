@@ -559,8 +559,9 @@ class RunTheArena(unittest.TestCase):
         self.assertEqual(policy, pages.AGENT_CSP)
         self.assertIn(f"script-src 'sha256-{pages._sha(pages.ARENA_SCRIPT)}'", policy)
         self.assertIn("connect-src 'self'", policy)
-        self.assertNotIn("script-src", self.p.csp_for("/agents/sales"))
-        self.assertNotIn("<script>", self.p.get("/agents/sales", ARENA_TAB, "t"))
+        # the Sales agent's page has Run reflection (DECISIONS 92), polled by the same script under the same policy
+        self.assertEqual(self.p.csp_for("/agents/sales"), pages.AGENT_CSP)
+        self.assertIn(f"<script>{pages.ARENA_SCRIPT}</script>", self.p.get("/agents/sales", ARENA_TAB, "t"))
         self.assertNotIn("script-src", self.p.csp_for("/agents/stock_watch/rollback"))
         self.assertIn("'X-Poll':'1'", pages.ARENA_SCRIPT)
 

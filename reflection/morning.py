@@ -540,6 +540,26 @@ RECORD_NOTE = ("The last run did not start: {file} in the agent's folder is torn
 NEW_TEST_SET = ("A new test set is ready: the old files are kept beside it, every customer before counts as trained, "
                 "and its next Arena run writes new customers for the test set. Nothing was started.")
 ARENA_STARTED = "The Arena is running. Its practice matches show here as it plays; it takes a few minutes."
+# Run reflection on an agent's page (run_reflection, reflection/reflect_now.py; DECISIONS 92 and 93). The
+# button, the line under it, the running line, the no lost chats line and the no key line are the owner's words.
+REFLECT_BUTTON = "Run reflection"
+REFLECT_SAID = ("This is the learning step. The agent reads the chats it lost, writes one lesson from them, and tests "
+                "that lesson on a full exam before it can reach a real customer. Uses your model key.")
+REFLECT_STEPS = (("read", "reading lost chats"), ("lesson", "writing a lesson"), ("exam", "the exam"))
+REFLECT_RUNNING = "Reflecting: " + ", then ".join(w for _, w in REFLECT_STEPS)
+NO_LOST = "No lost chats yet. Run the Arena first so the agent has something to learn from."
+NO_KEY = "Reflection needs a model key. Watch a recorded reflection run instead."
+REPLAY = "python3 -I recorded/play.py"  # the recorded replay docs/judges.md names
+REFLECT_NOT_HERE = "Run reflection is for an agent on this page, so nothing was started."
+REFLECT_NO_DB = "Run reflection needs the database folder. Start the page with --db."
+REFLECT_CAP = ("The day's model call cap has no room left, so nothing was started. Run it again tomorrow, "
+               "Cairo time.")
+REFLECT_TWICE = "Reflection is running for this agent already. What it did shows here when it ends."
+REFLECT_ARENA = "The Arena is running for this agent. Run reflection once it ends."
+REFLECT_LOCKED = ("A night of learning is running on this database now, the scheduled night or another agent's. "
+                  "Run reflection once it ends.")
+ARENA_REFLECTING = "Reflection is running for this agent. Run the Arena once it ends."
+REFLECT_STARTED = "Reflection is running. Its steps show here; it takes a few minutes."
 
 
 def _lines(folder):
@@ -662,6 +682,13 @@ class Morning:
         # the study between rounds' models (arena/practice.py study=): None takes arena/run.py
         # reflection_models when the models are real; a test hands a callable giving its fakes
         self.arena_reflection = None
+        # Run reflection (run_reflection), cloned from Run the Arena and kept under its lock, so the two never
+        # run at once on one agent: the agents with a run going and where each is (reflect_now.Steps), what
+        # went wrong with the last one, what the last one did, its models (None: arena/run.py
+        # reflection_models; a test hands a callable giving {"study", "open", "exam"} fakes) and how it starts
+        self._reflecting, self._reflect_note, self._reflected = {}, {}, {}
+        self.reflection_models = None
+        self.reflect_start = lambda work, name: threading.Thread(target=work, name=name, daemon=True).start()
 
     def add_built(self):
         """Wire each agent Quick start built since the page started into the running page, as
@@ -910,6 +937,8 @@ class Morning:
         with self._arena_lock:
             if agent in self._arenas:
                 raise Refused("The Arena is running for this agent already. Its matches show here as it plays.")
+            if agent in self._reflecting:
+                raise Refused(ARENA_REFLECTING)
             self._arenas.add(agent)
             self._arena_note.pop(agent, None)
             self._arena_record.pop(agent, None)
@@ -976,6 +1005,128 @@ class Morning:
                 self._arena_from.pop(agent, None)
             raise
         return ARENA_STARTED
+
+    def reflecting(self, agent):
+        """Where the agent's running Run reflection is (reflect_now READ, LESSON or EXAM), or None."""
+        with self._arena_lock:
+            steps = self._reflecting.get(agent)
+        return None if steps is None else steps.at
+
+    def reflect_note(self, agent):
+        """Why the agent's last Run reflection could not run or finish, or None."""
+        with self._arena_lock:
+            return self._reflect_note.get(agent)
+
+    def reflected(self, agent):
+        """What the agent's last Run reflection did, or None: {file, at, cards: [lesson ids], lost, read,
+        candidates, notes, calls}, from its saved report."""
+        with self._arena_lock:
+            return self._reflected.get(agent)
+
+    def reflect_ready(self, agent):
+        """None when Run reflection can start for the agent as far as the page knows before a press, else
+        the line that says why not: no model key (NO_KEY) or no lost chats (NO_LOST)."""
+        if self.reflection_models is None:
+            try:
+                if night_mod.missing_keys():
+                    return NO_KEY
+            except night_mod.Refused:
+                return NO_KEY
+        from reflection import reflect_now
+        try:
+            lost = reflect_now.lost_chats(self.db, self.plugs[agent])
+        except Exception:  # a database with no log yet: nothing lost
+            lost = 0
+        return None if lost else NO_LOST
+
+    def run_reflection(self, agent, now=None):
+        """Run reflection on an agent's page (reflection/reflect_now.py, DECISIONS 92 and 93): that agent's
+        night now (reflection/night.py night) with the real models on the real database, in a background
+        thread, so the page returns at once and polls its steps. Any agent on the page, the Sales agent or
+        one made here. Refused for an agent not on the page, with no database folder, with no model key,
+        when the day's model call cap has no room, with no lost chats, while a Run the Arena or a Run
+        reflection goes for the agent, and while the night lock is held (the scheduled night or another
+        Run reflection on this database). The lock is held until the run ends, so the scheduled night waits."""
+        from arena import retry as retry_mod, run as run_mod
+        from reflection import reflect_now, scheduler
+        if not isinstance(agent, str) or agent not in self.plugs or agent not in self.lessons:
+            raise Refused(REFLECT_NOT_HERE)
+        if self.db_path is None:
+            raise Refused(REFLECT_NO_DB)
+        if self.reflection_models is None:
+            try:
+                missing = night_mod.missing_keys()
+            except night_mod.Refused:
+                missing = True
+            if missing:
+                raise Refused(f"{NO_KEY} In the repo folder: {REPLAY}")
+        if not retry_mod.has_room(run_mod.state_dir(self.db_path)):
+            raise Refused(REFLECT_CAP)
+        if not reflect_now.lost_chats(self.db, self.plugs[agent], until=now):
+            raise Refused(NO_LOST)
+        folder = self.agent_folder(agent)
+        if folder is not None and (folder.is_symlink() or not folder.is_dir()):
+            raise Refused(REFLECT_NOT_HERE)
+        db_path, steps = self.db_path, reflect_now.Steps()
+        with self._arena_lock:
+            if agent in self._reflecting:
+                raise Refused(REFLECT_TWICE)
+            if agent in self._arenas:
+                raise Refused(REFLECT_ARENA)
+            db = Db(db_path)  # its own connection: the page's answers keep theirs
+            try:
+                lock = scheduler.Scheduler(db, db_path, when=None, holder=f"{reflect_now.PAGE_HOLDER}:{agent}:"
+                                                                          f"{secrets.token_hex(4)}")
+                held = lock._lock(time.time())
+            except Exception:
+                db.close()
+                raise
+            if not held:
+                db.close()
+                raise Refused(REFLECT_LOCKED)
+            self._reflecting[agent] = steps
+            self._reflect_note.pop(agent, None)
+        plug = self.plugs[agent]
+
+        def work():  # the thread's work: never raises, a failure becomes the block's one line
+            note, done = None, None
+            try:
+                models = self.reflection_models() if self.reflection_models is not None else run_mod.reflection_models()
+                calls = run_mod.Calls(run_mod.state_dir(db_path) / run_mod.CALLS_FILE, run_mod.DEFAULT_CAP)
+                rep, path = reflect_now.run(db, db_path, plug, folder=folder, models=models, calls=calls, steps=steps,
+                                            until=now)
+                done = {"file": path.name, "at": rep["window"]["until"], "lost": rep["decided"]["bad"],
+                        "read": rep["read"]["cases"], "candidates": len(rep["candidates"]),
+                        "cards": [c["lesson_id"] for c in rep["cards"] if c.get("lesson_id") is not None],
+                        "notes": list(rep["notes"]), "calls": rep.get("calls", 0)}
+            except Exception as e:
+                note = f"The last reflection could not finish ({' '.join(str(e).split())[:200] or type(e).__name__})."
+            finally:
+                try:
+                    lock._unlock()
+                except Exception:
+                    pass
+                try:
+                    db.close()
+                except Exception:
+                    pass
+            with self._arena_lock:
+                self._reflecting.pop(agent, None)
+                if note:
+                    self._reflect_note[agent] = note
+                if done is not None:
+                    self._reflected[agent] = done
+        try:
+            self.reflect_start(work, f"reflect-{agent}")
+        except Exception:
+            with self._arena_lock:
+                self._reflecting.pop(agent, None)
+            try:
+                lock._unlock()
+            finally:
+                db.close()
+            raise
+        return REFLECT_STARTED
 
     def set_risk_level(self, agent, level, now=None):
         """Keep, lower or raise the risk level of an agent made here (decision 84, arena/levels.py): its

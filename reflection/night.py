@@ -316,32 +316,40 @@ class Counted:
         return result
 
 
-def sales_exam(plug, db=None):
+def sales_exam(plug, db=None, *, model=None):
     """The exam main() gives the night: the Sales agent's examiner on Muse Spark Open, when the plug
     is the Sales agent's and names an exam; None otherwise (another agent's exam has no binding yet).
     db: the agent's database path; the Arena wins the gate reruns are the ones saved next to it.
-    Always the full exam: what it passes can reach real customers (the scoped one is the Arena's)."""
+    Always the full exam: what it passes can reach real customers (the scoped one is the Arena's).
+    model: the exam's and its reveal judge's model (Run reflection hands one taken from the day's call
+    count, reflection/reflect_now.py); None makes a new one for each."""
     if plug.exam is None or plug.agent != SALES.agent:
         return None
     from reflection import exam as exam_mod
     from arena import gate  # the eval gate: the exam, then the Arena rerun of past wins (DECISIONS item 8)
     # count=True: the gate also counts the cases each lesson fixed and broke (DECISIONS item 27)
     # judge_model: the reveal judge of the instructions situation (reflection/exam.py reveal_judge), on the same key
-    return lambda lessons: gate.wrap(exam_mod.Examiner(plug, kept=lessons, model=model_mod.Model(), count=True,
-                                                       judge_model=model_mod.Model()),
+    return lambda lessons: gate.wrap(exam_mod.Examiner(plug, kept=lessons, model=model or model_mod.Model(), count=True,
+                                                       judge_model=model or model_mod.Model()),
                                      lessons, db=db)
 
 
-def agent_exam(plug, db=None, folder=None):
+def agent_exam(plug, db=None, folder=None, *, model=None):
     """The exam the night and the Morning page give an agent: the Sales agent's (sales_exam), else the
     exam of an agent Quick start built (reflection/turn_exam.py binding: its folder, or
     <db folder>/agents/<agent>, wrapped in the Arena rerun of its past practice wins); None for an agent
-    with no exam."""
-    made = sales_exam(plug, db)
+    with no exam. model: as sales_exam's, the built agent's exam and judge model too."""
+    if model is None:  # the night's and the page's own: each part makes its model
+        made = sales_exam(plug, db)
+        if made is not None:
+            return made
+        from reflection import turn_exam
+        return turn_exam.binding(plug, folder=folder, db=db)
+    made = sales_exam(plug, db, model=model)
     if made is not None:
         return made
     from reflection import turn_exam
-    return turn_exam.binding(plug, folder=folder, db=db)
+    return turn_exam.binding(plug, folder=folder, db=db, model=model, judge_model=model)
 
 
 def built_folder(plug, plug_path):

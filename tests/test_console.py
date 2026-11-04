@@ -249,7 +249,9 @@ class Policy(Base):
         self.assertIn(f"style-src 'sha256-{sha}'", self.p.csp_for("/console"))
         self.assertEqual(page.count("<script"), 1)
         self.assertNotIn("style=", page)
-        self.assertNotIn("script-src", self.p.csp_for("/agents/sales"))
+        # the Sales agent's page carries Run reflection's poll only (DECISIONS 92), never the console's script
+        self.assertEqual(self.p.csp_for("/agents/sales"), pages.AGENT_CSP)
+        self.assertNotIn(f"'sha256-{sha}'", self.p.csp_for("/agents/sales").split("script-src")[1])
         self.assertEqual(self.p.csp_for("/"), pages.CSP)
 
     def test_the_agent_page_opens_the_console(self):
@@ -337,7 +339,7 @@ class OverTheServer(Base):
         again, _ = self.get("/console?agent=sales&view=arena")
         self.assertNotIn('class="flash"', again)
         _, headers = self.get("/agents/sales")
-        self.assertNotIn("script-src", headers["Content-Security-Policy"])
+        self.assertEqual(headers["Content-Security-Policy"], pages.AGENT_CSP)  # Run reflection's poll, not the console's
 
 
 if __name__ == "__main__":

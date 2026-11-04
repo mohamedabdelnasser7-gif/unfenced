@@ -1,5 +1,5 @@
 # For judges
-*Created: 2026-10-31. Last updated: 2026-11-03.*
+*Created: 2026-10-31. Last updated: 2026-11-04.*
 
 Every model this project calls is a Meta model: Muse Spark on the Meta Model API, or Muse Spark Open on Baseten. You do not need to connect any other account. The store name is made up; the products and prices are real; the practice customers are built from real chats with names, numbers and addresses removed.
 
@@ -28,11 +28,18 @@ Keys can also come from your shell environment; a value there wins over `.env`. 
 ## Open the page
 
 ```
-python3 -I sim/three_days.py data/sample-days
-python3 -m reflection.morning --demo-days data/sample-days
+python3 -m unfenced
 ```
 
-The first command writes three made-up working mornings to `data/sample-days`, which git ignores. It calls no model. The second serves them on your own machine and prints the address to open, with a Day 1, Day 2 and Day 3 switch at the top. Each day runs on a throwaway copy, so anything you press there leaves the sample files as they were. Ctrl+C stops the page.
+This serves the page on your own machine and prints the address to open. Ctrl+C stops it. On a fresh clone it first makes an empty database at `data/ascent.db`, which git ignores. It takes the same options as `python3 -m reflection.morning`; `python3 -m unfenced arena` and `python3 -m unfenced night` hand off to the Arena and to one night study.
+
+## Run the Arena, then Run reflection
+
+1. Open the page, then Agents. Pick an agent made on the page, or make one on New agent with your key.
+2. On its Arena tab, press Run the Arena. It plays practice matches against made-up customers, and the page shows them as it plays.
+3. Press Run reflection beside it. This is the learning step: the agent reads the chats it lost, writes one lesson from them, and tests that lesson on a full exam before it can reach a real customer. The page marks each step while it runs. Then it shows the lesson it wrote, or why it wrote none, the exam result, and whether the lesson is on trial or waits for your yes on Today.
+
+Run reflection uses your model key and counts toward the same daily model call cap as the Arena. With no lost chats yet it asks you to run the Arena first; with no key it points you to the recorded replay below. It never runs while the scheduled night runs, or while an Arena run goes on the same agent. The Sales agent has Run reflection too, and learns from the chats it lost in the page's database.
 
 ## Chat with the Sales agent
 
@@ -42,13 +49,13 @@ With no key in `.env`, the box says so and points you to the recorded replay bel
 
 ## Connect to WhatsApp
 
-The Connect button on an agent's page stays locked until a full Arena run on the page's own database has passed its gate. The run seals what it saved, so a result written or changed by hand never unlocks it. The quick run below never unlocks it, and the sample days do not either. Once Connect is on, Pull takes the agent off WhatsApp again.
+The Connect button on an agent's page stays locked until a full Arena run on the page's own database has passed its gate. The run seals what it saved, so a result written or changed by hand never unlocks it. The quick run below never unlocks it. Once Connect is on, Pull takes the agent off WhatsApp again.
 
 To see it unlock, run the full Arena on the page's database (`data/ascent.db`, which the Sales agent makes when it first runs), then open the page on it:
 
 ```
 python3 -I arena/run.py --db data/ascent.db
-python3 -m reflection.morning
+python3 -m unfenced
 ```
 
 The full run uses many more model calls than the quick one. Answering real WhatsApp messages also needs a WhatsApp Business number and its settings (the `WHATSAPP_` values read in `channels/whatsapp.py`), which this setup does not include.

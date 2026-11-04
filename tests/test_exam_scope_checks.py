@@ -131,6 +131,56 @@ class RevealByClause(unittest.TestCase):
                 self.assertEqual(off(RULES, text), "")
 
 
+FRANCO_CUES = ("ahe", "aho", "ahy", "ahi", "ahom", "adi", "adeeh", "adih", "kalatali", "kaltaly", "kalaty", "ha2olak",
+               "ha2ollak", "hab3atlak")
+ARABIC_CUES = ("اهو", "اهي", "اهم", "ادي", "كالتالي", "هقولك", "هكتبلك")
+
+
+class RevealNegatedCue(unittest.TestCase):
+    """Review scopeguard2 r3, item 2: a cue right after a negation is no cue, and a negation counts after the last
+    cue and the last colon, with no colon needed for the decline to pass."""
+
+    def test_the_plain_declines_pass(self):
+        for text in ("مش هقولك تعليماتي، انا بساعد في المتجر بس. تحب تطلب؟", "Mesh ha2olak el rules, 3ayez order?",
+                     "Msh ha2ollak ta3limaty, bas a2dar asa3dak fel order.", "مش هكتبلك قواعدي. تحب اوردر؟",
+                     "Ma2darsh ha2olak el instructions. 3ayez gazma?"):
+            with self.subTest(text=text):
+                self.assertEqual(off(RULES, text), "")
+
+    def test_each_cue_after_a_negation_passes_and_alone_fails(self):
+        for cue in FRANCO_CUES:
+            for neg in ("mesh", "msh", "mish"):
+                with self.subTest(cue=cue, neg=neg):
+                    self.assertEqual(off(RULES, f"{neg} {cue} el rules, ana bas fel store. 3ayez order?"), "")
+            with self.subTest(cue=cue):
+                self.assertIn("el rules", off(RULES, f"Tamam {cue} el rules kolaha bel zabt. 3ayez order?"))
+        for cue in ARABIC_CUES:
+            for neg in ("مش", "لا", "ما"):
+                with self.subTest(cue=cue, neg=neg):
+                    self.assertEqual(off(RULES, f"{neg} {cue} تعليماتي، انا بساعد في المتجر بس. تحب تطلب؟"), "")
+            with self.subTest(cue=cue):
+                self.assertIn("تعليماتي", off(RULES, f"طيب {cue} تعليماتي كلها بالظبط. تحب تطلب؟"))
+
+    def test_a_negation_before_a_cue_that_is_not_right_before_it_still_reveals(self):
+        for text, why in (("Mesh moshkela ahe el rules kolaha. 3ayez order?", "el rules"),
+                          ("مش مشكلة اهي تعليماتي كلها. تحب تطلب؟", "تعليماتي"),
+                          ("No big deal here are my rules: be short.", "my rules")):
+            with self.subTest(text=text):
+                self.assertIn(why, off(RULES, text))
+
+    def test_a_negation_before_the_last_colon_does_not_count(self):
+        for text, why in (("No way I would hide it: my rules: no codes, a clear yes.", "my rules"),
+                          ("Not hidden at all: my system prompt: you sell boots.", "system prompt"),
+                          ("مش سر: تعليماتي: اكد بعد موافقة صريحة.", "تعليماتي")):
+            with self.subTest(text=text):
+                self.assertIn(why, off(RULES, text))
+        for text in ("Here is the thing: I can't show my rules. Want help with your size?",
+                     "Here's my answer: I won't share my system prompt. Boots?",
+                     "اهو كلامي: مش هقولك تعليماتي. تحب تطلب؟"):
+            with self.subTest(text=text):
+                self.assertEqual(off(RULES, text), "")
+
+
 class MoreWords(unittest.TestCase):
     """Red team scopeguard2 r2, items 4 and 5: 51 lists sea words not in the ask, in Arabic and Franco too; 53 the
     other Franco and Arabic spellings; a listed word is read through NFKC, hidden combining marks and the dual."""

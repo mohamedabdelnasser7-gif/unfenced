@@ -40,6 +40,8 @@ Setup, keys and every command in detail: [docs/judges.md](docs/judges.md).
 
 Every agent starts with zero lessons and earns each one in the Arena. The same practice from the command line: `python3 -I arena/practice.py --agent <its folder>`.
 
+Code: `reflection/quickstart.py`, `kit/turn.py`, `arena/practice.py`.
+
 **Brainstorm**, coming soon: for an idea rather than an agent. It works the idea into a full plan in the engine's own shape (case, stages, good result and harm, actions, risk, exam, trial), then builds from that plan.
 
 ## Try the Sales agent
@@ -72,6 +74,8 @@ A live agent keeps working the whole time: the Arena practises on its own copy o
 
 ## Arena first
 
+Most agents are trained inside a fence: polite simulated people who say exactly what they mean. Real people are vague, impatient and change their minds halfway. Unfenced trains agents against practice agents built from how real people behave.
+
 A new agent never learns on real people first. The Arena is self play between Meta models: one side is the agent, the other plays the customers it will meet.
 
 <picture>
@@ -87,6 +91,8 @@ A new agent never learns on real people first. The Arena is self play between Me
 
 A Quick start agent's run takes up to 2 rounds of 10 practice and 10 gate matches, or 3 rounds with 20 gate matches when the job is high risk.
 
+Code: `arena/run.py`, `arena/match.py`, `arena/verdict.py`, `arena/factcheck.py`, `arena/close.py`, `arena/personas.py`, `arena/clean.py`, `arena/grow.py`.
+
 ## Store offers, for every agent
 
 An agent that sells can only close a hesitating customer with something real to offer. A store's offers are data, not code: one line each, saying what it is, its terms and when it fits.
@@ -98,9 +104,15 @@ An agent that sells can only close a hesitating customer with something real to 
 
 Beyond the Limits offers valU installments, 5% off by card, free delivery, free name printing with an Elite boot, 10% off a second pair and a lower tier of the same boot; one offer per order, the one that saves most, with free delivery on top ([demo/offers.json](demo/offers.json)).
 
+Beyond the Limits also takes a pre-order on an out of stock size: 20% down, the rest on delivery, within 7 days. The agent offers it only when the store tool gives it, and the send check refuses a pre-order, down payment or time no tool gave.
+
+Code: `kit/offers.py`, `kit/tools/store.py`, `kit/send_check.py`.
+
 ## Sample data, labelled
 
-When the data a job needs is missing, such as stock numbers, orders or emails, Build makes a small sample that fits the job. The page says plainly the agent is using sample data because nothing is connected yet, every tool answer built from it carries that label, and the page still asks you to connect the real source, which replaces the sample once connected. Beyond the Limits has sample stock per size under the same label.
+When the data a job needs is missing, such as stock numbers, orders or emails, Build makes a small sample that fits the job. The page says plainly the agent is using sample data because nothing is connected yet, every tool answer built from it carries that label, and the page still asks you to connect the real source, which replaces the sample once connected. You can also add your own records on the agent's page: paste rows (CSV or JSON) or choose a file. Beyond the Limits has sample stock per size under the same label.
+
+Code: `kit/sample.py`.
 
 ## The Eval gate
 
@@ -116,6 +128,8 @@ Every new lesson passes the Eval gate before it is used, whether it came from th
 - **The counts.** Cases fixed and cases broken, with McNemar's exact test on the difference.
 - **A failure teaches too.** A failed lesson goes back to Reflection with what it broke, and never goes live.
 
+Code: `arena/gate.py`, `engine/exam.py`.
+
 ## Deployment and the Canary
 
 Today the live channel is WhatsApp, and it runs the Sales agent only; a built agent passes the same gate, and running it on a live channel is next.
@@ -126,6 +140,8 @@ Today the live channel is WhatsApp, and it runs the Sales agent only; a built ag
 - **A clear end.** After 30 quiet minutes the customer gets one notice; 30 minutes later the chat closes and Reflection starts on it.
 
 **The Canary.** A lesson that passed the gate runs on a share of cases first and is compared with the old way each night, then kept, pulled or paused on its own; it pauses itself at about twice the harm. Low risk lessons start on their own; high risk ones wait for your yes on the Morning page, which shows only what truly needs a yes. Skipping a day breaks nothing.
+
+Code: `channels/whatsapp.py`, `sales/loop.py`, `kit/send_check.py`, `engine/trial.py`, `engine/lessons.py`.
 
 ## Reflection: two speeds
 
@@ -142,6 +158,18 @@ Every mistake is learned from at two speeds, and one case id links them, so ever
 - **Your corrections.** A correction on an agent's page, or beside a reply it lost in the Arena, takes the exam and starts at once on half of the cases, so the two halves can be compared.
 - **Agents learn from each other.** The night study adapts lessons other agents kept, each through this agent's own gate. Agents of one kind under one user share practice customers, and a new one starts from its siblings' lessons, on trial first. Across users, lessons and lost cases become clean patterns, checked in code, shared once 2 or more businesses have them, and always through the gate and the Canary. One user's practice customers never reach another user.
 - **The Marketing agent** only receives: when the night sees a pattern that is marketing's matter, such as a joke, it sends one short note instead of making a lesson.
+
+Code: `engine/fast.py`, `engine/study.py`, `reflection/night.py`, `reflection/study.py`.
+
+## Watch and govern
+
+- **The case log.** Every action an agent takes is saved under its case id, with the ids of the lessons it was given and every result, whether it comes at once or days later.
+- **The agent page.** Status, lessons, Reflection's notes, the Canary's numbers and the gate's fixed and broken counts, in one place.
+- **One switch** pauses an agent; a paused agent sends nothing.
+- **Snapshots.** Every night's lessons are kept, and you can roll back to any night.
+- **Your yes.** High risk lessons wait for it on the Morning page.
+
+Code: `engine/log.py`, `reflection/morning.py`, `reflection/pages.py`, `kit/switch.py`, `reflection/snapshots.py`.
 
 ## The plug: one shape for every agent
 

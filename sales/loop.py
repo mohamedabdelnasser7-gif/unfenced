@@ -129,7 +129,8 @@ def system_prompt(stage, picked, note=""):
     same words the check and the exam read), the stage note, the lessons in the slot the engine writes from
     the plug, then fast reflection's note for this chat when it has one. The offers line (kit/offers.py
     PROMPT_LINE) follows the rules."""
-    parts = [INSTRUCTIONS, send_check.prompt_rules(), offers.PROMPT_LINE, stages.note(stage)]
+    parts = [INSTRUCTIONS, send_check.prompt_rules(offers=offers.for_check(offers.current(), ()) is not None),
+             offers.PROMPT_LINE, stages.note(stage)]
     lessons = slot(PLUG, picked)
     if lessons:
         parts.append(lessons)
@@ -276,7 +277,8 @@ def _answer(t, convo, msg, vocab, sizes, names=frozenset(), *, results, send):
         passed, feedback = send_check.check(reply, t.customer_text, t.amounts, vocab, sizes,
                                             orders=order_names(ctx.chats, chat_id),
                                             links=store_links(ctx.chats, chat_id), names=names,
-                                            totals=tool_amounts(ctx.chats, chat_id))
+                                            totals=tool_amounts(ctx.chats, chat_id),
+                                            offers=offers.for_check(offers.current(), store_offers(ctx.chats, chat_id)))
         if passed:
             send(msg.customer_id, reply)
             n = ctx.chats.add_step(chat_id, "assistant", content=reply)
@@ -470,17 +472,20 @@ def tool_amounts(chats, chat_id):
 
 def store_offers(chats, chat_id):
     """The ids of the offers a tool gave in this chat, any turn: each offer in a store or data result that
-    ran (ok true) and each discount a draft_order result applied. The send check lets a reply name only
+    ran (ok true), each discount a draft_order result applied and the delivery offer (offer_id) a delivery
+    or draft_order result says set the fee. The send check lets a reply name only
     these offers (decision 105). Only a tool result counts, never the customer's text. Never raises: on an
     error no offer is given, so every offer is refused."""
     given = set()
     try:
         for s in chats.steps(chat_id):
-            if s["role"] != "tool" or s["name"] not in (store.NAME, "data", draft_order.NAME):
+            if s["role"] != "tool" or s["name"] not in (store.NAME, "data", draft_order.NAME, "delivery"):
                 continue
             out = json.loads(s["content"] or "null")
             if not (isinstance(out, dict) and out.get("ok") is True):
                 continue
+            if isinstance(out.get("offer_id"), str):
+                given.add(out["offer_id"])
             listed, key = (out.get("discounts"), "offer") if s["name"] == draft_order.NAME else (out.get("offers"), "id")
             if isinstance(listed, list):
                 given.update(o[key] for o in listed if isinstance(o, dict) and isinstance(o.get(key), str))

@@ -376,7 +376,8 @@ def system_prompt(agent, lessons=(), note=""):
     style only, kit/send_check.py prompt_rules, the same words the check reads), then its lessons, then
     the fast note for this case under its heading when it has one (last, as sales/loop.py has it). An agent
     with offers gets offers.PROMPT_LINE after the rules."""
-    parts = [agent.instructions, send_check.prompt_rules(agent.full_check, agent.stock)]
+    parts = [agent.instructions, send_check.prompt_rules(agent.full_check, agent.stock,
+                                                         offers=agent.full_check and _offers_for(agent, ()) is not None)]
     if agent.offers and agent.offers.get("offers"):
         parts.append(offers_mod.PROMPT_LINE)
     picked = slot(agent.plug, list(lessons))
@@ -393,7 +394,14 @@ def _check(agent, reply, customer_text, amounts, vocab, sizes, names, chats, cha
         return (not problems), " ".join(dict.fromkeys(problems))
     return send_check.check(reply, customer_text, amounts, vocab, sizes, orders=loop.order_names(chats, chat_id),
                             links=loop.store_links(chats, chat_id), names=names, priced_only=agent.priced_only,
-                            stock=agent.stock, totals=loop.tool_amounts(chats, chat_id))
+                            stock=agent.stock, totals=loop.tool_amounts(chats, chat_id),
+                            offers=_offers_for(agent, loop.store_offers(chats, chat_id)))
+
+
+def _offers_for(agent, given):
+    """What the send check's offers rule reads for this agent: its own offers only (kit/offers.py
+    for_check), None when it has none."""
+    return offers_mod.for_check(getattr(agent, "offers", None), given)
 
 
 PRACTICE_CHANNEL = "practice"

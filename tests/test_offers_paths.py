@@ -1,8 +1,8 @@
 """Store offers on the real paths (decision 105): the store and data tools list them, the delivery fee and
 the amounts a reply may quote follow the delivery offer, draft_order works the totals out through
 kit/offers.py (quote mode and the saved order), the Sales prompt and instructions carry them, and a built
-agent sees only its own offers. Front door tests T1, T3 and T4 of the offers plan go through sales/loop.turn
-and kit/turn.turn with a fake model. The send check's offers rule comes later (plan step A7). No network."""
+agent sees only its own offers. Front door tests T1 to T4 of the offers plan go through sales/loop.turn
+and kit/turn.turn with a fake model, the send check's offers rule (plan step A7) among them. No network."""
 import json
 import os
 import shutil
@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 from channels.base import Message
-from kit import offers, orders, tools, turn
+from kit import offers, orders, send_check, tools, turn
 from kit.chats import Chats
 from kit.db import Db
 from kit.tools import cod_risk, data as data_tool, delivery, draft_order, find_order, store
@@ -139,6 +139,57 @@ class Tools(unittest.TestCase):
         self.assertIn(offers.PROMPT_LINE, loop.system_prompt(stages.get("asking"), [])["content"])
 
 
+class OffersRule(unittest.TestCase):
+    """The send check's offers rule on its own (kit/send_check.py offer_problems, kit/offers.py for_check)."""
+
+    def problems(self, reply, given=()):
+        return dict(send_check.named_problems(reply, "hi", offers=offers.for_check(offers.demo(), given)))
+
+    def test_nothing_given_refuses_names_talk_and_percents(self):
+        self.assertIn("free_delivery", self.problems("Delivery is free delivery to Giza.").get("offers", ""))
+        self.assertIn("valu_3m", self.problems("You can pay through valU.").get("offers", ""))
+        self.assertIn(send_check.NO_OFFER_TALK, self.problems("We have a discount for you.").get("offers", ""))
+        self.assertIn("10%", self.problems("You get 10% off today.").get("offers", ""))
+        self.assertIn("10%", self.problems("خصم ١٠٪ النهارده").get("offers", ""))
+        self.assertIn("free_delivery", self.problems("والتوصيل مجاني لحد البيت").get("offers", ""))
+        self.assertIn(send_check.NO_OFFER_TALK, self.problems("في عرض والخصم كويس").get("offers", ""))
+        self.assertNotIn("offers", self.problems("We have the Phantom 6 Elite in 42, two pairs left."))
+
+    def test_given_offers_pass_and_other_percents_fail(self):
+        every = [o["id"] for o in offers.demo()["offers"]]
+        for ok in ("Pay by card and get 5% off.", "Every second pair is 10% off.", "Delivery is free delivery.",
+                   "There is a discount when you pay by card.", "valU, 3 months, no interest."):
+            self.assertNotIn("offers", self.problems(ok, every), ok)
+        self.assertIn("15%", self.problems("Pay by card and get 15% off.", every)["offers"])
+        self.assertIn("20%", self.problems("20 percent off the Elite.", every)["offers"])
+        only_card = self.problems("Pay by card for 5% off, or valU.", ["card_5"])["offers"]
+        self.assertIn("valu_3m", only_card)
+        self.assertNotIn("card_5", only_card)
+        self.assertIn("10%", self.problems("10% off a second pair.", ["card_5"]).get("offers", ""))
+
+    def test_an_agent_with_no_offers_is_not_held(self):
+        self.assertIsNone(offers.for_check(offers.EMPTY, ["x"]))
+        self.assertNotIn("offers", dict(send_check.named_problems("You get 10% off today.", "hi")))
+        self.assertEqual(send_check.offer_problems("10% off", None), [])
+        passed, feedback = send_check.check("You get 10% off today.", "hi", offers=offers.for_check(offers.demo(), ()))
+        self.assertFalse(passed)
+        self.assertIn(send_check.OFFERS_RULE, feedback)
+
+    def test_the_prompt_holds_the_rule_it_is_checked_on(self):
+        self.assertNotIn(send_check.OFFERS_RULE, send_check.prompt_rules())
+        self.assertIn(send_check.OFFERS_RULE, send_check.prompt_rules(offers=True))
+        self.assertIn(send_check.OFFERS_RULE, loop.system_prompt(stages.get("asking"), [])["content"])
+        token = offers.OFFERS.set(offers.EMPTY)
+        try:
+            self.assertNotIn(send_check.OFFERS_RULE, loop.system_prompt(stages.get("asking"), [])["content"])
+        finally:
+            offers.OFFERS.reset(token)
+
+    def test_a_discount_a_tool_gave_is_an_amount(self):
+        self.assertIn("discount", send_check.AMOUNT_KEYS)
+        self.assertEqual(send_check.amounts_in({"discounts": [{"offer": "card_5", "discount": 1395}]}), {1395})
+
+
 class SalesFrontDoor(unittest.TestCase):
     """T1 and T3: the Sales agent through sales/loop.turn."""
 
@@ -170,6 +221,45 @@ class SalesFrontDoor(unittest.TestCase):
         self.assertIn(offers.PROMPT_LINE, model.calls[0]["messages"][0]["content"])
         self.assertIn("valU", model.calls[0]["messages"][0]["content"])
         self.assertTrue({"valu_3m", "card_5", "free_delivery", "second_pair"} <= loop.store_offers(self.chats, self.cid))
+
+    def test_t2_a_made_up_discount_is_refused_and_a_given_offer_is_sent(self):
+        bad, good = "You get 10% off today on the Phantom 6.", "You can pay through valU, 3 months, no interest."
+        model = FakeModel(say(bad), call("store", query="phantom"), say(good))
+        r = self.turn(model, "Is there any discount on the Phantom 6?")
+        self.assertEqual((r.outcome, r.reply), ("replied", good))
+        self.assertEqual([t for _, t in self.out.sent], [good])
+        rows = self.results.for_chat(self.cid)
+        self.assertEqual([x["outcome"] for x in rows], ["check_failed", "replied"])
+        self.assertIn("10%", rows[0]["detail"]["feedback"])
+        self.assertIn(send_check.OFFERS_RULE, rows[0]["detail"]["feedback"])
+
+    def test_t2_an_offer_named_before_any_tool_gave_it_is_refused(self):
+        model = FakeModel(*[say("Delivery is free delivery anywhere in Egypt.")] * loop.MAX_FAILED_CHECKS)
+        r = self.turn(model, "How much is delivery?")
+        self.assertNotEqual(r.outcome, "replied")
+        self.assertEqual(self.out.sent, [])
+        rows = [x for x in self.results.for_chat(self.cid) if x["outcome"] == "check_failed"]
+        self.assertEqual(len(rows), loop.MAX_FAILED_CHECKS)
+        self.assertIn("free_delivery", rows[0]["detail"]["feedback"])
+
+    def test_t2_the_delivery_tool_gives_the_free_delivery_offer(self):
+        good = "Delivery to Giza is free delivery, 1 to 2 days."
+        model = FakeModel(call("delivery", governorate="Giza"), say(good))
+        r = self.turn(model, "How much is delivery to Giza?")
+        self.assertEqual((r.outcome, r.reply), ("replied", good))
+        self.assertEqual(tool_results(model)[0]["offer_id"], "free_delivery")
+        self.assertEqual(loop.store_offers(self.chats, self.cid), {"free_delivery"})
+
+    def test_t3_the_quote_s_discount_and_percent_may_be_quoted(self):
+        self.chats.set_stage(self.cid, "ordering")
+        args = {"items": ITEMS, "quote": True, "payment": "card", "governorate": "Giza"}
+        good = "With the card's 5% you save 1,395 EGP, so the total is 26,505 EGP with free delivery."
+        model = FakeModel(tool_call("draft_order", args), say("With the card you get 10% off, 25,110 EGP."),
+                          say(good))
+        r = self.turn(model, "Phantom 6 Elite and Pro in 42 with a name printing, paying by card. How much?")
+        self.assertEqual((r.outcome, r.reply), ("replied", good))
+        feedback = self.results.for_chat(self.cid)[0]["detail"]["feedback"]
+        self.assertIn("10%", feedback)
 
     def test_t3_a_card_quote_takes_the_one_biggest_offer(self):
         self.chats.set_stage(self.cid, "ordering")
@@ -242,6 +332,18 @@ class BuiltAgentFrontDoor(unittest.TestCase):
         self.assertIn(offers.PROMPT_LINE, model.calls[0]["messages"][0]["content"])
         self.assertIsNone(offers.own())                      # set for the turn only
 
+    def test_t4_a_made_up_offer_is_refused_and_its_own_offer_passes_after_the_tool(self):
+        offers.write(self.folder, OWN)
+        agent = turn.load(self.folder)
+        good = "The Phantom 6 is in stock, and there is a cap deal with it."
+        got, model = self.run_turn(agent, say("The Phantom 6 is 10% off today."), say("Ask about our cap deal."),
+                                   tool_call("store", {"query": "phantom"}), say(good))
+        self.assertEqual((got.outcome, got.reply), ("replied", good), got)
+        retries = [m["content"] for m in model.calls[-1]["messages"] if m["role"] == "user"][1:]
+        self.assertIn("10%", retries[0])
+        self.assertIn("cap_deal", retries[1])
+        self.assertIn(send_check.OFFERS_RULE, model.calls[0]["messages"][0]["content"])
+
     def test_an_agent_with_no_offers_gets_none_of_the_store_datas(self):
         agent = turn.load(self.folder)
         self.assertIsNone(agent.offers)
@@ -249,6 +351,8 @@ class BuiltAgentFrontDoor(unittest.TestCase):
         shown = tool_results(model)[0]
         self.assertNotIn("offers", shown)
         self.assertNotIn(offers.PROMPT_LINE, model.calls[0]["messages"][0]["content"])
+        self.assertNotIn(send_check.OFFERS_RULE, model.calls[0]["messages"][0]["content"])
+        self.assertIsNone(turn._offers_for(agent, ["valu_3m"]))     # not held to the store data's offers
 
     def test_with_no_store_tool_the_data_tool_lists_the_offers(self):
         plug = json.loads((self.folder / "plug.json").read_text(encoding="utf-8"))

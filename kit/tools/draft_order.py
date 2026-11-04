@@ -361,6 +361,8 @@ def quote(args):
     if place is not None:
         out.update({"fee": orders.amount(got["fee"]), "governorate": place["governorate"],
                     "days_min": place["days_min"], "days_max": place["days_max"]})
+        if place.get("offer_id"):
+            out["offer_id"] = place["offer_id"]   # the delivery offer that set the fee
     out.update({"total": orders.amount(got["total"]), "next": QUOTE_NEXT})
     return out
 

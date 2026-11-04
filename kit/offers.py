@@ -4,7 +4,7 @@ A store's offers are data, never code: one line each (what it is, its terms, whe
 numbers the totals need. The Sales agent's are in demo/offers.json; an agent made at Build keeps its own
 in its folder, <db folder>/agents/<name>/offers.json, the same shape:
 
-    {"max_stack": 1, "stack_counts": {kind: false}, "pick": "most_saved" or "listed",
+    {"max_stack": 1, "stack_counts": {kind: false}, "pick": "most_saved" or "listed", "payment_takes_slot": true,
      "apply": [kinds, in the order they are worked out], "round_to": 1,
      "payment_methods": [method ids], "offer_talk": [words that talk about an offer],
      "offers": [{"id", "kind", "what", "terms", "when", ...the kind's numbers..., "names", "covers"}]}
@@ -21,7 +21,9 @@ A line's keys are the store lines' own keys (type, tier, size); {"has": key} mea
 
 Totals (apply): each qualifying offer's saving is worked out alone. A kind whose stack_counts is false always
 applies; the rest are cut to max_stack by pick (most saved first, a tie to the one listed first; or the
-listed order). The kept offers are then worked out in the "apply" order, a payment percent on what the
+listed order). With payment_takes_slot, a payment offer whose method is the order's payment takes the first
+slot whatever it saves (even nothing, months only), because the customer chose to pay that way; the other
+slots, if any, go by pick. The kept offers are then worked out in the "apply" order, a payment percent on what the
 items cost after the line offers before it. Each discount is rounded to round_to, half up.
 
 Every value is untrusted: lines are plain and capped, numbers are checked, unknown keys are dropped, and the
@@ -174,6 +176,8 @@ def clean(raw):
         out["stack_counts"] = {k: v for k, v in raw["stack_counts"].items() if k in KINDS and isinstance(v, bool)}
     if raw.get("pick") in PICKS:
         out["pick"] = raw["pick"]
+    if raw.get("payment_takes_slot") is True:
+        out["payment_takes_slot"] = True
     order = [k for k in dict.fromkeys(raw.get("apply") or []) if k in WORKED] if isinstance(raw.get("apply"), list) else []
     if order:
         out["apply"] = order
@@ -273,6 +277,9 @@ def limit_line(data):
     head = "One offer an order" if n == 1 else f"At most {n} offers an order"
     picked = ("the one that saves the customer most applies" if n == 1 else "the ones that save the customer most apply") \
         if data.get("pick") == "most_saved" else ("the first listed applies" if n == 1 else "the first listed apply")
+    if data.get("payment_takes_slot") and any(o["kind"] == "payment" and "method" in o for o in counted):
+        picked += "; paying by an offer's payment method makes that offer the order's " + \
+            ("one offer" if n == 1 else "first offer")
     on_top = [o["id"] for o in data.get("offers", []) if data.get("stack_counts", {}).get(o["kind"], True) is False]
     tail = f"; always on top: {', '.join(on_top)}" if on_top else ""
     return f"{head}: {picked}{tail}."
@@ -292,6 +299,19 @@ def talk_words(data):
 def percents(data):
     """Every percent an offer gives, as Decimals."""
     return {Decimal(str(o["percent_off"])) for o in (data or {}).get("offers", []) if "percent_off" in o}
+
+
+def for_check(data, given):
+    """What the send check's offers rule reads (kit/send_check.py offer_problems): the offer ids a tool gave
+    in this chat that are in data, their percents, every offer's words and the talk words. None when data
+    has no offers, so an agent with none is not held to the rule."""
+    if not data or not data.get("offers"):
+        return None
+    ids = {o["id"] for o in data["offers"]}
+    given = {i for i in (given or ()) if i in ids}
+    return {"given": given,
+            "percents": percents({"offers": [o for o in data["offers"] if o["id"] in given]}),
+            "words": mention_words(data), "talk": talk_words(data)}
 
 
 def payment_methods(data):
@@ -383,6 +403,17 @@ def _saving(o, lines, payment, base):
     return Decimal(0)
 
 
+def _paid_by(data, payment, order):
+    """The place of the payment offer that takes the order's first slot (payment_takes_slot): the first listed
+    one whose method is the order's payment and that the limit counts. None when there is none."""
+    if not data.get("payment_takes_slot") or payment is None or "payment" not in order \
+            or data.get("stack_counts", {}).get("payment", True) is False:
+        return None
+    method = _key(str(payment))
+    return next((i for i, o in enumerate(data.get("offers", []))
+                 if o["kind"] == "payment" and o.get("method") == method), None)
+
+
 def apply(lines, payment=None, data=None, fee=None):
     """The order's totals with the offers, in Decimal.
 
@@ -406,7 +437,12 @@ def apply(lines, payment=None, data=None, fee=None):
     counted = [a for a in alone if a not in always]
     if data.get("pick") == "most_saved":
         counted.sort(key=lambda a: (-a[2], a[0]))
-    kept = {a[0] for a in always + counted[:int(data.get("max_stack", 1))]}
+    slots = int(data.get("max_stack", 1))
+    taker = _paid_by(data, payment, order)
+    if taker is not None:
+        counted = [a for a in counted if a[0] != taker]
+        slots -= 1
+    kept = {a[0] for a in always + counted[:max(slots, 0)]} | ({taker} if taker is not None else set())
     discounts, base = [], subtotal
     for kind in order:
         for i, o in enumerate(data.get("offers", [])):

@@ -12,7 +12,8 @@ kit/tools run and NEEDS), so the agent can answer "how long does delivery take" 
 names a place.
 
 A delivery offer in the store's offers (kit/offers.py delivery_fee, decision 105) sets the fee for
-every zone, in quote and in table alike, with the offer's line as "offer"; the days stay the zone's.
+every zone, in quote and in table alike, with the offer's line as "offer" and its id as "offer_id" (so the
+send check knows a tool gave it, sales/loop.py store_offers); the days stay the zone's.
 """
 import json
 import re
@@ -89,7 +90,7 @@ def quote(place):
            "fee": offers.delivery_fee(data, zone["fee"]), "days_min": zone["days_min"], "days_max": zone["days_max"]}
     deal = offers.delivery_offer(data)
     if deal is not None and out["fee"] != zone["fee"]:
-        out["offer"] = deal["what"]
+        out.update(offer=deal["what"], offer_id=deal["id"])
     return out
 
 
@@ -109,7 +110,7 @@ def table(ctx=None):
     out = {"ok": True, "zones": zones, "note": NO_PLACE}
     deal = offers.delivery_offer(data)
     if deal is not None and any(z["fee"] != r["fee"] for z, r in zip(zones, raw)):
-        out["offer"] = deal["what"]
+        out.update(offer=deal["what"], offer_id=deal["id"])
     return out
 
 

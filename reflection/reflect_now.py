@@ -11,16 +11,21 @@ customers grown from real chats stay on the scheduled night: they are not the le
 
 Every model call is taken from the day's call count next to the database (arena/run.py Calls,
 CALLS_FILE), the same cap as Run the Arena, Try again and Try Sales: the study's, the risk judge's,
-the exam's and the shared pool writer's. The Arena rerun inside the exam counts on the same file
-(arena/gate.py Fresh, FreshTurn).
+the exam's and the shared pool writer's. The Arena rerun inside the exam takes from the same Calls
+(arena/gate.py Fresh, FreshTurn, given calls= and the models as they are), so each of its calls counts
+once and lands in the run's count.
 
 The run holds the night lock (reflection/scheduler.py night_lock), so it never runs while the
-scheduled night runs on this database, and the scheduled night waits for it; Morning keeps one run
-per agent and never beside a Run the Arena of the same agent.
+scheduled night or a night run by hand runs on this database, and they wait for it; Morning keeps one
+run per agent and never beside a Run the Arena of the same agent. A page stopped mid run leaves its
+holder (holder()); the next press takes it over once that process is gone (gone).
 
 Steps marks where it is for the page: reading lost chats until the proposer or the idea part first
 asks its model, writing a lesson from then, the exam once a lesson takes it.
 """
+import os
+import secrets
+import socket
 import threading
 import time
 from pathlib import Path
@@ -28,6 +33,44 @@ from pathlib import Path
 READ, LESSON, EXAM = "read", "lesson", "exam"
 STEPS = (READ, LESSON, EXAM)
 PAGE_HOLDER = "page"  # how the night lock names a holder that is Run reflection (scheduler.py night_lock)
+
+
+def holder(agent):
+    """The night lock's holder for a Run reflection of agent: page:<agent>:<host>:<pid>:<token>. A page
+    stopped mid run (Ctrl+C) leaves it behind; the host and pid let the next press see that its process
+    is gone (gone) and take the lock over, not wait the lock's STALE hours."""
+    return f"{PAGE_HOLDER}:{agent}:{socket.gethostname()}:{os.getpid()}:{secrets.token_hex(4)}"
+
+
+def _page_pid(held):
+    """The pid in a Run reflection's holder (holder()) made on this machine, else None."""
+    bits = held.split(":") if isinstance(held, str) else []
+    if len(bits) != 5 or bits[0] != PAGE_HOLDER or bits[2] != socket.gethostname() or \
+            not (bits[3].isascii() and bits[3].isdigit()):
+        return None
+    pid = int(bits[3])
+    return pid if pid > 0 else None
+
+
+def ours(held):
+    """True when held is a Run reflection's holder of this very page process."""
+    return _page_pid(held) == os.getpid()
+
+
+def gone(held):
+    """True when held is a Run reflection's holder (holder()) made on this machine whose process no longer
+    runs: os.kill(pid, 0) raises ProcessLookupError. Any other holder (the scheduled night, a night run by
+    hand, another machine's, a process that runs or one that cannot be asked) is False: it is waited for."""
+    pid = _page_pid(held)
+    if pid is None:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except (OSError, OverflowError):  # PermissionError: it runs, as another user
+        return False
+    return False
 
 
 class Steps:
@@ -94,16 +137,18 @@ def plug_path(agent, folder, db_path):
 
 def run(db, db_path, plug, *, folder, models, calls, steps, until=None):
     """One night of plug now, on db (its own connection) at db_path. models: {"study", "open", "exam"}
-    (arena/run.py reflection_models; a test hands fakes), each taken from calls. folder: the folder of an
+    (arena/run.py reflection_models; a test hands fakes), each call taken from calls. folder: the folder of an
     agent Quick start built, else None. Returns (the report, the saved report's path)."""
     from kit.db import DEFAULT_PATH
     from reflection import judge as judge_mod
     from reflection import night
     from reflection import shared as shared_mod
     from reflection import study as parts
-    study_m, open_m, exam_m = (calls.model(models[k]) for k in ("study", "open", "exam"))
+    study_m, open_m = (calls.model(models[k]) for k in ("study", "open"))
     lesson_m = steps.marking(study_m, LESSON)
-    make = night.agent_exam(plug, str(db_path), folder=folder, model=exam_m)
+    # the exam's model as it is, with calls: the exam and its judges take each call from calls, and the Arena
+    # rerun after it counts once on the same calls (night.agent_exam)
+    make = night.agent_exam(plug, str(db_path), folder=folder, model=models["exam"], calls=calls)
     home = Path(folder) if folder is not None else Path(db_path).expanduser().resolve().parent  # as night.main
     try:  # an owner id or shared folder that cannot be read leaves the pool out, not the night
         link, left_out = shared_mod.Link.for_agent(plug, home, shared_mod.Writer(model=open_m),

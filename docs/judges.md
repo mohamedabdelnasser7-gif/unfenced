@@ -31,7 +31,7 @@ Keys can also come from your shell environment; a value there wins over `.env`. 
 python3 -m unfenced
 ```
 
-This serves the page on your own machine and prints the address to open. Ctrl+C stops it. On a fresh clone it first makes an empty database at `data/ascent.db`, which git ignores. It takes the same options as `python3 -m reflection.morning`; `python3 -m unfenced arena` and `python3 -m unfenced night` hand off to the Arena and to one night study.
+This serves the page on your own machine and prints the address to open. Ctrl+C stops it. On a fresh clone it first makes an empty database at `data/ascent.db`, which git ignores. It takes the same options as `python3 -m reflection.morning`; `python3 -m unfenced arena` and `python3 -m unfenced night` hand off to the Arena and to one night study. A night study started by hand holds the night lock while it runs: it does not start while the scheduled night or a Run reflection runs on the same database, and they wait for it.
 
 ## Run the Arena, then Run reflection
 
@@ -39,7 +39,7 @@ This serves the page on your own machine and prints the address to open. Ctrl+C 
 2. On its Arena tab, press Run the Arena. It plays practice matches against made-up customers, and the page shows them as it plays.
 3. Press Run reflection beside it. This is the learning step: the agent reads the chats it lost, writes one lesson from them, and tests that lesson on a full exam before it can reach a real customer. The page marks each step while it runs. Then it shows the lesson it wrote, or why it wrote none, the exam result, and whether the lesson is on trial or waits for your yes on Today.
 
-Run reflection uses your model key and counts toward the same daily model call cap as the Arena. With no lost chats yet it asks you to run the Arena first; with no key it points you to the recorded replay below. It never runs while the scheduled night runs, or while an Arena run goes on the same agent. The Sales agent has Run reflection too, and learns from the chats it lost in the page's database.
+Run reflection uses your model key and counts toward the same daily model call cap as the Arena. With no lost chats yet it asks you to run the Arena first; with no key it points you to the recorded replay below. It never runs while a night runs on the same database (the scheduled night, one started by hand or another agent's reflection), or while an Arena run goes on the same agent. If you stop the page while it reflects, the next press takes the lock back once that page has stopped. Run the Arena does not start while the scheduled night or a night started by hand runs; it holds no lock itself, so a night that starts after it runs beside it. The Sales agent has Run reflection too, and learns from the chats it lost in the page's database.
 
 ## Chat with the Sales agent
 
@@ -51,7 +51,7 @@ With no key in `.env`, the box says so and points you to the recorded replay bel
 
 The Connect button on an agent's page stays locked until a full Arena run on the page's own database has passed its gate. The run seals what it saved, so a result written or changed by hand never unlocks it. The quick run below never unlocks it. Once Connect is on, Pull takes the agent off WhatsApp again.
 
-To see it unlock, run the full Arena on the page's database (`data/ascent.db`, which the Sales agent makes when it first runs), then open the page on it:
+To see it unlock, run the full Arena on the page's database (`data/ascent.db`, which `python3 -m unfenced` makes empty on a fresh clone and the Sales agent makes when it first runs), then open the page on it:
 
 ```
 python3 -I arena/run.py --db data/ascent.db

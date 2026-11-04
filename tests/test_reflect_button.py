@@ -1,8 +1,15 @@
 """Run reflection on an agent's page (DECISIONS 92 and 93; reflection/reflect_now.py, Morning.run_reflection,
-pages.py REFLECT_PATH). Fake models only: no model call, no network."""
+pages.py REFLECT_PATH), and the night lock the Arena and a night run by hand now read (review reflectbtn r1).
+Fake models only: no model call, no network."""
+import contextlib
 import http.client
+import io
 import json
+import os
 import shutil
+import socket
+import subprocess
+import sys
 import tempfile
 import threading
 import types
@@ -11,14 +18,22 @@ import urllib.parse
 from pathlib import Path
 from unittest import mock
 
-from arena import learn_built, retry as retry_mod, run as run_mod
-from engine import plug as plug_mod
+from arena import learn_built, retry as retry_mod, run as run_mod, scope
+from engine import exam as engine_exam, plug as plug_mod
+from engine.lessons import Lessons as EngineLessons
 from kit import turn
 from kit.db import Db
+from reflection import PLUG as SALES
+from reflection import exam as exam_mod, judge as judge_mod, shared as shared_mod, study as parts
 from reflection import morning as mo, night, pages, reflect_now, scheduler
-from tests.fake_model import clean_env
+from reflection.lessons import Lessons as SalesLessons
+from tests.fake_model import Buyer, Seller, clean_env, say
+from tests.kept import kept_lesson
+from tests.test_night import Setup as NightSetup
+import tests.test_arena_gate as tag
 import tests.test_arena_practice as tap
 import tests.test_quickstart as tq
+import tests.test_turn_exam as tte
 
 ARENA_TAB = {"tab": ["arena"]}
 TURNS = [{"n": 1, "customer": "Is the blue mug in stock?", "replies": ["Let me check."], "outcome": "replied",
@@ -367,6 +382,365 @@ class Afterwards(Base):
         self.assertIn("The last reflection could not finish (the study route is down).", self.page(query=ARENA_TAB))
         self.assertIsNone(self.held_by())
         self.assertIsNone(self.m.reflecting("stock_watch"))
+
+
+def dead_pid():
+    """The pid of a process that ran and ended (reaped), so os.kill(pid, 0) raises ProcessLookupError."""
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait()
+    return child.pid
+
+
+def page_holder(agent, pid, host=None):
+    return f"{reflect_now.PAGE_HOLDER}:{agent}:{host or socket.gethostname()}:{pid}:abcd1234"
+
+
+class Started(Base):
+    def test_a_start_that_raises_lets_the_lock_go(self):
+        self.lose()
+
+        def refuse(work, name):
+            raise RuntimeError("no thread")
+        self.m.reflect_start = refuse
+        with self.assertRaises(RuntimeError):
+            self.m.run_reflection("stock_watch")
+        self.assertIsNone(self.held_by())
+        self.assertIsNone(self.m.reflecting("stock_watch"))
+        self.m.reflect_start = lambda work, name: self.starts.append((work, name))
+        self.assertEqual(self.m.run_reflection("stock_watch"), mo.REFLECT_STARTED)  # nothing was left behind
+        self.starts[0][0]()
+
+
+class TakeOver(Base):
+    """Review reflectbtn r1, item 3: a page stopped mid run (Ctrl+C) leaves its holder; the next press takes
+    the lock over once that holder's process is gone, never while it runs or when it is not the page's."""
+
+    def hold(self, holder):
+        self.assertTrue(scheduler.Scheduler(self.db, str(self.dir / "ascent.db"), when=None, holder=holder)
+                        ._lock(__import__("time").time()))
+
+    def test_the_holder_names_this_machine_and_this_process(self):
+        self.lose()
+        self.m.run_reflection("stock_watch")
+        kind, agent, host, pid, token = self.held_by().split(":")
+        self.assertEqual((kind, agent, host, pid), ("page", "stock_watch", socket.gethostname(), str(os.getpid())))
+        self.assertEqual(len(token), 8)
+        self.starts[0][0]()
+
+    def test_a_holder_whose_process_is_gone_is_taken_over(self):
+        self.lose()
+        self.hold(page_holder("sales", dead_pid()))
+        self.assertEqual(self.m.run_reflection("stock_watch"), mo.REFLECT_STARTED)
+        self.assertTrue(self.held_by().startswith(f"page:stock_watch:{socket.gethostname()}:{os.getpid()}:"))
+        self.starts[0][0]()
+        self.assertIsNone(self.held_by())
+
+    def test_a_live_or_other_holder_still_waits(self):
+        self.lose()
+        gone = dead_pid()
+        for held in (page_holder("sales", os.getpid()), page_holder("sales", os.getppid()),
+                     page_holder("sales", gone, host="another-machine"), f"page:sales:{gone}",
+                     f"{socket.gethostname()}:{gone}:abcd1234", "whatsapp:1", page_holder("sales", 0)):
+            with self.subTest(held=held):
+                self.hold(held)
+                with self.assertRaises(mo.Refused) as e:
+                    self.m.run_reflection("stock_watch")
+                self.assertEqual(str(e.exception), mo.REFLECT_LOCKED)
+                self.assertEqual((self.starts, self.held_by()), ([], held))
+                with self.db.tx() as c:
+                    c.execute("DELETE FROM night_lock")
+
+    def test_gone_and_ours(self):
+        gone = dead_pid()
+        self.assertTrue(reflect_now.gone(page_holder("a", gone)))
+        self.assertTrue(reflect_now.gone(reflect_now.holder("a").replace(f":{os.getpid()}:", f":{gone}:")))
+        for held in (page_holder("a", os.getpid()), page_holder("a", gone, "elsewhere"), page_holder("a", "x1"),
+                     page_holder("a", "١٢"), page_holder("a", 10 ** 30), None, "", "page:a:b"):
+            with self.subTest(held=held):
+                self.assertFalse(reflect_now.gone(held))
+        self.assertTrue(reflect_now.ours(reflect_now.holder("a")))
+        self.assertFalse(reflect_now.ours(page_holder("a", gone)))
+        self.assertFalse(reflect_now.ours(f"{socket.gethostname()}:{os.getpid()}:abcd1234"))  # a night's, not a page's
+
+
+class ArenaWaits(Base):
+    """Review reflectbtn r1, item 4: Run the Arena does not start while a night holds the night lock."""
+
+    def setUp(self):
+        super().setUp()
+        self.m.arena_models = lambda: (tap.raises, tap.raises, tap.raises)
+        self.arena_starts = []
+        self.m.arena_start = lambda work, name: self.arena_starts.append(name)
+
+    def hold(self, holder, at=None):
+        import time
+        self.assertTrue(scheduler.Scheduler(self.db, str(self.dir / "ascent.db"), when=None, holder=holder)
+                        ._lock(time.time() if at is None else at))
+
+    def test_a_night_holding_the_lock_stops_it(self):
+        for held in ("whatsapp:1", f"{socket.gethostname()}:{os.getpid() + 1}:abcd1234",
+                     page_holder("sales", os.getppid())):
+            with self.subTest(held=held):
+                self.hold(held)
+                with self.assertRaises(mo.Refused) as e:
+                    self.m.run_arena("stock_watch")
+                self.assertEqual(str(e.exception), mo.ARENA_LOCKED)
+                self.assertEqual(self.arena_starts, [])
+                self.assertNotIn("stock_watch", self.m._arenas)
+                with self.db.tx() as c:
+                    c.execute("DELETE FROM night_lock")
+        self.assertEqual(self.m.run_arena("stock_watch"), mo.ARENA_STARTED)  # free: it starts
+
+    def test_this_pages_own_reflection_a_gone_page_or_a_stale_lock_does_not(self):
+        import time
+        for held, at in ((page_holder("sales", os.getpid()), None), (page_holder("sales", dead_pid()), None),
+                         ("whatsapp:1", time.time() - scheduler.STALE - 1)):
+            with self.subTest(held=held):
+                self.hold(held, at)
+                self.assertEqual(self.m.run_arena("stock_watch"), mo.ARENA_STARTED)
+                self.m._arenas.discard("stock_watch")
+                with self.db.tx() as c:
+                    c.execute("DELETE FROM night_lock")
+        self.assertEqual(len(self.arena_starts), 3)
+
+    def test_with_no_lock_table_yet_it_starts(self):
+        self.assertEqual(self.m.run_arena("stock_watch"), mo.ARENA_STARTED)
+        self.assertEqual(self.arena_starts, ["arena-stock_watch"])
+
+
+class HandNight(NightSetup):
+    """Review reflectbtn r1, item 4: python3 -m reflection.night run by hand takes the night lock, so it never
+    runs beside the scheduled night or a Run reflection, and lets it go when it ends, however it ends. A night
+    the scheduler started runs under its parent's lock."""
+
+    def setUp(self):
+        super().setUp()
+        self.env()
+
+    def holder(self):
+        db = Db(str(self.db_path))
+        try:
+            return scheduler.live_holder(db, __import__("time").time())
+        finally:
+            db.close()
+
+    def hold(self, holder):
+        db = Db(str(self.db_path))
+        try:
+            self.assertTrue(scheduler.Scheduler(db, str(self.db_path), when=None, holder=holder)
+                            ._lock(__import__("time").time()))
+        finally:
+            db.close()
+
+    def watching(self, seen):
+        real = night.night
+
+        def study(*a, **k):
+            seen.append(self.holder())
+            return real(*a, **k)
+        return mock.patch.object(night, "night", study)
+
+    def test_it_holds_the_lock_while_it_runs_and_lets_it_go(self):
+        seen = []
+        with self.watching(seen):
+            code, out, err = self.run_main()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(seen), 1)
+        self.assertTrue(seen[0].startswith(f"{socket.gethostname()}:{os.getpid()}:"), seen)
+        self.assertIsNone(self.holder())
+
+    def test_a_held_lock_stops_it_before_the_study(self):
+        for held in ("whatsapp:1", page_holder("stock_watch", os.getpid())):
+            with self.subTest(held=held):
+                self.hold(held)
+                seen = []
+                with self.watching(seen):
+                    code, out, err = self.run_main()
+                self.assertEqual(code, 2)
+                self.assertIn(f"Not run: {night.NIGHT_LOCKED}.", err)
+                self.assertEqual((seen, out, self.net.seen), ([], "", []))
+                self.assertEqual(list(self.dir.glob("night-*.json")), [])
+                self.assertEqual(self.holder(), held)
+                db = Db(str(self.db_path))
+                with db.tx() as c:
+                    c.execute("DELETE FROM night_lock")
+                db.close()
+
+    def test_a_night_the_scheduler_started_runs_under_its_lock(self):
+        parent = f"{socket.gethostname()}:{os.getppid()}:abcd1234"
+        self.hold(parent)
+        seen = []
+        with self.watching(seen):
+            code, out, err = self.run_main()
+        self.assertEqual(code, 0, err)
+        self.assertEqual((seen, self.holder()), ([parent], parent))  # the scheduler's to let go
+
+    def test_a_night_that_raises_lets_the_lock_go(self):
+        with mock.patch.object(night, "night", side_effect=KeyboardInterrupt), self.assertRaises(KeyboardInterrupt):
+            self.run_main()
+        self.assertIsNone(self.holder())
+
+
+IDEA_LINE = "Say whether the item is in stock in the first reply."
+POOL_LINE = "When a customer asks about stock, say whether the item is there first."
+KEPT_LINE = "Name the item back to the customer before the stock answer."
+
+
+def _head(prompt):
+    return prompt.split("{")[0]
+
+
+class Teacher(tap.World):
+    """tap.World for the exam, its judge and the rerun's customer and agent, and for the study: the idea part
+    writes one lesson, the risk judge says low, the shared pool writer gives a pattern line and the other study
+    parts find nothing. calls: the World's sides; study: the study parts'."""
+
+    def __init__(self):
+        super().__init__()
+        self.study = {"idea": 0, "risk": 0, "writer": 0, "other": 0}
+
+    @property
+    def total(self):
+        return sum(self.calls.values()) + sum(self.study.values())
+
+    def chat(self, messages, tools=None, effort="medium", max_tokens=1500, whole=False):
+        system = messages[0]["content"]
+        if system.startswith(_head(parts.IDEA)):
+            self.study["idea"] += 1
+            return say(json.dumps([{"lesson": IDEA_LINE, "situation": "Any stock question.", "stages": ["all"]}]))
+        if system.startswith(_head(judge_mod.SYSTEM)):
+            self.study["risk"] += 1
+            return say("low")
+        if system.startswith(_head(shared_mod.PROMPT)):
+            self.study["writer"] += 1
+            return say(json.dumps({"pattern": POOL_LINE}))
+        if system.startswith(tuple(_head(p) for p in (parts.PROPOSE, parts.TAG, parts.FIT, parts.ADAPT, parts.SPOT,
+                                                       parts.NOTE))):
+            self.study["other"] += 1
+            return say("[]")
+        return super().chat(messages, tools=tools, effort=effort, max_tokens=max_tokens, whole=whole)
+
+
+class OneCount(Base):
+    """Review reflectbtn r1, items 5 and 6: a run that writes a lesson takes the full exam, and every call of
+    it lands once in the day's count: the exam's, its judge's, the Arena rerun's, the risk judge's and the
+    shared pool writer's."""
+
+    def setUp(self):
+        super().setUp()
+        tte.with_exam(self.folder)
+        raw = json.loads((self.folder / "plug.json").read_text())
+        raw["owner"] = "mona"  # the owner's folder above the agent names it, so the agent gives to the pool
+        (self.folder / "plug.json").write_text(json.dumps(raw))
+        (self.dir / "agents" / "owner.json").write_text(json.dumps({"owner": "mona"}))
+        self.m.plugs["stock_watch"] = turn.load(self.folder).plug
+        self.teacher = Teacher()
+        self.m.reflection_models = lambda: {"study": self.teacher, "open": self.teacher, "exam": self.teacher}
+
+    def calls_file(self):
+        return run_mod.state_dir(self.dir / "ascent.db") / run_mod.CALLS_FILE
+
+    def lose(self, n=2):
+        """As Base.lose, the won matches with the practice prompt's fingerprint and a persona card, as practice
+        saves them, so the gate reruns them."""
+        from arena import practice
+        super().lose(n)
+        path = self.folder / "arena-matches.jsonl"
+        rows = [json.loads(line) for line in path.read_text().splitlines()]
+        path.write_text("".join(json.dumps(dict(r, prompt_sha=practice.PROMPT_SHA, persona=tap.PEOPLE[0]) if r["won"] else r) + "\n"
+                                for r in rows))
+
+    def test_a_written_lesson_takes_the_full_exam_and_every_call_counts_once(self):
+        self.lose()
+        kept_lesson(EngineLessons(self.db, self.m.plugs["stock_watch"]), KEPT_LINE, ["all"], yes_by="test",
+                    skip_exam=True)
+        self.calls_file().write_text(json.dumps({"day": run_mod.today(), "calls": 7}))
+        self.m.run_reflection("stock_watch")
+        self.starts[0][0]()
+        self.assertIsNone(self.m.reflect_note("stock_watch"))
+        done = self.m.reflected("stock_watch")
+        rep = json.loads((self.dir / done["file"]).read_text())
+        self.assertEqual(len(done["cards"]), 1, rep["notes"])
+        self.assertEqual(rep["cards"][0]["change"], IDEA_LINE)
+        self.assertGreaterEqual(rep["exam"]["runs"], 1)
+        t = self.teacher
+        self.assertEqual(t.study["idea"], 1)
+        self.assertGreaterEqual(t.study["risk"], 1)    # the risk judge
+        self.assertGreaterEqual(t.study["writer"], 1)  # the shared pool writer, on the kept lesson
+        self.assertGreater(t.calls["agent"], 0)        # the exam's
+        self.assertGreater(t.calls["judge"], 0)        # the exam's judge and the rerun's
+        exam = EngineLessons(self.db, self.m.plugs["stock_watch"]).exam_of(done["cards"][0])
+        self.assertEqual(json.loads(exam["parts"]).get("arena"), [2, 2])  # the rerun of its two past wins
+        self.assertEqual(json.loads(self.calls_file().read_text())["calls"], 7 + t.total)
+        self.assertEqual(done["calls"], t.total)
+
+    def test_the_built_agents_rerun_counts_once_on_the_runs_calls(self):
+        self.lose()
+        calls = run_mod.Calls(self.calls_file(), run_mod.DEFAULT_CAP)
+        make = night.agent_exam(self.m.plugs["stock_watch"], str(self.dir / "ascent.db"), folder=self.folder,
+                                model=self.teacher, calls=calls)
+        result = make(EngineLessons(self.db, self.m.plugs["stock_watch"]))(IDEA_LINE, ("all",))
+        self.assertTrue(result.passed, result.rows)
+        self.assertEqual(result.parts().get("arena"), [2, 2])  # the rerun played its two past wins
+        self.assertEqual(calls.taken, self.teacher.total)
+        self.assertEqual(json.loads(self.calls_file().read_text())["calls"], self.teacher.total)
+
+
+class Shopper:
+    """The Sales side of one fake: the reveal judge answers no, the rerun's customer is a Buyer, every other
+    call is the Seller (the exam's agent and the rerun's)."""
+
+    def __init__(self):
+        self.seller, self.buyer, self.reveal = Seller(), Buyer(), 0
+
+    @property
+    def total(self):
+        return len(self.seller.calls) + len(self.buyer.calls) + self.reveal
+
+    def chat(self, messages, tools=None, effort="medium", max_tokens=1500, whole=False):
+        system = messages[0]["content"]
+        if system == scope.REVEAL_JUDGE:
+            self.reveal += 1
+            return say(json.dumps({"gives": False, "why": "a decline"}))
+        side = self.buyer if system.startswith("You are a customer") else self.seller
+        return side.chat(messages, tools=tools, effort=effort, max_tokens=max_tokens, whole=whole)
+
+
+class SalesCount(Base):
+    """Review reflectbtn r1, items 5 and 6, for the Sales agent: its full exam's reveal judge and its Arena
+    rerun take each call from the run's count."""
+
+    def test_the_full_exam_and_its_reveal_judge_count(self):
+        calls = run_mod.Calls(run_mod.state_dir(self.dir / "ascent.db") / run_mod.CALLS_FILE, run_mod.DEFAULT_CAP)
+        fake = Shopper()
+        make = night.agent_exam(SALES, str(self.dir / "ascent.db"), model=fake, calls=calls)
+        result = make(SalesLessons(self.db))(tag.LESSON, ("all",))
+        self.assertGreater(result.calls, 0)
+        self.assertGreater(fake.reveal, 0)
+        self.assertEqual(calls.taken, fake.total)
+        self.assertEqual(json.loads(calls.path.read_text())["calls"], fake.total)
+
+    def test_the_rerun_lands_in_the_runs_count(self):
+        (run_mod.state_dir(self.dir / "ascent.db") / run_mod.MATCHES_FILE).write_text(json.dumps(tag.past()) + "\n")
+        calls = run_mod.Calls(run_mod.state_dir(self.dir / "ascent.db") / run_mod.CALLS_FILE, run_mod.DEFAULT_CAP)
+        fake = Shopper()
+        made = []
+
+        def passes(plug, *, kept=None, model=None, count=False, judge_model=None):
+            made.append((model, judge_model))
+            return lambda text, tags: engine_exam.Result(passed=True, rows=[engine_exam.Row(1, "s1", "guard", True, "")],
+                                                         calls=0)
+        with mock.patch.object(exam_mod, "Examiner", passes):
+            result = night.agent_exam(SALES, str(self.dir / "ascent.db"), model=fake, calls=calls)(None)(
+                tag.LESSON, ("all",))
+        self.assertEqual([r.part for r in result.rows], ["guard", "arena"])  # the exam passed, so the rerun ran
+        self.assertGreater(len(fake.buyer.calls), 0)  # on the run's model
+        self.assertEqual(calls.taken, fake.total)
+        model, judge = made[0]
+        for m in (model, judge):
+            before = calls.taken
+            m.chat([{"role": "system", "content": "x"}, {"role": "user", "content": "y"}])
+            self.assertEqual(calls.taken, before + 1)  # the exam's and the reveal judge's model, counted
 
 
 class Script(unittest.TestCase):

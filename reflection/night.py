@@ -99,6 +99,8 @@ never prints a key: a part that fails is named in the notes by its plain reason 
 """
 import argparse
 import json
+import os
+import socket
 import sys
 import time
 from pathlib import Path
@@ -316,40 +318,42 @@ class Counted:
         return result
 
 
-def sales_exam(plug, db=None, *, model=None):
+def sales_exam(plug, db=None, *, model=None, calls=None):
     """The exam main() gives the night: the Sales agent's examiner on Muse Spark Open, when the plug
     is the Sales agent's and names an exam; None otherwise (another agent's exam has no binding yet).
     db: the agent's database path; the Arena wins the gate reruns are the ones saved next to it.
     Always the full exam: what it passes can reach real customers (the scoped one is the Arena's).
-    model: the exam's and its reveal judge's model (Run reflection hands one taken from the day's call
-    count, reflection/reflect_now.py); None makes a new one for each."""
+    model: the exam's, its reveal judge's and the Arena rerun's model; None makes a new one for each.
+    calls: a call count already open (Run reflection's, reflection/reflect_now.py): the exam and its
+    reveal judge take each call from it, and so does the rerun (arena/gate.py Fresh), once."""
     if plug.exam is None or plug.agent != SALES.agent:
         return None
     from reflection import exam as exam_mod
     from arena import gate  # the eval gate: the exam, then the Arena rerun of past wins (DECISIONS item 8)
+    counted = model if model is None or calls is None else calls.model(model)
     # count=True: the gate also counts the cases each lesson fixed and broke (DECISIONS item 27)
     # judge_model: the reveal judge of the instructions situation (reflection/exam.py reveal_judge), on the same key
-    return lambda lessons: gate.wrap(exam_mod.Examiner(plug, kept=lessons, model=model or model_mod.Model(), count=True,
-                                                       judge_model=model or model_mod.Model()),
-                                     lessons, db=db)
+    return lambda lessons: gate.wrap(exam_mod.Examiner(plug, kept=lessons, model=counted or model_mod.Model(),
+                                                       count=True, judge_model=counted or model_mod.Model()),
+                                     lessons, db=db, agent_model=model, customer_model=model, calls=calls)
 
 
-def agent_exam(plug, db=None, folder=None, *, model=None):
+def agent_exam(plug, db=None, folder=None, *, model=None, calls=None):
     """The exam the night and the Morning page give an agent: the Sales agent's (sales_exam), else the
     exam of an agent Quick start built (reflection/turn_exam.py binding: its folder, or
     <db folder>/agents/<agent>, wrapped in the Arena rerun of its past practice wins); None for an agent
-    with no exam. model: as sales_exam's, the built agent's exam and judge model too."""
+    with no exam. model and calls: as sales_exam's, for the built agent's exam, its judge and its rerun too."""
     if model is None:  # the night's and the page's own: each part makes its model
         made = sales_exam(plug, db)
         if made is not None:
             return made
         from reflection import turn_exam
         return turn_exam.binding(plug, folder=folder, db=db)
-    made = sales_exam(plug, db, model=model)
+    made = sales_exam(plug, db, model=model, calls=calls)
     if made is not None:
         return made
     from reflection import turn_exam
-    return turn_exam.binding(plug, folder=folder, db=db, model=model, judge_model=model)
+    return turn_exam.binding(plug, folder=folder, db=db, model=model, judge_model=model, calls=calls)
 
 
 def built_folder(plug, plug_path):
@@ -632,6 +636,46 @@ def _causes(left):
     return (" (" + ", ".join(f"{k} {v}" for k, v in sorted(by.items())) + ")") if by else ""
 
 
+NIGHT_LOCKED = ("a night of learning is running on this database now (the scheduled night, Run reflection on the "
+                "page or another night run by hand); run it again once it ends")
+
+
+class HandLock:
+    """The night lock a night run by hand holds (hand_lock), on its own connection; release() lets it go."""
+
+    def __init__(self, db, lock):
+        self.db, self.lock = db, lock
+
+    def release(self):
+        try:
+            self.lock._unlock()
+        finally:
+            self.db.close()
+
+
+def hand_lock(db_path, now=None):
+    """The night lock (reflection/scheduler.py night_lock) for a night run by hand, so it never runs beside
+    the scheduled night or a Run reflection on the same database, and they wait for it: a HandLock to
+    release when the night ends, NIGHT_LOCKED when another holds it, or None for a night the scheduler
+    started (the server's scheduler, this process's parent, holds the lock for it)."""
+    from reflection import scheduler
+    db = Db(db_path)
+    try:
+        now = time.time() if now is None else float(now)
+        lock = scheduler.Scheduler(db, db_path, when=None)
+        held = scheduler.live_holder(db, now)
+        if held is not None and held.startswith(f"{socket.gethostname()}:{os.getppid()}:"):
+            db.close()
+            return None
+        if not lock._lock(now):
+            db.close()
+            return NIGHT_LOCKED
+    except BaseException:
+        db.close()
+        raise
+    return HandLock(db, lock)
+
+
 def main(argv=None, *, until=None):
     """until: the window's end; --until gives it on the command line (the night scheduler does), the
     clock when neither is given (tests give a fixed one)."""
@@ -677,6 +721,19 @@ def main(argv=None, *, until=None):
     except Refused as e:
         print(f"Not run: {e}.", file=sys.stderr)
         return 2
+    held = hand_lock(args.db)
+    if isinstance(held, str):
+        print(f"Not run: {held}.", file=sys.stderr)
+        return 2
+    try:
+        return _studied(args, plug, folder, state, until)
+    finally:
+        if held is not None:
+            held.release()
+
+
+def _studied(args, plug, folder, state, until):
+    """main's night once its checks passed and it holds the night lock: the study, the report and its lines."""
     db = Db(args.db)
     try:
         now = time.time() if until is None else float(until)

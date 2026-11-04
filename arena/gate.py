@@ -415,20 +415,21 @@ class FreshTurn(Fresh):
 
 
 def wrap_turn(examiner, kept, *, agent, state, reports, agent_model=None, customer_model=None, judge_model=None,
-              cap=run_mod.DEFAULT_CAP):
+              cap=run_mod.DEFAULT_CAP, calls=None):
     """A built agent's examiner with the Arena rerun of its past practice wins after it (FreshTurn):
     state, the agent's folder (arena-matches.jsonl, arena/practice.py); reports, the folder beside the
-    database (arena-calls.json)."""
+    database (arena-calls.json). calls: a call count already open (Run reflection's), the rerun's models
+    given as they are, so each rerun call counts once, on it; None counts on a new one on reports."""
     return FreshTurn(examiner, kept, agent=agent, state=state, reports=reports, agent_model=agent_model,
-                     customer_model=customer_model, judge_model=judge_model, cap=cap)
+                     customer_model=customer_model, judge_model=judge_model, cap=cap, calls=calls)
 
 
-def wrap(examiner, kept, *, db, agent_model=None, customer_model=None, cap=run_mod.DEFAULT_CAP):
+def wrap(examiner, kept, *, db, agent_model=None, customer_model=None, cap=run_mod.DEFAULT_CAP, calls=None):
     """The examiner with the Arena rerun after it (Fresh), reading the past wins next to the
     agent's database (db, its path; arena/run.py state_dir: the matches, the call count and the
     stuck item live there, never in a shared temp folder) at each exam; the examiner as it is when
-    db is None (an in-memory database has no folder)."""
+    db is None (an in-memory database has no folder). calls: as wrap_turn's."""
     if db is None or str(db) == ":memory:":
         return examiner
     return Fresh(examiner, kept, state=run_mod.state_dir(db), agent_model=agent_model, customer_model=customer_model,
-                 cap=cap)
+                 cap=cap, calls=calls)

@@ -340,6 +340,23 @@ class Scheduler:
         with self.db.tx() as c:
             c.execute("DELETE FROM night_lock WHERE id = 1 AND holder = ?", (self.holder,))
 
+    def _take_over(self, old, now):
+        """Take the lock from old, the holder it was seen with (a Run reflection whose process is gone,
+        reflection/reflect_now.py gone). True when it was still old's and is now this one's."""
+        with self.db.tx() as c:
+            return c.execute("UPDATE night_lock SET holder = ?, at = ? WHERE id = 1 AND holder = ?",
+                             (self.holder, now, old)).rowcount == 1
+
+
+def live_holder(db, now, stale=STALE):
+    """Who holds the night lock on db now: its holder, or None when the lock is free, older than stale (the
+    next taker takes it over) or never made."""
+    with db.tx() as c:
+        if c.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'night_lock'").fetchone() is None:
+            return None
+        row = c.execute("SELECT holder FROM night_lock WHERE id = 1 AND at > ?", (now - float(stale),)).fetchone()
+    return None if row is None else row[0]
+
 
 def start(db, db_path, stop=None):
     """The scheduler's thread for a running service, started; None when NIGHT_HOUR is off or it

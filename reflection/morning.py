@@ -556,9 +556,11 @@ REFLECT_CAP = ("The day's model call cap has no room left, so nothing was starte
                "Cairo time.")
 REFLECT_TWICE = "Reflection is running for this agent already. What it did shows here when it ends."
 REFLECT_ARENA = "The Arena is running for this agent. Run reflection once it ends."
-REFLECT_LOCKED = ("A night of learning is running on this database now, the scheduled night or another agent's. "
-                  "Run reflection once it ends.")
+REFLECT_LOCKED = ("A night of learning is running on this database now: the scheduled night, one run by hand or "
+                  "another agent's reflection. Run reflection once it ends.")
 ARENA_REFLECTING = "Reflection is running for this agent. Run the Arena once it ends."
+ARENA_LOCKED = ("A night of learning is running on this database now, the scheduled night or one run by hand. "
+                "Run the Arena once it ends.")
 REFLECT_STARTED = "Reflection is running. Its steps show here; it takes a few minutes."
 
 
@@ -920,8 +922,11 @@ class Morning:
         made here against made-up customers, with its sample data, in a background thread, so the page
         returns at once and its Arena tab polls the progress. Refused for any other agent (the Sales agent
         runs through arena/run.py), when a run goes for the agent already, when the day's model call cap
-        has no room, or with no model key. Each lost match becomes a case the night studies, as after
-        Build (QuickStart._practise). Its item saves beside the database and shows on the Arena tab."""
+        has no room, with no model key, or while a night holds the night lock on this database (the
+        scheduled night or one run by hand; this page's own Run reflection of another agent does not stop
+        it). It takes no lock itself, so a night that starts after it runs beside it. Each lost match becomes
+        a case the night studies, as after Build (QuickStart._practise). Its item saves beside the database
+        and shows on the Arena tab."""
         from arena import retry as retry_mod, run as run_mod
         folder = self.agent_folder(agent)
         if agent == SALES.agent or folder is None or folder.is_symlink() or not folder.is_dir():
@@ -934,6 +939,10 @@ class Morning:
             if not model_mod.has_key():
                 raise Refused("No model key is set, so the Arena cannot play. Put META_API_KEY or "
                               "BASETEN_API_KEY in .env and start the page again.")
+        from reflection import reflect_now, scheduler
+        held = scheduler.live_holder(self.db, time.time())
+        if held is not None and not reflect_now.ours(held) and not reflect_now.gone(held):
+            raise Refused(ARENA_LOCKED)
         with self._arena_lock:
             if agent in self._arenas:
                 raise Refused("The Arena is running for this agent already. Its matches show here as it plays.")
@@ -1046,7 +1055,8 @@ class Morning:
         one made here. Refused for an agent not on the page, with no database folder, with no model key,
         when the day's model call cap has no room, with no lost chats, while a Run the Arena or a Run
         reflection goes for the agent, and while the night lock is held (the scheduled night or another
-        Run reflection on this database). The lock is held until the run ends, so the scheduled night waits."""
+        Run reflection on this database). The lock is held until the run ends, so the scheduled night waits. A
+        holder left by a page stopped mid run (Ctrl+C) is taken over once its process is gone (reflect_now.gone)."""
         from arena import retry as retry_mod, run as run_mod
         from reflection import reflect_now, scheduler
         if not isinstance(agent, str) or agent not in self.plugs or agent not in self.lessons:
@@ -1075,9 +1085,12 @@ class Morning:
                 raise Refused(REFLECT_ARENA)
             db = Db(db_path)  # its own connection: the page's answers keep theirs
             try:
-                lock = scheduler.Scheduler(db, db_path, when=None, holder=f"{reflect_now.PAGE_HOLDER}:{agent}:"
-                                                                          f"{secrets.token_hex(4)}")
-                held = lock._lock(time.time())
+                lock = scheduler.Scheduler(db, db_path, when=None, holder=reflect_now.holder(agent))
+                at = time.time()
+                held = lock._lock(at)
+                if not held:  # a page stopped mid run leaves its holder: taken over once that process is gone
+                    old = scheduler.live_holder(db, at)
+                    held = old is not None and reflect_now.gone(old) and lock._take_over(old, at)
             except Exception:
                 db.close()
                 raise

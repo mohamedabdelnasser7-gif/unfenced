@@ -39,6 +39,22 @@ class EntryPoint(unittest.TestCase):
                 entry.main(["--db", "other.db"])  # a named database is the page's to refuse
                 self.assertFalse(db.exists())
 
+    def test_help_the_sample_days_or_a_file_make_no_database(self):
+        """Review reflectbtn r1, mutant M11: only the page on its own database makes one."""
+        import unfenced.__main__ as entry
+        with tempfile.TemporaryDirectory() as d:
+            db = Path(d) / "data" / "ascent.db"
+            with mock.patch.object(entry, "DEFAULT_PATH", db), mock.patch.object(mo, "main", return_value=0) as page, \
+                    mock.patch("builtins.print"):
+                for argv in (["-h"], ["--help"], ["--html", "out.html"], ["--demo-days", "d"], ["--db=x.db"],
+                             ["--assistant-state", "s", "-h"]):
+                    with self.subTest(argv=argv):
+                        self.assertEqual(entry.main(list(argv)), 0)
+                        page.assert_called_with(argv)
+                        self.assertFalse(db.exists())
+                self.assertEqual(entry.main(["--assistant-state", "s"]), 0)  # another option: the page's own database
+                self.assertTrue(db.is_file())
+
 
 if __name__ == "__main__":
     unittest.main()

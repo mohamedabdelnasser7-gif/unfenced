@@ -91,11 +91,12 @@ are arena/run.py's, as before.
 The test set is kept (fixed_test). The first run's test ids are saved in the agent's folder,
 test-set.json beside card.json, each with the card fingerprint of the person it names, and later runs
 hold out the same people. A customer with a training match on record (any match in
-arena-matches.jsonl that is not a test match, a quick run's too) is never a test customer, so when the
-level is raised (10 to 20 test customers) or the saved ones are short, new customers that never
-trained fill the gap, and the writer writes more when too few are left. Saved test customers a smaller
-run does not need sit out (they never train). A test-set.json or a matches file that is there but
-cannot be read stops the run (fail closed).
+arena-matches.jsonl that is not a test match, a quick run's too; each match saved says which it is) is
+never a test customer, so when the level is raised (10 to 20 test customers) or the saved ones are
+short, new customers that never trained fill the gap, and the writer writes more when too few are
+left. Saved test customers a smaller run does not need sit out (they never train). A test-set.json or a matches file that is there but
+cannot be read, a line of it that cannot be read, or a matches file deleted while test-set.json is
+there stops the run (fail closed).
 """
 import argparse
 import hashlib
@@ -415,7 +416,7 @@ class Practice(run.Arena):
         self.unread = 0
         judged["failed_check"] = failed_check(judged)  # counted per gate round (arena/run.py Arena.run)
         m.update(id=match_id, won=judged["won"], why=judged["why"], quote=judged["quote"], persona=card,
-                 prompt_sha=self.prompt_sha, prompt_file=None)
+                 prompt_sha=self.prompt_sha, prompt_file=None, **{TEST_KEY: not training})
         if not judged["won"] and training:  # only practice matches: the item's lost, what Try again plays (81)
             self.lost.append({"id": match_id, "card": m["card"], "why": judged["why"], "quote": judged["quote"]})
         self.state.mkdir(parents=True, exist_ok=True)
@@ -567,6 +568,7 @@ def _whole(size):
 TEST_FILE = "test-set.json"
 MAX_TEST_FILE = 64 * 1024
 _TEST_MATCH = re.compile(r"-r\d+-g\d+$")  # a test match's id ends -r<round>-g<k> (arena/run.py Arena.run)
+TEST_KEY = "test_match"  # on every match Practice saves: true for a test match, false for a training match
 _ANY = object()  # a training match whose saved person names no card fingerprint: the id counts whatever it is
 
 
@@ -615,6 +617,11 @@ def write_test(folder, entries):
     if path.is_symlink():
         raise run.Refused(f"the agent's {TEST_FILE} is a link")
     text = json.dumps({"test": [{"id": i, "from_card": f} for i, f in entries]}, ensure_ascii=False) + "\n"
+    matches = folder / run.MATCHES_FILE  # there from now on, so a deleted one is told from a first run (trained)
+    if matches.is_symlink():
+        raise run.Refused("the agent's saved matches are a link")
+    if not matches.exists():
+        os.close(os.open(matches, os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0), 0o644))
     tmp = folder / f".{TEST_FILE}.{secrets.token_hex(4)}.tmp"
     try:
         with open(tmp, "x", encoding="utf-8") as f:
@@ -627,29 +634,42 @@ def write_test(folder, entries):
 
 def trained(folder):
     """{(card id, fingerprint)} of every match on record in the folder's arena-matches.jsonl that is not a
-    test match: the people that played a training match (a quick run's too). A line
-    that cannot be read is skipped, as every reader of the file does; a file that is there but cannot
-    be read is run.Refused (fail closed)."""
-    path = Path(folder) / run.MATCHES_FILE
+    test match: the people that played a training match (a quick run's too). A test match is one whose
+    line says so (TEST_KEY true, written with each match) and whose id is a test match's; any other line,
+    one written before TEST_KEY was too, counts as training, so no line can hide a training match.
+    run.Refused (fail closed, before any model call) when the file is a link or not a plain file, cannot
+    be read or holds a line that is not a match (never skipped), and when it is gone while test-set.json
+    is there (write_test makes it with the test set, so it was deleted)."""
+    folder = Path(folder)
+    path = folder / run.MATCHES_FILE
     if not path.exists() and not path.is_symlink():
+        if (folder / TEST_FILE).exists() or (folder / TEST_FILE).is_symlink():
+            raise run.Refused(f"the agent's saved matches are gone while its {TEST_FILE} is there, so the run did "
+                              "not start; they say which customers trained, and a test customer never has")
         return set()
+    bad = run.Refused("the agent's saved matches cannot be read, so the run did not start; they say "
+                      "which customers trained, and a test customer never has")
+    if path.is_symlink() or not path.is_file():
+        raise bad
     out = set()
     try:
-        with open(path, encoding="utf-8") as f:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with open(fd, encoding="utf-8") as f:
             for line in f:
+                if not line.strip():
+                    continue
                 try:
                     m = json.loads(line)
                 except (ValueError, RecursionError):
-                    continue
+                    raise bad from None
                 if not isinstance(m, dict) or not isinstance(m.get("card"), str):
-                    continue
-                if isinstance(m.get("id"), str) and _TEST_MATCH.search(m["id"]):
+                    raise bad
+                if m.get(TEST_KEY) is True and isinstance(m.get("id"), str) and _TEST_MATCH.search(m["id"]):
                     continue
                 who = m.get("persona")
                 out.add((m["card"], who.get("from_card", _ANY) if isinstance(who, dict) else _ANY))
     except (OSError, UnicodeDecodeError):
-        raise run.Refused("the agent's saved matches cannot be read, so the run did not start; they say "
-                          "which customers trained, and a test customer never has") from None
+        raise bad from None
     return out
 
 

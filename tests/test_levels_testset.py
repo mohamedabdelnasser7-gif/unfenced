@@ -13,10 +13,11 @@ from tests.test_customers_shape import Base, Writer
 
 def recorded_play(log, won=False):
     """Practice.play with no model that saves each match in the agent's matches file as the real one
-    does (its id, the card id and the person), so the training on record is real."""
+    does (its id, the card id, the person and whether it was a test match), so the training on record
+    is real."""
     def play(self, card, match_id, *, opening=None, lessons=None, replay=None, training=False):
         log.append((match_id, card["id"]))
-        m = {"id": match_id, "card": card["id"], "won": won, "persona": card}
+        m = {"id": match_id, "card": card["id"], "won": won, "persona": card, practice.TEST_KEY: not training}
         self.state.mkdir(parents=True, exist_ok=True)
         with open(self.state / run.MATCHES_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(m) + "\n")
@@ -106,6 +107,93 @@ class Kept(Base):
         os.symlink(folder / "card.json", folder / practice.TEST_FILE)
         with self.assertRaises(run.Refused):
             self.practise(name, 20, 10)
+
+
+class TrainedOnRecord(Base):
+    """trained reads who trained from a field each match carries, and fails closed (red team levels r2
+    item 2): a link, a line that cannot be read, or a matches file deleted beside test-set.json stops
+    the run before any model call; a line without the field counts as training."""
+    def setUp(self):
+        super().setUp()
+        self.dir = self.root / "one"
+        self.dir.mkdir()
+
+    def lines(self, *rows):
+        (self.dir / run.MATCHES_FILE).write_text("".join(
+            (r if isinstance(r, str) else json.dumps(r)) + "\n" for r in rows), encoding="utf-8")
+
+    def test_a_test_match_is_one_its_line_says_is(self):
+        self.lines({"id": "a-r1-g01", "card": "persona-01", "persona": {"from_card": "F"}, practice.TEST_KEY: True},
+                   {"id": "a-r1-t01", "card": "persona-02", "persona": {"from_card": "F"}, practice.TEST_KEY: False},
+                   {"id": "a-r1-g02", "card": "persona-03", "persona": {"from_card": "F"}},  # an old line
+                   {"id": "a-r1-t02", "card": "persona-04", "persona": {"from_card": "F"}, practice.TEST_KEY: True},
+                   {"id": "a-r1-g03", "card": "persona-05", "persona": {"from_card": "F"}, practice.TEST_KEY: "yes"},
+                   "   ")
+        self.assertEqual(practice.trained(self.dir), {("persona-02", "F"), ("persona-03", "F"), ("persona-04", "F"),
+                                                       ("persona-05", "F")})
+
+    def test_a_line_that_cannot_be_read_stops_it(self):
+        good_line = {"id": "a-r1-t01", "card": "persona-01", practice.TEST_KEY: False}
+        for bad in ('{"id": "a-r1-t02", "card"', "[1]", json.dumps({"id": "a-r1-t03", "card": 3}),
+                    json.dumps({"id": "a-r1-t04"})):
+            with self.subTest(bad=bad):
+                self.lines(good_line, bad)
+                with self.assertRaises(run.Refused) as got:
+                    practice.trained(self.dir)
+                self.assertIn("cannot be read", str(got.exception))
+
+    def test_a_link_or_a_folder_is_refused(self):
+        real = self.root / "elsewhere.jsonl"
+        real.write_text(json.dumps({"id": "a-r1-t01", "card": "persona-01"}) + "\n", encoding="utf-8")
+        os.symlink(real, self.dir / run.MATCHES_FILE)
+        with self.assertRaises(run.Refused):
+            practice.trained(self.dir)
+        (self.dir / run.MATCHES_FILE).unlink()
+        (self.dir / run.MATCHES_FILE).mkdir()
+        with self.assertRaises(run.Refused):
+            practice.trained(self.dir)
+
+    def test_a_matches_file_deleted_beside_the_test_set_stops_it(self):
+        self.assertEqual(practice.trained(self.dir), set())  # a first run: neither file
+        practice.write_test(self.dir, [("persona-01", "F")])
+        self.assertTrue((self.dir / run.MATCHES_FILE).is_file())  # made with the test set
+        self.assertEqual(practice.trained(self.dir), set())
+        (self.dir / run.MATCHES_FILE).unlink()
+        with self.assertRaises(run.Refused) as got:
+            practice.trained(self.dir)
+        self.assertIn("gone", str(got.exception))
+
+
+class FailClosedRun(Base):
+    practise = Kept.practise
+
+    def test_a_bad_line_or_a_deleted_matches_file_stops_the_run_before_any_model_call(self):
+        name = "support_calm_helper"
+        folder = self.folders[name]
+        self.practise(name, 20, 10)
+        path = folder / run.MATCHES_FILE
+        before = path.read_text(encoding="utf-8")
+        for text in (before + "not json\n", None):
+            with self.subTest(deleted=text is None):
+                if text is None:
+                    path.unlink()
+                else:
+                    path.write_text(text, encoding="utf-8")
+                writer = Writer()
+                with self.assertRaises(run.Refused):
+                    self.practise(name, 20, 10, writer=writer)
+                self.assertEqual(writer.asks, [])
+
+    def test_an_old_test_line_without_the_field_counts_as_training(self):
+        name = "coffee_caption_writer"
+        first = self.practise(name, 20, 10)
+        folder = self.folders[name]
+        gone = first["held_out_cards"][0]
+        card = json.loads((folder / madeup.FOLDER / f"{gone}.json").read_text(encoding="utf-8"))
+        with open(folder / run.MATCHES_FILE, "a", encoding="utf-8") as f:  # a training match given a test id
+            f.write(json.dumps({"id": "x-r1-g01", "card": gone, "persona": card}) + "\n")
+        second = self.practise(name, 20, 10)
+        self.assertNotIn(gone, second["held_out_cards"])
 
 
 class FixedTest(Base):

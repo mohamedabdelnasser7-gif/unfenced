@@ -322,6 +322,7 @@ class Gate(Base):
         shutil.rmtree(self.folders[name] / madeup.FOLDER, ignore_errors=True)
         for p in self.folders[name].glob("arena-*"):
             p.unlink()
+        (self.folders[name] / practice.TEST_FILE).unlink(missing_ok=True)  # its test set went with its matches
 
     def test_no_repeat_within_a_gate_round_when_fewer_matches_than_test_customers(self):
         rep, log, _ = self.practise("support_calm_helper", 30, 20, rounds=3)  # the public level: 10 matches

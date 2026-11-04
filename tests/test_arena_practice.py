@@ -140,6 +140,15 @@ class Base(unittest.TestCase):
 
 
 class EndToEnd(Base):
+    def test_each_saved_match_says_whether_it_was_a_test_match(self):
+        code, rep = self.main("--matches", "2", "--json")
+        self.assertEqual(code, 0, self.err)
+        ms = self.matches()
+        self.assertTrue(ms)
+        for m in ms:
+            self.assertIs(m[practice.TEST_KEY], m["id"].rsplit("-", 1)[-1].startswith("g"), m["id"])
+        self.assertEqual({m[practice.TEST_KEY] for m in ms}, {True, False})
+
     def test_a_fixture_plug_practises_and_writes_the_files_a_sales_run_writes(self):
         code, rep = self.main("--matches", "2", "--json")
         self.assertEqual(code, 0, self.err)

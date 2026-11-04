@@ -1,15 +1,14 @@
-"""Part G of the losses work (owner decision 103): a built agent with real customers gets fast notes too,
-by the one path the Sales agent has. reflection/fast.py notes_for gives the engine's notes with fast
-reflection's writer and guard for an agent whose plug names a bad deciding result, and none for one that
-names none; kit/turn.py reads the note once a turn through sales/loop.py fast_note and puts it last in the
-prompt under the same heading; a note that cannot be read never stops the reply; the channel's sweep runs
-built agents' notes beside the Sales agent's. Made-up text and a fake model; no network."""
+"""Part G of the losses work: kit/turn.py reads a built agent's fast note once a turn through sales/loop.py
+fast_note, the one path the Sales agent has, and puts it last in the prompt under fast reflection's heading;
+a note that cannot be read, or is not text, never stops the reply. The Arena's quick notes are the only
+notes a built agent gets today: no channel runs a built agent for real customers, so the built agent notes
+and their channel sweep were taken out (reviewer losses round 1, finding 3). Made-up text and a fake model;
+no network."""
 import json
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 from arena import match as match_mod
 from channels import whatsapp as wa
@@ -34,10 +33,6 @@ class Model:
     def chat(self, messages, tools=None, effort="medium", max_tokens=1500, whole=False):
         self.systems.append(messages[0]["content"])
         return say("Thanks for writing. Here is what happens next.")
-
-
-def writer(plug, view):
-    return NOTE
 
 
 class BuiltNotes(unittest.TestCase):
@@ -71,68 +66,59 @@ class BuiltNotes(unittest.TestCase):
         self.assertEqual(out.outcome, "replied")
         return model.systems[0]
 
-    def test_a_built_agent_gets_the_note_after_a_lost_case_and_loses_it_when_the_next_case_ends(self):
+    def test_the_note_goes_last_under_the_heading_in_every_turn(self):
         agent = self.agent()
-        db, chats, log = self.world(agent)
-        notes = fast_mod.notes_for(db, agent, chats=chats, writer=writer)
-        self.assertIsInstance(notes, fast_mod.AgentNotes)
-        first = chats.open(turn.CHANNEL, "cust-1")
-        log.act(first, "reply", result="replied", source="cust-1")
-        log.result(first, ENDED, source="cust-1")
-        wrote = notes.sweep()
-        self.assertEqual([(w["text"], w["why"]) for w in wrote], [(NOTE, None)])
-        nxt = chats.open(turn.CHANNEL, "cust-1")
-        system = self.reply(agent, chats, nxt, notes)
-        self.assertTrue(system.endswith(fast_mod.HEADING + "\n- " + NOTE), system[-200:])  # last, same heading
-        self.assertIn(NOTE, self.reply(agent, chats, nxt, notes))  # in every turn of that next case
-        self.assertNotIn(NOTE, self.reply(agent, chats, chats.open(turn.CHANNEL, "cust-2"), notes, who="cust-2"))
-        log.act(nxt, "reply", result="replied", source="cust-1")
-        log.result(nxt, "answered", source="cust-1")  # the next case ends: the note is gone
-        self.assertNotIn(fast_mod.HEADING, self.reply(agent, chats, nxt, notes))
+        _, chats, _ = self.world(agent)
 
-    def test_an_agent_with_no_bad_result_gets_none(self):
-        agent = self.agent(bad=False)
-        db, chats, _ = self.world(agent)
-        self.assertIsNone(fast_mod.notes_for(db, agent, chats=chats, writer=writer))
-        self.assertNotIn(fast_mod.HEADING, self.reply(agent, chats, chats.open(turn.CHANNEL, "cust-1"), None))
+        class Notes:
+            def for_prompt(self, case_id, now=None):
+                return fast_mod.HEADING + "\n- " + NOTE
+        chat = chats.open(turn.CHANNEL, "cust-1")
+        system = self.reply(agent, chats, chat, Notes())
+        self.assertTrue(system.endswith(fast_mod.HEADING + "\n- " + NOTE), system[-200:])  # last, same heading
+        self.assertIn(NOTE, self.reply(agent, chats, chat, Notes()))
+        self.assertNotIn(fast_mod.HEADING, self.reply(agent, chats, chat, None))
 
     def test_a_note_that_cannot_be_read_never_stops_the_reply(self):
         agent = self.agent()
         _, chats, _ = self.world(agent)
 
         class Broken:
-            def for_prompt(self, case_id, now=None, source=None):
+            def for_prompt(self, case_id, now=None):
                 raise RuntimeError("down")
         self.assertNotIn(fast_mod.HEADING, self.reply(agent, chats, chats.open(turn.CHANNEL, "cust-1"), Broken()))
 
-    def test_notes_that_cannot_be_set_up_are_left_off(self):
+    def test_a_note_that_is_not_text_is_left_out(self):
         agent = self.agent()
-        with mock.patch.object(fast_mod, "AgentNotes", side_effect=RuntimeError("no table")):
-            self.assertIsNone(fast_mod.notes_for(None, agent))
+        _, chats, _ = self.world(agent)
 
-    def test_the_guard_is_fast_reflections_over_the_agents_own_plug(self):
-        agent = self.agent()
-        db, chats, _ = self.world(agent)
-        notes = fast_mod.notes_for(db, agent, chats=chats, writer=writer)
-        self.assertEqual(notes.never, fast_mod.never_for(agent.plug.risk))
-        self.assertIsNotNone(notes.known)  # it has the store tool: the store's words may be named
+        class Odd:
+            def for_prompt(self, case_id, now=None):
+                return [NOTE]
+        self.assertNotIn(NOTE, self.reply(agent, chats, chats.open(turn.CHANNEL, "cust-1"), Odd()))
 
 
-class ChannelSweep(unittest.TestCase):
-    def test_built_agents_notes_are_swept_beside_the_sales_agents(self):
+class FastNote(unittest.TestCase):
+    def test_only_text_comes_back(self):
+        from sales import loop
+
         class Notes:
             def __init__(self, got):
                 self.got = got
 
-            def sweep(self):
+            def for_prompt(self, chat_id):
                 if isinstance(self.got, Exception):
                     raise self.got
                 return self.got
-        app = wa.App.__new__(wa.App)
-        app.fast, app.built_fast = Notes([{"case": "1"}]), [Notes(RuntimeError("down")), Notes([{"case": "2"}])]
-        self.assertEqual(app.sweep_once(), [{"case": "1"}, {"case": "2"}])
-        app.fast, app.built_fast = None, []
-        self.assertEqual(app.sweep_once(), [])
+        self.assertEqual(loop.fast_note(Notes("a note"), 1), "a note")
+        for got in (None, ["a note"], 7, {"note": "a note"}, RuntimeError("down")):
+            with self.subTest(got=got):
+                self.assertEqual(loop.fast_note(Notes(got), 1), "")
+        self.assertEqual(loop.fast_note(None, 1), "")
+
+    def test_the_channel_has_no_built_agent_notes(self):
+        self.assertFalse(hasattr(fast_mod, "AgentNotes") or hasattr(fast_mod, "notes_for"))
+        self.assertNotIn("built_fast", wa.App.__init__.__code__.co_varnames)
 
 
 if __name__ == "__main__":

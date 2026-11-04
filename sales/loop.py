@@ -136,15 +136,14 @@ def system_prompt(stage, picked, note=""):
     return {"role": "system", "content": "\n\n".join(parts)}
 
 
-def fast_note(fast, chat_id, source=None):
+def fast_note(fast, chat_id):
     """Fast reflection's note for this chat's prompt, or "". Never raises: a note that cannot be
-    read is left out and the turn goes on. The one path every agent reads its note by (Sales here,
-    a built agent in kit/turn.py). source: who the case comes from, for notes kept by source (a built
-    agent's, reflection/fast.py AgentNotes); left out, as Sales has it."""
+    read, or that is not text, is left out and the turn goes on. The one path every agent reads its
+    note by (Sales here, a built agent's Arena quick notes in kit/turn.py)."""
     if fast is None:
         return ""
     try:
-        got = fast.for_prompt(chat_id) if source is None else fast.for_prompt(chat_id, source=source)
+        got = fast.for_prompt(chat_id)
         return got if isinstance(got, str) else ""
     except Exception:
         log.exception("could not read the fast note; the turn goes on without it")

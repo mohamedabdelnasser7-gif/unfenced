@@ -474,7 +474,11 @@ class SalesRun(unittest.TestCase):
         self.go(self.arena(writer, Model(), matches=30))
         ids = [c for c, _ in self.opened]
         self.assertEqual(len(writer.asked(scope.WRITER)), 1)
-        self.assertEqual([i for i, c in enumerate(ids) if c.startswith(scope.PREFIX)], [9])
+        # matches in a group play side by side, so the open order inside a group is not fixed: read the match id
+        off = [kw.get("seed") for (c, _), kw in zip(self.opened, self.kws) if c.startswith(scope.PREFIX)]
+        self.assertEqual(len(off), 1)
+        self.assertTrue(str(off[0]).endswith("-r1-t10"), off)
+        self.assertEqual(sum(1 for c in ids if c.startswith(scope.PREFIX)), 1)
         self.assertEqual([k for k in range(1, 41) if scope.slot(k)], [10])
 
     def test_main_plays_it_only_with_models_it_made(self):

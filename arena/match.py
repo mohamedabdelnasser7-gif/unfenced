@@ -257,12 +257,14 @@ def _tool_results(chats, chat_id, start):
 
 
 def play(card, *, agent_model, customer_model, prompt=GENERIC_PROMPT, lessons=None, seed=0, max_turns=MAX_TURNS,
-         opening=None, checker=None, stop=None, fast=None):
+         opening=None, checker=None, stop=None, fast=None, on_turn=None):
     """Play one match. lessons: what loop.turn hands (reflection/exam.py _Lessons shape); None hands
     none. opening: a customer first line to use as it is (the replay and the rerun), else the
     persona writes it. checker(reply, customer_text, tool_results, orders) -> [failed checks].
     stop(turns) -> True ends the match there (ended "sign": the sale closed). fast: the run's quick
-    note after a loss (arena/notes.py), handed to loop.turn. Returns the match dict."""
+    note after a loss (arena/notes.py), handed to loop.turn. on_turn(turns): called with the turns so far
+    after each turn (arena/live.py Watch, the live chat on the agent page); an error in it never stops the
+    match (told). Returns the match dict."""
     from reflection.exam import _Lessons  # the exam's lesson hand: the new line first, then the kept ones
     hand = lessons if lessons is not None else _Lessons(None, None)
     customer = Customer(card, customer_model, prompt, seed)
@@ -300,6 +302,7 @@ def play(card, *, agent_model, customer_model, prompt=GENERIC_PROMPT, lessons=No
                               "tools": [name for name, _ in ran], "failed": failed, "order": bool(made),
                               **why_of(results, chat_id, seen, customer.lines + [line],
                                        (*store.titles(), *store.vocabulary()))})
+                told(on_turn, turns)
                 if made:
                     order, ended = made, "order"
                     break
@@ -324,6 +327,17 @@ def play(card, *, agent_model, customer_model, prompt=GENERIC_PROMPT, lessons=No
     if error is not None:
         m["error"] = error
     return m
+
+
+def told(on_turn, turns):
+    """on_turn(a copy of turns), when given; whatever it raises is caught and left, so a live view that
+    fails never changes a match."""
+    if on_turn is None:
+        return
+    try:
+        on_turn(list(turns))
+    except Exception:
+        pass
 
 
 def _last_row(results, chat_id):

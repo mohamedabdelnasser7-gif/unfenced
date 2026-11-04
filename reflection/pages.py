@@ -106,14 +106,22 @@ if(q(document,'[data-live="thread"]'))window.scrollTo(0,document.body.scrollHeig
 # policy only: while a run goes it fetches the page again with the X-Poll header, as the build page does, and
 # swaps each part marked data-live (arena, reflect) and data-running until its run is over; when that part is
 # gone (Overview once an Arena run is saved), and when a reflection ends (its lessons show elsewhere on the
-# page too), it loads the page again.
+# page too), it loads the page again. A swap keeps each Correct this (data-keep) that is open, holds text or has
+# the focus, as it is, and each chat (details data-chat) open or closed as the user left it.
 ARENA_SCRIPT = """(function(){
 var T=2000;function q(d,s){return d.querySelector(s)}
+function byKey(el,a,v){var xs=el.querySelectorAll('['+a+']');for(var i=0;i<xs.length;i++)if(xs[i].getAttribute(a)===v)return xs[i];return null}
+function swap(el,n){var keep=[],ks=el.querySelectorAll('[data-keep]'),op={},cs=el.querySelectorAll('details[data-chat]'),j,o,t;
+for(j=0;j<ks.length;j++){o=ks[j];t=o.querySelector('textarea');if(o.open||(t&&t.value)||o.contains(document.activeElement))keep.push(o)}
+for(j=0;j<cs.length;j++)op[cs[j].getAttribute('data-chat')]=cs[j].open;
+el.innerHTML=n.innerHTML;
+for(j=0;j<keep.length;j++){o=byKey(el,'data-keep',keep[j].getAttribute('data-keep'));if(o)o.replaceWith(keep[j]);else(el.querySelector('.tiles')||el).appendChild(keep[j])}
+cs=el.querySelectorAll('details[data-chat]');for(j=0;j<cs.length;j++){t=cs[j].getAttribute('data-chat');if(op.hasOwnProperty(t))cs[j].open=op[t]}}
 function poll(){var els=document.querySelectorAll('[data-live][data-running]');if(!els.length)return;
 fetch(location.href,{headers:{'X-Poll':'1'},credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.text():null}).then(function(t){if(!t)return;
 var d=new DOMParser().parseFromString(t,'text/html');for(var i=0;i<els.length;i++){var el=els[i],k=el.getAttribute('data-live'),n=q(d,'[data-live="'+k+'"]');
 if(!n||(k==='reflect'&&!n.hasAttribute('data-running'))){location.reload();return}
-el.innerHTML=n.innerHTML;if(!n.hasAttribute('data-running'))el.removeAttribute('data-running')}}).catch(function(){}).then(function(){
+swap(el,n);if(!n.hasAttribute('data-running'))el.removeAttribute('data-running')}}).catch(function(){}).then(function(){
 if(q(document,'[data-live][data-running]'))setTimeout(poll,T)})}
 setTimeout(poll,T)})();"""
 
@@ -1185,7 +1193,8 @@ def arena_tab(m, view, a, agent, st, ctx):
     side = arena_live(m, agent, "side") if able else ""
     sub = "Where it slipped"
     if running and hasattr(m, "arena_so_far"):  # the matches as they land, polled
-        tiles, retry, sub = so_far_tiles(so), "", SO_FAR_SUB
+        fix = c if c["token"] and agent in getattr(m, "lessons", {}) else None  # Correct this, as arena_parts
+        tiles, retry, sub = so_far_tiles(so, agent, fix), "", SO_FAR_SUB
     # one grid (page_css .arg): the correction box and the practice matches in the main column, the risk level
     # and the dark card in the side column, both from the same top line; one column on a phone
     return (f'<div class="qs arq"><div{top}>{track}{go}{learn}</div><div class="arg"><div class="arg-c">{card}</div>'
@@ -1420,21 +1429,70 @@ def running_pill(said):
             f'{h(said)}</span></span></div>')
 
 
-SO_FAR_SUB = "Played so far, newest first"
+SO_FAR_SUB = "Playing now on top, then played so far, newest first"
+PLAYING = "Playing"
+PLAYING_BADGE = f'<span class="pulse" aria-hidden="true"></span>{PLAYING}'
+CHAT_TURN_ROOM = 1500  # characters of one line shown in a live chat bubble
 
 
-def so_far_tiles(so):
-    """The running Run the Arena's matches so far (Morning.arena_so_far), newest first, in the saved run's tile
-    markup: won or lost and its one line why, with no Correct this while it runs. For the screen only: the gate
-    reads the saved run, never these."""
+def chat_bubbles(turns):
+    """A match's turns as a chat: the customer's line on one side, each agent reply on the other, escaped,
+    dir auto (Arabic and English alike); a turn with no reply says so."""
+    rows = []
+    for t in turns or []:
+        if not isinstance(t, dict):
+            continue
+        said = t.get("customer") if isinstance(t.get("customer"), str) and t["customer"].strip() else t.get("input")
+        if isinstance(said, str) and said.strip():
+            rows.append(f'<p class="said me" dir="auto">{h(said[:CHAT_TURN_ROOM])}</p>')
+        replies = [r for r in (t.get("replies") or []) if isinstance(r, str) and r.strip()]
+        for r in replies:
+            rows.append(f'<p class="said ag" dir="auto">{h(r[:CHAT_TURN_ROOM])}</p>')
+        if not replies:
+            out = str(t.get("outcome") or "").replace("_", " ").strip()
+            said_why = f" ({h(out)})" if out and out != "no reply" else ""
+            rows.append(f'<p class="said nil">No reply{said_why}.</p>')  # never .no, the round button's class
+    return f'<div class="thread">{"".join(rows)}</div>' if rows else ""
+
+
+def so_far_tiles(so, agent=None, fix_ctx=None):
+    """The running Run the Arena's matches (Morning.arena_so_far), for the screen only (the gate reads the saved
+    run, never these). On top the matches playing now, a Playing badge and the chat so far, turn by turn; then
+    the ones judged, newest first, Won or Lost with the one line why and the chat in a fold (open for Lost,
+    closed for Won). Every tile has Correct this (fix_ctx given: the page's token and the agent's lessons), the
+    same correction as the page's box (Morning.correct, the hotfix), the match id on it only as context."""
+    so = so or {}
     tiles = []
-    for x in (so or {}).get("rows") or []:
+
+    def fix(mid):
+        return correct_this(fix_ctx, agent, fix_ctx, keep=mid) if fix_ctx is not None and agent else ""
+
+    def head(who, about, res):
+        return (f'<div class="t-h"><span class="pav">{icon("chat")}</span><div><b>{h(who)}</b><small>'
+                f'{h(about)}</small></div><span class="res">{res}</span></div>')
+
+    live = [x for x in so.get("live") or [] if isinstance(x, dict) and isinstance(x.get("id"), str)]
+    for x in live:
+        if x.get("status") == "finished":
+            continue
+        chat = chat_bubbles(x.get("turns")) or '<p class="quiet">Its first line is on the way.</p>'
+        tiles.append(f'<article class="tile live" data-match="{h(x["id"])}">'
+                     f'{head(x.get("who") or "Practice case", x.get("about") or "", PLAYING_BADGE)}'
+                     f'<div class="lc">{chat}</div>{fix(x["id"])}</article>')
+    done = [x for x in live if x.get("status") == "finished"][::-1]
+    for x in done + [r for r in so.get("rows") or [] if isinstance(r, dict) and isinstance(r.get("won"), bool)]:
+        mid = str(x.get("id") or "")
         why = x.get("why") if isinstance(x.get("why"), str) else ""
-        res, cls = ("Won", "won") if x["won"] else ("Lost", "lost")
+        won = x.get("won") is True
+        res, cls = ("Won", "won") if won else ("Lost", "lost")
         line = f'<p class="persona" dir="auto">{h(_cap(" ".join(why.split())[:200]))}.</p>' if why.strip() else ""
-        tiles.append(f'<article class="tile {cls}"><div class="t-h"><span class="pav">{icon("chat")}</span><div>'
-                     f'<b>Practice case</b><small>Made up for the Arena</small></div><span class="res">{res}</span>'
-                     f'</div>{line}</article>')
+        turns = [t for t in x.get("turns") or [] if isinstance(t, dict)]
+        chat = chat_bubbles(turns)
+        fold = (f'<details class="lc" data-chat="{h(mid)}"{"" if won else " open"}><summary>The chat, '
+                f'{_plural(len(turns), "turn")}</summary>{chat}</details>') if chat else ""
+        tiles.append(f'<article class="tile {cls}" data-match="{h(mid)}">'
+                     f'{head(x.get("who") or "Practice case", x.get("about") or "Made up for the Arena", res)}'
+                     f'{line}{fold}{fix(mid) if mid else ""}</article>')
     return "".join(tiles) or ('<div class="ghost"><span class="pav" aria-hidden="true"></span>Its first matches are '
                               'starting.</div>')
 
@@ -2061,13 +2119,15 @@ def _cap(t):
     return t[:1].upper() + t[1:]
 
 
-def correct_this(ctx, agent, fix_ctx=None):
+def correct_this(ctx, agent, fix_ctx=None, keep=None):
     """Correct this, under a reply the agent lost a practice match on: the same correction as the box on
     the agent's page (Morning.correct, a hotfix through the short exam), sent from beside the reply it
     is about; the answer shows on the agent's page, on the same demo day or Live tab (ctx["q"]), so the
-    correction runs on the database the user was looking at."""
-    return (f'<details class="fix"><summary>{icon("loop")}Correct this</summary><form method="post" action="/correct">'
-            f'{_hidden(fix_ctx or dict(ctx, path=f"/agents/{agent}"), agent=agent)}<div class="box"><textarea name="line" '
+    correction runs on the database the user was looking at. keep: a live match's id, sent as context only
+    (Morning.correct never reads it) and marked data-keep, so the page's poll never wipes it (ARENA_SCRIPT)."""
+    mark, more = (f' data-keep="{h(keep)}"', {"match": keep}) if keep else ("", {})
+    return (f'<details class="fix"{mark}><summary>{icon("loop")}Correct this</summary><form method="post" action="/correct">'
+            f'{_hidden(fix_ctx or dict(ctx, path=f"/agents/{agent}"), agent=agent, **more)}<div class="box"><textarea name="line" '
             f'aria-label="What it should do here" placeholder="What should it do here?" maxlength="{mo.MAX_LEN}" '
             f'dir="auto" required></textarea></div><div class="say-f"><p class="quiet">{SAY_NOTE}</p>'
             f'<button class="send" type="submit">Send{icon("arrow")}</button></div></form></details>')

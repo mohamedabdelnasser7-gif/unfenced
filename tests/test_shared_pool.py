@@ -8,6 +8,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from reflection import shared
@@ -358,6 +359,24 @@ class PoolTest(unittest.TestCase):
         with self.assertRaises(shared.Refused):
             shared.Pool("support", self.root).add(shared.LESSON, CLEAN_EN, OWNER_C, "k6")
         self.assertEqual(path.read_bytes(), before)
+
+    def test_a_file_that_cannot_be_read_is_never_written_over(self):
+        path, data = self.two_shared()
+        good = path.read_bytes()
+        cases = {"out of shape": b'{"kind": "support", "patterns": {}}', "not json": b"{not json",
+                 "a list": b"[]", "cut short": good[:len(good) // 2], "oversize": good}
+        for name, raw in cases.items():
+            with self.subTest(name):
+                path.write_bytes(raw)
+                with mock.patch.object(shared, "MAX_FILE", len(good) - 1 if name == "oversize" else shared.MAX_FILE):
+                    pool = shared.Pool("support", self.root)
+                    self.assertTrue(pool.broken)
+                    with self.assertRaises(shared.Refused):
+                        pool.add(shared.LESSON, CLEAN_EN, OWNER_C, "k9")
+                self.assertEqual(path.read_bytes(), raw)
+        path.unlink()
+        self.assertFalse(shared.Pool("support", self.root).broken)  # no file yet is a fresh pool
+        self.assertGreaterEqual(shared.MAX_FILE, shared.MAX_PATTERNS * shared.MAX_OWNERS * 51)
 
     def test_rows_copied_to_another_kind_do_not_verify(self):
         path, data = self.two_shared()

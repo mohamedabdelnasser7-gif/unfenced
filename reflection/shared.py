@@ -79,7 +79,7 @@ KEY_FILE = "owner-key"
 OWNER_ID_FILE = "owner-id"  # in an owner's state folder: the id the pool counts it by
 SHARED_DIR = "shared"
 POOL_AGENT = "shared_pool"  # the name the study's notes and links give the pool
-MAX_FILE = 5_000_000
+MAX_FILE = 32_000_000  # MAX_PATTERNS rows of MAX_OWNERS sealed owners (48 hex) and MAX_KEYS keys fit
 HASH = re.compile(r"[0-9a-f]{32}")
 SEALED = re.compile(r"([0-9a-f]{32})([0-9a-f]{16})")  # an owner in the file: its hash, then its seal
 PID = re.compile(r"[0-9a-f]{12}")
@@ -434,15 +434,17 @@ class Pool:
     # reading and writing
 
     def _read(self):
-        data = {}
+        data, failed = {}, False
         if self.path.is_symlink():
             raise Refused("the pool file is a link")
-        try:
-            if self.path.is_file() and self.path.stat().st_size <= MAX_FILE:
-                data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError, RecursionError):
-            data = {}
-        data = data if isinstance(data, dict) else {}
+        if self.path.exists():  # there but oversize, unreadable or out of shape: a broken read
+            try:
+                failed = not self.path.is_file() or self.path.stat().st_size > MAX_FILE
+                data = {} if failed else json.loads(self.path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, RecursionError):
+                data, failed = {}, True
+            if not isinstance(data, dict) or not isinstance(data.get("patterns", []), list):
+                data, failed = {}, True
         if data.get("kind", self.kind) != self.kind:
             raise Refused("the pool file is for another kind of agent")
         rows = [p for p in (data.get("patterns") or [])[:MAX_PATTERNS] if _pattern_ok(p)]
@@ -450,7 +452,7 @@ class Pool:
         # the read is broken, and add() writes nothing rather than wipe the pool
         key = self._secret(make=False)
         self.patterns = [p for p in (self._unsealed(p) for p in rows) if p is not None] if key else []
-        self.broken = bool(rows) and not self.patterns
+        self.broken = failed or bool(rows) and not self.patterns
         for p in self.patterns:
             p["words"] = words(p["text"])
         keys = data.get("keys")
@@ -506,8 +508,8 @@ class Pool:
         with self._locked():
             self._read()
             if self.broken:
-                raise Refused("the pool file has patterns none of which the shared folder's key sealed; nothing is "
-                              "written")
+                raise Refused("the pool file could not be read, or none of its patterns was sealed by the shared "
+                              "folder's key; nothing is written")
             if kh not in self.keys:
                 self.keys.append(kh)
             if reasons:

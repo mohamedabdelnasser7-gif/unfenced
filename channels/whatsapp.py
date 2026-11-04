@@ -681,6 +681,8 @@ def main():
     from sales import loop
     loop.warn_size_prices()
     db = Db()
+    from kit import added
+    added.use(DEFAULT_PATH)  # the rows and offers added for the Sales agent on its page sit beside this database
     pnid = env.get("WHATSAPP_PHONE_NUMBER_ID")
     graph = Graph(env.get("WHATSAPP_TOKEN"), pnid, env.get("GRAPH_API_VERSION", GRAPH_VERSION_DEFAULT))
     # The Meta risk judge on Muse Spark Open. It fails closed: with no key, an error or an odd

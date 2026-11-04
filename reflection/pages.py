@@ -1110,16 +1110,24 @@ def overview_tab(m, view, a, agent, st, ctx):
         left.append(connections_html(agent, conns, ctx, tok))
     folder = m.agent_folder(agent) if hasattr(m, "agent_folder") else None
     kit = getattr(m, "case_kit", lambda a: None)(agent) if folder is not None else None
-    if kit is not None:  # a repo agent on the built path (decision 109): its own data line, no rows box, no offers
-        left.append(f'<section class="grp sq" aria-labelledby="sd-h"><h3 id="sd-h">{h(kit.DATA_HEAD)}</h3>'
-                    f'<div class="lr"><b>{h(kit.DATA_LINE)}</b></div></section>')
-    elif folder is not None:  # an agent made here: its sample data and the box that adds to it
-        data = m.sample_data(agent)
-        line = sample_mod.words(data) or "No sample data yet. Add rows it can work from."
-        using = f"<small>{USING_SAMPLE}</small>" if using_sample(folder, data) else ""
+    takes = folder is not None or getattr(m, "takes_data", lambda a: False)(agent)
+    said = None if takes else getattr(m, "data_line", lambda a: None)(agent)
+    if said:  # a repo agent nothing here reads added data for (Marketing): its Sample data line only, no boxes
         left.append(f'<section class="grp sq" aria-labelledby="sd-h"><h3 id="sd-h">Sample data</h3><div class="lr">'
-                    f'<b dir="auto">{h(line)}</b>{using}<small>Made up for practice until a real connection is set.</small>'
-                    '</div></section>')
+                    f'<b dir="auto">{h(said)}</b></div></section>')
+    if takes:  # an agent made here, an example, the assistant (decision 109) or the Sales agent: its data, the boxes
+        data = m.sample_data(agent)
+        mine = sample_mod.words(data)
+        if kit is not None:  # its own data line (its mailbox and calendar), then any rows added to its folder
+            line = f"{kit.DATA_LINE} {mine}" if mine else kit.DATA_LINE
+        elif folder is None:  # the Sales agent: the store data's line, with the rows added for it
+            line = m.data_line(agent)
+        else:
+            line = mine or "No sample data yet. Add rows it can work from."
+        using = f"<small>{USING_SAMPLE}</small>" if folder is not None and using_sample(folder, data) else ""
+        made = "" if folder is None else "<small>Made up for practice until a real connection is set.</small>"
+        left.append(f'<section class="grp sq" aria-labelledby="sd-h"><h3 id="sd-h">Sample data</h3><div class="lr">'
+                    f'<b dir="auto">{h(line)}</b>{using}{made}</div></section>')
         if tok:
             left.append(data_form(ctx, agent))
         own = m.offers(agent) if hasattr(m, "offers") else None
@@ -1977,22 +1985,90 @@ def offers_list(offers):
     return '<ul class="offers">' + "".join(f'<li dir="auto">{h(offer_text(o))}</li>' for o in offers) + "</ul>"
 
 
+# The boxes' placeholders, each fitting the agent (data_hint, offer_hint): the Add data box shows its sample
+# data's columns (the first row's keys); the Add offers box an example offer for the kind of work on its card.
+DATA_HINT = "name, details, notes"           # no rows and nothing on its card to go by
+STORE_DATA_HINT = "name, price, stock"       # a card with the store need and no rows yet
+SALES_DATA_HINT = "title, size, price, stock"  # the Sales agent: its store tool reads added rows as products
+MAX_HINT_KEYS = 5
+OFFER_HINT = "What it is; its terms; when it fits"
+SALES_OFFER_HINT = "10% off a second pair; on two pairs in one order; when they want two"
+OFFER_HINTS = (  # the first whose words are on the card wins, so homes and meals come before a store
+    (r"apartment|flat|propert|rent|real estate|viewing|listing", "Free second viewing; on a booked viewing; this week"),
+    (r"dinner|meal|recipe|grocer|food|menu|cook", "A cheaper swap; the same meal on a tighter budget; "
+                                                 "when the week runs over budget"),
+    (r"appointment|booking|clinic|salon|lesson|course|tutor|class|trainer|gym",
+     "A free first session; on a first booking; this month"),
+    (r"email|calendar|meeting|inbox|mailbox", "A short draft first; for a reply you check fast; when you are rushed"),
+    (r"store|shop|order|product|deliver|stock|sell|catalog", "Free delivery; on any order; always"),
+)
+
+
+def _card_of(m, agent):
+    """The agent's card (card.json in its agent folder) as a dict, or {}."""
+    folder = m.agent_folder(agent) if m is not None and hasattr(m, "agent_folder") else None
+    try:
+        card = json.loads((Path(folder) / "card.json").read_text(encoding="utf-8")) if folder is not None else {}
+    except (OSError, ValueError, UnicodeDecodeError):
+        return {}
+    return card if isinstance(card, dict) else {}
+
+
+def data_hint(m, agent):
+    """The Add data box's placeholder: the agent's sample data columns (its first row's keys), else the store's
+    columns for a store need or the Sales agent, its case kit's, or DATA_HINT."""
+    data = m.sample_data(agent) if m is not None and hasattr(m, "sample_data") else None
+    rows = (data or {}).get("rows") or []
+    keys = [k for k in (rows[0]["row"] if rows else {}) if k != "text"][:MAX_HINT_KEYS]
+    if keys:
+        return ", ".join(k.replace("_", " ") for k in keys)
+    if agent == mo.SALES.agent and (m is None or m.agent_folder(agent) is None):
+        return SALES_DATA_HINT
+    kit = getattr(m, "case_kit", lambda a: None)(agent) if m is not None else None
+    if getattr(kit, "DATA_HINT", None):
+        return kit.DATA_HINT
+    needs = _card_of(m, agent).get("needs")
+    if isinstance(needs, list) and any(isinstance(n, dict) and n.get("tool") == "store" for n in needs):
+        return STORE_DATA_HINT
+    return DATA_HINT
+
+
+def offer_hint(m, agent):
+    """The Add offers box's placeholder: an example offer for the kind of work on the agent's card (its kind,
+    what it does and its case), or its case kit's; the Sales agent's for its shop; else OFFER_HINT."""
+    if agent == mo.SALES.agent and (m is None or m.agent_folder(agent) is None):
+        return SALES_OFFER_HINT
+    kit = getattr(m, "case_kit", lambda a: None)(agent) if m is not None else None
+    if getattr(kit, "OFFER_HINT", None):
+        return kit.OFFER_HINT
+    card = _card_of(m, agent)
+    case = card.get("case") if isinstance(card.get("case"), dict) else {}
+    text = " ".join(str(x) for x in (card.get("kind"), card.get("name"), card.get("does"), case.get("input"),
+                                     case.get("output")) if x).lower()
+    for words, hint in OFFER_HINTS:
+        if re.search(rf"\b(?:{words})", text):
+            return hint
+    return OFFER_HINT
+
+
 def offers_form(ctx, agent):
-    """The box that adds offers to a built agent (Morning.add_offers), cloned from the Add data box."""
+    """The box that adds offers to an agent (Morning.add_offers), cloned from the Add data box; its placeholder
+    fits the agent (offer_hint)."""
     return (f'<section class="say sq" id="add-offers" aria-label="Add offers"><form method="post" action="{mo.OFFERS_PATH}">'
             f'{_hidden(ctx, agent=agent)}<span class="lab">Add offers</span><div class="box"><textarea name="text" '
             f'aria-label="Offers to add, one a line" maxlength="{mo.MAX_OFFERS_TEXT}" dir="auto" '
-            'placeholder="Free delivery; on any order; always"></textarea></div><div class="say-f"><span></span>'
+            f'placeholder="{h(offer_hint(ctx.get("m"), agent))}"></textarea></div><div class="say-f"><span></span>'
             f'<button class="send pill" type="submit">Add{icon("arrow")}</button></div><p class="quiet">{h(OFFERS_NOTE)}'
             '</p></form></section>')
 
 
 def data_form(ctx, agent):
-    """The box that adds rows or a file to a built agent's sample data (Morning.add_data)."""
+    """The box that adds rows or a file to an agent's sample data (Morning.add_data); its placeholder is the
+    agent's own columns (data_hint)."""
     return (f'<section class="say sq" id="{DATA_ID}" aria-label="Add sample data"><form method="post" action="{mo.DATA_PATH}" '
             f'enctype="multipart/form-data">{_hidden(ctx, agent=agent)}<span class="lab">Add data</span><div class="box">'
             f'<textarea name="text" aria-label="Rows or text to add" maxlength="{sample_mod.MAX_TEXT}" dir="auto" '
-            'placeholder="name, price, stock"></textarea></div><div class="say-f"><label class="quiet pick">'
+            f'placeholder="{h(data_hint(ctx.get("m"), agent))}"></textarea></div><div class="say-f"><label class="quiet pick">'
             f'{icon("plus")}<input type="file" name="file" aria-label="A CSV or JSON file" '
             'accept=".csv,.json,.txt,text/csv,application/json,text/plain"></label><button class="send pill" type="submit">'
             f'Add{icon("arrow")}</button></div><p class="quiet">{DATA_NOTE}</p></form></section>')

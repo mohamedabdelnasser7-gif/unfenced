@@ -282,7 +282,9 @@ class LiveTab(unittest.TestCase):
         for path in PATHS:
             page = self.fetch(f"{path}?day=live")
             self.assertIn(f'class="on" href="{path}?day=live">Live<', page)
-            self.assertNotIn("Sample data", page)
+            # the sample days' label; an agent's own Sample data section (its Overview) is not it
+            self.assertNotIn('<span class="sample">Sample data</span>', page)
+            self.assertNotIn('title="Sample data"', page)
         self.assertIn("Nothing needs you today", self.fetch("/?day=live"))
         self.assertIn('href="/new?day=live">', self.fetch("/agents?day=live"))
 

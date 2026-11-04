@@ -191,12 +191,12 @@ class OffersOnThePages(PageCase):  # T10
         self.assertEqual(add(self.m, {"agent": ["stock_watcher"], "text": ["Free name tag"]}),
                          "Added 1 offer. Its next practice and its replies read them.")
         self.assertEqual(self.m.offers("stock_watcher")["offers"][-1]["id"], "own_3")
-        for agent, text, words in (("sales", "x", "Only an agent made here"), ("stock_watcher", " \n ; ", "one offer a line"),
+        for agent, text, words in (("nobody", "x", "Only an agent made here"), ("stock_watcher", " \n ; ", "one offer a line"),
                                    ("stock_watcher", "x" * (mo.MAX_OFFERS_TEXT + 1), "At most")):
             with self.assertRaises(mo.Refused) as e:
                 add(self.m, {"agent": [agent], "text": [text]})
             self.assertIn(words, str(e.exception))
-        self.assertNotIn('id="of-h"', self.p.get("/agents/sales", {}, "t"))
+        self.assertIn('id="of-h"', self.p.get("/agents/sales", {}, "t"))  # existing agents too (tests/test_agentdata.py)
 
     def report(self, **extra):
         item = dict({"agent": "sales", "run": "r1", "kind": "arena_rounds", "line": "Arena run r1.", "at": time.time(),

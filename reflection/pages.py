@@ -41,10 +41,12 @@ data (Sample on the phone bar, so every label stays on one line at 390); each da
 """
 import base64
 import hashlib
+import json
 import re
 import threading
 import time
 import urllib.parse
+from pathlib import Path
 
 from arena import levels as levels_mod
 from engine import lessons as lessons_mod
@@ -982,8 +984,9 @@ def overview_tab(m, view, a, agent, st, ctx):
     if folder is not None:  # an agent made here: its sample data and the box that adds to it
         data = m.sample_data(agent)
         line = sample_mod.words(data) or "No sample data yet. Add rows it can work from."
+        using = f"<small>{USING_SAMPLE}</small>" if using_sample(folder, data) else ""
         left.append(f'<section class="grp sq" aria-labelledby="sd-h"><h3 id="sd-h">Sample data</h3><div class="lr">'
-                    f'<b dir="auto">{h(line)}</b><small>Made up for practice until a real connection is set.</small>'
+                    f'<b dir="auto">{h(line)}</b>{using}<small>Made up for practice until a real connection is set.</small>'
                     '</div></section>')
         if tok:
             left.append(data_form(ctx, agent))
@@ -1681,6 +1684,7 @@ def case_value(label, value):
     return cut or v
 
 
+USING_SAMPLE = "This agent is using sample data, since nothing is connected yet."  # DECISIONS 107
 SAMPLE_STATE = "Sample data for now"            # a need with no real connection, read from the sample data
 STORE_SAMPLE = "Sample data until the store is connected"  # the store need with no Shopify keys
 # A step the case's end needs (reflection/quickstart.py steps) whose need is not connected: the card says,
@@ -1744,6 +1748,20 @@ def data_form(ctx, agent):
 
 def sample_line(data):
     return f'<p class="quiet sdata">{icon("note")}{h(sample_mod.words(data))}</p>' if data else ""
+
+
+def using_sample(folder, data):
+    """True when a built agent works from sample data: no need on its card is connected for real, and it has
+    sample rows or a store need (the store answers from sample data with no keys)."""
+    try:
+        card = json.loads((Path(folder) / "card.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return bool(data)
+    needs = [n for n in card.get("needs") or [] if isinstance(n, dict) and "tool" in n and "connected" in n] \
+        if isinstance(card, dict) else []
+    if any(need_state(n, data)[1] for n in needs):
+        return False
+    return bool(data) or any(n["tool"] == "store" for n in needs)
 
 
 def need_keys(tool):

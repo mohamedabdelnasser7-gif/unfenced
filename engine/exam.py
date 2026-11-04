@@ -112,6 +112,13 @@ COUNT_COLUMNS = (("fixed", "INTEGER"), ("broke", "INTEGER"), ("p_value", "REAL")
 # {situation, name, part, check, why}. NULL on a row that passed and on rows from before it.
 FAIL_COLUMNS = (("fails", "TEXT"),)
 MAX_FAILS = 10  # failed rows kept on one exam row
+# What the agent said in each situation, with the new lesson and without it, added by ensure() like the
+# counts (2026-11-04: a refused lesson can be explained from its answers): JSON, a list of {situation, name,
+# with_lesson, without_lesson}, each side cut to MAX_SAID characters. NULL when no answer had words.
+ANSWER_COLUMNS = (("answers", "TEXT"),)
+SAID = "said"  # the did key of the agent's words (answer(situation, lesson) -> did)
+MAX_SAID = 600  # characters of the agent's words kept, per situation
+MAX_ANSWERS = 40  # situations whose words one exam row keeps
 NOT_RUN = "error"  # the check name saved when the exam itself could not run
 ANSWER = "answer"  # the check name of a situation whose answer raised (engine sit)
 RERUN = "arena_rerun"  # the check name of the eval gate's Arena rerun of past wins (arena/gate.py)
@@ -136,6 +143,7 @@ class Row:
     check: str = ""
     why: str = ""
     fails: tuple = ()  # ((check, why), ...): every check that failed here, the first one first
+    said: str = field(default="", compare=False)  # the agent's words here (did[SAID]), cut to MAX_SAID
 
 
 @dataclass(frozen=True)
@@ -153,6 +161,7 @@ class Result:
     calls: int = 0
     pairs: list = field(default_factory=list)  # [Pair], the gate's counts; empty when not counted
     blocked: Row | None = None  # the row that held the lesson (judge()); None: the first failed row
+    before: list = field(default_factory=list)  # [Row], the run without the new lesson (judge()); [] when none
 
     @property
     def first(self):
@@ -262,9 +271,16 @@ def _checked(s, did, checks, names):
             why = f"the check raised: {e}"
         if why:
             fails.append((name, _one_line(why)))
+    words = _said(did)
     if not fails:
-        return Row(s["id"], s["name"], s["part"], True)
-    return Row(s["id"], s["name"], s["part"], False, fails[0][0], fails[0][1], tuple(fails))
+        return Row(s["id"], s["name"], s["part"], True, said=words)
+    return Row(s["id"], s["name"], s["part"], False, fails[0][0], fails[0][1], tuple(fails), said=words)
+
+
+def _said(did):
+    """The agent's words in one answer, cut to MAX_SAID characters; "" when it has none."""
+    v = did.get(SAID) if isinstance(did, dict) else None
+    return v[:MAX_SAID] if isinstance(v, str) else ""
 
 
 def safety_of(plug, default):
@@ -313,7 +329,7 @@ def judge(after, before, total, safety, *, calls=0, pairs=None):
         had = set() if old is None or old.check in (ANSWER, NOT_RUN) else {c for c, _ in _row_fails(old)}
         for c, w in _blocking(r, safety):
             if c in ALWAYS or w == NO_CHECK or c not in had:
-                held = Row(r.situation, r.name, r.part, False, c, w, r.fails)
+                held = Row(r.situation, r.name, r.part, False, c, w, r.fails, said=r.said)
                 break
         if held is not None:
             break
@@ -328,15 +344,16 @@ def judge(after, before, total, safety, *, calls=0, pairs=None):
             r = next((x for x in after if f"situation {x.situation}" == name), None)
             why = f"it broke {eff['broke']} situations and fixed {eff['fixed']}"
             held = Row(r.situation if r else None, r.name if r else "", r.part if r else "", False, COUNTS, why)
-    return Result(passed=held is None, rows=after, calls=calls, pairs=list(pairs), blocked=held)
+    return Result(passed=held is None, rows=after, calls=calls, pairs=list(pairs), blocked=held,
+                  before=list(before or ()))
 
 
 def _without_check(row, check):
     """row with check taken off its fails: passed when none is left."""
     fails = tuple((c, w) for c, w in _row_fails(row) if c != check)
     if not fails:
-        return Row(row.situation, row.name, row.part, True)
-    return Row(row.situation, row.name, row.part, False, fails[0][0], fails[0][1], fails)
+        return Row(row.situation, row.name, row.part, True, said=row.said)
+    return Row(row.situation, row.name, row.part, False, fails[0][0], fails[0][1], fails, said=row.said)
 
 
 def _with_check(row, check, why):
@@ -345,7 +362,7 @@ def _with_check(row, check, why):
     if check in {c for c, _ in fails}:
         return row
     fails = fails + ((check, why),)
-    return Row(row.situation, row.name, row.part, False, fails[0][0], fails[0][1], fails)
+    return Row(row.situation, row.name, row.part, False, fails[0][0], fails[0][1], fails, said=row.said)
 
 
 def _fails_check(row, check, raised):
@@ -461,7 +478,7 @@ def ensure(db):
     db.script(TABLE)
     with db.tx() as c:
         have = {r[1] for r in c.execute("PRAGMA table_info(lesson_exams)")}
-        for col, kind in COUNT_COLUMNS + FAIL_COLUMNS:
+        for col, kind in COUNT_COLUMNS + FAIL_COLUMNS + ANSWER_COLUMNS:
             if col in have:
                 continue
             try:
@@ -487,13 +504,41 @@ def save(c, agent, lesson_id, result, now=None):
                                 and r is not first]
         fails = json.dumps([{"situation": r.situation, "name": r.name, "part": r.part, "check": r.check,
                              "why": _one_line(r.why)} for r in failed][:MAX_FAILS], ensure_ascii=False)
+    said = answers(result)
+    said = json.dumps(said, ensure_ascii=False) if said else None
     c.execute("INSERT INTO lesson_exams (lesson_id, agent, passed, situation, check_name, why, calls, parts, at, "
-              "fixed, broke, p_value, effect, fails) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              "fixed, broke, p_value, effect, fails, answers) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
               (lesson_id, agent, int(result.passed), first.situation if first else None,
                first.check if first else None,
                None if first is None or first.why is None else _one_line(first.why),  # one line, capped (red team item 5)
                int(result.calls),
-               json.dumps(result.parts(), ensure_ascii=False), time.time() if now is None else now, *counts, fails))
+               json.dumps(result.parts(), ensure_ascii=False), time.time() if now is None else now, *counts, fails,
+               said))
+
+
+def answers(result):
+    """What the agent said in each situation with the new lesson (the result's rows) and without it (its before rows), each
+    cut to MAX_SAID: [{situation, name, with_lesson, without_lesson}], at most MAX_ANSWERS; a situation
+    with no words on either side is left out."""
+    before = {r.situation: r for r in getattr(result, "before", None) or () if r.situation is not None}
+    out = []
+    for r in getattr(result, "rows", None) or ():
+        old = before.get(r.situation)
+        said, had = getattr(r, "said", "") or "", getattr(old, "said", "") or ""
+        if r.situation is None or not (said or had):
+            continue
+        out.append({"situation": r.situation, "name": r.name, "with_lesson": said[:MAX_SAID],
+                    "without_lesson": had[:MAX_SAID]})
+    return out[:MAX_ANSWERS]
+
+
+def answers_of(row):
+    """The answers kept on a saved exam row (a dict from of()); [] when it has none or they cannot be read."""
+    try:
+        kept = json.loads((row or {}).get("answers") or "null")
+    except ValueError:
+        return []
+    return [k for k in kept if isinstance(k, dict)] if isinstance(kept, list) else []
 
 
 def of(c, agent, lesson_id):
@@ -564,8 +609,8 @@ def vote(rows):
     fails = tuple((c, w) for c, (n, w) in seen.items() if 2 * n > len(usable))
     first = usable[0]
     if not fails:
-        return Row(first.situation, first.name, first.part, True)
-    return Row(first.situation, first.name, first.part, False, fails[0][0], fails[0][1], fails)
+        return Row(first.situation, first.name, first.part, True, said=first.said)
+    return Row(first.situation, first.name, first.part, False, fails[0][0], fails[0][1], fails, said=first.said)
 
 
 def effect(pairs):

@@ -349,7 +349,7 @@ def _answer(s, lesson, *, model, kept=None):
             if name in tools.AMOUNT_TOOLS:
                 amounts |= send_check.amounts_in(res)
         orders = loop.order_names(chats, chat_id)
-        return {"reply": reply, "calls": m.calls, engine_exam.EMPTY: not reply.strip(),
+        return {"reply": reply, engine_exam.SAID: reply, "calls": m.calls, engine_exam.EMPTY: not reply.strip(),
                 "customer_text": msg.text, "tools": ran, "amounts": amounts, "sizes": store.size_strings(),
                 "orders": orders, "order": loop.order_made(chats, chat_id),
                 "problems": dict(send_check.named_problems(reply, msg.text, amounts, store.vocabulary(),

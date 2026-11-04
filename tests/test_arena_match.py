@@ -160,10 +160,17 @@ class Facts(unittest.TestCase):
             self.assertEqual(self.names("The Phantom 6 Elite in size 43 is available."), [])
             self.assertEqual(self.names("The Phantom 6 Pro in size 45 is sold out."), ["stock"])
             self.assertEqual(self.names("The Phantom 6 Elite in size 45 is sold out."), [])
-        # The demo store does not track stock: no level, so saying it is in stock fails as no stock data
-        # (Arena run 20261104T143545, cause 7), and saying it is out fails nothing.
-        self.assertEqual(self.names("The Phantom 6 Elite in size 45 is available."), ["stock"])
-        self.assertEqual(self.names("The Phantom 6 Elite in size 45 is sold out."), [])
+        # A store with no stock level: saying it is in stock fails as no stock data (Arena run 20261104T143545,
+        # cause 7), and saying it is out fails nothing. The demo store has one only from its sample layer.
+        store._cache.update(at=0.0, items=None)
+        self.addCleanup(store._cache.update, at=0.0, items=None)
+        with mock.patch.object(store, "DEMO_SAMPLE_STOCK", Path("/nonexistent/sample-stock.json")):
+            self.assertEqual(self.names("The Phantom 6 Elite in size 45 is available."), ["stock"])
+            self.assertEqual(self.names("The Phantom 6 Elite in size 45 is sold out."), [])
+        store._cache.update(at=0.0, items=None)
+        level = [v["stock"] for i in store.catalogue() if i["title"] == "Nike Phantom 6" for v in i["variants"]
+                 if (v["tier"], v["size"]) == ("Elite", "45")]
+        self.assertEqual(self.names("The Phantom 6 Elite in size 45 is available."), ["stock"] if level == ["out"] else [])
 
     def test_size(self):
         self.assertEqual(self.names("The Phantom 6 Elite comes in size 43."), [])

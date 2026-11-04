@@ -339,7 +339,9 @@ class StoreTest(unittest.TestCase):
             self.assertEqual({v["tier"]: v["price"] for v in variants}, tiers, title)
             for tier in tiers:
                 self.assertEqual(sorted(int(v["size"]) for v in variants if v["tier"] == tier), list(range(39, 47)))
-            self.assertFalse([v for v in variants if "stock" in v], title)   # the demo store does not track stock
+            # the demo store tracks no stock: each level comes from its sample stock layer (DECISIONS 107)
+            layer = store.sample_stock(store.DEMO_SAMPLE_STOCK)
+            self.assertEqual([v["stock"] for v in variants], [store.stock_level(layer[v["sku"]]) for v in variants])
         self.assertEqual(store.tiers(), {"Elite", "Pro", "Academy", "League"})
         printing = [i for i in items if i["type"] == "Printing"]
         self.assertEqual(len(printing), 1)

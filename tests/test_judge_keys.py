@@ -108,14 +108,16 @@ class KeyChoice(unittest.TestCase):
 
     def test_only_the_baseten_key_runs_on_baseten_with_no_fallback(self):
         env_with(self, BASETEN_API_KEY=self.b)
-        t = Transport(baseten=[http_error(BASETEN_URL, 503)])
+        # a call with no answer is asked once more on the same host (kit/model.py), so it fails twice
+        t = Transport(baseten=[http_error(BASETEN_URL, 503), http_error(BASETEN_URL, 503)])
         mdl = kit_model.Model(opener=t)
         self.assertIs(mdl.route, kit_model.OPEN)
         self.assertIsNone(mdl.fallback)
         with self.assertRaises(kit_model.ModelError) as e:
             mdl.chat(HI)
-        self.assertEqual(str(e.exception), "Baseten answered 503 Service Unavailable")
-        self.assertEqual(t.hosts(), [BASETEN_URL])
+        once = "Baseten answered 503 Service Unavailable"
+        self.assertEqual(str(e.exception), f"{once}; asked once more: {once}")
+        self.assertEqual(t.hosts(), [BASETEN_URL, BASETEN_URL])
 
     def test_both_keys_put_baseten_first_and_meta_as_the_fallback(self):
         env_with(self, BASETEN_API_KEY=self.b, META_API_KEY=self.m)
@@ -196,11 +198,13 @@ class Fallback(unittest.TestCase):
                 self.assertTrue(str(e.exception).startswith("Baseten "))
 
     def test_both_failing_names_both_and_no_key(self):
-        t = Transport(baseten=[http_error(BASETEN_URL, 503)], meta=[TimeoutError("slow " + self.m)])
+        t = Transport(baseten=[http_error(BASETEN_URL, 503)] * 2, meta=[TimeoutError("slow " + self.m)] * 2)
         with self.assertRaises(kit_model.ModelError) as e, self.assertLogs("kit.model", level="ERROR"):
             kit_model.Model(opener=t).chat(HI)
         err = e.exception
-        self.assertEqual(str(err), "Baseten answered 503 Service Unavailable; Meta call failed: TimeoutError")
+        once = "Baseten answered 503 Service Unavailable; Meta call failed: TimeoutError"
+        self.assertEqual(str(err), f"{once}; asked once more: {once}")
+        self.assertEqual(t.hosts(), [BASETEN_URL, META_URL] * 2)
         for text in (str(err), repr(err)):
             self.assertNotIn(self.b, text)
             self.assertNotIn(self.m, text)
@@ -235,11 +239,12 @@ class Fallback(unittest.TestCase):
                     self.assertIn(f"Baseten call failed: {type(err).__name__}; this call goes to Meta",
                                   "\n".join(logs.output))
                     self.assertNotIn(self.b, "\n".join(logs.output))
-        t = Transport(baseten=[ssl.SSLEOFError(8, "EOF " + self.b)], meta=[OSError(9, "bad " + self.m)])
+        t = Transport(baseten=[ssl.SSLEOFError(8, "EOF " + self.b)] * 2, meta=[OSError(9, "bad " + self.m)] * 2)
         with self.assertRaises(kit_model.ModelError) as e, self.assertLogs("kit.model", level="ERROR"):
             kit_model.Model(opener=t).chat(HI)
         err = e.exception
-        self.assertEqual(str(err), "Baseten call failed: SSLEOFError; Meta call failed: OSError")
+        once = "Baseten call failed: SSLEOFError; Meta call failed: OSError"
+        self.assertEqual(str(err), f"{once}; asked once more: {once}")
         for text in (str(err), repr(err)):
             self.assertNotIn(self.b, text)
             self.assertNotIn(self.m, text)
@@ -248,11 +253,11 @@ class Fallback(unittest.TestCase):
 
     def test_an_ssl_error_with_one_key_is_a_model_error_too(self):
         env_with(self, META_API_KEY=self.m)
-        t = Transport(meta=[ssl.SSLError(1, "record layer failure " + self.m)])
+        t = Transport(meta=[ssl.SSLError(1, "record layer failure " + self.m)] * 2)
         with self.assertRaises(kit_model.ModelError) as e:
             kit_model.Model(opener=t).chat(HI)
-        self.assertEqual(str(e.exception), "Meta call failed: SSLError")
-        self.assertEqual(t.hosts(), [META_URL])
+        self.assertEqual(str(e.exception), "Meta call failed: SSLError; asked once more: Meta call failed: SSLError")
+        self.assertEqual(t.hosts(), [META_URL, META_URL])
 
     def test_the_fallback_never_follows_a_redirect(self):
         self.assertIs(kit_model.Model()._open, net.open_once)

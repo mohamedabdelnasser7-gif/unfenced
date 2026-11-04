@@ -246,7 +246,8 @@ def answer(s, lesson, *, agent, model, kept=None):
                    if st["role"] == "tool" and st["name"] != turn_mod.ACT_TOOL]
         if out.outcome == "model_error":
             raise RuntimeError("the model could not answer")
-        return {"reply": out.reply or "", "outcome": out.outcome, "failed": list(out.retried) + list(out.failed), "tools": ran,
+        return {"reply": out.reply or "", engine_exam.SAID: out.reply or "", "outcome": out.outcome,
+                "failed": list(out.retried) + list(out.failed), "tools": ran,
                 "sent": sent, "calls": m.calls, "customer_text": "" if first else text,
                 "actions": [a["action"] for a in out.actions], "acted": list(out.actions)}
     finally:
@@ -408,7 +409,7 @@ class Examiner:
                 why = f"the good result could not be judged: {e}"
             why = _line(why, MAX_LINE)
             out.append(engine_exam.Row(r.situation, r.name, r.part, False, self.GOOD, why,
-                                       ((self.GOOD, why),) + tuple(r.fails)) if why else r)
+                                       ((self.GOOD, why),) + tuple(r.fails), said=r.said) if why else r)
         return out, made
 
     def _before(self, sid, cached):

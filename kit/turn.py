@@ -20,7 +20,9 @@ message from the person the agent serves, the way sales/loop.py runs a Sales tur
 what any agent has. With first=True the text is the case's input, not a person's message: the agent
 writes first (a lead it follows up), and the input is saved under a frame line so later turns read it.
 
-1. instructions.md is the system prompt. The lessons it has earned go under the plug's slot line
+1. instructions.md is the system prompt, then the rules its send check holds every reply to (point 4),
+   in the check's own words (kit/send_check.py prompt_rules, DECISIONS item 94), so it is never examined
+   on a rule it was not shown. The lessons it has earned go under the plug's slot line
    (none in the Arena's first runs: every agent starts from zero, DECISIONS item 20).
 2. The chat so far comes from kit/chats.py, so the tools read it the way they read a Sales chat.
 3. Tools: card.json's tools, when Build wrote them, are the most the plug may name: a plug that
@@ -284,7 +286,7 @@ def load(folder):
 def _fixed(folder, raw, p, instructions, card_text, connected):
     """(plug, instructions) of an agent Build made, read with the fixes Build makes now, for one built
     before them (reflection/quickstart.py at_load: its high risk cleaned in code, an action for every
-    step its case needs, the house style and how it acts in its instructions). Nothing is written back:
+    step its case needs, the old house style line out and how it acts in its instructions). Nothing is written back:
     the files stay as they are. A fixed plug the engine refuses leaves the agent as it was read."""
     from reflection import quickstart  # here, not at the top: Quick start reads this module too
     plug, words = quickstart.at_load(raw, instructions, json.loads(card_text), connected)
@@ -328,7 +330,9 @@ class TurnResult:
 
 
 def system_prompt(agent, lessons=()):
-    parts = [agent.instructions]
+    """The instructions, the rules its send check holds every reply to (_check: the full rules or the house
+    style only, kit/send_check.py prompt_rules, the same words the check reads), then its lessons."""
+    parts = [agent.instructions, send_check.prompt_rules(agent.full_check, agent.stock)]
     picked = slot(agent.plug, list(lessons))
     if picked:
         parts.append(picked)

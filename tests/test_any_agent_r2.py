@@ -182,21 +182,39 @@ class TheirOwnNumbers(unittest.TestCase):
 
 
 class HouseStyleInTheInstructions(unittest.TestCase):
-    """The three agents' instructions never said the house style, so first replies failed on dashes and **."""
+    """The three agents' instructions never said the house style, so first replies failed on dashes and **.
+    The prompt now says it in the send check's own words (kit/send_check.py prompt_rules, DECISIONS item 94),
+    so Build no longer adds its own line, which said it in other words and named a rule no check holds (no #
+    headings, review examrules round 1, item 2)."""
 
-    def test_none_of_the_three_said_it_and_build_adds_it(self):
+    def setUp(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.tmp = d.name
+
+    def test_none_of_the_three_said_it_and_build_adds_no_second_copy(self):
         for name, a in THREE.items():
             self.assertNotIn("dash", a["instructions"].lower(), name)
             plug = {k: v for k, v in a["plug"].items() if k != "exam"}
             got, words, why = qs.QuickStart._plug_from(
                 json.dumps({"plug": plug, "instructions": a["instructions"]}), name, a["card"]["tools"], a["card"])
             self.assertIsNone(why, name)
-            self.assertTrue(words.startswith(a["instructions"].strip()))
-            self.assertTrue(words.startswith(f"{a['instructions'].strip()}\n\n{qs.HOUSE_STYLE}"))  # then how it acts
-            self.assertEqual(words.count(qs.HOUSE_STYLE), 1)
-        for rule in ("markdown", "**", "em or en dashes", "emoji"):
-            self.assertIn(rule, qs.HOUSE_STYLE)
-        self.assertEqual(send_check.style_problems(qs.HOUSE_STYLE.replace("**", "")), [])
+            self.assertTrue(words.startswith(f"{a['instructions'].strip()}\n\n{qs.ACT_NOTE}"), name)  # how it acts
+            self.assertNotIn(qs.OLD_HOUSE_STYLE, words, name)
+            for said in ("headings", "dashes", "emoji", "markdown"):
+                self.assertNotIn(said, words.lower(), (name, said))
+            agent = turn.load(agent_folder(tempfile.mkdtemp(dir=self.tmp), name, instructions=words))
+            prompt = turn.system_prompt(agent)["content"]
+            self.assertIn(send_check.prompt_rules(agent.full_check, agent.stock), prompt)  # the style, said once
+            self.assertEqual(prompt.count(send_check.NO_EMOJI), 1, name)
+
+    def test_an_agent_built_with_the_old_line_loads_without_it(self):
+        for name, a in THREE.items():
+            old = f"{a['instructions'].strip()}\n\n{qs.OLD_HOUSE_STYLE}"
+            agent = turn.load(agent_folder(tempfile.mkdtemp(dir=self.tmp), name, instructions=old))
+            self.assertNotIn(qs.OLD_HOUSE_STYLE, agent.instructions, name)
+            self.assertNotIn("headings", agent.instructions, name)
+            self.assertTrue(agent.instructions.startswith(f"{a['instructions'].strip()}\n\n{qs.ACT_NOTE}"), name)
 
 
 class EveryStepHasAnAction(unittest.TestCase):
@@ -253,7 +271,7 @@ class EveryStepHasAnAction(unittest.TestCase):
                 if act != "reply":
                     self.assertIn(f"{act} (", words, (name, act))
             self.assertIn(f"The case ends {a['card']['case']['ends']}", words)
-            self.assertEqual(words.count(qs.HOUSE_STYLE), 1)
+            self.assertNotIn(qs.OLD_HOUSE_STYLE, words)
         _, words = self.built("support_calm_helper")
         tools_line = next(x for x in words.splitlines() if x.startswith("Your tools: "))
         named = set(tools_line[len("Your tools: "):].split(".")[0].split(", "))
@@ -586,7 +604,7 @@ class OlderAgentsGetTheFixes(unittest.TestCase):
             self.assertEqual(agent.plug.risk, cleaned(name).risk, name)
             self.assertEqual(dict(agent.plug.actions), plug["actions"], name)
             self.assertEqual(agent.instructions, words, name)
-            self.assertEqual(agent.instructions.count(qs.HOUSE_STYLE), 1)
+            self.assertNotIn(qs.OLD_HOUSE_STYLE, agent.instructions)
             self.assertIn(qs.ACT_NOTE, agent.instructions)
             self.assertTrue(agent.priced_only, name)
             highs = [n for n, text in enumerate(a["lessons"], 1)
@@ -629,7 +647,6 @@ class OlderAgentsGetTheFixes(unittest.TestCase):
         raw = json.loads((folder / "plug.json").read_text(encoding="utf-8"))
         self.assertEqual(agent.plug, plug_mod.from_dict(raw, folder))
         self.assertEqual(agent.instructions, a["instructions"].strip())
-        self.assertNotIn(qs.HOUSE_STYLE, agent.instructions)
         self.assertIn(("number", "[0-9]"), agent.plug.risk.patterns)
         self.assertNotIn("mark_ticket_tagged", agent.plug.actions)
         self.assertFalse(agent.priced_only)

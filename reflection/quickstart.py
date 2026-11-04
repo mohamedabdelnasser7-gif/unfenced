@@ -93,10 +93,12 @@ MAX_INSTRUCTIONS = 8_000
 MAX_DRAFT = 256_000      # bytes of quickstart.json read back
 MAX_SAMPLE_REPLY = 40_000  # characters of the sample data reply read from the model
 NO_SAMPLE = "No sample data this time. Add some on its page."
-# The house style every agent's replies are checked for (kit/send_check.py named_style), said in its own
-# instructions, so its first reply does not fail on it. Build adds it after the model's words.
-HOUSE_STYLE = ("How you write every reply: plain text only, no markdown (no ** and no # headings), no em or en "
-               "dashes and no hyphen with spaces around it (use a comma or a full stop), and no emoji.")
+# The house style line Build used to add after the model's words. The style is now in every agent's prompt in
+# the send check's own words (kit/send_check.py prompt_rules, DECISIONS item 94), so this line only repeated it
+# in other words and named a rule no check holds (no # headings). Build adds it no more, and finish_words takes
+# it out of an agent built before (review examrules round 1, item 2).
+OLD_HOUSE_STYLE = ("How you write every reply: plain text only, no markdown (no ** and no # headings), no em or en "
+                   "dashes and no hyphen with spaces around it (use a comma or a full stop), and no emoji.")
 CALLS_PER_MINUTE = 10
 MAX_BUILDS = 3           # Build presses that reach the model in one chat
 MAX_CARD_CHANGES = 3     # card changes one build takes in before its files are written
@@ -773,12 +775,12 @@ def clean_plug(raw, agent, tools, card=None):
 
 
 def finish_words(words, plug, card):
-    """The instructions with what Build adds after the model's words: the house style (the send check
-    holds every agent to it, kit/send_check.py named_style), then how it acts (how_it_acts: every declared
-    step and tool, and when; the model's words alone named none of them). A part already there is not
-    added again, so an agent's own instructions read through this twice come out the same."""
-    if HOUSE_STYLE not in words:
-        words = f"{words}\n\n{HOUSE_STYLE}"
+    """The instructions with what Build adds after the model's words: how it acts (how_it_acts: every
+    declared step and tool, and when; the model's words alone named none of them). The house style is not
+    added: the prompt holds it (kit/send_check.py prompt_rules), and the line an agent built before carries
+    (OLD_HOUSE_STYLE) is taken out. A part already there is not added again, so an agent's own instructions
+    read through this twice come out the same."""
+    words = words.replace(f"\n\n{OLD_HOUSE_STYLE}", "").replace(OLD_HOUSE_STYLE, "")
     from kit import turn as turn_mod
     tools = turn_mod.tools_of(plug_mod.from_dict({k: v for k, v in plug.items() if k != "exam"}))[0]
     acting = how_it_acts(plug, card, tools)  # the exam file is read only with its folder, and names no tool
@@ -790,7 +792,7 @@ def finish_words(words, plug, card):
 def at_load(raw, instructions, card, tools):
     """(plug, instructions) of an agent Build made, with the fixes Build makes now, for an agent built
     before them (kit/turn.py load calls it; the files on disk are never written): its high risk cleaned
-    in code (clean_risk), an action for every step its case needs (add_steps), the house style and how
+    in code (clean_risk), an action for every step its case needs (add_steps), the old house style line out and how
     it acts in its instructions (finish_words). card is its card.json as written, tools the ones it
     connects. Each fix is the same on a plug that has it already, so reading it twice adds nothing.
     A plug the engine would refuse once fixed comes back as it was, so an agent that loaded still loads."""

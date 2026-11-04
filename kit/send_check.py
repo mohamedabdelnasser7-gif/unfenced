@@ -165,11 +165,19 @@ MARKDOWN_BOLD = re.compile(r"\*\*")
 SPACED_HYPHEN = re.compile(r"(?<=(\S))[ \t]+-[ \t]+(?=(\S))")
 
 # The words of the rules a reply is held to, in one home: the feedback below and the prompt (prompt_rules) both
-# read them, so what an agent is told and what it is checked for never drift apart (DECISIONS item 94).
+# read them, so what an agent is told and what it is checked for never drift apart (DECISIONS item 94). The
+# banned words' fixes (BANNED above) are read by both too.
 NO_DASHES = "Never use em dashes or en dashes. Use a comma or a full stop."
 NO_SPACED_HYPHEN = "Never use a hyphen with spaces as a dash. Use a comma or a full stop."
 NO_EMOJI = "No emoji."
-NO_MARKDOWN = "No markdown. WhatsApp shows the ** as they are."
+NO_MARKDOWN = "No markdown."
+ON_WHATSAPP = "WhatsApp shows the ** as they are."  # said in the prompt only to an agent with the full check
+NO_SYMPATHY = "No sympathy lines; just answer."
+SYMPATHY_SHOWN = ("sorry to hear", "\u0645\u0642\u062f\u0631 \u0625\u0646")  # two of SYMPATHY, as the prompt's examples
+ONLY_STORE_LINKS = ("Share only a product's image link from the store tool in this chat, exactly as it gave it. "
+                    "No other links.")
+NO_STOCK_COUNT = ("Never give the exact stock count. If the store says few left, say only a few are left; "
+                  "otherwise say it is in stock or out of stock.")
 REPLY_IN = {"arabic": "Reply in Egyptian Arabic, in Arabic letters",
             "franco": "Reply in Franco, in Latin letters and numbers, no Arabic letters",
             "english": "Reply in English, no Arabic letters"}
@@ -193,13 +201,18 @@ def digits_rule():
             f"({cur['arabic']} in Arabic, {cur['english']} in English, {cur['franco']} in Franco), so it can be checked.")
 
 
-def prompt_rules(full=True):
+def prompt_rules(full=True, stock=True):
     """The rules the send check holds a reply to, as short lines for the agent's own prompt (sales/loop.py
-    and kit/turn.py system_prompt), read from the same words its feedback gives. full: the full check
-    (script, amount format, prices and fees from tools only) on top of the house style every agent has."""
-    lines = [RULES_HEAD, " ".join((NO_DASHES, NO_SPACED_HYPHEN, NO_EMOJI, NO_MARKDOWN))]
+    and kit/turn.py system_prompt), read from the same words its feedback gives. Every agent: the house
+    style (banned words, dashes, emoji, markdown). full: the full check on top (why WhatsApp shows **, no
+    sympathy lines, links, script, amount format, prices and fees from tools only). stock: with full, the
+    stock count rule too, for an agent whose check holds it (check stock)."""
+    markdown = f"{NO_MARKDOWN} {ON_WHATSAPP}" if full else NO_MARKDOWN
+    lines = [RULES_HEAD, " ".join(fix for _, fix in BANNED),
+             " ".join((NO_DASHES, NO_SPACED_HYPHEN, NO_EMOJI, markdown))]
     if full:
-        lines += ["Reply in the script the customer wrote in.",
+        lines += [f'{NO_SYMPATHY} Never write "{SYMPATHY_SHOWN[0]}" or "{SYMPATHY_SHOWN[1]}".', ONLY_STORE_LINKS,
+                  "Reply in the script the customer wrote in.",
                   f"If they wrote in Arabic letters: {REPLY_IN['arabic']}.",
                   f"If they wrote in Franco: {REPLY_IN['franco']}.",
                   f"If they wrote in English: {REPLY_IN['english']}. {NOT_FRANCO}",
@@ -207,6 +220,8 @@ def prompt_rules(full=True):
                       f"{EXAMPLE_AMOUNT} {CURRENCY_SAID[s]} in {s.capitalize()}" for s in ("english", "franco", "arabic"))
                   + ".",
                   FROM_TOOLS]
+        if stock:
+            lines.append(NO_STOCK_COUNT)
     return "\n".join(lines)
 
 LETTER_BEFORE = r"(?<![^\W\d_])"
@@ -1170,7 +1185,7 @@ def named_style(text):
     if EMOJI.search(text or ""):
         problems.append(("emoji", NO_EMOJI))
     if MARKDOWN_BOLD.search(text or ""):
-        problems.append(("markdown", NO_MARKDOWN))
+        problems.append(("markdown", f"{NO_MARKDOWN} {ON_WHATSAPP}"))
     return problems
 
 
@@ -1206,8 +1221,7 @@ def named_problems(reply, customer_text="", amounts=(), vocabulary=frozenset(), 
     problems = []
     reply, wrong_links = _links(reply, links)
     if wrong_links:
-        problems.append(("links", "Share only a product's image link from the store tool in this chat, exactly as "
-                         "it gave it. No other links."))
+        problems.append(("links", ONLY_STORE_LINKS))
     fb = _script_feedback(reply, customer_text, vocabulary, names)
     if fb:
         problems.append(("script", fb))
@@ -1215,7 +1229,7 @@ def named_problems(reply, customer_text="", amounts=(), vocabulary=frozenset(), 
     low = reply.lower()
     for line in SYMPATHY:
         if line in low:
-            problems.append(("sympathy", f'Remove the sympathy line ("{line}"). No sympathy lines; just answer.'))
+            problems.append(("sympathy", f'Remove the sympathy line ("{line}"). {NO_SYMPATHY}'))
             break
     allowed = {n for n in (amount(a) for a in amounts) if n is not None}
     wrong = sorted({p for p in prices_in(reply, sizes, orders, names, priced_only) if p not in allowed})
@@ -1228,6 +1242,5 @@ def named_problems(reply, customer_text="", amounts=(), vocabulary=frozenset(), 
             or model_thousands(digits, names) or store_word_thousands(digits, vocabulary, names)):
         problems.append(("digits", digits_rule()))
     if stock and stock_counts(reply, sizes, orders, names):
-        problems.append(("stock", "Never give the exact stock count. If the store says few left, say only a few are "
-                         "left; otherwise say it is in stock or out of stock."))
+        problems.append(("stock", NO_STOCK_COUNT))
     return problems

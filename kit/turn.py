@@ -286,7 +286,7 @@ def load(folder):
 def _fixed(folder, raw, p, instructions, card_text, connected):
     """(plug, instructions) of an agent Build made, read with the fixes Build makes now, for one built
     before them (reflection/quickstart.py at_load: its high risk cleaned in code, an action for every
-    step its case needs, the house style and how it acts in its instructions). Nothing is written back:
+    step its case needs, the old house style line out and how it acts in its instructions). Nothing is written back:
     the files stay as they are. A fixed plug the engine refuses leaves the agent as it was read."""
     from reflection import quickstart  # here, not at the top: Quick start reads this module too
     plug, words = quickstart.at_load(raw, instructions, json.loads(card_text), connected)
@@ -332,7 +332,7 @@ class TurnResult:
 def system_prompt(agent, lessons=()):
     """The instructions, the rules its send check holds every reply to (_check: the full rules or the house
     style only, kit/send_check.py prompt_rules, the same words the check reads), then its lessons."""
-    parts = [agent.instructions, send_check.prompt_rules(agent.full_check)]
+    parts = [agent.instructions, send_check.prompt_rules(agent.full_check, agent.stock)]
     picked = slot(agent.plug, list(lessons))
     if picked:
         parts.append(picked)

@@ -53,8 +53,10 @@ Keys (unknown keys are refused, so a typo never passes quietly):
            pattern is counted by it (DECISIONS item 73): a night reads 2 days and it lands later.
   risk     {high: {about, words, patterns, tools}, low: {about}}: what is high risk in
            this business. words and patterns are {group: [...]}, so a match names its
-           group. The code check looks for the words, patterns and tool names first; the
-           judge reads the two about lines; unsure counts as high.
+           group. The code check looks for the words and patterns first. Tool names are
+           marks only for the note guard (code_check with tools=True); a lesson's risk
+           check leaves them out, so a tool that spends or sends must be listed as a word
+           too. The judge reads the two about lines; unsure counts as high.
   trial    {fast, careful, holdback, worst_cost}: the two trial levels, fast and careful,
            both required, each {share, days}: a new trial gives the lesson in this share of
            cases (more than 0 and under 1) for this many days (a whole number, 1 or more).

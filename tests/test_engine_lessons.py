@@ -1,6 +1,7 @@
 """Step 3: lessons carry their agent, risk, state, share, end date, field tags and source.
-A Sales agent lesson never reaches another agent; a lesson with a number or promise is
-high every time."""
+A Sales agent lesson never reaches another agent; a lesson with an amount or a promise is
+high every time (since engine fix A, 2026-11-03, a bare number, the order details, stock and a tool
+name are not)."""
 import random
 import sqlite3
 import tempfile
@@ -24,7 +25,7 @@ def always_low(text, high_about, low_about):
     return risk.LOW
 
 
-NUMBERS = [
+AMOUNTS = [
     "Tell them delivery is 500.",
     "Say the boots are ٥٠٠ جنيه.",
     "Say ۵۰۰ for the pair.",
@@ -41,9 +42,7 @@ NUMBERS = [
     "قول له تلات أيام.",
     "Tell them it is five​hundred.",
     "Tell them it is fi​ve hundred.",
-    "Say the price plainly, the number then جنيه.",
     "Say ثلاثمائة.",
-    "2olo el se3r.",
 ]
 PROMISES = [
     "Promise them a refund if it does not fit.",
@@ -60,12 +59,22 @@ PROMISES = [
     "Tell them the refunds are quick.",
     "Say delivery takes one day.",
 ]
-POLICY_AND_DATA = [
+POLICY_AND_DATA = [  # a policy change, another way to pay, or data beyond the order
+    "Offer them a refund.",
+    "Tell them we can cancel any time.",
+    "Ask for a deposit first.",
+    "Tell them they can pay by card.",
+    "Ask for their national id.",
+    "Keep their phone numbers for the newsletter.",
+]
+NOW_LOW = [  # high on the wide list before engine fix A; low now on the judge's clear low
     "Ask for their address before the summary.",
     "Never cancel without asking the team.",
     "Tell them we take cash on delivery only.",
     "Use their name and phone number in the summary.",
     "Check stock with the store tool first.",
+    "Say the price plainly, the number then جنيه.",
+    "2olo el se3r.",
 ]
 TONE = [  # low risk on the starter list: tone, wording, the order of questions, when to ask for the size, greetings
     "Greet them warmly before anything else.",
@@ -76,8 +85,8 @@ TONE = [  # low risk on the starter list: tone, wording, the order of questions,
     "رحب بيهم بلطف.",
     "اسأل عن المقاس الأول.",
 ]
-MARKERS = ["500", "٥٠٠", "۵۰۰", "５０", "7", "fifty", "five hundred", "twenty", "half", "خمسين", "تلاتة", "ميتين",
-           "refund", "exchange", "tomorrow", "guarantee", "بكرة", "استرجاع", "استبدال", "هيوصل", "promise", "10%"]
+MARKERS = ["500", "٥٠٠", "۵۰۰", "1,500", "five hundred", "ميتين", "refund", "tomorrow", "guarantee", "بكرة",
+           "استرجاع", "استبدال", "promise", "10%", "deposit", "discount", "خصم", "عربون"]
 HIDDEN = ["​", "‌", "‍", "­", "⁠", "﻿"]
 
 
@@ -85,8 +94,8 @@ class RiskCheck(unittest.TestCase):
     def level(self, text, judge=always_low):
         return risk.classify(text, PLUG.risk, judge)[0]
 
-    def test_a_number_is_high_every_time(self):
-        for text in NUMBERS:
+    def test_an_amount_is_high_every_time(self):
+        for text in AMOUNTS:
             with self.subTest(text=text):
                 self.assertEqual(self.level(text), risk.HIGH)
 
@@ -95,12 +104,19 @@ class RiskCheck(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.level(text), risk.HIGH)
 
-    def test_store_policy_and_personal_data_are_high(self):
+    def test_store_policy_payment_and_personal_data_are_high(self):
         for text in POLICY_AND_DATA:
             with self.subTest(text=text):
                 self.assertEqual(self.level(text), risk.HIGH)
 
-    def test_a_number_or_promise_anywhere_in_a_tone_lesson_is_high(self):
+    def test_order_details_stock_and_price_talk_are_low_only_on_a_clear_low(self):
+        for text in NOW_LOW:
+            with self.subTest(text=text):
+                self.assertEqual(risk.code_check(text, PLUG.risk, tools=False), [])
+                self.assertEqual(self.level(text), risk.LOW)
+                self.assertEqual(self.level(text, risk.no_judge), risk.HIGH)  # the stub is still unsure: high
+
+    def test_an_amount_or_promise_anywhere_in_a_tone_lesson_is_high(self):
         rnd = random.Random(261029)
         for i in range(600):
             words = rnd.choice(TONE).split()
@@ -143,17 +159,21 @@ class RiskCheck(unittest.TestCase):
         self.assertEqual(asked, [(TONE[0], PLUG.risk.high_about, PLUG.risk.low_about)])
 
     def test_the_lines_name_what_made_it_high(self):
-        level, why = risk.classify("Promise a refund of 50.", PLUG.risk)
+        level, why = risk.classify("Promise a refund of 500.", PLUG.risk)
         self.assertEqual(level, risk.HIGH)
-        self.assertIn("promise: refund", why)
-        self.assertIn("number: /[0-9]/", why)
-        self.assertIn("tool: draft_order", risk.classify("Call draft_order early.", PLUG.risk)[1])
+        self.assertIn("promise: promise", why)
+        self.assertIn("policy: refund", why)
+        self.assertIn("amount: /a number of three or more digits/", why)
+        # a tool name is no mark on a lesson; the code check still finds it when asked (the note guard)
+        self.assertNotIn("tool: draft_order", risk.classify("Call draft_order early.", PLUG.risk)[1])
+        self.assertIn("tool: draft_order", risk.code_check("Call draft_order early.", PLUG.risk))
 
     def test_another_agents_list_is_its_own(self):
         waterer = plugs.load(plugs.WATERER, self)
         self.assertEqual(risk.classify("Promise a refund.", waterer.risk, always_low)[0], risk.LOW)
         self.assertEqual(risk.classify("Use the pesticide.", waterer.risk, always_low)[0], risk.HIGH)
-        self.assertEqual(risk.classify("Use the sprayer.", waterer.risk, always_low)[0], risk.HIGH)
+        self.assertEqual(risk.classify("Use the sprayer.", waterer.risk, always_low)[0], risk.LOW)  # a tool name alone
+        self.assertIn("tool: sprayer", risk.code_check("Use the sprayer.", waterer.risk))
 
 
 class States(unittest.TestCase):
@@ -205,7 +225,7 @@ class States(unittest.TestCase):
         self.assertEqual((stub.get(lid)["risk"], stub.get(lid)["state"]), ("high", "waiting"))
 
     def test_add_is_a_lesson_with_a_yes_already(self):
-        lid = kept_lesson(self.low, "Say the fee once.", ["ordering"], yes_by="mohamed", now=NOW)
+        lid = kept_lesson(self.low, "Say the fee is 60 once.", ["ordering"], yes_by="mohamed", now=NOW)
         les = self.low.get(lid)
         self.assertEqual((les["risk"], les["state"], les["share"], les["yes_by"]), ("high", "kept", 1.0, "mohamed"))
         self.assertEqual(self.ids(None, "ordering"), [lid])

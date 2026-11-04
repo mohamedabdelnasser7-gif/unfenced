@@ -44,7 +44,7 @@
   "decides": {"good": "sold", "bad": ["no_sale"]},
   "risk": {
     "high": {
-      "about": "High risk on the page: any number (a price, a discount, pieces left), any promise (a delivery date, a refund, a gift), the store's policy, words about other brands, a buyer's personal data, and anything that spends money (ads, a boost, a paid partner).",
+      "about": "High risk on the page: any number (a price, a discount, pieces left), any promise (a delivery date, a refund, a gift), the store's policy, words about other brands, a buyer's personal data, anything that spends money (ads, a boost, a paid partner), and posting or publishing anything without the owner's yes, in any wording.",
       "words": {
         "number": [
           "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
@@ -71,11 +71,14 @@
           "home", "building", "national id", "password", "account number",
           "رقم", "تليفون", "موبايل", "عنوان", "شارع", "ايميل"
         ],
-        "spend": ["ads", "advert", "advertising", "boost", "sponsor", "sponsored", "budget", "spend", "paid", "influencer"]
+        "spend": ["ads", "advert", "advertising", "boost", "sponsor", "sponsored", "budget", "spend", "paid", "influencer", "ads_manager", "promote", "campaign", "ممول", "اعلان"],
+        "goes_out": ["publish_post"]
       },
       "patterns": {
         "number": ["[0-9]", "[%$£€]"],
-        "personal_data": ["@", "(?<!ا)مكان"]
+        "personal_data": ["@", "(?<!ا)مكان"],
+        "spend": ["(?#an ad)(?<![a-z])ads?(?![a-z])"],
+        "goes_out": ["(?#posted with no yes)(?<![a-z])(?:post|posts|posting|publish|publishing|share|sharing|put|push|send|upload|uploading|release|launch)\\s+(?:(?:it|this|them|the\\s+posts?|posts?|drafts?|the\\s+drafts?)\\s+)?(?:up\\s+|out\\s+)?(?:straight\\s+away|right\\s+away|at\\s+once|immediately|without\\s+(?:waiting|asking|checking|approval|an?\\s+(?:ok|yes)|the\\s+owner)|with\\s+no\\s+(?:approval|ok|yes))(?![a-z])|(?<![a-z])(?:without|no\\s+need\\s+for|skip|skipping)\\s+(?:the\\s+)?(?:owner['’]?s\\s+)?(?:approval|ok|yes|sign[\\s-]?off)(?![a-z])|(?<![a-z])don['’]?t\\s+wait\\s+for\\s+(?:the\\s+)?(?:owner|approval|an?\\s+(?:ok|yes))(?![a-z])|(?<![a-z])(?:go|goes|going|went|push|pushes|make|makes|put|set)\\s+(?:it\\s+|them\\s+|the\\s+posts?\\s+)?live(?![a-z])"]
       },
       "tools": ["catalogue", "price_book", "ads_manager", "publish_post"]
     },

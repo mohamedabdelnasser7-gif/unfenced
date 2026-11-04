@@ -54,7 +54,8 @@ calling it with a round's number then:
    already running when the run started too, and the Pool hands them first in every match after, and to the
    gate of each new lesson. A correction pulled since is no longer handed. Nothing the run makes
    (cases, lessons, exams, matches) is ever written to the live database by this step. A live
-   database that is busy, locked or gone keeps the corrections read last.
+   database that is busy, locked or gone keeps the corrections read last; one with no lessons table yet
+   holds none and is not busy.
 
 Every model call of the study, the risk judge, the exam and the rerun is taken from the Arena's own
 call count (arena/run.py Calls, arena-calls.json), so one cap holds the whole run. At the cap each
@@ -87,10 +88,16 @@ def live_hotfixes(path, agent):
     hotfix (on trial or kept), whenever they were added, oldest first, each as the Pool hands
     it: kept, its stages and fields as lists, and its id the live id made negative (live_id keeps the
     live one), so it never reads as a lesson of the Arena's copy. The database is opened read only.
-    sqlite3.Error when it cannot be read (busy, locked, gone, or a database with no lessons yet)."""
+    A database with no lessons table yet (a new agent's, made before its first lesson) holds no
+    correction, so the list is empty: it is not busy, and the round says nothing about it (the Arena run
+    20261104T120239 printed "live busy (no such table: lessons)" for an empty test database). sqlite3.Error
+    when it cannot be read (busy, locked or gone)."""
     con = sqlite3.connect(f"{Path(path).resolve().as_uri()}?mode=ro", uri=True, timeout=1)
     try:
         con.row_factory = sqlite3.Row
+        have = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        if not {"lessons", "lesson_exams"} <= have:
+            return []
         rows = con.execute(
             "SELECT l.* FROM lessons l JOIN lesson_exams e ON e.lesson_id = l.id WHERE l.agent = ? AND l.source = ? "
             "AND l.origin = ? AND e.passed = 1 AND l.state IN (?, ?) ORDER BY l.id",
@@ -509,7 +516,8 @@ class Between:
         return full
 
 
-FULL_HELD = "passed the Arena's exam but not the full exam, so it stays in the Arena and is not handed live"
+FULL_HELD = ("passed the Arena's exam but not the full exam, so it stays in the Arena: not handed to the next round "
+             "nor live")
 
 
 def turn_examiner(agent, judge_model):

@@ -963,7 +963,10 @@ def text(rep):
                 state = ("handed on" if one["handed"] else "passed, waits for a yes" if one["waits_for_yes"]
                          else "passed, not handed" if one["passed"] else f"refused: {one['why'] or 'failed the gate'}")
                 counts = "" if not one.get("gate") else f" ({one['gate']['fixed']} fixed, {one['gate']['broke']} broke)"
-                lines.append(f"      lesson {one['lesson_id']} ({one['risk']} risk): {state}{counts}")
+                # why a passed lesson was not handed (the full exam held it, or the live database could not take
+                # it) on its own line, so the round's three notes never cut it (the run 20261104T120239)
+                said = f"; {one['live']}" if one.get("live") else ""
+                lines.append(f"      lesson {one['lesson_id']} ({one['risk']} risk): {state}{counts}{said}")
             for note in (got.get("notes") or [])[:3]:
                 lines.append(f"      note: {note}")
     if rep.get("error"):

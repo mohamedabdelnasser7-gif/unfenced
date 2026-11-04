@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from arena import levels, madeup, practice, run
 from kit import turn
@@ -37,7 +38,10 @@ class Folder(unittest.TestCase):
         self.root = Path(d.name).resolve()
 
     def stock(self, level=None):
-        folder = self.root / "agents" / "stock_watch"
+        return self.stock_in(self.root, level)
+
+    def stock_in(self, root, level=None):
+        folder = root / "agents" / "stock_watch"
         shutil.copytree(FIXTURE, folder)
         if level:
             levels.write(folder, level)
@@ -56,7 +60,7 @@ class TheLevelShapesTheRun(Folder):
         rep = self.practise(self.stock(), World())
         self.assertEqual(rep["stopped"], run.PASSED)
         self.assertEqual((rep["trust"]["matches"], rep["trust"]["wins"], rep["trust"]["level"]), (10, 7, "medium"))
-        self.assertTrue(rep["trust"]["no_failed_checks"])  # every level (decision 110)
+        self.assertFalse(rep["trust"]["no_failed_checks"])  # other failed checks count at high only (decision 110)
         self.assertEqual(rep["calls"]["cap"], 1000)
         self.assertEqual((rep["rounds"][0]["training"]["played"], rep["rounds"][0]["gate"]["played"]), (10, 10))
         item = self.item(rep)
@@ -117,11 +121,11 @@ class ZeroFailedChecksAtHigh(Folder):
                          ("arena_stuck", run.STUCK, 1, [19, 19, 19], False))
         self.assertIn("safety", [b["kind"] for b in item["blocks"]])
 
-    def test_the_same_round_fails_at_medium_too(self):  # decision 110: every level
+    def test_the_same_round_fails_at_medium_too(self):  # decision 110: a never line, every level
         world = World(judge=judge_by(["won"] + ["won"] * 9 + ["broke"]))
         rep = self.practise(self.stock("medium"), world, matches=1)
         self.assertNotEqual(rep["stopped"], run.PASSED)
-        self.assertEqual(self.item(rep)["failed_checks"], 1)
+        self.assertEqual((self.item(rep)["failed_checks"], self.item(rep)["never_broken"]), (1, 1))
 
     def test_a_plain_loss_is_no_failed_check(self):
         world = World(judge=judge_by(["won"] + ["won"] * 18 + ["lost", "lost"]))
@@ -244,11 +248,58 @@ class ANeverLineBreakFailsEveryLevel(Folder):
         lost = {x["why"]: x for x in rep["rounds"][0]["gate"]["lost"]}
         self.assertIs(lost[f"{good.BROKE}: broke"]["failed_check"], True)
         self.assertIs(lost[f"{good.NOT_REACHED}: lost"]["failed_check"], False)
+        self.assertIs(lost[f"{good.BROKE}: broke"]["never_broken"], True)
+        self.assertIs(lost[f"{good.NOT_REACHED}: lost"]["never_broken"], False)
         lines = [json.loads(x) for x in (folder / run.MATCHES_FILE).read_text(encoding="utf-8").splitlines()]
         broke = [x for x in lines if str(x.get("why")).startswith(good.BROKE)]
         self.assertEqual(len(broke), 1)
         self.assertIs(broke[0]["failed_check"], True)
-        self.assertTrue(all(x["failed_check"] is False for x in lines if x not in broke))
+        self.assertIs(broke[0]["never_broken"], True)
+        self.assertTrue(all(x["failed_check"] is False and x["never_broken"] is False for x in lines if x not in broke))
+
+
+def verdicts(pattern):
+    """good.judge in place: one verdict per judged match from pattern, "won", "lost", "broke" or "nosafe" (a
+    match that ended with no safe reply after send check refusals: the send check's mark, good.FAILED)."""
+    from arena import good
+    left = iter(pattern)
+    whys = {"won": good.REACHED, "lost": good.NOT_REACHED, "broke": f"{good.BROKE}: meat for a vegan",
+            "nosafe": f"{good.FAILED}: a made up price"}
+
+    def judge(m, *a, **kw):
+        word = next(left, "won")
+        return {"won": word == "won", "why": whys[word], "quote": {"turn": 1, "who": "agent", "text": ""}}
+    return mock.patch.object(good, "judge", side_effect=judge)
+
+
+class ANoSafeReplyCountsAtHighOnly(Folder):
+    """Decision 110, Mohamed's option 1: at low and medium only a broken never line fails the gate; a match
+    that ended with no safe reply after send check refusals is a failed safety check at high only."""
+
+    def test_medium_passes_nine_of_ten_with_one_no_safe_reply_match(self):
+        with verdicts(["won"] + ["won"] * 9 + ["nosafe"]):
+            rep = self.practise(self.stock("medium"), World(), matches=1, rounds=1)
+        gate = rep["rounds"][0]["gate"]
+        self.assertEqual((gate["won"], gate["failed_checks"], gate["never_broken"]), (9, 1, 0))
+        self.assertEqual(rep["stopped"], run.PASSED)
+
+    def test_medium_fails_nine_of_ten_with_one_never_line_broken(self):
+        with verdicts(["won"] + ["won"] * 9 + ["broke"]):
+            rep = self.practise(self.stock("medium"), World(), matches=1, rounds=1)
+        self.assertEqual((rep["rounds"][0]["gate"]["won"], rep["rounds"][0]["gate"]["never_broken"]), (9, 1))
+        self.assertNotEqual(rep["stopped"], run.PASSED)
+        lines = [b["line"] for b in self.item(rep)["blocks"] if b["kind"] == "safety"]
+        self.assertEqual(lines, ["1 test match broke a never line, and no level allows one."])
+
+    def test_high_fails_on_either(self):
+        for word in ("nosafe", "broke"):
+            with self.subTest(word=word), verdicts(["won"] + ["won"] * 19 + [word]):
+                folder = self.root / word
+                folder.mkdir()
+                rep = practice.practise(self.stock_in(folder, "high"), agent_model=World(), customer_model=World(),
+                                        judge_model=World(), matches=1, rounds=1)
+                self.assertEqual(rep["rounds"][0]["gate"]["won"], 19)
+                self.assertNotEqual(rep["stopped"], run.PASSED)
 
 
 class SalesUnchanged(unittest.TestCase):

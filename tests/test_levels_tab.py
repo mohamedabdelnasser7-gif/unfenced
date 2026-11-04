@@ -34,7 +34,7 @@ class LevelCard(Tab):
                   lost=[{"card": "c1", "why": "it gave no answer", "quote": {"turn": 1, "who": "agent", "text": "Hi"}}])
         page = self.tab()
         self.assertIn("Risk level: Medium", page)
-        self.assertIn("<b>6 of 10</b>, your level needs 7 with no failed safety check; a broken never line fails it</p>", page)
+        self.assertIn("<b>6 of 10</b>, your level needs 7; a broken never line fails it</p>", page)
         self.assertIn("<li><span>Round 1</span><b>4 of 10</b></li><li><span>Round 2</span><b>6 of 10</b></li>", page)
         self.assertIn("What holds it back", page)
         self.assertIn(EXAM, page)
@@ -58,7 +58,7 @@ class LevelCard(Tab):
         self.item(gate_won=6, gate_played=10, gate_size=10, needs=7, failed_checks=0, scores=[6], level="medium")
         mo.TWO_TAB_ACTIONS[mo.LEVEL_PATH](self.m, {"agent": ["stock_watch"], "level": ["low"]})
         page = self.tab()
-        self.assertIn("<b>6 of 10</b>, your level needs 5 with no failed safety check; a broken never line fails it</p>", page)
+        self.assertIn("<b>6 of 10</b>, your level needs 5; a broken never line fails it</p>", page)
         self.assertIn("passed the gate for its low level", page)
         self.assertEqual([f[0] for f in self.level_forms(page)], ["low", "medium"])
 
@@ -69,11 +69,35 @@ class LevelCard(Tab):
         self.assertIn("<b>8 of 10</b>, your level needs 16 of 20 with no failed safety check; a broken never line fails it</p>", page)
         self.assertIn("asks for a run of 20, so run the Arena again", page)
 
+    def test_a_never_line_break_at_the_level_offers_no_lower_step(self):  # decision 110, review round 1 item 2
+        self.item(kind="arena_stuck", gate_won=9, gate_played=10, gate_size=10, needs=7, failed_checks=1, never_broken=1,
+                  scores=[9], level="medium",
+                  blocks=[{"kind": "safety", "line": "1 test match broke a never line, and no level allows one."}])
+        page = self.tab()
+        self.assertIn("broke a never line, and no level allows one", page)
+        self.assertIn(pages.SAFETY_HELP, page)
+        self.assertNotIn(pages.LEVEL_HELP, page)
+        self.assertNotIn("lower the level", page)
+        self.item(kind="arena_stuck", gate_won=6, gate_played=10, gate_size=10, needs=7, failed_checks=1, never_broken=1,
+                  scores=[6], level="medium")  # short on wins too: lowering can still help with the wins
+        self.assertIn(pages.LEVEL_HELP, self.tab())
+
+    def test_the_next_step_offers_no_lower_level_after_a_never_line_break_at_the_level(self):  # decision 110
+        from tests.test_levels_morning import NOW
+        for won, lower in ((9, False), (6, True)):
+            with self.subTest(won=won):
+                for run_id, at in (("r1", NOW - 100), ("r2", NOW)):  # two full runs, no gain: a correction or lower
+                    self.item(kind="arena_stuck", run=run_id, at=at, gate_won=won, gate_played=10, gate_size=10,
+                              needs=7, failed_checks=1, never_broken=1, scores=[won], level="medium", stopped="stuck")
+                step = self.m.next_step("stock_watch")
+                self.assertEqual((step["kind"], step["lower"]), ("no_gain", lower))
+                self.assertEqual("lower the risk level" in mo.next_step_html(step, "stock_watch"), lower)
+
     def test_a_round_cut_short_shows_what_was_played(self):
         self.item(gate_won=6, gate_played=7, gate_size=10, needs=7, failed_checks=0, scores=[5, 6], stopped="cap",
                   level="medium")
         page = self.tab()
-        self.assertIn("<b>6 won of 7 played</b> (the run stopped before all 10), your level needs 7 with no failed safety check; a broken never line fails it</p>", page)
+        self.assertIn("<b>6 won of 7 played</b> (the run stopped before all 10), your level needs 7; a broken never line fails it</p>", page)
         self.assertIn("<li><span>Round 1</span><b>5 of 10</b></li><li><span>Round 2</span><b>6 of 7</b></li>", page)
         self.assertNotIn("<b>6 of 10</b>", page)
 

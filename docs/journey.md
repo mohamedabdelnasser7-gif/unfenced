@@ -100,7 +100,7 @@ These came in on the engfix2 and engfix3 branches.
 
 **The assistant on the case Arena.** The personal assistant's page moved from simulated days to the case Arena: one request or one email thread at a time against a made-up user, with the same Run the Arena, Train and gate as an agent made in Quick start, so it practises on the tasks it will really face (decision 109).
 
-**A planner that broke a never line still passed.** The example Family Dinner Planner passed its medium gate at 7 of 10 while the judge said a never line was broken: it served meat to a vegan family with a peanut allergy. Only the high level counted safety checks, and the match it saved did not say a check had failed. Fix: a broken never line now counts as a failed safety check on the match, and any failed safety check fails the gate at every level, whatever the win count. An agent whose work touches diets, allergies or health now starts at high, the planner included (decision 110).
+**A planner that broke a never line still passed.** The example Family Dinner Planner passed its medium gate at 7 of 10 while the judge said a never line was broken: it served meat to a vegan family with a peanut allergy. Only the high level counted safety checks, and the match it saved did not say a check had failed. Fix: a broken never line is now marked as a failed safety check on the match, and it fails the gate at every level, whatever the win count. A match that ended with no safe reply after send check refusals still counts only at high. An agent whose work touches diets, allergies or health now starts at high, the planner included (decision 110).
 
 ## Still open
 

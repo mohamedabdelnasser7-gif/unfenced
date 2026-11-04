@@ -790,11 +790,14 @@ class Arena:
                 self._count(one, judged)
                 if "failed_check" in judged:  # a built agent's verdict marks its safety checks (arena/practice.py)
                     one["gate"]["failed_checks"] = one["gate"].get("failed_checks", 0) + bool(judged["failed_check"])
+                if "never_broken" in judged:  # and, apart, its broken never lines, which fail every level
+                    one["gate"]["never_broken"] = one["gate"].get("never_broken", 0) + bool(judged["never_broken"])
                 if not judged["won"]:
                     one["gate"]["lost"].append({"card": m["card"], "why": judged["why"], "quote": judged["quote"],
                                                 "match": m["id"]})
                     if "failed_check" in judged:  # a built agent's lost test match says whether it failed one
                         one["gate"]["lost"][-1]["failed_check"] = bool(judged["failed_check"])
+                        one["gate"]["lost"][-1]["never_broken"] = bool(judged.get("never_broken"))
             wins = one["gate"]["won"]
             if self._passed(one):
                 return self._report(rounds, PASSED)

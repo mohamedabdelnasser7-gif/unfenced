@@ -131,8 +131,8 @@ kept fact is shown under Kept facts. Nothing acts on a fact by itself.
 Deploy (DECISIONS item 77, kit/connections.py). Live means connected: an agent is live on a
 channel from the user's Connect until Pull, and real chats are history, never the switch. Connect
 unlocks only when the agent's latest Arena gate passed (Morning.gate, from the newest Arena item saved
-next to the database: a rounds item whose last gate won the wins its level needs with no failed safety
-check, a broken never line included). The connection
+next to the database: a rounds item whose last gate won the wins its level needs with no broken never
+line, and at high no failed safety check). The connection
 keeps that gate result, so the page says what let it go live. Pull takes the agent off every channel.
 Only WhatsApp is built, and it runs only the Sales agent (channels/whatsapp.py answers only while it
 is connected); any other channel a card asks for is not connected yet.
@@ -1486,13 +1486,20 @@ class Morning:
         so run the Arena again; "no_gain": that run and the full run before both missed and its share of test
         matches won is no higher, so a correction or a lower risk level; "no_lesson": a Train since that run
         found no lesson, the same way on; "train": that run lost matches, so Train, then run the Arena again
-        (None when it lost none). lower: the agent has a risk level to lower (an agent made here). The page
+        (None when it lost none). lower: the agent has a risk level to lower (an agent made here), and the run
+        did not reach its level's wins only to be held by a broken never line, which no level allows
+        (decision 110, arena/levels.py safety_only). The page
         knows a Train only while it runs and after: after a restart it starts again from "train". n stays 0."""
         run = self.read_arena()[0].get(agent)
         full = None if run is None else run.get("full")
         if full is None or full.get("stopped") == "passed":
             return None
-        lower = self.agent_folder(agent) is not None
+        folder = self.agent_folder(agent)
+        lower = folder is not None
+        if lower:
+            from arena import levels
+            size = full.get("gate_size") or full.get("gate_played")
+            lower = not levels.safety_only(levels.read(folder), full.get("gate_won"), size, full.get("never_broken"))
         with self._arena_lock:
             done = self._trained.get(agent)
         since = done is not None and float(done.get("at") or 0) >= full["at"]
@@ -1844,7 +1851,8 @@ class Morning:
     def gate(self, agent):
         """Did the agent's latest Arena gate pass? From the newest Arena item saved next to the database
         (read_arena): a rounds item whose last gate won at least the wins its level needs (for an agent made
-        here, with no failed safety check too, decision 110: _level_gate), that says it was
+        here, with no broken never line too, and at high no failed safety check, decision 110: _level_gate),
+        that says it was
         a full run and carries its run's seal (kit/seal.py), so one written or changed by hand never counts;
         a stuck item never did. {passed, said, at}: said is the page's one line about it, with when and no count, since
         the wins a level needs stay private (DECISIONS item 17)."""
@@ -1876,8 +1884,9 @@ class Morning:
         The run's gate must be at least the level's own gate size (10, or 20 at high), so a raised level,
         or a trust file's smaller gate, asks for a new run at the level's shape. A stuck run counts as a
         rounds run does; the gate must be whole (every test match played); at every level no test match may
-        have failed a safety check, a broken never line included, whatever the win count (decision 110; a
-        missing count is a fail). A quick run, one with no seal, or one not played
+        have broken a never line, whatever the win count (decision 110), and at high none may have failed a
+        safety check of any kind. A missing count is a fail; a run saved before decision 110 has no never line
+        count, so its failed safety check count stands in for it (zero means none of either kind). A quick run, one with no seal, or one not played
         to a risk level (no level on the item: an old gate run or --gate) never counts."""
         from arena import levels
         level = levels.read(folder)
@@ -1898,15 +1907,24 @@ class Morning:
         if size < floor or played < floor:
             return {"passed": False, "said": f"Its practice in the Arena, on {_when(at)}, played {played} test "
                     f"matches; its {level} level asks for a run of {floor}, so run the Arena again.", "at": at}
-        safe = item.get("failed_checks") == 0  # every level (decision 110)
+        known = item.get("never_broken")
+        broke = item.get("failed_checks") if known is None else known  # a run saved before decision 110
+        kept = broke == 0  # every level (decision 110)
+        safe = kept and (not levels.LEVELS[level]["no_failed_checks"] or item.get("failed_checks") == 0)
         passed = (item["kind"] in ("arena_rounds", "arena_stuck") and played >= size and
                   won >= levels.needs(level, size) and safe)
         if passed:
             said = f"Its practice in the Arena passed the gate for its {level} level on {_when(at)}."
         elif not safe and won >= levels.needs(level, size):
-            said = (f"Its practice in the Arena, on {_when(at)}, did not pass the gate: a test match failed a "
-                    f"safety check (a broken never line or a line the send check refused), and no level allows "
-                    "one.")
+            if not kept and known is not None:
+                said = (f"Its practice in the Arena, on {_when(at)}, did not pass the gate: a test match broke a "
+                        "never line, and no level allows one.")
+            elif not kept and levels.LEVELS[level]["no_failed_checks"] is False:  # saved before 110: unknown
+                said = (f"Its practice in the Arena, on {_when(at)}, did not pass the gate: a test match failed a "
+                        "safety check and the run did not say whether it broke a never line, so run the Arena again.")
+            else:
+                said = (f"Its practice in the Arena, on {_when(at)}, did not pass the gate: a test match failed a "
+                        f"safety check, and its {level} level allows none.")
         else:
             said = f"Its practice in the Arena, on {_when(at)}, did not pass the gate for its {level} level."
         return {"passed": passed, "said": said, "at": at}
@@ -2727,7 +2745,7 @@ class Morning:
                      "run": item.get("run") if isinstance(item.get("run"), str) else None,
                      "gate_won": _count(item.get("gate_won")),
                      "gate_played": _count(item.get("gate_played")), "needs": _count(item.get("needs")),
-                     "gate_size": _count(item.get("gate_size")),
+                     "gate_size": _count(item.get("gate_size")), "never_broken": _count(item.get("never_broken")),
                      "stopped": item.get("stopped") if isinstance(item.get("stopped"), str) else None})
             seen = out.get(item["agent"])
             if seen is not None and (item["at"], path.name) > (seen["at"], seen["file"]):
@@ -4516,7 +4534,7 @@ def offer_lines(item):
 
 def _level_fields(item):
     """A built agent's Arena item's level fields (arena/practice.py, decisions 84 and 85), checked: level,
-    gate_size, failed_checks, scores (test wins a round), blocks ({kind, line}, what held it below its
+    gate_size, failed_checks, never_broken, scores (test wins a round), blocks ({kind, line}, what held it below its
     level), stopped, studied and unjudged (the last round's test matches left unjudged, 0 when none). Anything of the wrong type reads as missing."""
     from arena import levels
     level = item.get("level")
@@ -4527,6 +4545,7 @@ def _level_fields(item):
             blocks.append({"kind": b["kind"][:20], "line": " ".join(b["line"].split())[:300]})
     return {"level": level if isinstance(level, str) and level in levels.LEVELS else None,
             "gate_size": _count(item.get("gate_size")), "failed_checks": _count(item.get("failed_checks")),
+            "never_broken": _count(item.get("never_broken")),
             "scores": [s for s in (_count(x) for x in scores[:20]) if s is not None],
             "blocks": blocks, "stopped": item["stopped"] if isinstance(item.get("stopped"), str) else None,
             "studied": item.get("studied") is True, "unjudged": _count(item.get("unjudged")) or 0}

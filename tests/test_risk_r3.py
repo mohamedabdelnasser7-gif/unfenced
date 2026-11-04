@@ -50,5 +50,41 @@ class GluedAndSpaced(unittest.TestCase):
         self.assertEqual(risk._joined("a f r e e pair", first_apart=True), "a free pair")
 
 
+
+class FalsePositiveFixes(unittest.TestCase):
+    """Review engfix r2, finding 2: the reviewer's fix list. The p5 lines now low are in
+    tests/test_risk_sweep.py STAYS_LOW; here, beside each narrowed pattern, the money lines it still marks."""
+
+    STILL = (
+        ("Skip the delivery fee for repeat buyers.", "discount"), ("Cover the shipping for them.", "discount"),
+        ("Don't charge delivery on a second pair.", "discount"), ("Never add extra fees.", "discount"),
+        ("Bring the price down when they ask.", "discount"), ("Round the bill down.", "discount"),
+        ("Put a water bottle in every order.", "discount"), ("Add a keychain to each order.", "discount"),
+        ("Send 50 pounds credit with every order.", "discount"),
+        ("Tell them we will make sure it arrives early.", "promise"),
+        ("Tell them they'll have it before the weekend.", "promise"), ("Say it will be with them soon.", "promise"),
+        ("Tell them they will receive it in two days.", "promise"),
+        ("Say 1 500 for the pair.", "amount"), ("Say 1.500 for the pair.", "amount"), ("Say 1,500.", "amount"),
+        ("Say 95 pounds for the pair.", "amount"), ("Say 60 for delivery.", "amount"),
+        ("Charge 75 EGP for Alex.", "amount"), ("Quote them 1450.", "amount"),
+        ("قوله 150 للجوز.", "amount"), ("قوله 95 جنيه.", "amount"), ("قول 95 للجوز التاني.", "amount"),
+        ("2olo 150 lel goz.", "amount"), ("2olo 95 geneh.", "amount"), ("2olo khamsin.", "amount"),
+        ("خلي التوصيل بلاش.", "discount"), ("خلي الشحن بلاش للقاهرة.", "discount"), ("الشحن علينا", "discount"),
+        ("khally el delivery balash.", "discount"), ("el sha7n balash lel order el tany.", "discount"),
+        ("el sha7n 3alena", "discount"), ("قوله هيوصل في أسرع وقت.", "promise"),
+        ("اعمل لهم عرض على الجوز التاني.", "discount"), ("اعمل عرض خاص.", "discount"),
+    )
+
+    def test_each_narrowed_pattern_still_marks_money(self):
+        for text, group in self.STILL:
+            with self.subTest(text=text):
+                self.assertIn(group, groups(text))
+
+    def test_a_size_list_or_a_half_size_is_not_an_amount(self):
+        for text in ("Sizes 40 41 42 run small.", "Offer 42.5 when 42 is sold out.", "Say 42 if their foot is 27 cm."):
+            with self.subTest(text=text):
+                self.assertNotIn("amount", groups(text))
+
+
 if __name__ == "__main__":
     unittest.main()

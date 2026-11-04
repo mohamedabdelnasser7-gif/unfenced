@@ -1281,7 +1281,37 @@ def _new_test_set_main(agent):
     return 0
 
 
-def main(argv=None, *, agent_model=None, customer_model=None, judge_model=None):
+NO_DB = ("No database beside the agent's folder ({path}), so this run keeps no quick notes and has no study "
+         "between rounds. Name one with --db.")
+NO_STUDY = "It plays one round: the study between rounds needs its model keys"
+
+
+def learning(folder, db_path, *, full=True, study=None, made=True):
+    """What a run learns with, the same for the page (reflection/morning.py run_arena) and the command
+    line (main): (db, learn, study, why). db: the agent's database opened at db_path (the caller closes
+    it); learn: each lost match becomes a case there (arena/learn_built.py, when it is here); study: the
+    study between rounds, given, else with real models (made) the night's models (arena/run.py
+    reflection_models), None for the short run (full False) or with no db; why: the reason the night's
+    models could not be made, else None."""
+    db = learn = why = None
+    try:
+        from arena import learn_built
+    except ImportError:
+        learn_built = None
+    if learn_built is not None:
+        db = Db(str(db_path))
+        learn = learn_built.learner(db, turn_mod.load(folder).plug)
+    if not full:
+        study = None
+    elif study is None and made:
+        try:
+            study = run.reflection_models()
+        except run.Refused as e:
+            why = " ".join(str(e).split())[:160]
+    return db, learn, (study if db is not None else None), why
+
+
+def main(argv=None, *, agent_model=None, customer_model=None, judge_model=None, study=None):
     ap = argparse.ArgumentParser(prog="arena/practice.py", description="Arena practice for an agent made by Quick start.")
     ap.add_argument("--agent", required=True, help="the agent's folder, <db folder>/agents/<name>/")
     ap.add_argument("--matches", type=int, default=None, help="training matches a round (the level's, 10)")
@@ -1293,6 +1323,8 @@ def main(argv=None, *, agent_model=None, customer_model=None, judge_model=None):
                     "of the risk level's")
     ap.add_argument("--level", default=None, choices=levels.ORDER, help="the risk level, else the agent's level.json")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--db", default=None, help="the agent's database, where lost matches become cases and quick "
+                    "notes and lessons are kept (the page's: <db folder>/ascent.db beside agents/)")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--quick", action="store_true", help="one training match, a gate of one match, at most "
                     f"{run.QUICK_CALLS} model calls")
@@ -1317,16 +1349,29 @@ def main(argv=None, *, agent_model=None, customer_model=None, judge_model=None):
         agent_model = agent_model or model_mod.Model()
         customer_model = customer_model or model_mod.Model()
         judge_model = judge_model or model_mod.Model()
+    db_path = Path(args.db) if args.db else Path(args.agent).resolve().parent.parent / "ascent.db"
+    db = learn = None
+    if args.db or db_path.is_file():  # the page's wiring (learning): quick notes, and study between rounds
+        db, learn, study, why = learning(args.agent, db_path, full=not args.quick, study=study, made=made)
+        if why:
+            print(f"{NO_STUDY} ({why}).", file=sys.stderr)
+    else:
+        study = None
+        print(NO_DB.format(path=db_path), file=sys.stderr)
     try:
         rep = practise(args.agent, agent_model=agent_model, customer_model=customer_model, judge_model=judge_model,
                        matches=None if args.quick else args.matches, rounds=args.rounds, cards=args.cards, trust=args.trust, cap=args.cap,
-                       seed=args.seed, quick=args.quick, gate=gate, level=args.level, off_topic=made)
+                       seed=args.seed, quick=args.quick, gate=gate, level=args.level, off_topic=made, learn=learn,
+                       study=study, db=db, live_path=str(db_path) if db is not None else None)
     except NOT_RUN as e:
         print(f"Not run: {e}", file=sys.stderr)
         if isinstance(e, Unrecorded):  # a torn, changed or missing record: its one way on
             print(f"To go on, start a new test set: python3 -I arena/practice.py --agent {shlex.quote(args.agent)} "
                   "--new-test-set", file=sys.stderr)
         return 2
+    finally:
+        if db is not None:
+            db.close()
     print(json.dumps(rep, ensure_ascii=False, indent=1) if args.json else text(rep))
     return 0 if rep["stopped"] == run.PASSED else 1
 

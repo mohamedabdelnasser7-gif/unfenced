@@ -1175,28 +1175,17 @@ class Morning:
                     models = (model_mod.Model(), model_mod.Model(), model_mod.Model())
                 else:
                     models = self.arena_models()
-                learn = None
-                try:  # each lost match becomes a case the night studies (arena/learn_built.py), when it is here
-                    from arena import learn_built
-                except ImportError:
-                    learn_built = None
-                if learn_built is not None:
-                    from kit import turn as turn_mod
-                    db = Db(db_path)  # its own connection: the page's answers keep theirs
-                    learn = learn_built.learner(db, turn_mod.load(folder).plug)
-                study = None
-                if not full:  # the short run: one round, no study between rounds
-                    pass
-                elif self.arena_reflection is not None:
-                    study = self.arena_reflection()
-                elif self.arena_models is None:  # real models: the night's study models, else one round
-                    try:
-                        study = run_mod.reflection_models()
-                    except run_mod.Refused as e:
-                        with self._arena_lock:
-                            self._arena_note[agent] = f"{NO_STUDY} ({' '.join(str(e).split())[:160]})."
+                # each lost match becomes a case the night studies, and the study between rounds (the short run
+                # has none), the same wiring as the command line (arena/practice.py learning); its own
+                # connection, so the page's answers keep theirs
+                given = self.arena_reflection() if full and self.arena_reflection is not None else None
+                db, learn, study, why = practice.learning(folder, db_path, full=full, study=given,
+                                                          made=self.arena_models is None)
+                if why:
+                    with self._arena_lock:
+                        self._arena_note[agent] = f"{NO_STUDY} ({why})."
                 rep = practice.practise(folder, agent_model=models[0], customer_model=models[1],
-                                        judge_model=models[2], learn=learn, study=study if db is not None else None,
+                                        judge_model=models[2], learn=learn, study=study,
                                         db=db, live_path=db_path,
                                         # the off topic customer only with models made here, after the key check
                                         **{"off_topic": self.arena_models is None, **(shape if full else short)})

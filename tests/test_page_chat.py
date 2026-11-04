@@ -17,10 +17,13 @@ from pathlib import Path
 from unittest import mock
 
 from assistant import PLUG, case
+from engine import exam as engine_exam
 from engine import plug as plug_mod
+from engine import risk
+from engine.lessons import Lessons
 from kit import sample
 from kit.db import Db
-from kit.tools import mailbox
+from kit.tools import calendar_tool, mailbox
 from reflection import examples, morning as mo, pages, try_sales
 from tests.fake_model import FakeModel, clean_env, say, tool_call
 import tests.test_quickstart as tq
@@ -30,6 +33,8 @@ SUMMARY = "Today: Maya needs the launch checklist by noon (urgent, reply). Omar 
 DRAFT = "Hi Maya, the checklist is attached. Can we talk at 11?"
 LIVE = {"tab": ["live"]}
 WAITING = {"Revised quote", "Intro call", "Budget numbers", "This week in design"}  # the newest day's mail with no reply
+AT = dt.datetime(2026, 11, 4, 12, 0, tzinfo=dt.timezone(dt.timedelta(hours=2)))  # the clock the chat tests read the mail at
+TRICK = "</textarea><script>alert(1)</script>"
 
 
 def waiting_today(got, day):
@@ -53,6 +58,9 @@ class Base(unittest.TestCase):
         self.seen = []
         self.model = FakeModel(self.reads_mail, self.answers)
         self.p = pages.Pages(self.m, try_model=self.model)
+        clock = mock.patch.object(mailbox, "now", return_value=AT)  # a fixed clock: early in the day, today has no mail
+        clock.start()
+        self.addCleanup(clock.stop)
 
     def reads_mail(self, messages, tools):
         self.seen.append({"messages": messages, "tools": [t["function"]["name"] for t in tools or []]})
@@ -160,12 +168,94 @@ class UseMyVersion(Base):
                     self.p.action_for("/try/assistant/correct")(self.m, {"text": [text]})
         correct.assert_not_called()
 
+    def test_the_cap_is_exactly_what_a_correction_holds(self):
+        """Review r1 finding 7 (M6): the boundary, the most a correction holds passes and one more is refused."""
+        self.assertEqual(pages.MINE_ROOM, mo.MAX_LEN - len(pages.MINE.format(text="")))
+        act = self.p.action_for("/try/assistant/correct")
+        with mock.patch.object(self.m, "correct", return_value="ok") as correct:
+            self.assertEqual(act(self.m, {"text": ["x" * pages.MINE_ROOM]}), "ok")
+            with self.assertRaises(mo.Refused) as e:
+                act(self.m, {"text": ["x" * (pages.MINE_ROOM + 1)]})
+        self.assertIn(f"at most {pages.MINE_ROOM}", str(e.exception))
+        correct.assert_called_once()
+        self.assertEqual(len(correct.call_args.args[1]), mo.MAX_LEN)
+
+    def test_an_agent_with_no_folder_on_this_page_is_refused(self):
+        """Review r1 finding 7 (M7): Use my version on a page whose assistant has no agent folder is refused."""
+        bare = mo.Morning(self.db, [plug_mod.load(ROOT / "sales" / "plug.json"), PLUG], reports=self.dir)  # no folder
+        with mock.patch.object(bare, "correct") as correct, mock.patch.object(self.m, "correct") as other:
+            with self.assertRaises(mo.Refused):
+                self.p.action_for("/try/assistant/correct")(bare, {"text": ["Hi Maya, attached."]})
+        correct.assert_not_called()
+        other.assert_not_called()
+
+    def test_the_agents_own_draft_unchanged_is_refused(self):
+        """Review r1 finding 3: the model's draft sent back unchanged is not the user's version, so a pasted email
+        cannot turn the model's own words into a lesson with one press."""
+        self.model.script = [say(DRAFT)]
+        self.send("assistant", "Draft a reply to Maya.")
+        act = self.p.action_for("/try/assistant/correct")
+        with mock.patch.object(self.m, "correct", return_value="ok") as correct:
+            for same in (DRAFT, f"  {DRAFT}\n", DRAFT.replace(" ", "\n  ", 2)):
+                with self.subTest(same=same), self.assertRaises(mo.Refused) as e:
+                    act(self.m, {"text": [same]})
+                self.assertEqual(str(e.exception), pages.MINE_SAME)
+            correct.assert_not_called()
+            self.assertEqual(act(self.m, {"text": [DRAFT.replace("11", "12")]}), "ok")
+        correct.assert_called_once()
+
+    def test_edit_this_draft_shows_the_limit_and_prefills_only_what_fits(self):
+        """Review r1 finding 2: the box holds at most what a correction holds, says so, and a longer draft leaves it
+        empty with a hint instead of a text the server would refuse."""
+        long = "Hi Leo, " + "thanks for the note on the revised quote, I will send it by noon tomorrow. " * 5
+        self.assertGreater(len(long), pages.MINE_ROOM)
+        self.model.script = [say(DRAFT), say(long)]
+        self.send("assistant", "Draft a reply to Maya.")
+        self.send("assistant", "Draft a reply to Leo.")
+        page = self.p.get("/agents/assistant", LIVE, "tok")
+        self.assertIn(f"at most {pages.MINE_ROOM} characters", page)
+        self.assertEqual(page.count(f'maxlength="{pages.MINE_ROOM}"'), 2)
+        self.assertIn(f'required>{mo.h(DRAFT)}</textarea>', page)  # a short draft is there to edit
+        self.assertIn(f'required placeholder="{mo.h(pages.MINE_HINT)}"></textarea>', page)  # a long one: empty, a hint
+        self.assertNotIn(f">{mo.h(' '.join(long.split()))}</textarea>", page)
+
+    def test_a_reply_is_escaped_in_the_thread_and_in_the_box(self):
+        """Review r1 finding 7 (M10 and M12): a reply holding markup shows as text, in the thread and in the draft box."""
+        self.model.script = [say(TRICK)]
+        self.send("assistant", "Draft a reply to Maya.")
+        page = self.p.get("/agents/assistant", LIVE, "tok")
+        self.assertNotIn("<script>alert", page)
+        self.assertNotIn(TRICK, page)
+        self.assertIn(f'<p class="said ag" dir="auto">{mo.h(TRICK)}</p>', page)
+        self.assertIn(f'required>{mo.h(TRICK)}</textarea>', page)
+
+
+def low(text, high_about, low_about):
+    return risk.LOW
+
+
+class Handed(Base):
+    def test_a_passed_correction_reaches_the_chats_next_turn(self):
+        """Review r1 finding 7 (M19): a correction that passed its exam and runs on the live database is handed to
+        the chat's next turn, as the Arena hands it."""
+        fix = "Always offer two times for a call."
+        d = Db(str(self.path))
+        try:
+            Lessons(d, PLUG, judge=low).correct(fix, ["all"], yes_by=mo.BY,
+                                                exam=engine_exam.Result(True, [engine_exam.Row(1, "s1", "guard", True)],
+                                                                        calls=1))
+        finally:
+            d.close()
+        self.model.script = [say(DRAFT)]
+        self.send("assistant", "Draft a reply to Hana.")
+        self.assertIn(fix, json.dumps(self.model.calls[0]["messages"]))
+
 
 class Mailbox(unittest.TestCase):
     def test_the_sample_mailbox_always_holds_emails_dated_today(self):
         written = mailbox.emails(dt.datetime(2026, 10, 29, 23, 0, tzinfo=dt.timezone(dt.timedelta(hours=2))))
         written = written[:mailbox.MAX_EMAILS]  # what one read gives
-        for at in (dt.datetime(2027, 3, 15, 0, 5, tzinfo=dt.timezone(dt.timedelta(hours=2))),
+        for at in (dt.datetime(2027, 3, 15, 8, 35, tzinfo=dt.timezone(dt.timedelta(hours=2))),
                    dt.datetime(2026, 11, 4, 23, 59, tzinfo=dt.timezone(dt.timedelta(hours=-8))),
                    dt.datetime(2031, 1, 1, 12, 0, tzinfo=dt.timezone.utc)):
             with self.subTest(at=at), mock.patch.object(mailbox, "now", return_value=at):
@@ -174,7 +264,7 @@ class Mailbox(unittest.TestCase):
                 self.assertTrue(got["today"].startswith(at.date().isoformat()))
                 dates = [dt.datetime.fromisoformat(e["date"]) for e in got["emails"]]
                 self.assertTrue(any(d.date() == at.date() for d in dates))
-                self.assertFalse(any(d.date() > at.date() for d in dates))
+                self.assertFalse(any(d > at for d in dates))  # never after now
                 self.assertEqual(dates, sorted(dates, reverse=True))  # the order stays
                 old = [dt.datetime.fromisoformat(e["date"]) for e in written]
                 self.assertEqual([a - b for a, b in zip(dates, dates[1:])], [a - b for a, b in zip(old, old[1:])])
@@ -190,6 +280,57 @@ class Mailbox(unittest.TestCase):
                 self.assertGreaterEqual(len(waiting), 3)
                 self.assertEqual(waiting, WAITING)
                 self.assertGreater(len(today), len(waiting))  # a mix: some answered, some not
+
+    def test_the_newest_email_lands_just_before_now_never_after(self):
+        """Review r1 finding 4: at 09:00 no email is dated later the same day; the newest lands GAP before now."""
+        at = dt.datetime(2026, 11, 4, 9, 0, 30, tzinfo=dt.timezone(dt.timedelta(hours=2)))
+        with mock.patch.object(mailbox, "now", return_value=at):
+            dates = [dt.datetime.fromisoformat(e["date"]) for e in mailbox.run({}, None)["emails"]]
+        self.assertEqual(max(dates), dt.datetime(2026, 11, 4, 8, 50, tzinfo=at.tzinfo))
+        self.assertTrue(all(d < at for d in dates))
+        self.assertEqual(mailbox.GAP, dt.timedelta(minutes=10))
+
+    def test_a_zone_past_midnight_reads_in_its_own_time(self):
+        """Review r1 finding 7 (M13): at +14:00 the sample's own times (+02:00) fall on the next day; every date is
+        written in the user's zone, the newest just before now and today's waiting mail on the user's today."""
+        for hours in (14, 10, -12):
+            at = dt.datetime(2026, 11, 4, 20, 0, tzinfo=dt.timezone(dt.timedelta(hours=hours)))
+            with self.subTest(hours=hours), mock.patch.object(mailbox, "now", return_value=at):
+                got = mailbox.run({}, None)
+                zone = at.strftime("%z")
+                self.assertTrue(all(e["date"].endswith(f"{zone[:3]}:{zone[3:]}") for e in got["emails"]))
+                self.assertEqual(got["emails"][0]["date"], "2026-11-04T19:50:00" + f"{zone[:3]}:{zone[3:]}")
+                self.assertEqual(waiting_today(got, "2026-11-04")[0], WAITING)
+
+    def test_an_empty_mailbox_or_one_with_no_dates_stays_as_it_is(self):
+        """Review r1 finding 7 (M14): nothing to move is no crash and no change."""
+        self.assertEqual(mailbox.shifted([]), [])
+        self.assertEqual(mailbox.shifted([None]), [None])
+        self.assertEqual(mailbox.shifted([None, None], AT), [None, None])
+
+
+class Calendar(unittest.TestCase):
+    def test_the_calendar_day_is_the_mailboxs_today(self):
+        """Review r1 finding 1: the calendar moves onto the same today as the mailbox, so today's meetings and a
+        booking for tomorrow read the day the mail is on."""
+        for at in (AT, dt.datetime(2026, 11, 4, 23, 59, tzinfo=dt.timezone(dt.timedelta(hours=-8))),
+                   dt.datetime(2027, 3, 15, 9, 0, tzinfo=dt.timezone(dt.timedelta(hours=14))),
+                   dt.datetime(2031, 1, 1, 12, 0, tzinfo=dt.timezone.utc)):
+            with self.subTest(at=at), mock.patch.object(mailbox, "now", return_value=at):
+                mail, cal = mailbox.run({}, None), calendar_tool.run({}, None)
+                today = at.date().isoformat()
+                self.assertEqual(cal["date"], today)
+                self.assertEqual(mail["today"], cal["today"])
+                self.assertTrue(mail["today"].startswith(cal["date"]))
+                self.assertEqual([m["title"] for m in cal["meetings"]], ["Team sync", "Focus time", "Client call"])
+                self.assertTrue(all(m["date"] == today for m in cal["meetings"]))
+                tomorrow = (at.date() + dt.timedelta(days=1)).isoformat()
+                self.assertEqual(calendar_tool.run({"date": tomorrow}, None)["meetings"], [])
+                clash = calendar_tool.run({"title": "Hana", "start": "16:30", "end": "17:00"}, None)
+                self.assertIn("clashes with Client call", clash["feedback"])
+                self.assertEqual(clash["date"], today)
+        written = json.loads(calendar_tool.DEMO.read_text(encoding="utf-8"))["events"]
+        self.assertEqual({e["date"] for e in written}, {"2026-11-02"})  # the demo file is never written
 
 
 class Routes(Base):
@@ -243,6 +384,12 @@ class OverTheServer(Base):
                 self.assertEqual(self.post(path, [("text", "hi")], token="wrong")[0], 403)
         self.assertEqual(self.post("/try/assistant", [("text", "x" * (try_sales.MAX_PASTE + 1))])[0], 200)
         self.assertEqual(self.model.calls, [])  # refused, too long: no model call
+        status, page = self.post("/try/assistant", [("text", chr(0x201C) * (try_sales.MAX_PASTE + 1))])
+        self.assertEqual(status, 200)  # review r1 finding 6: 3 byte characters get the chat's refusal, not a bare 413
+        self.assertIn(f"A message is at most {try_sales.MAX_PASTE} characters.", page)
+        self.assertEqual(self.model.calls, [])
+        self.assertEqual(self.post("/try/assistant", [("text", "x" * pages.MAX_TRY_BODY)])[0], 413)  # still capped
+        self.assertEqual(self.post("/try/sales", [("text", "x" * mo.MAX_BODY)])[0], 413)  # Try Sales keeps its cap
         status, page = self.post("/try/assistant", [("text", "summarize my emails for today")])
         self.assertEqual(status, 200)
         self.assertIn(SUMMARY, page)

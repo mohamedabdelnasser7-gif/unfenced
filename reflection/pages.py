@@ -74,9 +74,15 @@ ROLLBACK = "/rollback"  # /agents/<name>/rollback: the plan a rollback would car
 # The page chat of an agent with an agent folder (Pages.action_for, try_mod.TryAgent): send, Start over, Use my version
 _TRY = re.compile(r"^/try/([a-z][a-z_]{0,30})(/clear|/correct)?$")
 MINE = "The user rewrote your draft as: {text}"  # Use my version, the correction it sends (Morning.correct)
+MINE_ROOM = mo.MAX_LEN - len(MINE.format(text=""))  # characters of the user's own version a correction holds
 CHAT_LINE = "Write to it, or paste what it works on, and it answers with its own tools on sample data. Nothing is sent."
-MINE_NOTE = ("Your version goes to the agent as a correction. It takes the short exam first, the same way as the box "
-             "on Overview.")
+MINE_NOTE = (f"Your version goes to the agent as a correction, at most {MINE_ROOM} characters. It takes the short exam "
+             "first, the same way as the box on Overview.")
+MINE_HINT = f"This draft is longer than {MINE_ROOM} characters. Write the line you would change."
+MINE_SAME = "Change the draft first, then press Use my version."
+# Bytes in one POST to /try/<agent> (morning.py do_POST): a message of MAX_PASTE characters of 3 bytes each, which
+# the form sends as 9 (%E2%80%9C), and room for the other fields, so a long paste gets the chat's own refusal
+MAX_TRY_BODY = try_mod.MAX_PASTE * 9 + 4096
 # The build page's one script (LOCKS "App pages", 2A), allowed by its hash in the /new policy only: while a
 # build runs it fetches the page again with the X-Poll header (the console's way, so the one-time
 # message stays) and swaps the thread; when the build is done it runs the countdown to the Arena, which
@@ -223,6 +229,7 @@ class Pages:
     live: the Morning on the real database, a Live tab after the days (no Sample data label there)."""
 
     LIVE = "live"
+    MAX_TRY_BODY = MAX_TRY_BODY  # the server's cap on a POST to /try/<agent> (morning.py do_POST)
 
     def __init__(self, morning=None, *, days=None, at=None, live=None, model=None, try_model=None, background=None):
         """at: {day: the time that day's page shows}, a sample's own clock; the real clock otherwise
@@ -308,15 +315,16 @@ class Pages:
     def _mine(self, m, agent, text, now):
         """Use my version: the user's rewrite of a draft in the page chat, a correction down the same exam and
         hotfix path as the box on Overview (Morning.correct, by the user)."""
-        self._try(lambda mm, now=None: self.chat(mm, agent), m, now)
+        box = self._try(lambda mm, now=None: self.chat(mm, agent), m, now)
         words = " ".join(str(text or "").split())
         if not words:
             raise mo.Refused("Write your version first.")
+        if words in {" ".join(str(r).split()) for t in box.thread() for r in t["replies"]}:
+            raise mo.Refused(MINE_SAME)  # the agent's own draft unchanged is not the user's version
         line = MINE.format(text=words)
         if len(line) > mo.MAX_LEN:
-            room = mo.MAX_LEN - len(MINE.format(text=""))
-            raise mo.Refused(f"Your version is {len(words)} characters. A correction holds at most {room}, so keep "
-                             "the part that matters.")
+            raise mo.Refused(f"Your version is {len(words)} characters. A correction holds at most {MINE_ROOM}, so "
+                             "keep the part that matters.")
         return m.correct(agent, line, now=now, by=mo.BY)
 
     def back(self, value):
@@ -600,9 +608,12 @@ class Pages:
             for r in turn["replies"]:
                 rows.append(f'<p class="said ag" dir="auto">{h(r)}</p>')
                 if ctx["token"]:
+                    draft = " ".join(str(r).split())  # as Use my version reads it; empty with a hint when too long
+                    fill, hint = (draft, "") if len(draft) <= MINE_ROOM else ("", f' placeholder="{h(MINE_HINT)}"')
                     rows.append(f'<details class="mine"><summary>Edit this draft</summary><form method="post" '
                                 f'action="/try/{h(agent)}/correct">{_hidden(ctx)}<div class="box"><textarea name="text" '
-                                f'aria-label="Your version of the draft" dir="auto" required>{h(r)}</textarea></div>'
+                                f'aria-label="Your version of the draft" maxlength="{MINE_ROOM}" dir="auto" required'
+                                f'{hint}>{h(fill)}</textarea></div>'
                                 f'<div class="say-f"><p class="quiet">{icon("loop")}{MINE_NOTE}</p><button class="send" '
                                 f'type="submit">Use my version{icon("arrow")}</button></div></form></details>')
             if turn.get("tools"):

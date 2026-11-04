@@ -109,4 +109,5 @@ These came in on the engfix2 and engfix3 branches.
 - The cleaner can miss a rare surname or a number written in words (decisions 23 and 40).
 - Hand-off to a person is a later feature (decision 53). A live off-topic check on every real reply is next (decision 89).
 - The personal assistant's night and command line Arena still play simulated days; its page practises case by case (decisions 71 and 109).
+- The assistant's sample day now moves with the date: its mailbox and calendar land on today each time they are read, and the mailbox holds 16 emails, not 12. Its past Arena wins were played on the old fixed mailbox, and its Arena has not been run again since.
 - One agent with several kinds of case is next, not built (decision 69).

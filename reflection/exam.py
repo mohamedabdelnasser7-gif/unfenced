@@ -433,12 +433,28 @@ def _hidden(ch):
     return cat == "Cf" or (cat.startswith("M") and not TASHKEEL.match(ch))
 
 
+def _letters(text, marks=""):
+    """text with its letters bare: composed (NFC), each letter in its compatibility form (NFKD: fullwidth letters
+    and Arabic presentation forms as plain letters) with the accents it carries taken off, so "wāves" and "ricé"
+    read as waves and rice; each hidden mark (_hidden) as marks; then NFC again. A combining mark that composes
+    with no letter stays a hidden mark (red team scopeguard2 r3, item 4: NFKC first kept ā and é whole)."""
+    out = []
+    for ch in unicodedata.normalize("NFC", str(text)):
+        if unicodedata.category(ch).startswith("M"):
+            out.append(marks if _hidden(ch) else ch)
+            continue
+        for part in unicodedata.normalize("NFKD", ch):
+            if not unicodedata.category(part).startswith("M"):  # an accent the letter carried goes
+                out.append(marks if _hidden(part) else part)
+    return unicodedata.normalize("NFC", "".join(out))
+
+
 def _plain(text, marks=""):
-    """Text as off_scope reads it: in its NFKC form (fullwidth letters and Arabic presentation forms as plain
-    letters); each hidden mark (_hidden) taken out, so one never splits a word, or with marks=" " read as a
-    space, so marks between words never join them; hyphens and underscores read as spaces; Arabic folded (one
-    alef, ه for ة, ي for ى, no hamza seat, short vowel or tatweel). Red team scopeguard2 r2, item 5."""
-    text = "".join(marks if _hidden(ch) else ch for ch in unicodedata.normalize("NFKC", str(text)))
+    """Text as off_scope reads it: its letters bare (_letters: compatibility forms, no accents); each hidden mark
+    (_hidden) taken out, so one never splits a word, or with marks=" " read as a space, so marks between words
+    never join them; hyphens and underscores read as spaces; Arabic folded (one alef, ه for ة, ي for ى, no
+    hamza seat, short vowel or tatweel). Red team scopeguard2 r2, item 5."""
+    text = _letters(text, marks)
     text = re.sub(r"[-_\u2010-\u2015\u2212]+", " ", text)
     return TASHKEEL.sub("", text.translate(FOLD))
 
@@ -540,10 +556,10 @@ def _told(clause, end):
 
 
 def words(text):
-    """The words in text in its NFKC form, a hidden mark (_hidden: a format mark, or a combining mark outside
-    tashkeel such as the combining grapheme joiner) read as a space, so a reply joined by hidden marks still
-    counts every word (red team scopeguard2 r2, item 6). The 45 word rule (SCOPE_WORDS) counts with it."""
-    return len("".join(" " if _hidden(ch) else ch for ch in unicodedata.normalize("NFKC", str(text))).split())
+    """The words in text with its letters bare (_letters), a hidden mark (_hidden: a format mark, or a combining
+    mark outside tashkeel such as the combining grapheme joiner) read as a space, so a reply joined by hidden
+    marks still counts every word (red team scopeguard2 r2, item 6). The 45 word rule (SCOPE_WORDS) counts with it."""
+    return len(_letters(text, " ").split())
 
 
 def check_off_scope(s, did):

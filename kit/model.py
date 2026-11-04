@@ -33,6 +33,11 @@ is not asked again. The second ask is a model call like any other, so every wrap
 toward a cap counts it too: such a wrapper runs its inner call inside counting(take), and Model.chat
 calls each take() before it asks again (outermost first). A take() that raises (a cap reached)
 stops the second ask, and its error goes up as the wrapper's own would.
+
+A call that got no answer at all (a timeout, a network failure, a 5xx or a 429, after the fallback
+leg when there is one) is asked once more the same way, at the same budget, counted the same way
+(2026-11-04: a live run on the Meta key alone, which has no fallback, dropped a match on one such
+failure). One second ask at most per call, whichever the reason.
 """
 import contextlib
 import contextvars
@@ -201,7 +206,7 @@ class Model:
         self.last_route = self.last_model = None
         if not self._key:
             raise ModelError(self._no_key)
-        message, failed, cut = self._ask(messages, tools, effort, max_tokens, whole)
+        message, failed, cut, lost = self._ask(messages, tools, effort, max_tokens, whole)
         bigger = retry_tokens(max_tokens)
         if bigger is not None and (cut or (failed is None and empty(message))):
             for take in _COUNTERS.get():
@@ -210,14 +215,22 @@ class Model:
             log.warning("%s gave %s at %s tokens; asked once more at %d", self.route.name,
                         "a cut off answer" if cut else "an empty answer", max_tokens, bigger)
             self.last_route = self.last_model = None
-            message, failed, _ = self._ask(messages, tools, effort, bigger, whole)
+            message, failed, _, _ = self._ask(messages, tools, effort, bigger, whole)
+        elif failed is not None and lost:  # no answer at all: once more, same budget, counted the same
+            for take in _COUNTERS.get():
+                take()
+            # The failure names the route and a status or an error type only, never the request.
+            log.warning("%s; asked once more", failed)
+            message, again, _, _ = self._ask(messages, tools, effort, max_tokens, whole)
+            failed = None if again is None else f"{failed}; asked once more: {again}"
         if failed is not None:
             raise ModelError(failed)
         return message
 
     def _ask(self, messages, tools, effort, max_tokens, whole):
         """One ask: the first leg, then the fallback leg on the failures it is for. Returns (message,
-        why it failed or None, cut: the failure is an answer cut off at max_tokens)."""
+        why it failed or None, cut: the failure is an answer cut off at max_tokens, lost: the last
+        leg asked gave no answer at all, a timeout, network failure, 5xx or 429)."""
         first = Leg(self.route, self._key, self.model_id)
         message, failed, retry = self._send(first, self.endpoint, messages, tools, effort, max_tokens, whole)
         if failed is not None and retry and self.fallback is not None:
@@ -225,10 +238,10 @@ class Model:
             # Route names and status only. ERROR, not WARNING: the Arena and the exam quiet warnings
             # while a match runs (arena/match.py demo_store), and a switch of host must still show.
             log.error("%s; this call goes to %s", failed, nxt.route.name)
-            message, again, _ = self._send(nxt, nxt.route.endpoint, messages, tools, effort, max_tokens, whole)
+            message, again, lost = self._send(nxt, nxt.route.endpoint, messages, tools, effort, max_tokens, whole)
             failed = None if again is None else f"{failed}; {again}"
-            return message, failed, isinstance(again, _Cut)
-        return message, failed, isinstance(failed, _Cut)
+            return message, failed, isinstance(again, _Cut), again is not None and lost
+        return message, failed, isinstance(failed, _Cut), failed is not None and retry
 
     def _send(self, leg, endpoint, messages, tools, effort, max_tokens, whole):
         """One request to one leg. Returns (message, None, False) or (None, why, retry), and never

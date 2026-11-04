@@ -50,7 +50,7 @@ class SoFar(Base):
         self.add(match(0, True, "an old run"))
         self.assertIsNone(self.m.arena_so_far("stock_watch"))  # no run goes
         self.m.run_arena("stock_watch", full=True)
-        self.assertEqual(self.m.arena_so_far("stock_watch"), {"played": 0, "won": 0, "rows": []})
+        self.assertEqual(self.m.arena_so_far("stock_watch"), {"played": 0, "won": 0, "rows": [], "live": []})
         self.add(match(1, False, "it guessed the stock"), '{"not judged": 1}\n', "not json\n",
                  match(2, True, "a clear answer"))
         got = self.m.arena_so_far("stock_watch")

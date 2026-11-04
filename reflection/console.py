@@ -149,6 +149,9 @@ def _so_far(m, agent, out, rec):
     the timeline. For the screen only: never in the saved run's win rate, and the gate never reads them."""
     got = m.arena_so_far(agent) if hasattr(m, "arena_so_far") else None
     out["so_far"] = None if got is None else {"played": got["played"], "won": got["won"]}
+    out["playing"] = [{"id": x["id"], "who": x.get("who") or "", "about": x.get("about") or "",
+                       "last": latest_turn(x.get("turns"))}
+                      for x in (got or {}).get("live") or [] if isinstance(x, dict) and x.get("status") == "playing"]
     out["live"] = []
     for x in (got or {}).get("rows") or []:
         run = re.match(r"\d{8}T\d{6}", str(x.get("id") or ""))
@@ -159,6 +162,21 @@ def _so_far(m, agent, out, rec):
     for x in reversed(out["live"]):  # the timeline is oldest first
         rec.add("A", None, f"running: match {x['id']} {'won' if x['won'] else 'lost'}" + (f": {x['why']}" if x["why"] else ""),
                 x["raw"], row=f"m.{x['id']}", sort=_run_start(x["id"][:15]))
+
+
+LATEST_ROOM = 160  # characters of a playing match's latest turn on the console
+
+
+def latest_turn(turns):
+    """A playing match's newest turn in one short line: the customer's words, then the agent's first reply."""
+    turns = [t for t in turns or [] if isinstance(t, dict)]
+    if not turns:
+        return "first line on the way"
+    t = turns[-1]
+    said = " ".join(str(t.get("customer") or t.get("input") or "").split())
+    reply = next((" ".join(r.split()) for r in t.get("replies") or [] if isinstance(r, str) and r.strip()), "")
+    line = f"turn {len(turns)}: customer: {said[:LATEST_ROOM]}"
+    return line + (f" | agent: {reply[:LATEST_ROOM]}" if reply else " | no reply")
 
 
 def _sales():
@@ -855,6 +873,10 @@ def arena_html(data, st, day):
         head = "<tr><th>Match</th><th>Customer</th><th>Kind</th><th>Check</th><th>Result</th><th></th></tr>"
         live = data.get("live") or []
         running = {x["id"] for x in live}
+        for x in (data.get("playing") or []) if st["f"] == "all" else []:  # playing now, its latest turn
+            rows.append(f'<tr><td class="mono">{h(x["id"])}</td><td class="sit">{h(x["who"])}'
+                        f'{" | " + h(x["about"]) if x["about"] else ""}<small class="why" dir="auto">{h(x["last"])}</small>'
+                        f'</td><td class="dim">playing</td><td></td><td><span class="badge run">PLAYING</span></td><td></td></tr>')
         for x in live + list(reversed(data["matches"])):  # a running run's matches first, newest first
             if not _keep(x["won"], st["f"]):
                 continue

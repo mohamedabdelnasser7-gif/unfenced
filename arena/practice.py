@@ -297,14 +297,15 @@ class Customer(match_mod.Customer):
 
 
 def play(agent, card, *, agent_model, customer_model, seed=0, max_turns=MAX_TURNS, lessons=(), opening=None,
-         fast=None):
+         fast=None, on_turn=None):
     """One practice match of agent (kit/turn.py Agent) against card. Returns the match dict in
     arena/match.py's shape, with the agent's name, the made-up mark, the customer's closing line and
     the prompt's fingerprint. opening: a customer first line to use as it is (the eval gate's rerun of
     a past win, arena/gate.py TurnGate), else the card's case input when it has one, else the customer
     model writes it. A case the agent starts opens with the agent's first message and takes no opening.
     fast: the run's quick notes (arena/notes.py RunNotes), handed last in the agent's prompt each turn
-    (kit/turn.py turn fast); None for a gate match, which plays without them as the live agent does."""
+    (kit/turn.py turn fast); None for a gate match, which plays without them as the live agent does.
+    on_turn(turns): called with the turns so far after each turn (arena/match.py told), never stopping it."""
     customer = Customer(card, customer_model, agent.card["does"], seed, agent_card=agent.card,
                         data=getattr(agent, "data", None))
     case = case_of(agent.card)
@@ -353,6 +354,7 @@ def play(agent, card, *, agent_model, customer_model, seed=0, max_turns=MAX_TURN
                 if agent_first:
                     one["input"] = given
                 turns.append(one)
+                match_mod.told(on_turn, turns)
                 if out.outcome == "model_error":
                     ended, error = VOID, AGENT_SILENT + (f" ({out.error})" if getattr(out, "error", "") else "")
                     break
@@ -469,13 +471,15 @@ class Practice(run.Arena):
         self.train = self.train + shared
         return len(shared)
 
-    def play(self, card, match_id, *, opening=None, lessons=None, replay=None, training=False):
+    def _play_match(self, card, match_id, *, opening=None, lessons=None, replay=None, training=False, on_turn=None):
+        """One practice match and its verdict, saved (run.Arena.play wraps it with the live chat file)."""
         try:
             if self.before_match is not None and not run.laned():  # Pool.refresh: the live corrections, read again
                 self.before_match()
             m = play(self.who, card, agent_model=self.agent_model, customer_model=self.customer_model, seed=match_id,
                      lessons=lessons if lessons is not None else self.handed(), opening=opening,
-                     fast=self.notes if training else None)  # the run's quick notes, training only
+                     fast=self.notes if training else None,  # the run's quick notes, training only
+                     on_turn=on_turn)
             if scope.is_off(card):  # judged with the exam's off-topic rules (arena/scope.py)
                 m.update(off_scope=True, ask=card["ask"])
             if m.get("ended") == VOID:  # a model did not answer: dropped, never a loss

@@ -716,5 +716,16 @@ textarea.typed{width:100%; border:0; background:transparent; resize:none; outlin
   .bp .dock{bottom:0; padding:28px 0 28px}
 }
 @media (prefers-reduced-motion: reduce){ .runp .spin{animation:none} }
+/* the live chats of a running Arena run (pages.py so_far_tiles): the page chat's bubbles, customer right, agent left */
+.lc{margin-top:12px}
+.lc summary{display:inline-flex; align-items:center; gap:6px; cursor:pointer; list-style:none; font:600 14px/20px var(--font); color:var(--ink-2)}
+.lc summary::-webkit-details-marker{display:none}
+.lc .thread{display:flex; flex-direction:column; align-items:stretch; gap:6px; margin-top:10px}
+.lc .said{max-width:86%; margin:0; padding:8px 12px; border-radius:16px; font:400 14px/20px var(--font); white-space:pre-line; overflow-wrap:anywhere}
+.lc .said.me{align-self:flex-end; border-bottom-right-radius:6px; background:#e3e9e6}
+.lc .said.ag{align-self:flex-start; border-bottom-left-radius:6px; background:var(--card-3); box-shadow:inset 0 0 0 1px var(--line)}
+.lc .said.nil{align-self:flex-start; background:none; color:var(--ink-2); font-style:italic}
+.tile.live{box-shadow:var(--shadow-soft), inset 0 0 0 1px var(--line)}
+@media (prefers-reduced-motion: reduce){ .live .res .pulse{animation:none} }
 
 """

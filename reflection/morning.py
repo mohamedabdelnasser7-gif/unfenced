@@ -1168,7 +1168,10 @@ class Morning:
         its matches file gained since it started (the start arena_played uses; _gained keeps the newest
         SO_FAR_TAIL bytes of them). {"played": the lines gained, "won": the gained lines read that say won, "rows": each
         gained line read that holds a judged match (a dict with won true or false), newest first, at most
-        SO_FAR_ROWS}; None when no run goes (arena_run)."""
+        SO_FAR_ROWS, each with "who" and "about" (arena/live.py who_of) beside its saved "turns"; "live": the matches
+        playing now, from the run's live folder (arena/live.py read: id, who, about, status, turns, and won and
+        why once judged but not yet saved), never one already in rows}; None when no run goes (arena_run)."""
+        from arena import live as live_mod
         run = self.arena_run(agent)
         if run is None:
             return None
@@ -1180,8 +1183,12 @@ class Morning:
             except (ValueError, RecursionError):
                 continue
             if isinstance(x, dict) and isinstance(x.get("won"), bool):
+                x["who"], x["about"] = live_mod.who_of(x.get("persona"))
                 got.append(x)
-        return {"played": played, "won": sum(1 for x in got if x["won"]), "rows": got[::-1][:SO_FAR_ROWS]}
+        saved = {x.get("id") for x in got}
+        playing = [x for x in (live_mod.read(run[0]) if run[0] is not None else []) if x["id"] not in saved]
+        return {"played": played, "won": sum(1 for x in got if x["won"]), "rows": got[::-1][:SO_FAR_ROWS],
+                "live": playing}
 
     def _arena_checks(self, agent, locked):
         """The refusals Run the Arena and Train share: (sales, folder). Refused for any other agent, for the Sales

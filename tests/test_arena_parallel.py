@@ -1,4 +1,4 @@
-"""Arena matches 3 at a time (arena/run.py PARALLEL): the same saved run as one by one, groups that really
+"""Arena matches up to 5 at a time (arena/run.py PARALLEL): the same saved run as one by one, groups that really
 overlap, the cap inside a group, quick notes carried group to group, whole lines on the matches file."""
 import json
 import os
@@ -65,8 +65,10 @@ class Same(P):
         self.assertTrue(any(r["gate"]["lost"] for r in one["rounds"]))  # the test has losses to compare
         self.assertTrue(no_match_threads())
 
-    def test_the_setting_is_one_to_three_and_three_when_unset(self):
-        for raw, want in (("", 3), ("1", 1), ("2", 2), ("3", 3), ("9", 3), ("0", 1), ("x", 3)):
+    def test_the_setting_is_one_to_five_and_five_when_unset(self):
+        self.assertEqual(run.MAX_PARALLEL, 5)
+        for raw, want in (("", 5), ("1", 1), ("2", 2), ("3", 3), ("4", 4), ("5", 5), ("6", 5), ("9", 5), ("0", 1),
+                          ("x", 5)):
             with self.subTest(raw=raw), mock.patch.dict(os.environ, {run.PARALLEL_ENV: raw}):
                 self.assertEqual(run._parallel(), want)
         with mock.patch.object(run, "PARALLEL", None), mock.patch.dict(os.environ, {run.PARALLEL_ENV: "2"}):
@@ -76,6 +78,24 @@ class Same(P):
 
 
 class Overlap(P):
+    def test_a_group_of_five_is_in_flight_at_once_practice_and_gate(self):
+        barrier, seen = threading.Barrier(5, timeout=WAIT), []
+
+        def play(self, card_, match_id, **kw):
+            barrier.wait()  # all five of the group are here, or BrokenBarrierError fails the run
+            seen.append(match_id)
+            return fake_match(self, card_, match_id, True)
+        cards = [card(i, "size") for i in range(1, 11)]
+        with mock.patch.object(run, "PARALLEL", None), mock.patch.dict(os.environ, {run.PARALLEL_ENV: ""}), \
+                mock.patch.object(run.Arena, "play", play):
+            rep = self.arena(cards, Customer(), matches=5, rounds=1,
+                             trust={"matches": 5, "wins": 5, "zero_failed_checks": True}).run()
+        self.assertEqual(rep["stopped"], run.PASSED)
+        self.assertEqual(len(seen), 10)
+        self.assertEqual(rep["rounds"][0]["training"]["played"], 5)
+        self.assertEqual(rep["rounds"][0]["gate"]["played"], 5)
+        self.assertTrue(no_match_threads())
+
     def test_a_group_of_three_is_in_flight_at_once_practice_and_gate(self):
         barrier, seen = threading.Barrier(3, timeout=WAIT), []
 

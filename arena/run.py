@@ -126,7 +126,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if __name__ == "__main__" and str(ROOT) not in sys.path:  # run by its path under -I
     sys.path.insert(0, str(ROOT))
 
-from arena import close as close_mod, factcheck, match as match_mod, notes as notes_mod, offers as offers_mod, paths, \
+from arena import close as close_mod, factcheck, live, match as match_mod, notes as notes_mod, offers as offers_mod, paths, \
     replay as replay_mod, scope, verdict  # noqa: E402
 from kit import seal  # noqa: E402
 from kit.model import ModelError, counting  # noqa: E402
@@ -161,16 +161,17 @@ QUICK_STATE = ROOT / "data" / "arena-quick"
 
 
 PARALLEL_ENV = "UNFENCED_ARENA_PARALLEL"  # in env or .env (.env.example)
+MAX_PARALLEL = 5  # matches at once at most, and when PARALLEL_ENV is not set (Mohamed 2026-11-05)
 
 
 def _parallel():
-    """PARALLEL_ENV from env: 1 to 3 matches at a time, 3 when it is not set or not a number."""
+    """PARALLEL_ENV from env: 1 to MAX_PARALLEL matches at a time, MAX_PARALLEL when it is not set or not a number."""
     raw = os.environ.get(PARALLEL_ENV, "").strip()
     try:
-        n = int(raw) if raw else 3
+        n = int(raw) if raw else MAX_PARALLEL
     except ValueError:
-        n = 3
-    return min(max(n, 1), 3)
+        n = MAX_PARALLEL
+    return min(max(n, 1), MAX_PARALLEL)
 
 
 # How many matches play at once (Arena.run): practice in groups that learn from the group before, the gate in
@@ -652,7 +653,23 @@ class Arena:
         if self.matches < 1 or self.rounds < 1:
             raise Refused("--matches and --rounds must be at least 1")
 
-    def play(self, card, match_id, *, opening=None, lessons=None, replay=None, training=False):
+    def play(self, card, match_id, **kw):
+        """One match (_play_match) with its chat written turn by turn to the run's live folder (arena/live.py) for
+        the agent page: removed once the match is saved or dropped. Played beside others, a judged match shows
+        Won or Lost there until Arena.run folds it in and its line is on the matches file; _together then removes
+        it, and any left by a match never folded in."""
+        watch = live.Watch(self.state, match_id, card).start()
+        out = None
+        try:
+            out = self._play_match(card, match_id, on_turn=watch, **kw)
+            return out
+        finally:
+            if laned() and isinstance(out, tuple) and len(out) == 2 and isinstance(out[1], dict):
+                watch.finish(out[1].get("won"), out[1].get("why"))  # _together removes it once folded in
+            else:
+                watch.remove()
+
+    def _play_match(self, card, match_id, *, opening=None, lessons=None, replay=None, training=False, on_turn=None):
         """One match and its verdict, saved; None when the cap stopped it (the match is dropped).
         replay: the replay chat's id, saved on the match. training: a training match, the only kind
         handed the run's quick notes (the live agent never gets them, so the gate and the replay
@@ -662,7 +679,7 @@ class Arena:
         try:
             m = match_mod.play(card, agent_model=self.agent_model, customer_model=self.customer_model,
                                prompt=self.prompt, lessons=lessons or self.lessons, seed=match_id,
-                               opening=opening, checker=factcheck.check, stop=verdict.closed,
+                               opening=opening, checker=factcheck.check, stop=verdict.closed, on_turn=on_turn,
                                **(self._fast() if training else {}))
         except CapReached:
             self.halt = CAP
@@ -879,6 +896,13 @@ class Arena:
         always), and returns their results in match order, each settled (_settle), ending at the first None:
         the matches after a dropped one are stopped at their next model call and never folded in. Every
         thread has ended when it returns."""
+        try:
+            return self._together_now(jobs)
+        finally:  # a match never folded in (after a dropped one) leaves no live file
+            for _, mid, _ in jobs:
+                live.remove(self.state, mid)
+
+    def _together_now(self, jobs):
         if len(jobs) < 2:  # none when the off topic slot ended the round skipped
             return [self.play(card, mid, **kw) for card, mid, kw in jobs]
         try:

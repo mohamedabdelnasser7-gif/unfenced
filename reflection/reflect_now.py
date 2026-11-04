@@ -345,7 +345,8 @@ def run_arena(db_path, plug, *, models, agent_model, customer_model, calls, step
             raise ValueError("the Arena's copy holds lessons mined from history rows; every agent starts from zero "
                              "(DECISIONS item 20)")
         pool = rounds_mod.Pool(SalesLessons(copy), hotfixes=lambda: rounds_mod.live_lessons(str(db_path), plug.agent))
-        pool.refresh()  # the corrections sent on the live page and the live lessons on trial, as before every Arena match
+        pool.refresh()  # the corrections sent on the live page and the live lessons on trial, as before every match;
+        # Between reads them again before each exam and gate, so one pulled during Train stops at once
 
         def live_lessons():  # opened at the first lesson that passes the gate, not before
             live.append(Db(str(db_path)))
@@ -394,7 +395,7 @@ def train_between(db, db_path, folder, *, models, agent_model, customer_model, j
     agent = turn_mod.load(folder)
     reports = practice.reports_of(Path(folder))
     calls = run_mod.Calls(reports / run_mod.CALLS_FILE, run_mod.DEFAULT_CAP)
-    pool = rounds_mod.Pool(EngineLessons(db, agent.plug),  # it reads the live database at its first use
+    pool = rounds_mod.Pool(EngineLessons(db, agent.plug),  # read at its first use, again before each exam and gate
                            hotfixes=lambda: rounds_mod.live_lessons(str(db_path), agent.name))
     examiner = models.get("examiner") or rounds_mod.turn_examiner(agent, calls.model(judge_model))
     marked = {"study": steps.marking(models["study"], LESSON), "open": models["open"], "exam": models["exam"]}

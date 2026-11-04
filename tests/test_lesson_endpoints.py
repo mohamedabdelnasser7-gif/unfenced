@@ -23,7 +23,10 @@ Coverage. "fix N" fails on the code before this change (ab44c19); "guard" passed
   tests/test_arena_hotfix.py TypedMidRun (A in the Sales Arena).
   fix 1: Train's Pool reads the live database at its first use (it never refreshes). fix 2: a built agent's
   Arena builds the Pool with no study between rounds. fix 3: lessons on trial are read (decision 112).
-  fix 4: a person's yes after a failed exam counts as passing. fix 5: the Try again record."""
+  fix 4: a person's yes after a failed exam counts as passing. fix 5: the Try again record.
+  Review round 1: a correction paused or past its end date is not read (Reader); a lesson with no exam is read once
+  a person's yes starts it (NoExam); a lesson handed on and on trial live is handed once (PoolOnce); Between reads
+  the live database again before each exam and gate (Built)."""
 import json
 import tempfile
 import time
@@ -103,9 +106,20 @@ class Reader(tar.Base):
             self.assertTrue(SalesLessons(d).pull(d_, "no from the user"))  # No on its Today card (Morning.no)
         finally:
             d.close()
+        # two corrections on trial past their end date: one paused (engine/trial.py _stop sets its end date to now,
+        # as Lessons.pause does) and one whose trial ended; they wait their turn behind a, so the trial is set here
+        paused = hot.correct(db, "Say delivery is free.")
+        over = hot.correct(db, "Say returns take two days.")
+        d = Db(str(db))
+        try:
+            with d.tx() as c:
+                for lid, end in ((paused, time.time()), (over, time.time() - 30 * 86400)):
+                    c.execute("UPDATE lessons SET state = 'trying', ends_at = ? WHERE id = ?", (end, lid))
+        finally:
+            d.close()
         got = {one["live_id"]: one["hotfix"] for one in rounds.live_lessons(db, PLUG.agent)}
         self.assertEqual(got, {a: True, b: True, e: False})
-        for gone in (c, d_, f, g, ended):
+        for gone in (c, d_, f, g, ended, paused, over):
             self.assertNotIn(gone, got)
         self.assertEqual([one["live_id"] for one in rounds.live_hotfixes(db, PLUG.agent)], [a, b])
 
@@ -124,6 +138,78 @@ class Reader(tar.Base):
         finally:
             d.close()
         self.assertEqual(rounds.live_lessons(db, PLUG.agent), [])
+
+
+class NoExam(tar.Base):
+    """A lesson that took no exam (no lesson_exams row) is handed once a person's yes on Today starts it (decision
+    112; Mohamed 2026-11-04, every fix): a high risk one with the switch off, a brought back one, a copied one.
+    Never while it waits, nor on the switch's marked yes."""
+
+    def lessons(self, db, judge=hot.low):
+        d = Db(str(db))
+        self.addCleanup(d.close)
+        return SalesLessons(d, judge=judge, exam=hot.passed)
+
+    def read(self, db):
+        return {one["live_id"]: one["hotfix"] for one in rounds.live_lessons(db, PLUG.agent)}
+
+    def test_a_high_risk_lesson_with_no_exam_is_handed_after_a_persons_yes(self):
+        db = self.db()
+        L = self.lessons(db, judge=lambda *a: risk.HIGH)
+        lid = L.propose(TRIAL, ["asking"], source=STUDY, sources=[])
+        self.assertEqual((L.get(lid)["state"], L.exam_of(lid)), ("waiting", None))
+        self.assertEqual(self.read(db), {})  # waiting: never handed
+        self.assertTrue(L.approve(lid, "the user"))
+        self.assertEqual(L.get(lid)["state"], "trying")
+        self.assertEqual(self.read(db), {lid: False})
+
+    def test_a_brought_back_lesson_is_handed(self):
+        db = self.db()
+        old = on_trial(db, TRIAL, ("asking",))
+        L = self.lessons(db)
+        self.assertTrue(L.pull(old, "pulled on Today"))
+        self.assertEqual(self.read(db), {})
+        new = L.bring_back(old, "the user")
+        self.assertEqual((L.get(new)["state"], L.exam_of(new)), ("trying", None))
+        self.assertEqual(self.read(db), {new: False})
+
+    def test_a_copied_lesson_is_handed_after_a_persons_yes(self):
+        db = self.db()
+        L = self.lessons(db)
+        text = "Tell them the blue trainer comes in sizes forty to forty five today."
+        lid = L.propose(text, ["asking"], source=STUDY, sources=[text])
+        self.assertTrue(L.get(lid)["risk_why"].startswith(risk.COPIED), L.get(lid)["risk_why"])
+        self.assertEqual((L.get(lid)["state"], L.exam_of(lid)), ("waiting", None))
+        self.assertEqual(self.read(db), {})
+        self.assertTrue(L.approve(lid, "the user"))
+        self.assertEqual(self.read(db), {lid: False})
+
+    def test_no_exam_and_the_switchs_yes_is_never_handed(self):
+        db = self.db()
+        L = self.lessons(db, judge=lambda *a: risk.HIGH)
+        lid = L.propose(TRIAL, ["asking"], source=STUDY, sources=[])
+        with L.db.tx() as c:
+            c.execute("UPDATE lessons SET state = 'trying', ends_at = ?, yes_at = ?, yes_by = ? WHERE id = ?",
+                      (time.time() + 86400, time.time(), "the user (Accept high risk)", lid))
+        self.assertIsNone(L.exam_of(lid))
+        self.assertEqual(self.read(db), {})
+
+
+class PoolOnce(tar.Base):
+    def test_a_lesson_handed_on_and_on_trial_live_is_handed_once(self):
+        """A lesson this run passed, handed on and wrote live (hand_live: on trial there) comes back from the live
+        read as a trial; the Pool hands its text once, in live() and in pick()."""
+        db = self.db()
+        copy = db.with_name(db.name + run.ARENA_SUFFIX)
+        mine = on_trial(copy, TRIAL, ("asking",))
+        on_trial(db, TRIAL, ("asking",))
+        d = Db(str(copy))
+        self.addCleanup(d.close)
+        pool = rounds.Pool(SalesLessons(d), hotfixes=lambda: rounds.live_lessons(str(db), PLUG.agent))
+        pool.hand_on(mine)
+        pool.refresh()
+        self.assertEqual([p["text"] for p in pool.live("asking")].count(TRIAL), 1)
+        self.assertEqual([p["text"] for p in pool.pick("asking", "hi")].count(TRIAL), 1)
 
 
 class PageChat(tts.Base):
@@ -314,6 +400,53 @@ class Built(unittest.TestCase):
                                             steps=reflect_now.Steps(reflect_now.READ))
         between._exam([])
         self.assertIn(DINNER_FIX, handed[0])
+
+    def between(self, seen):
+        def make(plug, kept, model):
+            def examiner(text, stages):
+                seen.append([p["text"] for p in kept.live()])
+                return hot.passed(text, stages)
+            return examiner
+        world = World()
+        return reflect_now.train_between(self.db, self.path, self.folder,
+                                         models={"study": world, "open": world, "exam": world, "examiner": make},
+                                         agent_model=world, customer_model=world, judge_model=world,
+                                         steps=reflect_now.Steps(reflect_now.READ))
+
+    def test_train_stops_handing_a_lesson_pulled_between_two_exams(self):
+        """Decision 112, read again at every call: Train's Pool reads the live database before each exam, so a
+        lesson pulled on Today during Train is not handed to the next exam (Between and BuiltBetween share this)."""
+        lid = on_trial(self.path, DINNER_FIX, plug=self.plug)
+        seen, path, plug = [], self.path, self.plug
+
+        class Study:
+            def __init__(self, db, plug_, *, lessons, **kw):
+                self.lessons, self.log = lessons, None
+
+            def run(self, since, until, now=None, stop=None):
+                self.lessons.examiner("Ask about the oven.", ["all"])
+                d = Db(str(path))
+                try:
+                    assert EngineLessons(d, plug).pull(lid, "pulled on Today")
+                finally:
+                    d.close()
+                self.lessons.examiner("Ask about the pans.", ["all"])
+                return {"notes": [], "cards": []}
+        between = self.between(seen)
+        between.pending = ["case 1"]
+        with mock.patch("reflection.night.LinkedStudy", Study):
+            between(1)
+        self.assertEqual(len(seen), 2)
+        self.assertIn(DINNER_FIX, seen[0])
+        self.assertNotIn(DINNER_FIX, seen[1])
+
+    def test_the_gate_reads_the_live_lessons_again(self):
+        between = self.between([])
+        L = EngineLessons(self.db, self.plug, judge=hot.low, exam=hot.passed)
+        lid = L.propose("Ask about the oven.", ["all"], source=STUDY, sources=[])
+        with mock.patch.object(between.pool, "refresh", wraps=between.pool.refresh) as spy:
+            between._gate(L, hot.passed, lid, time.time())
+        spy.assert_called_once_with()
 
 
 if __name__ == "__main__":

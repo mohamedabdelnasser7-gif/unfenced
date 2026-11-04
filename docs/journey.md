@@ -100,6 +100,8 @@ These came in on the engfix2 and engfix3 branches.
 
 **The assistant on the case Arena.** The personal assistant's page moved from simulated days to the case Arena: one request or one email thread at a time against a made-up user, with the same Run the Arena, Train and gate as an agent made in Quick start, so it practises on the tasks it will really face (decision 109).
 
+**Built agents could not be talked to.** Only Sales had a chat on its page. The assistant, the Family Dinner Planner and every agent made in Quick start could practise in the Arena, but you could not ask one anything, and the assistant's page ended with no Connect and no way to try it. Now every built agent has a page chat, cloned from Try Sales, that runs its real turn and tools, and every agent built later gets it the moment it exists. The assistant answers today's email from a sample mailbox, dated today and labelled as sample data, until email connects through Microsoft or Google sign-in. A pasted email can be summarised or answered as a draft, nothing is sent, and your rewrite of a draft goes in as a correction through the same exam.
+
 ## Still open
 
 - The offers and fair close work (decision 105) is on its own branch and not yet merged here.

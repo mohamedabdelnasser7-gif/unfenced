@@ -508,6 +508,16 @@ textarea.typed{width:100%; border:0; background:transparent; resize:none; outlin
 .try .said.no{align-self:flex-start; color:var(--ink-2); font-style:italic}
 .try .say-f form{margin:0}
 .try .over{height:44px; padding:0 14px; border:0; border-radius:22px; background:none; font:500 14px/44px var(--font); color:var(--ink-2); cursor:pointer}
+.try .used{align-self:flex-start; margin:0 4px; font:400 12px/16px var(--font); color:var(--ink-2)}
+.try details.mine{align-self:flex-start; width:86%}
+.try details.mine>summary{list-style:none; cursor:pointer; margin:0 4px; font:500 13px/18px var(--font); color:var(--ink-2)}
+.try details.mine>summary::-webkit-details-marker{display:none}
+.try details.mine>summary:focus-visible{outline:2px solid var(--ink); outline-offset:2px}
+.try details.mine textarea{min-height:120px; font-size:15px; line-height:22px}
+.try details.mine .say-f{margin-top:8px}
+.trk li.soon{background:none; box-shadow:inset 0 0 0 1px var(--line); color:var(--ink-2)}
+.trkc{margin:10px 0 0; font:400 13px/18px var(--font); color:var(--ink-2)}
+.trkc b{font-weight:600; color:var(--ink)}
 
 /* the agent page's head and its four tabs (design/boards/pages-r2/structure-b.html) */
 .ahead{margin:12px 0 0}

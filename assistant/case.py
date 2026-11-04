@@ -39,6 +39,14 @@ SAID = "Plays practice cases against a made-up user who asks for things, on its 
 # Its data on its page (reflection/pages.py overview_tab), in place of a built agent's rows and offers boxes
 DATA_HEAD = "Mailbox and calendar"
 DATA_LINE = "Its mailbox and calendar are sample data for practice, nothing connected yet."  # Quick start's keys (reflection/quickstart.py TOOLS), the kit/tools behind them
+# The Connect step in its Arena steps (reflection/pages.py arena_track): a line, no button, until sign-in is built
+CONNECT_STEP = "Connect your email"
+CONNECT_LINE = ("Email connects through Microsoft or Google sign-in next. Until then this assistant works on a sample "
+                "mailbox.")
+# Its page chat (reflection/try_sales.py TryAgent): the box's hint and the line under it
+CHAT_HINT = "Ask \"summarize my emails for today\", or paste an email or a thread."
+CHAT_NOTE = ("Until email connects it reads a sample mailbox dated today. Paste an email or a thread to have it "
+             "summarised, answered as a draft or turned into tasks.")
 
 CARD = {
     "name": "Personal assistant",

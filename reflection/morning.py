@@ -4156,6 +4156,8 @@ def _handler(morning, token, pages=None):
             multi = MULTIPART.get(path) if sheet or path in table else None
             act = (lambda m, f, now=None: m.late_sheet(_field(f, "agent"), _sheet(f), now=now)) if sheet else \
                 table.get(path)
+            if act is None and pages is not None and hasattr(pages, "action_for"):  # /try/<agent>: the page chat
+                act = pages.action_for(path)
             if act is None:
                 return self._send(404, "Not found.\n")
             try:

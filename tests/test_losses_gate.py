@@ -112,7 +112,8 @@ class OneGroup(Base):
         self.assertIn("relaxed", a.gate_line)
         rep = a.run()
         self.assertEqual(rep["rounds"][0]["gate"]["played"], 10)
-        self.assertEqual(rep["gate_mix"], {"cards": 1, "most": 10, "of": 10, "line": a.gate_line})
+        self.assertEqual(rep["gate_mix"], {"cards": 1, "most": 10, "of": 10, "line": a.gate_line,
+                                           "team_rate": rep["gate_mix"]["team_rate"]})  # decision 105's report line
         self.assertIn(a.gate_line, run.text(rep))
 
     def test_the_cap_holds_line_is_quiet(self):

@@ -13,6 +13,11 @@ Lost otherwise, quoting the turn the match ended on: the reply the customer left
 turn with no safe reply (nothing was sent, so its quote is empty), or the last reply when the
 turns ran out. A match recorded before DECISIONS item 53 may end "handed_off"; it reads as before.
 
+A match on a close card (no offer covers its need, arena/offers.py; the match's "close") that ended
+with no sale and no failed check, and not with no safe reply, is lost as above with "needs_close": True,
+so arena/run.py Arena.play asks the close judge (arena/close.py) whether it was a correct close; with
+no close judge the loss stands (decision 105).
+
 judge(match, facts=True) -> {"won": bool, "why": str, "quote": {"turn", "who", "text"}}.
 """
 from arena.match import plain
@@ -50,4 +55,7 @@ def judge(match, facts=True):
             return {"won": True, "why": WON_ORDER, "quote": _quote(t["n"], "customer", t["customer"])}
     last = turns[-1]
     why = {"left": LEFT, "no_safe_reply": NO_SAFE, "handed_off": HANDED}.get(match.get("ended"), OUT_OF_TURNS)
-    return {"won": False, "why": why, "quote": _quote(last["n"], "agent", " ".join(last["replies"]))}
+    out = {"won": False, "why": why, "quote": _quote(last["n"], "agent", " ".join(last["replies"]))}
+    if match.get("close") is True and match.get("ended") != "no_safe_reply":
+        out["needs_close"] = True
+    return out

@@ -52,7 +52,7 @@ persona card, the cap, a model error) is no pair, and it still holds the lesson 
 from pathlib import Path
 
 from engine import exam as engine_exam
-from arena import factcheck, match as match_mod, run as run_mod, verdict
+from arena import close as close_mod, factcheck, match as match_mod, run as run_mod, verdict
 from kit.model import ModelError
 
 PART = "arena"
@@ -66,6 +66,7 @@ VOTES = 3  # plays a side when a past win is lost on rerun: with the lesson, the
 FAILED_CHECKS = "it failed a fact check when it was played"
 NO_PROMPT = "it was saved with no customer prompt fingerprint"
 PROMPT_GONE = "the customer prompt it was played with is not available (moved, changed or refused)"
+NO_CLOSE_JUDGE = "it was won on a correct close and no close judge was given"  # decision 105
 
 
 def _prompt_of(win, prompts=None):
@@ -86,8 +87,9 @@ def _prompt_of(win, prompts=None):
     return text if match_mod.prompt_sha(text) == sha else None
 
 
-def pick(wins, most=MAX_RERUNS, prompts=None):
-    """The past wins to rerun, newest first, at most `most`: ([(win, prompt)], [(win, why skipped)])."""
+def pick(wins, most=MAX_RERUNS, prompts=None, closes=True):
+    """The past wins to rerun, newest first, at most `most`: ([(win, prompt)], [(win, why skipped)]).
+    closes False: a win on a correct close (decision 105) is skipped, as no judge can rerun it."""
     reruns, skipped = [], []
     for win in reversed(wins):
         if len(reruns) >= most:
@@ -95,6 +97,8 @@ def pick(wins, most=MAX_RERUNS, prompts=None):
         prompt = None
         if any(isinstance(t, dict) and t.get("failed") for t in win.get("turns") or []):
             why = FAILED_CHECKS
+        elif not closes and win.get("close_win") is True:
+            why = NO_CLOSE_JUDGE
         elif not isinstance(win.get("prompt_sha"), str) or not win["prompt_sha"]:
             why = NO_PROMPT
         else:
@@ -130,11 +134,16 @@ def skipped_note(got):
 
 class Gate:
     prompts = None  # the customer prompts known by fingerprint alone: the generic one
+    closes_judged = False  # a correct close needs judge_model here (arena/close.py); TurnGate's judge has it
 
     def __init__(self, examiner, *, wins, agent_model, customer_model, calls, kept=None, fact_checks=True,
-                 max_reruns=MAX_RERUNS):
+                 max_reruns=MAX_RERUNS, judge_model=None):
+        """judge_model: the close judge (arena/close.py) for a past win on a correct close (decision 105),
+        taken from calls; with none such a win is skipped (NO_CLOSE_JUDGE)."""
         self.examiner, self.kept, self.calls = examiner, kept, calls
-        self.reruns, self.skipped = pick(wins, max_reruns, self.prompts)
+        self.judge_model = None if judge_model is None else calls.model(judge_model)
+        self.reruns, self.skipped = pick(wins, max_reruns, self.prompts,
+                                         closes=self.closes_judged or judge_model is not None)
         self.wins = [w for w, _ in self.reruns]
         self.agent_model, self.customer_model = calls.model(agent_model), calls.model(customer_model)
         self.facts = fact_checks
@@ -149,7 +158,18 @@ class Gate:
                               stop=verdict.closed)
 
     def _judge(self, m):
-        return verdict.judge(m, facts=self.facts)
+        """The verdict; a close card with no sale goes to the close judge, asked once more when its answer
+        cannot be read (close_mod.Unreadable, a model fault: the lesson is held, never failed)."""
+        judged = verdict.judge(m, facts=self.facts)
+        if not judged.pop("needs_close", False) or self.judge_model is None:
+            return judged
+        from kit import offers as kit_offers
+        for _ in range(2):
+            try:
+                return close_mod.judge(m, m.get("persona"), kit_offers.current(), self.judge_model, facts=self.facts)
+            except close_mod.Unreadable:
+                continue
+        raise close_mod.Unreadable("the close judge's answer could not be read twice")
 
     def _once(self, past, persona, prompt, text, tags, with_line):
         """One play judged: (the verdict, None), or (None, the row that stops the gate: the cap, a model
@@ -165,6 +185,7 @@ class Gate:
         if m.get("ended") == match_mod.VOID:
             return None, engine_exam.Row(None, "", PART, False, engine_exam.NOT_RUN,
                                          f"a model error stopped the rerun: {m.get('error') or ''}")
+        m.setdefault("persona", persona)  # what the close judge reads the customer's need from
         try:
             return self._judge(m), None
         except run_mod.CapReached:
@@ -244,9 +265,10 @@ class Fresh:
     the file next to the database, read as it is at each exam."""
 
     def __init__(self, examiner, kept, *, state, agent_model=None, customer_model=None, cap=run_mod.DEFAULT_CAP,
-                 calls=None):
+                 calls=None, judge_model=None):
         self.examiner, self.kept, self.state, self.cap = examiner, kept, state, cap
         self.agent_model, self.customer_model = agent_model, customer_model
+        self.judge_model = judge_model  # the close judge (Gate), made with the other two when they are
         self.calls = calls
 
     def gate(self):
@@ -258,9 +280,10 @@ class Fresh:
             from kit import model as model_mod
             self.agent_model = self.agent_model or model_mod.Model()
             self.customer_model = self.customer_model or model_mod.Model()
+            self.judge_model = self.judge_model or model_mod.Model()
         calls = self.calls if self.calls is not None else run_mod.Calls(self.state / run_mod.CALLS_FILE, self.cap)
         return Gate(self.examiner, wins=wins, agent_model=self.agent_model, customer_model=self.customer_model,
-                    calls=calls, kept=self.kept)
+                    calls=calls, kept=self.kept, judge_model=self.judge_model)
 
     def __call__(self, text, tags):
         g = self.gate()
@@ -269,7 +292,9 @@ class Fresh:
 
 class TurnGate(Gate):
     """The gate for an agent Quick start built (kit/turn.py): its past practice wins played again with
-    arena/practice.py play and judged by arena/good.py against its card."""
+    arena/practice.py play and judged by arena/good.py against its card; a correct close with its close_case
+    (decision 105), the agent's own offers."""
+    closes_judged = True
 
     def __init__(self, examiner, *, agent, judge_model, **kw):
         from arena import practice
@@ -287,7 +312,17 @@ class TurnGate(Gate):
 
     def _judge(self, m):
         from arena import good
-        return good.judge(m, self.agent.card, self.judge_model, facts=self.facts, plug=self.agent.plug)
+        return good.judge(m, self.agent.card, self.judge_model, facts=self.facts, plug=self.agent.plug,
+                          offers=agent_offers(self.agent))
+
+
+def agent_offers(agent):
+    """A built agent's own offers (kit/turn.py Agent offers, else its folder's offers.json), or None."""
+    from kit import offers as kit_offers
+    got = getattr(agent, "offers", None)
+    if got is None and getattr(agent, "folder", None) is not None:
+        got = kit_offers.read(agent.folder)
+    return got
 
 
 def _won_at(win):

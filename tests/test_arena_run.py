@@ -418,6 +418,7 @@ class HeldOut(Base):
     """Review round 1, finding 9: the gate never plays a card that will not buy, and the held-out
     cards are spread over worries."""
 
+    @mock.patch.object(run.offers_mod, "current", lambda: None)  # no offers: no close card (tests/test_offers_arena.py)
     def test_a_perfect_agent_passes_the_public_level_in_round_one_on_every_seed(self):
         cards = run.load_cards(run.DEMO_CARDS)
         self.assertTrue(any(c["unwinnable"] for c in cards))  # the demo cards hold unwinnable ones

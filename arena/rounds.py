@@ -353,7 +353,8 @@ class Between:
         from arena import gate
         examiner = self.scoped = self.examiner(self.plug, self.pool, self.calls.model(self.models["exam"]))
         return gate.Fresh(examiner, self.pool, state=self.state, agent_model=self.agent_model,
-                          customer_model=self.customer_model, calls=self.calls)
+                          customer_model=self.customer_model, calls=self.calls,
+                          judge_model=self.models.get("exam"))  # the close judge of a close win's rerun (decision 105)
 
     def _lessons(self, judge):
         """The lessons the study writes and the gate reads: the Sales agent's (reflection/lessons.py)."""

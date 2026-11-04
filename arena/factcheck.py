@@ -17,8 +17,9 @@ price     every amount in the reply (kit/send_check.py prices_in) is a price of 
           extra holds the extra's price only beside a sum, or when the boot comes first with no
           joining word between ("For the Vapor 17 Elite the printing is 400 EGP" passes, "The
           Vapor 17 Elite with printing is 400 EGP" fails) or with the boot's own price before
-          the extra and the extra's amount right after it ("The Vapor 17 Elite is 16,500 EGP
-          with printing 400 EGP" passes), or when the extra comes first as the
+          the extra and the extra's amount right after it, past the rest of the extra's title and
+          an own price word (سعرها, its price) ("The Vapor 17 Elite is 16,500 EGP with printing 400
+          EGP" passes), or when the extra comes first as the
           clause's subject ("Printing on the Vapor 17 Elite is 400 EGP" passes, "With printing the
           Vapor 17 Elite is 400 EGP" fails) (_extra_not_held; red team gatefb rounds 1 and 2,
           review gatefb round 2). An add-on word right beside the amount (more, extra, plus, on
@@ -294,7 +295,26 @@ def _own_price_then_extra(gap, after, items, extras, sizes, orders):
     boots = _dec(send_check.amount(v["price"]) for i in items if i not in extras
                  for v in i.get("variants", []) if "price" in v)
     return bool(OWN_PRICE_END.search(before) and _dec(send_check.prices_in(before, sizes, orders)) & boots
-                and SUBJECT_LEAD.fullmatch(between.lstrip()) and EXTRA_AMOUNT.match(after))
+                and SUBJECT_LEAD.fullmatch(_past_extra_name(between, extras, price_word=False).lstrip())
+                and EXTRA_AMOUNT.match(_past_extra_name(after, extras)))
+
+
+def _past_extra_name(after, extras, price_word=True):
+    """after with the rest of the extra's name (its own title words) and, with price_word, one word that
+    gives the extra its own price (OWN_PRICE_WORD: سعرها, its price) taken off its start, so "مع طباعة
+    Beyond the Limits Name Printing سعرها 400 جنيه" reads the 400 right after the extra and "with Beyond
+    the Limits Name Printing 400 EGP" has only the extra's title past its joining word (Arena run
+    20261104T120239, part D). Only these words: "with printing is 400 EGP" still joins the extra to the
+    boot."""
+    own = {w for e in extras for w in re.findall(r"[a-z]+", str(e.get("title") or "").casefold())}
+    rest = after
+    while True:
+        m = re.match(r"[^\S\n]*([a-z]+)(?![^\W_])", rest, re.IGNORECASE)
+        if not m or m.group(1).casefold() not in own:
+            break
+        rest = rest[m.end():]
+    m = OWN_PRICE_WORD.match(rest) if price_word else None
+    return rest[m.end():] if m else rest
 
 
 # A price that ends the text, its currency word after it or none ("16,500 EGP "), and an amount right at
@@ -302,6 +322,9 @@ def _own_price_then_extra(gap, after, items, extras, sizes, orders):
 # _own_price_then_extra.
 OWN_PRICE_END = re.compile(r"\d(?:[^\S\n]*(?:" + send_check.CURRENCY + r")" + send_check.NO_LETTER_AFTER
                            + r")?[^\S\n]*$", re.IGNORECASE)
+# A word that gives the extra named right before it its own price: "its price", "سعرها", "تمنه" (the ها or ه
+# is the extra's, the boot's price already came before the joining word)
+OWN_PRICE_WORD = re.compile(r"[^\S\n]*(?:its[^\S\n]+price(?:[^\S\n]+is)?|(?:سعر|تمن)(?:ها|ه))(?![^\W_])", re.IGNORECASE)
 EXTRA_AMOUNT = re.compile(r"[^\S\n]*(?:(?:" + send_check.CURRENCY + r")" + send_check.NO_LETTER_AFTER
                           + r"[^\S\n]*)?(?:" + send_check.DIGITS + r")", re.IGNORECASE)
 

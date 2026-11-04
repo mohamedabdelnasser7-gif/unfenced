@@ -75,8 +75,8 @@ from engine.study import read_days
 DAY = 86400.0
 LIVE_BUSY = "not handed, live busy"  # a passed lesson the live database could not take this run
 EXAM_CAP = 60  # model calls one lesson's exam may take between rounds, the run on the kept lessons included (--exam-cap)
-FULL_CAP = 400  # model calls one lesson's full exam may take before hand_live, the run on the kept lessons included:
-# the 50 situations twice (kept lessons, then with the lesson) at up to 4 calls each (reflection/exam.py CALL_CAP), so a
+FULL_CAP = 440  # model calls one lesson's full exam may take before hand_live, the run on the kept lessons included:
+# the 53 situations twice (kept lessons, then with the lesson) at up to 4 calls each (reflection/exam.py CALL_CAP), so a
 # normal exam never reaches it and only a runaway one is held (review simplify round 3, finding 3)
 REWRITES = 2  # new tries a lesson the gate refused may take in the same round (Mohamed 2026-11-02, "Yes now")
 CAP_NOTE = "the model call cap was reached during the night study; nothing it left unchecked is handed on"
@@ -287,9 +287,10 @@ def hand_live(arena_db, live, lesson_id, now=None):
 
 def real_examiner(plug, kept, model, cap=EXAM_CAP):
     """The Sales agent's exam with the gate's counts (reflection/exam.py, as night.sales_exam has it),
-    scoped to the lesson's stages and source situations under cap model calls a lesson."""
+    scoped to the lesson's stages and source situations under cap model calls a lesson. The exam's model is
+    its reveal judge too (reflection/exam.py reveal_judge), so the judge's calls count on the run's calls."""
     from reflection import exam as exam_mod_sales
-    return exam_mod_sales.Examiner(plug, kept=kept, model=model, count=True, scope=True, cap=cap)
+    return exam_mod_sales.Examiner(plug, kept=kept, model=model, count=True, scope=True, cap=cap, judge_model=model)
 
 
 def full_examiner(plug, kept, model):
@@ -297,7 +298,8 @@ def full_examiner(plug, kept, model):
     scoped exam takes once more before hand_live writes it to the live database, so nothing reaches
     real customers on the scoped exam alone (DECISIONS item 75: the scoped exam is for the Arena)."""
     from reflection import exam as exam_mod_sales
-    return exam_mod_sales.Examiner(plug, kept=kept, model=model, count=True, cap=FULL_CAP)  # the reruns stay inside it
+    return exam_mod_sales.Examiner(plug, kept=kept, model=model, count=True, cap=FULL_CAP,  # the reruns stay inside it
+                                   judge_model=model)  # its reveal judge too, as real_examiner
 
 
 class Between:

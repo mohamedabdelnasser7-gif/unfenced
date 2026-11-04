@@ -102,6 +102,16 @@ a lesson card through the agent's own lessons and risk check.
 run() returns the night's report as plain data: what was read and counted, each candidate
 with its numbers, the cards written, what came from other agents, the two switches as they
 read at the night's now, and notes on any part that failed. A failing part makes no lesson.
+
+9. Scope cases. A case the Arena wrote from an off topic practice match (arena/scope.py; every row's
+   detail says "kind": "scope", arena/learn.py and arena/learn_built.py) is counted, but never read by
+   the proposer, the tagger, the idea part (a rewrite in the run too), the hand over track or another
+   agent's study; all of them take their cases from one reader, _own: the ask in it
+   is one made-up person's, so a lesson from it could refuse a topic. From the lost ones the study
+   writes only DECLINE, one general line (decline briefly, give no part of it, offer the agent's own
+   work), never a refusal of a topic, through Lessons.propose as any lesson, its source line starting
+   "night study of <agent>, scope:" (SCOPE_SOURCE). A night with no lost scope case writes none; a
+   line already among the lessons or close to a pulled one is treated as in 5.
 """
 import difflib
 import math
@@ -115,7 +125,7 @@ from engine import exam as exam_mod
 from engine import risk as risk_mod
 from engine.lessons import DAY, IDEA, KEPT, MAX_LEN, PATTERN, PERSON, PULLED, WAITING, Lessons, meet, whose
 from engine.log import Log
-from engine.plug import SLOW
+from engine.plug import ALL, SLOW
 
 CHANCE = 0.75     # the chance the named side is better, decided item 7
 MIN_CASES = 5     # cases on each side
@@ -153,6 +163,12 @@ IDEAS = 3         # ideas the idea part may write a night. Not a cap on trials (
                   # runs on a stage at a time, so more would only queue on the stages, ahead of
                   # later lessons that have cases, and lengthen the morning page.
 NO_CASES = "no past cases: this is a try"  # how sure an idea's card is today
+SCOPE = "scope"  # the case kind of an off topic practice match, on each row's detail (see 9)
+# the one line the study writes from lost scope cases: general, never a topic (see 9)
+DECLINE = ("When someone asks for something that is not part of your work, say in one short line that you only "
+           "help with your own work, give no part of what they asked for, and offer to help with your work.")
+DECLINE_SITUATION = "a person asks for something outside the agent's work"
+SCOPE_SOURCE = "night study of {agent}, scope: "  # how a scope line's source starts
 
 
 class HandedOver(ValueError):
@@ -204,6 +220,8 @@ class _Case:
         self.cut = len(rows) if cut is None else cut  # the rows before the last deciding one
         self.status, self.deciding, self.causes = status, deciding, causes
         self.source, self.text = source, text
+        # an off topic practice match (see 9): any row whose detail names the scope kind
+        self.scope = any(isinstance(r["detail"], dict) and r["detail"].get("kind") == SCOPE for r in rows)
 
 
 class Study:
@@ -252,8 +270,8 @@ class Study:
                                                                ("clash", self.clash), ("ideas", self.ideas))
                          if part is not None}}
         texts = _Texts(self.lessons)
-        cases = _read(self.plug, self.log.window(since, until), until)
-        rep.update(_counts(self.plug, cases))
+        every, cases, scoped = _own(self.plug, self.log.window(since, until), until)
+        rep.update(_counts(self.plug, every))  # scope cases are counted; only the decline line reads them (see 9)
         mine = self.lessons.mine()
         tries = self._failed_tries(mine)
         known = _known(mine, {t["lesson_id"] for t in tries})
@@ -285,6 +303,7 @@ class Study:
             rec["lesson_id"] = card["lesson_id"]
             known[_norm(cand["lesson"])] = KNOWN
         rep["candidates"] = found["candidates"]
+        self._scope(scoped, known, pulled, rep, since, until)
         self._across(since, until, known, pulled, rep)
         self._ideas(cases, known, pulled, texts, rep, since, until)
         self._give_shared(rep)
@@ -292,6 +311,31 @@ class Study:
                              self.hand_over.night(cases, texts, since, until, now=at, notes=rep["notes"]))
         rep["switches"] = self.lessons.switches.reading(at)
         return rep
+
+    def _scope(self, scoped, known, pulled, rep, since, until):
+        """The night's scope cases (see 9): from the lost ones only DECLINE is written, as one lesson through
+        propose, its source line saying scope. rep["scope"] names the counts, the line and what stopped it."""
+        lost = [c for c in scoped if c.status == BAD]
+        rec = rep["scope"] = {"cases": len(scoped), "lost": len(lost), "lesson": None, "lesson_id": None, "why": None}
+        if not lost:
+            return
+        rec["lesson"] = DECLINE
+        if _norm(DECLINE) in known:
+            rec["why"] = known[_norm(DECLINE)]
+            return
+        source = (f"{SCOPE_SOURCE.format(agent=self.plug.agent)}{len(lost)} off topic practice cases lost from "
+                  f"{_day(since)} to {_day(until)}; one general decline line, never a topic; cases: {_shown(lost)}")
+        cand = {"lesson": DECLINE, "situation": DECLINE_SITUATION, "stages": [ALL]}
+        try:  # sources []: the line is fixed in code, so it can copy no case's words
+            card = self._write(cand, source, [], None, None, rep, close=_close(DECLINE, pulled, self._failed_lines))
+        except HandedOver as e:
+            rec["why"], rec["handed_to"] = HANDED, {"agent": e.to, "kind": e.kind}
+            return
+        except ValueError as e:  # refused by the lessons
+            rec["why"] = f"not written: {e}"
+            return
+        rec["lesson_id"] = card["lesson_id"]
+        known[_norm(DECLINE)] = KNOWN
 
     def _failed_tries(self, mine):
         """This agent's lessons that failed the eval gate and are not live (waiting, or pulled after),
@@ -392,7 +436,7 @@ class Study:
             return out
         plug = self.plug
         texts = _Texts(self.lessons)
-        cases = _read(plug, self.log.window(since, until), until)
+        _, cases, _ = _own(plug, self.log.window(since, until), until)  # never a scope case (see 9)
         mine = self.lessons.mine()
         every = self._failed_tries(mine)
         chain = [int(t) for t in tries]
@@ -638,8 +682,8 @@ class Study:
                 self._from_shared(known, pulled, rep)
             theirs = Lessons(self.db, other)
             texts = _Texts(theirs)
-            cases = _read(other, self.log.window(since, until, agent=other.agent, plug=other), until)
-            counts = _counts(other, cases)
+            every, cases, _ = _own(other, self.log.window(since, until, agent=other.agent, plug=other), until)
+            counts = _counts(other, every)  # never another agent's off topic practice (see 9)
             entry = {"agent": other.agent, "sibling": gated, "shared_fields": sorted(fields & set(other.fields)),
                      "read": {"cases": counts["read"]["cases"], "good": counts["decided"]["good"],
                               "bad": counts["decided"]["bad"], "pending": counts["pending"],
@@ -917,6 +961,14 @@ def _read(plug, window, until):
         out.append(_Case(f"k{n}", case_id, rows, status, deciding, causes, sources[-1] if sources else None,
                          "\n".join(words), cut))
     return out
+
+
+def _own(plug, window, until):
+    """The one reader of the study's parts (see 9): (every case read, the cases a part may read, the scope
+    cases). Run, rewrite and the read of other agents all take their cases from here, so no part but the
+    decline line ever reads an off topic practice case."""
+    every = _read(plug, window, until)
+    return every, [c for c in every if not c.scope], [c for c in every if c.scope]
 
 
 def _counts(plug, cases):

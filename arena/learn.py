@@ -15,11 +15,12 @@ that closed after quiet and an imported chat with no order (no timer settles a c
 item 66). Its rows are timed one day past study.read_days before now, so a live read of the last
 days never meets them. Every row
 says "arena": true and "history": true, so a trial never counts it (engine/trial.py: only live
-results judge a trial).
+results judge a trial). An off topic match (arena/scope.py) has "kind": "scope" on every row too, so the
+study writes from it only its general decline line, never a refusal of a topic (engine/study.py, see 9).
 """
 import time
 
-from engine.study import read_days
+from engine.study import SCOPE, read_days
 from reflection import PLUG
 from reflection.results import Results
 
@@ -40,13 +41,15 @@ def to_case(db, match, judged, match_id, *, now=None):
     start = now - (read_days(PLUG) + 1) * DAY
     case = case_id(match_id)
     turns = match.get("turns") or []
+    kind = {"kind": SCOPE} if match.get("off_scope") else {}  # an off topic match (engine/study.py, see 9)
     for i, t in enumerate(turns):
         outcome = t.get("outcome")
         declared = PLUG.results.get(outcome)
         if declared is None or not declared.after:
             outcome = "replied"
         detail = {"arena": True, "history": True, "match": match_id, "card": match.get("card"),
-                  "worry": match.get("worry"), "customer": t.get("customer"), "reply": " ".join(t.get("replies") or [])}
+                  "worry": match.get("worry"), "customer": t.get("customer"), "reply": " ".join(t.get("replies") or []),
+                  **kind}
         if t.get("failed"):
             detail["failed_checks"] = t["failed"]
         if i == len(turns) - 1:
@@ -55,5 +58,5 @@ def to_case(db, match, judged, match_id, *, now=None):
         log.act(case, PLUG.result(outcome).after, result=outcome, stage="asking", step=i + 1, detail=detail,
                 at=start + i * TURN_SECONDS)
     log.result(case, "chat_closed", step=len(turns) + 1, at=start + len(turns) * TURN_SECONDS,
-               detail={"arena": True, "history": True, "match": match_id})
+               detail={"arena": True, "history": True, "match": match_id, **kind})
     return case

@@ -21,7 +21,7 @@ This follows an idea from Agent Workflow Memory: add new memory and retire the o
 
 A lesson changes how a live agent talks to real customers. One wrong lesson could repeat a mistake across many chats. So every new lesson passes the Arena and the eval gate before any agent uses it.
 
-- The eval gate gives the lesson the exam, 50 situations, and reruns the practice matches the agent already won, so a new lesson cannot break them.
+- The eval gate gives the lesson the exam, 53 situations, and reruns the practice matches the agent already won, so a new lesson cannot break them.
 - It reports the cases the lesson fixed and the cases it broke, beside pass or fail, with a McNemar test on those counts. The idea came from a hackathon workshop that compared a base model with a tuned one.
 - A lesson that passes goes live first as a canary: it runs on a share of chats and is compared with the old way. It is kept, pulled or paused on its own.
 - Low risk lessons start on their own. High risk lessons wait for the user's yes on the Morning page.

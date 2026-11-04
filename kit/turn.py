@@ -63,6 +63,7 @@ in a throwaway database.
 """
 import json
 import logging
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -138,8 +139,26 @@ def _read(folder, name):
         raise Refused(f"{name} could not be read as text") from None
 
 
+# Every format mark (direction marks, embeddings, overrides and isolates, zero width spaces, word joiners, tag
+# characters): taken out of a card line, so text that shows one way cannot read another way, or hide words, in
+# the prompt, the scope line or the off topic writer (red team scopeguard2 r1, item 5; r2, item 7). The two
+# joiners stay (JOINERS): Arabic and emoji need them.
+JOINERS = "\u200c\u200d"
+# Letters that show nothing: the Hangul fillers and the braille blank (red team scopeguard2 r3, items 5 and 8).
+# The exam reads them as hidden marks (reflection/exam.py _hidden).
+INVISIBLE = "\u115f\u1160\u3164\uffa0\u2800"
+
+
+def _unmarked(v):
+    """v in its NFKC form (fullwidth, bold and presentation forms as plain letters), with every format mark but
+    the two joiners and every letter that shows nothing (INVISIBLE) taken out (red team scopeguard2 r3, item 8)."""
+    return "".join(ch for ch in unicodedata.normalize("NFKC", v)
+                   if ch in JOINERS or (unicodedata.category(ch) != "Cf" and ch not in INVISIBLE))
+
+
 def _line(v, what):
-    if not isinstance(v, str) or not v.strip():
+    v = _unmarked(v) if isinstance(v, str) else v
+    if not isinstance(v, str) or not "".join(ch for ch in v if ch not in JOINERS).strip():  # nothing that shows
         raise Refused(f"card.json {what}: one plain line")
     if len(v) > MAX_CARD_LINE:
         raise Refused(f"card.json {what}: at most {MAX_CARD_LINE} characters")

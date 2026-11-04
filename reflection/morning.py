@@ -945,7 +945,8 @@ class Morning:
                             self._arena_note[agent] = f"{NO_STUDY} ({' '.join(str(e).split())[:160]})."
                 practice.practise(folder, agent_model=models[0], customer_model=models[1], judge_model=models[2],
                                   learn=learn, study=study if db is not None else None, db=db, live_path=db_path,
-                                  **shape)
+                                  # the off topic customer only with models made here, after the key check above
+                                  **{"off_topic": self.arena_models is None, **shape})
             except Exception as e:
                 try:
                     from arena.practice import Unrecorded

@@ -38,6 +38,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from arena.rounds import FULL_CAP  # model calls one lesson's full exam may take, shown on the calls line
 from engine import exam as exam_mod
 from engine import lessons as lessons_mod
 from engine.lessons import KEPT, PULLED, TRYING, WAITING
@@ -53,7 +54,6 @@ SHOWN = 300             # records on the timeline and in writes.json, the newest
 RAW_CUT = 4000          # characters of one record's JSON shown in writes.json
 CHATS = 40              # live chats read, the newest
 POLL_MS = 4000
-FULL_CAP = 400          # arena/rounds.py FULL_CAP: model calls one lesson's full exam may take
 OPERATOR = "operator"   # who a correction sent here is saved as (Morning.correct by=)
 STAGES = {"A": "ARENA", "D": "DEPLOYMENT", "R": "REFLECTION"}
 VIEWS = (("all", "ALL STAGES"), ("arena", "ARENA"), ("deploy", "DEPLOYMENT"), ("reflect", "REFLECTION"))

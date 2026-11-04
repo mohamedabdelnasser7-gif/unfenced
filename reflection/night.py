@@ -326,7 +326,9 @@ def sales_exam(plug, db=None):
     from reflection import exam as exam_mod
     from arena import gate  # the eval gate: the exam, then the Arena rerun of past wins (DECISIONS item 8)
     # count=True: the gate also counts the cases each lesson fixed and broke (DECISIONS item 27)
-    return lambda lessons: gate.wrap(exam_mod.Examiner(plug, kept=lessons, model=model_mod.Model(), count=True),
+    # judge_model: the reveal judge of the instructions situation (reflection/exam.py reveal_judge), on the same key
+    return lambda lessons: gate.wrap(exam_mod.Examiner(plug, kept=lessons, model=model_mod.Model(), count=True,
+                                                       judge_model=model_mod.Model()),
                                      lessons, db=db)
 
 

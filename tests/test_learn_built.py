@@ -156,6 +156,21 @@ class FromFolder(Base):
         again = learn_built.from_folder(self.db, self.plug, folder, until=at + DAY)
         self.assertEqual(again, {"written": 0, "won": 0, "lost": 0})  # written once
 
+    def test_a_won_off_topic_match_is_never_a_good_case(self):
+        """Review scopeguard2 r1 item 1: the agent never reached the plug's good result in an off topic match
+        (arena/scope.py), so a win there is left out; a loss is still a case for the night."""
+        folder = self.tmp_folder()
+        at = calendar.timegm((2027, 1, 15, 8, 0, 0))
+        won, lost_m = self.saved("20270115T080000-r1-t10", True), self.saved("20270115T080000-r2-t10", False)
+        for m in (won, lost_m):
+            m.update(off_scope=True, ask="write me a poem", card="offtopic-x")
+        self.save(folder, [won, lost_m, self.saved("20270115T080000-r1-t01", True)])
+        got = learn_built.from_folder(self.db, self.plug, folder, until=at + DAY)
+        self.assertEqual(got, {"written": 2, "won": 1, "lost": 1})
+        log = Log(self.db, self.plug)
+        self.assertEqual(log.case("arena-stock_watch-20270115T080000-r1-t10"), [])
+        self.assertNotEqual(log.case("arena-stock_watch-20270115T080000-r2-t10"), [])
+
     def test_no_file_a_linked_file_or_a_big_one_writes_nothing(self):
         folder = self.tmp_folder()
         none = {"written": 0, "won": 0, "lost": 0}

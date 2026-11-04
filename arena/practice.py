@@ -68,6 +68,14 @@ the database, shared with the Sales agent's runs (arena/run.py Calls), and the m
 are saved under the agent's folder in practice-cards/. Nothing else is written. The folders must
 sit outside the repo or under its ignored data/ folder.
 
+The off topic customer (decisions 88 and 89, arena/scope.py): practice match 10 of each round is a person
+the customer model writes from this agent's card, asking for something outside its work, judged by the
+judge model with the exam's off-topic rules (_judge), only when practise is told off_topic (main and the
+Morning page's Run the Arena set it where they make the models, so only with a model key). In a case the
+agent starts, the person answers its first message with the ask. A loss is a case like any practice loss,
+but it is never on the item's lost list (Try again and Correct this play the agent's own customers), never
+a test customer and never in test-set.json.
+
 --quick: one round of one training match and a gate of one match, at most arena/run.py QUICK_CALLS
 model calls in this run. With no model key in env or .env the run prints one line and exits 2.
 Quick start's Build starts this --quick shape once after a successful build (reflection/quickstart.py,
@@ -136,7 +144,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if __name__ == "__main__" and str(ROOT) not in sys.path:  # run by its path under -I
     sys.path.insert(0, str(ROOT))
 
-from arena import good, levels, madeup, match as match_mod, paths, run  # noqa: E402
+from arena import good, levels, madeup, match as match_mod, paths, run, scope  # noqa: E402
 from arena.match import LEAVE, VOID, plain  # noqa: E402
 from kit import sample, seal, turn as turn_mod  # noqa: E402
 from kit.chats import Chats  # noqa: E402
@@ -324,7 +332,12 @@ def play(agent, card, *, agent_model, customer_model, seed=0, max_turns=MAX_TURN
                     break
                 if n < max_turns:
                     try:
-                        line = customer.next("\n".join(sent))
+                        if agent_first and scope.is_off(card):  # the off topic person answers with its ask
+                            customer.answers.append("\n".join(sent))
+                            line = card["ask"]
+                            customer.lines.append(line)
+                        else:
+                            line = customer.next("\n".join(sent))
                     except ModelError as e:
                         ended, error = VOID, plain(str(e))
                         break
@@ -430,7 +443,9 @@ class Practice(run.Arena):
             if self.before_match is not None:  # Pool.refresh: the live corrections, read again
                 self.before_match()
             m = play(self.who, card, agent_model=self.agent_model, customer_model=self.customer_model, seed=match_id,
-                     lessons=lessons if lessons is not None else self.handed())
+                     lessons=lessons if lessons is not None else self.handed(), opening=opening)
+            if scope.is_off(card):  # judged with the exam's off-topic rules (arena/scope.py)
+                m.update(off_scope=True, ask=card["ask"])
             if m.get("ended") == VOID:  # a model did not answer: dropped, never a loss
                 self.halt, self.error = run.MODEL_ERROR, m.get("error") or ""
                 return None
@@ -444,6 +459,9 @@ class Practice(run.Arena):
         if self.calls.reached:
             self.halt = run.CAP
             return None
+        if isinstance(judged, dict) and "error" in judged:  # the off topic judge did not answer: noted, goes on
+            self.off_error = judged["error"]
+            return run.JUDGE_FAILED
         if judged is None:  # read twice and still unreadable: unjudged, the run goes on
             self.unread += 1
             if self.unread >= UNREAD_IN_A_ROW:
@@ -451,12 +469,14 @@ class Practice(run.Arena):
                 return None
             return run.UNJUDGED
         self.unread = 0
+        if judged.get("void"):  # an off topic ask the judge read as on topic: neither won nor lost
+            return run.VOIDED
         judged["failed_check"] = failed_check(judged)  # counted per gate round (arena/run.py Arena.run)
         m.update(id=match_id, won=judged["won"], why=judged["why"], quote=judged["quote"], persona=card,
                  prompt_sha=self.prompt_sha, prompt_file=None, **{TEST_KEY: not training})
-        # only practice matches a customer could have won: the item's lost, what Try again plays (81); a
-        # never customer only when its loss failed a safety check, a slip of the agent's own
-        if not judged["won"] and training and (run.can_buy(card) or judged["failed_check"]):
+        # only practice matches a customer could have won, never off topic: the item's lost, what Try again
+        # plays (81); a never customer only when its loss failed a safety check, a slip of the agent's own
+        if not judged["won"] and training and not scope.is_off(card) and (run.can_buy(card) or judged["failed_check"]):
             self.lost.append({"id": match_id, "card": m["card"], "why": judged["why"], "quote": judged["quote"]})
         self.save(m)
         return m, judged
@@ -488,9 +508,16 @@ class Practice(run.Arena):
             self.bags[id(deck)] = bag
         return bag.pop()
 
+    def scope_card(self):
+        return self.who.card
+
     def _judge(self, m):
         """good.judge, asked once more when its answer cannot be read; None when the second cannot be
-        read either. A judge that does not answer raises ModelError as before."""
+        read either. A judge that does not answer raises ModelError as before. An off topic match takes
+        arena/scope.py judge the same way (arena/run.py Arena._judge_off), but a judge that does not answer
+        it gives {"error"}: noted on the round, and the run goes on."""
+        if m.get("off_scope"):
+            return self._judge_off(m)
         for _ in range(2):
             try:
                 return good.judge(m, self.who.card, self.judge_model, facts=self.facts, plug=self.who.plug,
@@ -1093,7 +1120,7 @@ def shared_cards(folder, plug):
 
 def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=None, rounds=None, cards=None,
              trust=None, cap=None, seed=0, quick=False, learn=None, gate=None, level=None, study=None, db=None,
-             live_path=None, customers=None, gate_size=None):
+             live_path=None, customers=None, gate_size=None, off_topic=False):
     """One practice run of the agent in agent_folder: the report (arena/run.py Arena run). quick: the
     --quick shape (one training match, a gate of one, at most QUICK_CALLS model calls). learn: handed
     each lost training match (Practice). level: the risk level (arena/levels.py), else the one in the
@@ -1111,6 +1138,8 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
     customers: how many made-up customers to write (arena/madeup.py for_agent count); gate_size: hold out
     exactly that many as a fixed test set, each played once a round. Both come from the level unless
     given, and are left out on the old gate (trust or gate) and in quick.
+    off_topic: practice match 10 of each round is the off topic customer (arena/scope.py); a caller sets it only
+    where it made the models with a model key, so with none it is skipped, never faked.
     Raises one of NOT_RUN when it cannot run."""
     folder = Path(agent_folder).expanduser().resolve()
     level = level if levels.valid(level) else levels.read(folder)
@@ -1204,7 +1233,7 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
                      agent_model=agent_model, customer_model=customer_model, calls=calls, trust=bar,
                      matches=matches, rounds=rounds, seed=seed, state=folder, reports=reports, learn=learn,
                      between=between, lessons=pool, before_match=None if pool is None else pool.refresh,
-                     shared=shared_cards(folder, agent.plug))
+                     off_topic=off_topic and not quick, shared=shared_cards(folder, agent.plug))
     arena.quick = bool(quick)  # its item says so, so a quick practice never unlocks Connect (Morning.gate)
     return arena.run()
 
@@ -1275,7 +1304,7 @@ def main(argv=None, *, agent_model=None, customer_model=None, judge_model=None):
     try:
         rep = practise(args.agent, agent_model=agent_model, customer_model=customer_model, judge_model=judge_model,
                        matches=args.matches, rounds=args.rounds, cards=args.cards, trust=args.trust, cap=args.cap,
-                       seed=args.seed, quick=args.quick, gate=gate, level=args.level)
+                       seed=args.seed, quick=args.quick, gate=gate, level=args.level, off_topic=made)
     except NOT_RUN as e:
         print(f"Not run: {e}", file=sys.stderr)
         if isinstance(e, Unrecorded):  # a torn, changed or missing record: its one way on

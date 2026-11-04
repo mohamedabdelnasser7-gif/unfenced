@@ -42,6 +42,19 @@ new card. Each card says "made_up": true and "behaviour_from": [the real card's 
 fingerprint covers the agent's card and the behaviour read, so a changed real card writes new
 ones. Fewer than MIN_REAL usable real cards, or none that can reach the good result: made up as
 above.
+
+As many customers as the shape needs (DECISIONS item 85). for_agent(count=N) writes N customers, in
+batches of at most BATCH a model call, every call counted on the run's cap (the model handed in is
+arena/run.py Calls.model). The made-up mix keeps the KINDS shares (mix: easy, unsure, hard, never,
+the largest remainders first); a blend takes the owner's real cards in turn. Every batch after the
+first is told the people already written ("already": each one's want and opening), and a person
+whose want and opening match one already written (person) is asked for once more, then dropped, so
+no two customers are the same person. An old folder written from the same card is topped up to N:
+its cards stay as they are, byte for byte, and only the new files are written (save_new); a folder
+holding more than N gives N of them, the mix's share of each kind. When the cap is reached mid write
+the customers written so far are saved (the next run writes the rest) and the run stops with a
+plain line saying how many were written. count=None is the old shape: one call, KINDS, or one
+customer for each real card.
 """
 import hashlib
 import json
@@ -71,6 +84,9 @@ BEHAVIOUR_OPENINGS = ("greeting", "voice note", "photo or link")  # how a person
 LABEL = re.compile(r"[a-z][a-z ]{0,29}")
 OTHER = "other"
 MAX_CARD_BYTES = 100_000
+BATCH = 10  # customers at most in one model call
+MAX_CUSTOMERS = 99  # ids are persona-NN
+KIND_ORDER = tuple(dict.fromkeys(KINDS))  # easy, unsure, hard, never
 
 SYSTEM = (
     "You write made-up practice customers for an agent in training. Each one is a person who writes to the "
@@ -110,6 +126,12 @@ CASE_PART = (
     "exactly as it arrives, written as this person would (the whole ticket, the brief, the whole email thread), "
     "at most 1200 characters. When the case starts with the agent, \"input\" is the record the agent starts "
     "from (for example a lead's details), and the person is the one the agent writes to, who may never answer."
+)
+
+
+ALREADY_PART = (
+    " The user message also lists \"already\": the people written before, each one's want and opening. Every "
+    "new person is someone else: a want and an opening none of them has."
 )
 
 
@@ -388,15 +410,179 @@ def blend(agent, card, model, profiles):
     return cards
 
 
-def for_agent(agent_folder, agent, card, model, profiles=None):
+def for_agent(agent_folder, agent, card, model, profiles=None, count=None):
     """(cards, written): the saved practice customers when card.json (and, for a blend, the owner's
     real cards' behaviour) is unchanged, else new ones the model writes, saved in the agent's folder.
-    profiles: owner_cards() to blend, else None for made-up customers."""
+    profiles: owner_cards() to blend, else None for made-up customers. count: how many customers,
+    written in batches and topped up (module lines); None for the old shape, 6 made up (KINDS) or
+    one for each real card."""
     folder = Path(agent_folder) / FOLDER
     source = fingerprint(card) if profiles is None else blend_source(card, profiles)
     saved = read(folder, agent, card, source)
+    if count is not None:
+        return _shaped(agent_folder, agent, card, model, profiles, count, folder, source, saved)
     if saved is not None:
         return saved, False
     cards = write(agent, card, model) if profiles is None else blend(agent, card, model, profiles)
     save(folder, cards)
+    return cards, True
+
+
+# ---- as many customers as the shape needs (DECISIONS item 85)
+
+def mix(count):
+    """{kind: how many} for count customers in the KINDS shares, the largest remainders first (ties in
+    KIND_ORDER), so 6 gives KINDS itself, 20 gives 7, 7, 3, 3 and 30 gives 10, 10, 5, 5."""
+    exact = {k: count * KINDS.count(k) / len(KINDS) for k in KIND_ORDER}
+    out = {k: int(v) for k, v in exact.items()}
+    for k in sorted(KIND_ORDER, key=lambda k: (-(exact[k] - out[k]), KIND_ORDER.index(k)))[:count - sum(out.values())]:
+        out[k] += 1
+    return out
+
+
+def layout(quota):
+    """The kinds in quota laid out as KINDS is, pass after pass, so every batch holds the mix."""
+    left, out = dict(quota), []
+    while any(v > 0 for v in left.values()):
+        for k in KINDS:
+            if left.get(k, 0) > 0:
+                out.append(k)
+                left[k] -= 1
+    return out
+
+
+def kinds_for(count):
+    return layout(mix(count))
+
+
+def check_count(count):
+    """count as a whole number of customers, 2 to MAX_CUSTOMERS; ValueError otherwise."""
+    if isinstance(count, bool) or not isinstance(count, int) or not 2 <= count <= MAX_CUSTOMERS:
+        raise ValueError(f"the practice customers are a whole number from 2 to {MAX_CUSTOMERS}")
+    return count
+
+
+def _plain(v):
+    return " ".join(str(v).casefold().split())
+
+
+def opening_of(c):
+    """What a card's first message is about: its opening topics that are not a behaviour opening."""
+    style = c.get("style") if isinstance(c.get("style"), dict) else {}
+    opening = style.get("opening") if isinstance(style.get("opening"), dict) else {}
+    return ", ".join(sorted(_plain(k) for k in opening if k not in BEHAVIOUR_OPENINGS))
+
+
+def person(c):
+    """Who a card is, for telling two apart: its want and its opening, case and spaces aside."""
+    want = c.get("want") if isinstance(c.get("want"), list) else []
+    return tuple(sorted(_plain(w) for w in want)), opening_of(c)
+
+
+def _number(c):
+    m = re.fullmatch(r"persona-(\d{2})", str(c.get("id")))
+    return int(m.group(1)) if m else 0
+
+
+def _ask(card, model, system, ask, written):
+    """One batch call: the people the model wrote (a list), told the people already written."""
+    if written:
+        ask = {**ask, "already": [{"want": c["want"], "opening": opening_of(c)} for c in written]}
+        system += ALREADY_PART
+    out = model.chat([{"role": "system", "content": system_for(system, card)},
+                      {"role": "user", "content": json.dumps(ask, ensure_ascii=False)}],
+                     effort=EFFORT, max_tokens=MAX_TOKENS)
+    got = _json(out.get("content") if isinstance(out, dict) else None)
+    people = got.get("customers") if got else None
+    if not isinstance(people, list):
+        raise Unreadable("the practice customers the model wrote could not be read")
+    return people
+
+
+def write_many(card, model, slots, have, new, *, system, ask_of, build):
+    """The new customers for slots (each a kind, or a real card's behaviour), BATCH at most a call,
+    appended to new as they are made, so a caller stopped by the cap keeps them. have: the cards
+    already written, kept as they are. A person already written (person) is asked for once more in
+    one call, then dropped. build(i, slot, got): one card numbered i, or None."""
+    seen = {person(c) for c in have}
+    start = max((_number(c) for c in have), default=0)
+
+    def take(batch, people, again):
+        for slot, one in zip(batch, people):
+            c = build(start + len(new) + 1, slot, one if isinstance(one, dict) else {})
+            if c is None:
+                continue
+            if person(c) in seen:
+                if again is not None:
+                    again.append(slot)
+                continue
+            seen.add(person(c))
+            new.append(c)
+
+    for i in range(0, len(slots), BATCH):
+        batch, again = slots[i:i + BATCH], []
+        take(batch, _ask(card, model, system, ask_of(batch), have + new), again)
+        if again:  # once more, told everyone written so far; a second match is dropped
+            take(again, _ask(card, model, system, ask_of(again), have + new), None)
+    return new
+
+
+def save_new(folder, cards):
+    """Write only these cards into folder, never over a file that is there, so the cards saved before
+    stay byte for byte."""
+    folder = Path(folder)
+    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    for c in cards:
+        path = folder / f"{c['id']}.json"
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(c, ensure_ascii=False, indent=1))
+    return folder
+
+
+def _kept(have, quota):
+    """The saved made-up cards inside quota, in id order, and the quota still missing."""
+    left, kept = dict(quota), []
+    for c in sorted(have, key=_number):
+        if left.get(c.get("kind"), 0) > 0:
+            kept.append(c)
+            left[c["kind"]] -= 1
+    return kept, {k: v for k, v in left.items() if v > 0}
+
+
+def _shaped(agent_folder, agent, card, model, profiles, count, folder, source, saved):
+    """for_agent with count: (cards, written), topping up the saved cards."""
+    from arena import run as run_mod  # here: arena/run.py loads the store, the matches and the history
+    count, have = check_count(count), saved or []
+    if profiles is None:
+        kept, missing = _kept(have, mix(count))
+        slots, n = layout(missing), count
+        ask_of = lambda batch: {"agent_card": asked_card(card), "kinds": list(batch)}  # noqa: E731
+        build = lambda i, kind, one: card_of(i, kind, one, agent, source, n)  # noqa: E731
+        system = SYSTEM
+    else:
+        kept = sorted(have, key=_number)[:count]
+        slots = [profiles[i % len(profiles)] for i in range(len(kept), count)]
+        ask_of = lambda batch: {"agent_card": asked_card(card), "people": [asked(b) for b in batch]}  # noqa: E731
+        build = lambda i, b, one: blended(i, b, one, agent, source, len(profiles))  # noqa: E731
+        system = BLEND_SYSTEM
+    if not slots:
+        return kept, False
+    new = []
+    try:
+        write_many(card, model, slots, kept, new, system=system, ask_of=ask_of, build=build)
+    except run_mod.CapReached as e:
+        if new and len(kept) + len(new) >= 2:
+            (save_new if have else save)(folder, new if have else kept + new)
+        raise run_mod.CapReached(
+            f"{e}; {len(kept) + len(new)} of {count} practice customers were written "
+            f"{'and saved, and the next run writes the rest' if new and len(kept) + len(new) >= 2 else 'and none saved'}"
+        ) from None
+    cards = kept + new
+    if len(cards) < 2 or not any(not c["unwinnable"] for c in cards):
+        raise Unreadable("the model wrote too few practice customers that can be played")
+    if have:
+        save_new(folder, new)
+    else:
+        save(folder, cards)
     return cards, True

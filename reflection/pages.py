@@ -1847,7 +1847,7 @@ def new_agent(m, quick, ctx, run=None):
         form = ""
         if tok:
             form = (f'<form method="post" action="/quickstart">{_hidden(ctx)}<div class="comp sq"><textarea name="text" '
-                    f'rows="2" maxlength="{qs_mod.MAX_TEXT}" aria-label="What agent do you want?" dir="auto" required '
+                    f'rows="4" maxlength="{qs_mod.MAX_TEXT}" aria-label="What agent do you want?" dir="auto" required '
                     'placeholder="I want an agent that answers my support tickets and tags the ones that need the '
                     'team."></textarea><div class="crow"><span class="bmode"><span class="on">Build</span><span>'
                     f'Brainstorm <i>Soon</i></span></span><span class="sp"></span><button class="send go" type="submit" '

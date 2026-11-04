@@ -634,7 +634,7 @@ html{scroll-padding-top:16px}
 .bp .hero .sub{margin:12px 0 24px; font:400 15px/22px var(--font); color:var(--ink-2); text-wrap:pretty}
 .bp .comp{border-radius:26px; background:#fff; box-shadow:inset 0 0 0 1px rgba(42,51,50,.1), 0 1px 2px rgba(11,15,18,.04), 0 16px 32px -24px rgba(11,15,18,.3); padding:12px 10px 10px 18px}
 .bp .comp:focus-within{box-shadow:inset 0 0 0 1.5px rgba(42,51,50,.32), 0 1px 2px rgba(11,15,18,.04), 0 16px 32px -24px rgba(11,15,18,.3)}
-.bp .comp textarea{display:block; width:100%; margin:2px 0 0; padding:0; border:0; outline:0; resize:none; background:none; min-height:24px; max-height:156px; font:400 17px/24px var(--font); letter-spacing:-.01em; color:var(--ink); box-shadow:none}
+.bp .comp textarea{display:block; width:100%; margin:2px 0 0; padding:0; border:0; outline:0; resize:none; background:none; field-sizing:content; min-height:96px; max-height:260px; overflow-y:auto; font:400 17px/24px var(--font); letter-spacing:-.01em; color:var(--ink); box-shadow:none}
 .bp .comp textarea::placeholder{color:var(--ink-3); opacity:1}
 .bp .crow{display:flex; align-items:center; gap:8px; margin-top:10px; min-width:0}
 .bp .crow .sp{flex:1}
@@ -743,7 +743,7 @@ html{scroll-padding-top:16px}
   .bp .hero .sub{font-size:17px; line-height:24px}
   .bp .hero .comp{text-align:left}
   .bp .comp{padding:16px 12px 12px 22px}
-  .bp .comp textarea{font-size:18px; line-height:26px; min-height:26px}
+  .bp .comp textarea{font-size:18px; line-height:26px; min-height:104px}
   .bthread{gap:26px; padding-top:32px}
   .bp .you{max-width:70%}
   .bp .acard{padding:24px 26px}

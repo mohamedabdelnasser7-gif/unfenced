@@ -253,3 +253,72 @@ class HandEditedKinds(Base):
                 got = [kinds[i] for i in rep["held_out_cards"]]
                 self.assertEqual((got.count("easy"), got.count("unsure"), got.count("hard")), (8, 8, 4))
 
+
+class Gaps(Base):
+    """The cases review levels r2 item 4 found untested."""
+    practise = Kept.practise
+
+    def test_a_matches_file_that_cannot_be_read_stops_the_run_before_any_model_call(self):
+        name = "support_calm_helper"
+        folder = self.folders[name]
+        self.practise(name, 20, 10)
+        path = folder / run.MATCHES_FILE
+        before = path.read_bytes()
+        for what in ("no read permission", "not utf-8"):
+            with self.subTest(what=what):
+                if what == "not utf-8":
+                    path.write_bytes(before + b'{"id": "x-r1-t01", "card": "\xff"}\n')
+                else:
+                    os.chmod(path, 0)
+                    self.addCleanup(os.chmod, path, 0o644)
+                writer = Writer()
+                with self.assertRaises(run.Refused) as got:
+                    self.practise(name, 20, 10, writer=writer)
+                self.assertIn("saved matches cannot be read", str(got.exception))
+                self.assertEqual(writer.asks, [])
+                os.chmod(path, 0o644)
+
+    def test_read_test_refuses_a_dangling_link_a_big_file_and_a_bad_from_card(self):
+        d = self.root / "one"
+        d.mkdir()
+        path = d / practice.TEST_FILE
+        os.symlink(d / "gone.json", path)  # points nowhere
+        with self.assertRaises(run.Refused):
+            practice.read_test(d)
+        path.unlink()
+        pad = "x" * practice.MAX_TEST_FILE
+        path.write_text(json.dumps({"test": [{"id": "persona-01", "from_card": "F"}], "pad": pad}), encoding="utf-8")
+        with self.assertRaises(run.Refused):
+            practice.read_test(d)  # whole JSON, but over the size cap
+        for bad in (3, ["F"], {"f": 1}, True):
+            with self.subTest(from_card=bad):
+                path.write_text(json.dumps({"test": [{"id": "persona-01", "from_card": bad}]}), encoding="utf-8")
+                with self.assertRaises(run.Refused):
+                    practice.read_test(d)
+        path.write_text(json.dumps({"test": [{"id": "persona-01", "from_card": None}]}), encoding="utf-8")
+        self.assertEqual(practice.read_test(d), [("persona-01", None)])
+
+    def test_a_training_match_whose_person_names_no_card_rules_out_the_id_whatever_its_card(self):
+        d = self.root / "one"
+        d.mkdir()
+        (d / run.MATCHES_FILE).write_text(
+            json.dumps({"id": "a-r1-t01", "card": "persona-01", "persona": {"id": "persona-01"},
+                        practice.TEST_KEY: False}) + "\n" +
+            json.dumps({"id": "a-r1-t02", "card": "persona-02", "persona": "not a person",
+                        practice.TEST_KEY: False}) + "\n", encoding="utf-8")
+        done = practice.trained(d)
+        cards = FixedTest.cards(None, ["easy"] * 6 + ["never"])
+        held = practice.fixed_test(cards, 4, [("persona-01", "F"), ("persona-02", "F")], done)[0]
+        self.assertEqual(len(held), 4)
+        self.assertFalse({"persona-01", "persona-02"} & set(held))
+
+    def test_a_card_grown_from_real_chats_is_never_held_by_fixed_test(self):
+        cards = FixedTest.cards(None, ["easy"] * 4 + ["never"])
+        cards.append({"id": "grown-01", "kind": "easy", "from_card": "F", "unwinnable": False})
+        held, spare, short = practice.fixed_test(cards, 3, [("grown-01", "F")], set())
+        self.assertNotIn("grown-01", held + spare)
+        self.assertEqual((len(held), short), (3, 0))
+        held, _, short = practice.fixed_test(cards, 5, [("grown-01", "F")], set())  # only 4 are not grown
+        self.assertIsNone(held)
+        self.assertGreater(short, 0)
+

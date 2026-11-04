@@ -102,6 +102,8 @@ These came in on the engfix2 and engfix3 branches.
 
 **The assistant on the case Arena.** The personal assistant's page moved from simulated days to the case Arena: one request or one email thread at a time against a made-up user, with the same Run the Arena, Train and gate as an agent made in Quick start, so it practises on the tasks it will really face (decision 109).
 
+**A clear mistake had to happen three times.** The night study wrote a lesson only when a pattern had at least 5 cases from 3 different sources on each side and a 75% chance of being better. That bar suits soft patterns, like shorter replies closing better, but it also held back mistakes that are plain from one case, like meat in a vegan plan or a price the store never set: they could not become a lesson until they repeated across 3 sources. Now a broken never line or a failed fact check in the Arena makes a lesson from that one case, and the lesson still passes the exam, the gate and a trial before it is kept. Softer patterns keep the old bar (decision 111).
+
 ## Still open
 
 - The offers and fair close work (decision 105) is on its own branch and not yet merged here.

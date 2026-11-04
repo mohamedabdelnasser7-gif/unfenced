@@ -45,10 +45,10 @@ BEGIN SELECT RAISE(ABORT, 'a queued lesson is never deleted; a study takes it');
 # kind: the lesson's kind (engine/lessons.py PATTERN or IDEA). part: where the study found it
 # (PARTS). lesson: its line. item: what the write needs again, as JSON: the candidate {lesson,
 # situation, stages, ...}, its source line, the texts of the cases it came from (the copy check),
-# its counts (rec, or null), where it came from (origin, or null), the kept lesson it was adapted
+# its counts (rec, or null; a clear mistake's rec names its case), where it came from (origin, or null), the kept lesson it was adapted
 # from (source_lesson_id, or null) and whether it goes on trial only through the eval gate (gated).
 # why: what stopped the study. taken_at, lesson_id and outcome: set once, when a later study took it.
-PARTS = ("pattern", "scope", "across", "pool", "idea")
+PARTS = ("pattern", "mistake", "scope", "across", "pool", "idea")
 
 
 def ensure(db):

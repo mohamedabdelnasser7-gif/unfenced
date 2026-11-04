@@ -33,6 +33,15 @@ a lesson card through the agent's own lessons and risk check.
    alone. A tag that is not a plain yes or no leaves that case out of that pattern. With a
    few candidates a night one may pass by luck; it only starts a trial, and the trial's
    verdict on new cases decides.
+   A clear mistake teaches from one case (DECISIONS item 111). A lost Arena or practice case whose
+   verdict is a broken never line or a failed fact check (arena/good.py BROKE, arena/verdict.py and
+   arena/good.py FAILED; mistake_of) is enough on its own: there is no comparison to make, so it has
+   no floor of cases or sources and no gap test; the case itself is the evidence. The proposer is
+   given that one case, marked "mistake" with its kind, and the first lesson it gives is written as
+   in 5, its source line saying "from one clear mistake: <kind>"; one lesson a case, and one a night
+   for the same verdict line. It still takes the exam and the gate before use, then a trial. Softer
+   patterns, the ones the proposer and the tagger compare, keep the gap rule above. A night that has
+   stopped (see 10) asks the proposer for no more of them; the cases stay in the log.
 5. Write. Each winner, strongest first, goes through Lessons.propose with its stage tags,
    a source line with the counts, and the texts of the cases the model read as sources, so
    copied words make it high. Risk decides: low goes on trial with no yes, as many a night
@@ -156,6 +165,18 @@ TAGGED = 200      # settled cases the tagger reads for each candidate
 SHOWN = 20        # case ids a source line names
 FULLY, PARTLY, NOT = "fully", "partly", "not"
 GOOD, BAD, PENDING, LEFT_OUT = "good", "bad", "pending", "left out"
+# A clear mistake (see 4, DECISIONS item 111): the start of the verdict a lost Arena or practice case ends on, as
+# arena/verdict.py and arena/good.py write it (tests/test_study_mistake.py holds them equal), and its kind in words.
+BROKE_NEVER = "a never line was broken"   # arena/good.py BROKE
+FAILED_FACT = "failed fact check"         # arena/verdict.py FAILED: arena/factcheck.py checks
+FAILED_SEND = "failed send check"         # arena/good.py FAILED: a built agent's fact checks, its send check
+MISTAKES = ((BROKE_NEVER, "a broken never line"), (FAILED_FACT, "a failed fact check"),
+            (FAILED_SEND, "a failed fact check"))
+MISTAKE_SOURCE = "from one clear mistake: "
+SAME_MISTAKE = "the same mistake as another case tonight"
+NO_MISTAKE_LESSON = "the proposer gave no lesson for it"
+ONE_A_CASE = "one lesson from one clear mistake"
+NOT_ASKED = "not asked: the study stopped first; the case stays in the log"
 LESSON, KNOWN, FEW_CASES, FEW_SOURCES, NO_GAP = (
     "lesson", "already a lesson", "too few cases", "too few sources", "gap not clear")
 PULLED_BEFORE = "pulled before"
@@ -266,7 +287,9 @@ class Study:
     call, not a count of lessons (see 3 and 7). When this agent has lessons that failed the eval gate (see 5),
     the proposer and the idea part are called with failed=[{lesson, first_fail, fails,
     broke_cases, fixed, broke}] too, and those lines are left out of known; with none, the call is
-    as above. clock: the time a deadline is read against (see 10), the computer's clock unless given."""
+    as above. For a clear mistake (see 4) the proposer is given that one case alone, its view marked
+    "mistake" with its kind. clock: the time a deadline is read against (see 10), the computer's clock
+    unless given."""
 
     def __init__(self, db, plug, *, proposer, tagger, fit=None, adapter=None, others=(), lessons=None,
                  judge=risk_mod.no_judge, limit=ANSWER_MAX, sample=SAMPLE, seed=0, clash=None, ideas=None,
@@ -310,6 +333,7 @@ class Study:
         at = time.time() if now is None else float(now)
         rep = {"agent": self.plug.agent, "window": {"since": since, "until": until}, "candidates": [], "dropped": [],
                "cards": [], "across": [], "ideas": [], "unread": [], "notes": [], "queued": [], "from_queue": [],
+               "mistakes": [],
                "stopped": None,
                "parts": {name: _label(part) for name, part in (("proposer", self.proposer), ("tagger", self.tagger),
                                                                ("fit", self.fit), ("adapter", self.adapter),
@@ -328,8 +352,8 @@ class Study:
         self._given = [{k: v for k, v in t.items() if k != "lesson_id"} for t in tries[:FAILED_GIVEN]]
         if take_queue:
             self._from_queue(known, pulled, rep)  # the lessons an earlier study queued go first (see 10)
-        found = self._find(self.plug, cases, [les["text"] for les in mine if les["id"] not in self._given_ids],
-                           texts, rep["notes"], failed=self._given)
+        given = [les["text"] for les in mine if les["id"] not in self._given_ids]
+        found = self._find(self.plug, cases, given, texts, rep["notes"], failed=self._given)
         rep["dropped"] = found["dropped"]
         for rec, cand, sample, with_ in found["winners"]:
             if _norm(cand["lesson"]) in known:
@@ -354,6 +378,7 @@ class Study:
             rec["lesson_id"] = card["lesson_id"]
             known[_norm(cand["lesson"])] = KNOWN
         rep["candidates"] = found["candidates"]
+        self._mistakes(cases, given, known, pulled, texts, rep, since, until)
         self._scope(scoped, known, pulled, rep, since, until)
         self._across(since, until, known, pulled, rep)
         if not self._halted():
@@ -398,7 +423,8 @@ class Study:
         if origin is not None:
             part = "pool" if origin.get("agent") == POOL_AGENT else "across"
         else:
-            part = "idea" if kind == IDEA else "scope" if rec is None else "pattern"
+            part = ("idea" if kind == IDEA else "scope" if rec is None else "mistake" if rec.get("mistake")
+                    else "pattern")
         qid = None
         if _norm(cand["lesson"]) not in self._waiting:
             item = {"cand": dict(cand), "source": source, "sources": list(sources), "rec": rec, "origin": origin,
@@ -443,6 +469,67 @@ class Study:
                     known[_norm(cand["lesson"])] = KNOWN
             queue_mod.take(self.db, self.plug.agent, row["id"], lesson_id=out["lesson_id"],
                            outcome=out["why"] or "written", now=self._now)
+
+    def _mistakes(self, cases, given, known, pulled, texts, rep, since, until):
+        """The night's clear mistakes (see 4): each lost case mistake_of names gives the proposer that one
+        case, marked with its kind, and the first lesson it gives is written with no count and no gap test.
+        rep["mistakes"] names each as {case_id, kind, why, lesson, lesson_id, verdict, cases_with}."""
+        seen = set()
+        for c in cases:
+            m = mistake_of(c)
+            if m is None:
+                continue
+            rec = {"case_id": c.id, "kind": m["kind"], "why": m["why"], "lesson": None, "lesson_id": None,
+                   "verdict": None, "cases_with": [c.id], "mistake": True}
+            rep["mistakes"].append(rec)
+            if m["why"] in seen:
+                rec["verdict"] = SAME_MISTAKE
+                continue
+            seen.add(m["why"])
+            if self._halted():
+                rec["verdict"] = NOT_ASKED
+                continue
+            view = _view(self.plug, c, texts, blind=False)
+            view["mistake"] = m["kind"]
+            try:
+                raw = self.proposer(self.plug, [view], self.limit, list(given),
+                                    **({"failed": self._given} if self._given else {}))
+            except Exception as e:  # a failing proposer makes no lesson
+                rep["notes"].append(f"{self.plug.agent}: the proposer failed on a clear mistake ({_failed(e)})")
+                rec["verdict"] = NO_MISTAKE_LESSON
+                continue
+            cand = None
+            for item in raw if isinstance(raw, list) else []:
+                if cand is not None:
+                    rep["dropped"].append({"agent": self.plug.agent, "candidate": _said(item), "why": ONE_A_CASE})
+                    continue
+                try:
+                    cand = _candidate(self.plug, item)
+                except ValueError as e:
+                    rep["dropped"].append({"agent": self.plug.agent, "candidate": repr(item)[:200], "why": str(e)})
+            if cand is None:
+                rec["verdict"] = NO_MISTAKE_LESSON
+                continue
+            rec["lesson"] = cand["lesson"]
+            if _norm(cand["lesson"]) in known:
+                rec["verdict"] = known[_norm(cand["lesson"])]
+                continue
+            source = (f'night study of {self.plug.agent}, {MISTAKE_SOURCE}{m["kind"]}; case {c.id} from '
+                      f'{_day(since)} to {_day(until)}: {m["why"]}; no count or gap test, the case is the evidence')
+            try:
+                card = self._write(cand, source, [c.text], rec, None, rep,
+                                   close=_close(cand["lesson"], pulled, self._failed_lines))
+            except HandedOver as e:  # another agent's matter (see 8)
+                rec["verdict"], rec["handed_to"] = HANDED, {"agent": e.to, "kind": e.kind}
+                continue
+            except Queued as e:  # the study stopped first (see 10)
+                rec["verdict"] = f"{QUEUED} ({e.why})"
+                continue
+            except ValueError as e:  # refused by the lessons
+                rec["verdict"] = f"not written: {e}"
+                continue
+            rec["verdict"], rec["lesson_id"] = LESSON, card["lesson_id"]
+            known[_norm(cand["lesson"])] = KNOWN
 
     def _scope(self, scoped, known, pulled, rep, since, until):
         """The night's scope cases (see 9): from the lost ones only DECLINE is written, as one lesson through
@@ -760,8 +847,8 @@ class Study:
                 "situation": cand["situation"], "change": les["text"], "stages": les["stages"],
                 "moves": {"result": good, "shows_in_days": _shows(self.plug, good)},
                 "must_not_worsen": {"results": list(self.plug.harm.results), "about": self.plug.harm.about},
-                "sure": rec["chance"] if rec else None,
-                "cases": None if rec is None else {
+                "sure": rec.get("chance") if rec else None,
+                "cases": None if rec is None or "with" not in rec else {
                     "with": rec["with"]["cases"], "without": rec["without"]["cases"],
                     "total": rec["with"]["cases"] + rec["without"]["cases"],
                     "good_with": rec["with"]["good"], "good_without": rec["without"]["good"]},
@@ -1168,6 +1255,27 @@ def _view(plug, case, texts, *, blind):
         view["deciding"] = case.deciding
         view["good"] = case.status == GOOD
     return view
+
+
+def mistake_of(case):
+    """The clear mistake a lost case ended on (see 4), as {kind, why}, or None. Read from the verdict the
+    last turn of a lost Arena or practice case carries (arena/learn.py, arena/learn_built.py), before its
+    deciding row; only a row our own Arena wrote ("arena": true) counts, so no live or imported row can
+    make one."""
+    if case.status != BAD:
+        return None
+    for r in reversed(case.rows[:case.cut]):
+        d = r["detail"]
+        verdict = d.get("verdict") if isinstance(d, dict) else None
+        if not isinstance(verdict, str):
+            continue
+        if d.get("arena") is not True:
+            return None
+        for start, kind in MISTAKES:
+            if verdict.startswith(start):
+                return {"kind": kind, "why": verdict[:300]}
+        return None
+    return None
 
 
 def past_bound(limit):

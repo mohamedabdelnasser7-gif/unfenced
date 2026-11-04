@@ -77,6 +77,14 @@ another owner, even cleaned. A pool file naming another kind is refused, and so 
 are not exactly the shape this file writes; the pool is written under a fresh name and moved into
 place (arena/personas.py _write), never through a link, readable by its user only.
 
+The shared pool across owners (reflection/shared.py, DECISIONS item 83) is read and given to here
+too, beside siblings. Each lost chat the night adds, already cleaned, goes to the pattern writer
+(at most the link's give_lost a night, its calls on the same daily cap) and only a clean general
+pattern joins the pool of its kind, with the owner as a keyed hash; nothing of the chat is kept
+there. The pool's lost patterns seen at 2 or more owners become fresh practice customers for every
+owner's Arena (for_state with the install's shared folder: Pool.shared): they hold the pattern alone,
+train only and never take the gate. The owner's own practice customers above still never cross.
+
 The tagger's calls count against the Arena's daily cap in the agent's own folder (arena/run.py
 Calls), at most MAX_NEW chats a night. The step needs the persona recipe (arena/recipe.py,
 private): with none it reads no chat and says so.
@@ -244,6 +252,7 @@ class Pool:
         self.trained_ids = set(ids) if isinstance(ids, list) and len(ids) <= MAX_SPLIT \
             and all(isinstance(i, str) for i in ids) else set()
         self._keys = {i["read"] for i in self.items if "read" in i}
+        self.shared = []  # practice customers from the shared pool's lost patterns (for_state); never saved here
         self.changed = False
 
     def weight(self, card):
@@ -345,7 +354,7 @@ class Pool:
 
     def summary(self):
         return {"kind": self.kind, "grown_cards": len(self.cards), "items": len(self.items),
-                "siblings": siblings(self.owner, self.kind)}
+                "siblings": siblings(self.owner, self.kind), "shared_cards": len(self.shared)}
 
 
 def _count(v):
@@ -518,9 +527,15 @@ def group(card):
     return f"{side}:{_slug(card.get('worry'))[:80]}" + (f":{_slug(why)[:80]}" if why else "")
 
 
-def for_state(state, default_kind=DEFAULT_KIND):
-    """The pool of the agent whose Arena files sit in state: its owner's, of its kind."""
-    return Pool(owner_of(state), kind_at(state, default_kind))
+def for_state(state, default_kind=DEFAULT_KIND, shared_root=None):
+    """The pool of the agent whose Arena files sit in state: its owner's, of its kind. shared_root:
+    the install's shared folder (reflection/shared.py root_for); its kind's shared lost patterns
+    become Pool.shared, practice customers that train only. None: no shared pool is read."""
+    pool = Pool(owner_of(state), kind_at(state, default_kind))
+    if shared_root is not None:
+        from reflection import shared as shared_mod
+        pool.shared = shared_mod.practice_cards(pool.kind, shared_root)
+    return pool
 
 
 # ---- the deck the Arena draws from
@@ -553,7 +568,7 @@ def decks(base, pool, held):
     in them (a "grown" count on each, arena/personas.py --state) take no grown card again. The
     base cards are never changed in place."""
     folded = any("grown" in c for c in base)
-    grown = [] if folded else [dict(c) for c in pool.cards]
+    grown = [] if folded else [dict(c) for c in pool.cards + list(getattr(pool, "shared", ()))]
     out = [dict(c) for c in base] + grown
     for c in out:
         c.setdefault("unwinnable", False)
@@ -772,10 +787,12 @@ WAITING = frozenset({label_mod.OPEN, label_mod.UNANSWERED, label_mod.VOICE})  # 
 
 
 def grow(db, pool, *, since, until, tagger, calls=None, most=MAX_NEW, quiet_hours=label_mod.QUIET_HOURS, plug=None,
-         own=True):
+         own=True, shared=None):
     """The night's new practice items from the real chats into the pool. Returns counts only. plug:
     the agent whose chats are read (see the module lines); None reads every chat, as the Sales
-    agent's database holds only its own. own: as in real_chats."""
+    agent's database holds only its own. own: as in real_chats. shared: the agent's link into the
+    shared pool (reflection/shared.py Link); each lost chat added, cleaned, is given to it as one
+    clean pattern, at most shared.give_lost a night."""
     from arena.personas import turns_of  # the persona build's own turns, cleaned the same way
     n = Counter()
     chats = real_chats(db, since - quiet_hours * 3600, until, pool, agent=None if plug is None else plug.agent, own=own)
@@ -821,6 +838,16 @@ def grow(db, pool, *, since, until, tagger, calls=None, most=MAX_NEW, quiet_hour
                   "style": cards_mod.style_of(chat), "turns": turns}, chat_id, *last)
         n["added"] += 1
         n["lost" if lab == label_mod.LOST else "hard"] += 1
+        if lab == label_mod.LOST and shared is not None and n["patterns asked"] < shared.give_lost \
+                and not (calls is not None and calls.reached):
+            try:  # only the cleaned turns reach the writer; only a clean pattern reaches the pool
+                got = shared.give_chat(f"{chat_id}:{last[0]}", turns, tags.get("worry"))
+            except (OSError, ValueError) as e:
+                n[f"patterns not given ({type(e).__name__})"] += 1
+                continue
+            n["patterns asked"] += bool(got.get("asked"))
+            n["patterns given" if got.get("pattern") else "patterns dropped" if got.get("asked") else
+              "patterns skipped"] += 1
     return dict(n)
 
 
@@ -831,12 +858,14 @@ def tag_model():
     return model_mod.Model(timeout=tag_mod.TIMEOUT, route=model_mod.OPEN)
 
 
-def night(db_path, plug, recipe_path, since, until, folder=None, own=True):
+def night(db_path, plug, recipe_path, since, until, folder=None, own=True, shared_root=None):
     """The night step for an agent of any kind: its new real chats into its owner's pool of its kind.
     folder: the folder of an agent Quick start built (reflection/night.py built_folder), its owner
     found from there (owner_of) and its daily cap kept there; None for an agent whose folder is the
-    database's. own: the database's own agent, the Sales agent (see the module lines). Returns counts and the pool's summary; stopped names why nothing
-    more was read."""
+    database's. own: the database's own agent, the Sales agent (see the module lines). shared_root:
+    the install's shared folder (reflection/shared.py root_for): lost chats are given to the shared
+    pool of the plug's kind and its practice customers counted; None leaves the shared pool out.
+    Returns counts and the pool's summary; stopped names why nothing more was read."""
     from arena import recipe as recipe_mod
     from arena import run as arena_run
     from arena import tag as tag_mod
@@ -854,10 +883,19 @@ def night(db_path, plug, recipe_path, since, until, folder=None, own=True):
         return rep
     calls = arena_run.Calls(folder / arena_run.CALLS_FILE, arena_run.DEFAULT_CAP)
     tagger = tag_mod.Tagger(model=calls.model(tag_model()), cap=MAX_NEW, recipe=recipe)
+    link = None
+    if shared_root is not None:
+        from reflection import shared as shared_mod
+        try:
+            link = shared_mod.Link.for_plug(plug, shared_mod.Writer(model=calls.model(tag_model())), shared_root)
+            link.pool  # opened now, so a refused folder is said once
+            pool.shared = shared_mod.practice_cards(pool.kind, shared_root)
+        except shared_mod.Refused as e:
+            link, rep["shared_stopped"] = None, str(e)
     db = Db(str(db_path))
     try:
         rep.update(grow(db, pool, since=since, until=until, tagger=tagger, calls=calls,
-                        plug=None if own and kind_of(plug) == DEFAULT_KIND else plug, own=own))
+                        plug=None if own and kind_of(plug) == DEFAULT_KIND else plug, own=own, shared=link))
     finally:
         db.close()
     if rep.get("added"):
@@ -885,4 +923,7 @@ def line(rep):
             f"{rep.get('hard', 0)} hard); {rep.get('easy wins, skipped', 0)} easy wins and "
             f"{rep.get('unclear, skipped', 0)} unclear skipped; the pool holds {rep['grown_cards']} cards from "
             f"{rep['items']} chats, shared by {', '.join(rep['siblings']) or 'this agent only'}"
+            + (f"; {rep['shared_cards']} more from patterns seen at 2 or more owners" if rep.get("shared_cards") else "")
+            + (f"; {rep['patterns given']} lost chats given to the shared pool as clean patterns"
+               if rep.get("patterns given") else "")
             + (f" (stopped: {rep['stopped']})" if rep.get("stopped") else ""))

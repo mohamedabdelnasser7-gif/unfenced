@@ -699,7 +699,8 @@ def main(argv=None, *, until=None):
     from arena import grow
     try:  # every kind grows its own pool (DECISIONS item 79); a built agent's owner is found from its folder
         rep["practice"] = grow.night(args.db, plug, args.recipe, rep["window"]["since"], rep["window"]["until"],
-                                     folder=folder, own=plug.agent == SALES.agent)
+                                     folder=folder, own=plug.agent == SALES.agent,
+                                     shared_root=shared_mod.root_for(args.db))
     except Exception as e:  # the lessons went in already: the report and its rollback line are still saved
         rep["practice"] = {"kind": grow.kind_of(plug), "stopped": f"failed: {type(e).__name__}"}
     # ---- end of the practice step

@@ -869,7 +869,9 @@ def text(rep):
     if rep.get("pool"):
         p = rep["pool"]
         lines.append(f"  practice customers grown from real chats: {p['grown_cards']} cards from {p['items']} chats"
-                     + (f", shared by {', '.join(p['siblings'])}" if p["siblings"] else ""))
+                     + (f", shared by {', '.join(p['siblings'])}" if p["siblings"] else "")
+                     + (f"; {p['shared_cards']} more from the shared pool of {p['kind']} agents, patterns seen at 2 "
+                        "or more owners" if p.get("shared_cards") else ""))
     if rep.get("stuck"):
         lines.append(f"  stuck point for the Morning page: {rep['stuck']['file']}")
     if rep.get("item"):
@@ -959,7 +961,8 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
                           " could be committed; keep --db or --state outside it or under data/ (DECISIONS item 17)")
         calls = Calls(state / CALLS_FILE, args.cap, limit=QUICK_CALLS if args.quick else None)
         from arena import grow
-        practice = grow.for_state(state, AGENT)  # the owner's practice customers, of this agent's kind
+        from reflection import shared as shared_mod  # with a database, its install's shared pool (item 83)
+        practice = grow.for_state(state, AGENT, shared_root=shared_mod.root_for(args.db) if args.db else None)
         if args.db and not Path(args.db).is_file():
             raise Refused(f"no database at {args.db}")
         made = agent_model is None or customer_model is None  # a real run: the models are made here

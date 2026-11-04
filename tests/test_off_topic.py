@@ -297,6 +297,14 @@ class SalesRun(unittest.TestCase):
         self.go(self.arena(writer, Model(), matches=9))
         self.assertEqual(writer.asked(scope.WRITER), [])
 
+    def test_a_longer_round_plays_only_match_10(self):
+        writer = Model()
+        self.go(self.arena(writer, Model(), matches=30))
+        ids = [c for c, _ in self.opened]
+        self.assertEqual(len(writer.asked(scope.WRITER)), 1)
+        self.assertEqual([i for i, c in enumerate(ids) if c.startswith(scope.PREFIX)], [9])
+        self.assertEqual([k for k in range(1, 41) if scope.slot(k)], [10])
+
     def test_main_plays_it_only_with_models_it_made(self):
         """With models given (no key needed: tests, the recorded replay) the run never writes one."""
         writer = Model()

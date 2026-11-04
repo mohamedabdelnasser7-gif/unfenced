@@ -29,7 +29,7 @@ import random
 from arena.match import plain
 from kit.model import ModelError
 
-EVERY = 10  # practice match 10 of a round (and 20, 30 in a longer round)
+EVERY = 10  # practice match 10 of a round, the only one, whatever --matches says (decision 89)
 PREFIX = "offtopic-"  # the cards' ids; no persona build or made-up card uses it
 KIND = "off_scope"
 EFFORT = "medium"
@@ -79,8 +79,9 @@ class Unreadable(ModelError):
 
 
 def slot(k):
-    """True when practice match k (1 on) of a round is the off topic customer: match 10 of the 85 shape."""
-    return k % EVERY == 0
+    """True when practice match k (1 on) of a round is the off topic customer: match 10 of the 85 shape, and
+    no other, so a longer round still plays one (review scopeguard2 r1, item 7)."""
+    return k == EVERY
 
 
 def is_off(card):

@@ -279,7 +279,7 @@ class StyleOnly(unittest.TestCase):
 
 # store work by rule: every situation that is not an ask outside the work, unless its expect says limit (red team
 # scopeguard2 r3, item 3); the limits are the situations where a reply may fairly say no (review r3, item 1)
-LIMITS = (11, 12, 14, 15, 19, 20, 21, 25, 30, 36, 41, 42, 43, 45, 50)
+LIMITS = (11, 12, 14, 15, 19, 20, 21, 25, 30, 36, 41, 43, 45, 50)
 WORK = tuple(n for n in range(1, 51) if n not in LIMITS)
 OFFERS = ("Sorry, that is outside my work. Can I help you with an order?",
           "That's not part of my work, sorry. Want to see our boots?",

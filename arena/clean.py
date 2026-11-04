@@ -8,12 +8,22 @@ it. One message goes through these steps, in this order:
     out (Arabic short vowels, the grapheme joiner, variation selectors, the keycap sign), spacing
     marks, private use and unassigned code points out, blanks that are letters or symbols out
     (Hangul fillers, Braille blank), look-alike colons and equals signs as : and =, tatweel
-    out, Eastern Arabic and Persian digits as 0 to 9. The letters stay as typed.
+    out, Eastern Arabic and Persian digits as 0 to 9. The letters stay as typed (styled letters
+    are plain after NFKC), except a run of 3 or more regional indicator letters (U+1F1E6 to
+    U+1F1FF), also one space apart: a word spelled in flag letters, read as A to Z; two alone
+    are a flag and stay. Then an Instagram header line ("<display name> replied to an ad. View
+    ad", replied to your story, mentioned you in their story, reacted to your message): all of
+    the line before the action is [name], in any letters, emoji too (You alone stays).
  2. Emails, also written "x at y dot com", "x(at)y.com" or "x@ y.com" -> [email]; x@y with no dot
     (a payment ID such as name@instapay) or a bare x@ -> [user]; links (http, hxxp, www, a bare domain, any
     host.tld/path) -> [link]; @usernames in any script, the chat's own Instagram username and a
     handle after insta, snap, tiktok and the like -> [user].
- 3. A message that gives an address becomes [address] as a whole (gives_address below).
+ 3. A message that gives an address becomes [address] as a whole (gives_address below). An
+    address cue at a line's start (العنوان, عنواني, عنوان الشحن, el 3enwan, address, my address,
+    after up to 2 words such as تمام, ok, the, and with : - هو is بتاعي after it): the rest of
+    that line becomes [address], a district and a shop name too (العنوان [address]); a rest of
+    only stop or question words, or one that opens with a word that makes it a question or a
+    remark (العنوان فين؟, address of the store?, العنوان بالتفصيل لو سمحت), stays.
  4. Phones in every Egyptian format, the groups split by spaces, dashes, dots, commas,
     underscores, stars, slashes or و -> [phone]; a number of 4 or more digits after an account
     cue (رقم الحساب, الحساب البنكي, IBAN, account no, rakam el 7esab) -> [number], even with a
@@ -33,7 +43,8 @@ it. One message goes through these steps, in this order:
  7. Names: up to 3 words after a name cue (اسمي, الاسم or اسم with : - / | = .. ، or an emoji,
     باسم, المستلم, my name is, name - X, Name X at a line's start, be esm, besm), up to two new
     lines after it,
-    stopping at a word that is never a name; any sender's full name from the whole import
+    stopping at a word that is never a name; one first name after a print cue and اسم, esm or
+    name (اطبع اسم X, print the name X, etba3 esm X, اكتب اسم X), never a word with ال; any sender's full name from the whole import
     (hamza and ta marbuta forms as one, Arabic typed for a Latin display name and back); the
     history Masker with the chat's own sender names; each of their words in any of its forms,
     joined to و ف ب ل يا, or two of them typed as one, el and al joined to the word after them and
@@ -59,27 +70,39 @@ ChatCleaner.texts cleans a whole chat: after the store asks the name (اسمك �
 اسم المستلم؟, مين معايا, Name?), every customer message up to the store's next one that moves on
 is [name] (لحظة, then the name, are both [name]); a short store line with no question (تمام,
 a thumbs up, ok, an export's media or deleted message line) does not move on. After the store asks
-for the address, or after a customer message that cleaned to [address] or [place], every
-customer message up to the store's next one is [address]. When the store asks both at once,
+for the address, or after a customer message that cleaned to [address] or [place] (or to an
+address cue and [address] on every line: العنوان [address]), every customer message up to the
+store's next one is [address]. When the store asks both at once,
 the first answer is [name] and the rest [address]. Every word a cue named in the chat (my name
 is, I am, this is, يا, hi, a title, a relation word, the answer to the name question) joins the
 chat's names and the chat is cleaned once more with them, so that name typed bare in another
 turn, before or after, is masked too. A word masked only for standing after or beside a [name]
 is never learned: it may be a product word (الجاكيت, Mercurial), and learning it would mask it
 in every turn.
+
+Files already written are cleaned again with no model call by scrub_file (a replay.jsonl or a
+card .json) and scrub_folder (a cards folder): each replay entry's turns as one chat, each card's
+examples line by line; ids, labels and keys stay. From a shell, run by path under -I:
+python3 -I arena/clean.py scrub IN OUT (IN a .jsonl, a .json or a cards folder; OUT may be IN).
 """
 import json
+import os
 import re
+import sys
 import unicodedata
 from functools import lru_cache
 from pathlib import Path
-
-from kit import send_check
-from reflection import history as hist
-from arena import words as W
-from arena.words import fold
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parent.parent
+if __name__ == "__main__" and str(ROOT) not in sys.path:  # run by its path under -I, as arena/personas.py is
+    sys.path.insert(0, str(ROOT))
+
+from kit import send_check  # noqa: E402
+from reflection import history as hist  # noqa: E402
+from arena import words as W  # noqa: E402
+from arena.words import fold  # noqa: E402
+
 GOVERNORATES = ROOT / "demo" / "governorates.json"
 
 KINDS = ("name", "phone", "order", "number", "email", "link", "user", "place", "address")
@@ -104,10 +127,23 @@ DROPPED = frozenset({"Cf", "Mn", "Me", "Mc", "Co", "Cn"})
 LOOKALIKES = {**send_check.LOOKALIKES, **dict.fromkeys((0x115F, 0x1160, 0x3164, 0xFFA0, 0x2800))}
 
 
+# regional indicator letters (U+1F1E6 to U+1F1FF): NFKC keeps them. Two make one flag and stay;
+# a run of 3 or more, also one space apart, spells a word (a name typed in flag letters) and
+# becomes A to Z. Accepted: two flags in a row read as 4 letters (privacy first: OMAR is two flags).
+RI_FIRST, RI_LAST = 0x1F1E6, 0x1F1FF
+_RI = "[" + chr(RI_FIRST) + "-" + chr(RI_LAST) + "]"
+RI_RUN = re.compile(_RI + "(?:[ ]?" + _RI + "){2,}")
+
+
+def _ri_letters(m):
+    return "".join(chr(ord("A") + ord(ch) - RI_FIRST) for ch in m.group(0) if ch != " ")
+
+
 def normalize(text):
     """The text as every rule reads it (step 1 above)."""
     text = unicodedata.normalize("NFKC", str(text or "")).translate(LOOKALIKES)
     text = "".join(ch for ch in text if unicodedata.category(ch) not in DROPPED)
+    text = RI_RUN.sub(_ri_letters, text)
     return MARKS.sub("", text).translate(send_check.EASTERN_DIGITS)
 
 
@@ -244,6 +280,42 @@ def gives_address(text):
                 or STREET_NAMED.search(text) or LANDMARK.search(text) or COORDS.search(text))
 
 
+# An address cue at a line's start (after up to 2 words such as و, ok, تمام, the, my), and the
+# signs or words that may follow it (: - هو is بتاعي): the rest of that line is the address, even
+# a district and a shop name only. The asking forms (عنوانك, your address) are no cue.
+ADDRESS_LEAD = r"(?:(?:و|and|ok|okay|تمام|طيب|ماشي|حاضر|خلاص|the|my|this\s+is|ده|دا|دي)(?:[ \t]*[,،][ \t]*|[ \t]+)){0,2}"
+ADDRESS_CUE = (r"(?:(?:و|ف|ب)?(?:ال)?عنوان(?:ي|ى|ه|ها)?(?:[ \t]+(?:ال)?(?:شحن|توصيل|استلام))?"
+               r"|(?:el[ \t]?)?3[aei]nwan(?:y|i|o)?|(?:(?:delivery|shipping)[ \t]+)?address)(?![^\W\d_])")
+ADDRESS_MID = r"(?:[ \t]*(?:[:：\-=،,.|/]|(?:هو|هي|بتاعي|بتاعى|is|bta3y|beta3y|bta3i)(?![^\W\d_])))*[ \t]*"
+ADDRESS_LINE = re.compile(r"(?m)^(?P<head>[ \t]*" + ADDRESS_LEAD + ADDRESS_CUE + ADDRESS_MID + r")(?P<rest>[^\n]*\S)",
+                          re.IGNORECASE)
+ADDRESS_ANSWER = re.compile(r"[ \t]*" + ADDRESS_LEAD + ADDRESS_CUE + ADDRESS_MID + r"\[address\][ \t]*", re.IGNORECASE)
+# a first word after the cue that makes the line a question or a remark, not an address
+NOT_ADDRESS_FIRST = frozenset(fold(w) for w in (
+    "of", "for", "please", "pls", "plz", "بتاعكم", "بتاعك", "بتاعتكم", "فين", "ايه", "إيه", "كام", "ازاي", "where", "what",
+    "fen", "feen", "eh", "eih", "ezay", "صح", "مظبوط", "غلط", "اتغير", "اتغيرت", "changed", "correct", "wrong", "نفس",
+    "same", "later", "بعدين", "بكرة", "tomorrow", "مش", "msh", "mesh", "not", "ده", "دا", "دي", "da", "di", "tany", "تاني",
+    "بالتفصيل", "كامل", "بالكامل", "لو", "ممكن", "ياريت", "full", "details", "detailed", "in", "here", "هنا"))
+
+
+def _address_line(m):
+    """[address] for the rest of a line after an address cue, unless that rest is a question or a
+    remark: nothing but stop words, question words or placeholders (العنوان فين؟, address please,
+    العنوان بتاعكم فين), or a first word in NOT_ADDRESS_FIRST (address of the store?)."""
+    words = [w for w in TOKEN.findall(m.group("rest")) if not w.startswith("[")]
+    if not words or fold(words[0]) in NOT_ADDRESS_FIRST:
+        return m.group(0)
+    if all(is_stop(w) or fold(w) in COMMON or fold(w) in NOT_ADDRESS_FIRST for w in words):
+        return m.group(0)
+    return m.group("head") + "[address]"
+
+
+def address_answer(text):
+    """True when every line of a cleaned message is an address cue and [address] (العنوان [address])."""
+    lines = [x for x in text.split("\n") if x.strip()]
+    return bool(lines) and all(ADDRESS_ANSWER.fullmatch(x) for x in lines)
+
+
 # ---- 4. numbers
 
 _SEP = r"(?:[ \t\-_.,،*/‐-―−]|[ \t]*و[ \t]*)"
@@ -369,7 +441,11 @@ def _order_before(m):
 
 # الاسم: X, الاسم - X, الاسم/ X, name | X, الاسم = X, الاسم .. X, الاسم ، X, الاسم: (person emoji) X
 CUE_SEP = r"(?:[:：\-/|=،‐-―−]|\.{2,3}|" + send_check.EMOJI.pattern + r")"
-CUE_WORDS = (r"[اإ]سم(?:[يى]|ه|ها)|ال[اإ]سم|[اإ]سم\s+(?:المستلم|العميل|صاحب\s+(?:ال)?(?:طلب|[اأ]وردر))|(?:ال)?مستلم"
+# a print cue, up to 3 words, then اسم, esm or name: اطبع اسم X, print the name X, etba3 esm X
+PRINT_CUE = r"(?:اطبع\w*|[وب]?(?:ال)?طباع[ةه]|اكتب\w*|print(?:ed|ing)?|write|e?tba3\w*|ekteb\w*|ektb\w*)"
+PRINT_NAME = PRINT_CUE + r"(?:[ \t]+[^\W\d_]+){0,3}?[ \t]+(?:(?:ال)?[اإ]سم|esm|ism|name)(?![^\W\d_])"
+PRINT_START = re.compile(PRINT_CUE + r"(?![^\W\d_])", re.IGNORECASE)
+CUE_WORDS = (PRINT_NAME + r"|[اإ]سم(?:[يى]|ه|ها)|ال[اإ]سم|[اإ]سم\s+(?:المستلم|العميل|صاحب\s+(?:ال)?(?:طلب|[اأ]وردر))|(?:ال)?مستلم"
              r"|[اإ]سم(?=[ \t]*" + CUE_SEP + r")"
              r"|ب[اإ]سم|my\s+name\s+is|my\s+name's|(?:his|her)\s+name\s+is|(?:full\s+)?name(?=[ \t]*" + CUE_SEP + r")"
              r"|full\s+name|recipient(?:\s+name)?(?=[ \t]*" + CUE_SEP + r")|recipient\s+is|esm[yi]|ism[yi]|esmo"
@@ -390,10 +466,15 @@ def _cue_word(w):
 
 
 def _name_cue(m, learned=None):
-    """learned: a set the words taken as a name join (ChatCleaner masks them in the rest of the chat)."""
+    """learned: a set the words taken as a name join (ChatCleaner masks them in the rest of the chat).
+    After a print cue (اطبع اسم X) one word only, a first name: listed, or name-shaped with no ال
+    (اطبع اسم الفريق, print name and number stay)."""
     parts = re.split(r"([ \t]+)", m.group("rest"))
+    printed = bool(PRINT_START.match(m.group("cue")))
     take = 0
     for k, w in enumerate(parts[::2]):
+        if printed and (k or not (is_listed(w) or name_shaped(w, True) and not fold(w).startswith("ال"))):
+            break
         if not _cue_word(w):
             break
         take = k + 1
@@ -404,8 +485,29 @@ def _name_cue(m, learned=None):
     return m.group(0)[:m.start("rest") - m.start()] + "[name]" + "".join(parts[2 * take - 1:])
 
 
+# an Instagram header line: "<display name> replied to an ad. View ad", replied to your story,
+# mentioned you in their story, reacted to your message. Everything before the action on its line
+# is the display name, in any letters (styled, flag letters, Arabic, Franco, emoji): [name]
+HEADER = re.compile(r"(?m)^(?P<who>[ \t]*[^\n]{0,80}?\S)(?=[ \t]+(?:replied[ \t]+to[ \t]+(?:an?[ \t]+(?:ad|story)"
+                    r"|(?:your|their|his|her)[ \t]+(?:ad|story|post|reel|note))"
+                    r"|mentioned[ \t]+you[ \t]+in[ \t]+(?:their|his|her|a|your)[ \t]+(?:story|post|reel)"
+                    r"|reacted(?:[ \t]+\S{1,8})?[ \t]+to[ \t]+(?:your|their|an?)[ \t]+(?:message|story|ad|post|reel"
+                    r"|photo|video|note|comment))(?!\w))", re.IGNORECASE)
+
+
+PRONOUNS = frozenset({"you", "i", "we", "he", "she", "they", "انا", "احنا", "انت", "انتي"})
+
+
+def _header(m):
+    """[name] for the display name before the action; a pronoun alone stays (You replied to their story)."""
+    words = TOKEN.findall(m.group("who"))
+    if len(words) == 1 and fold(words[0]) in PRONOUNS and m.group("who").strip() == words[0]:
+        return m.group(0)
+    return "[name]"
+
+
 TOKEN = re.compile(r"\[\w+\]|\w+(?:['’]\w+)?")
-JOINED = re.compile(r"(يا|و|ف|ب|ل)(\w{2,})$")
+JOINED =re.compile(r"(يا|و|ف|ب|ل)(\w{2,})$")
 FRANCO_AR = re.compile(r"[2357-9][ء-ي]{2,}")  # a nickname with a Franco digit in Arabic letters: يا7ودة
 COMPOUND = re.compile(r"(?<!\w)(?P<p>و|ف|ب|ل|يا)?عبد(?:\s*ال\w{2,}|\s+رب\w*)"
                       r"|(?<!\w)3?abd(?:[\s\-]?(?:el|al|ul|ol))?[\s\-]?[a-z]{3,}(?!\w)", re.IGNORECASE)
@@ -946,7 +1048,7 @@ class ChatCleaner:
     def __call__(self, text):
         if not isinstance(text, str) or not text:
             return ""
-        text = normalize(text)
+        text = HEADER.sub(_header, normalize(text))
         if "@" in text:
             text = hist.EMAIL.sub("[email]", text)
             text = SPACED_EMAIL.sub("[email]", text)
@@ -961,6 +1063,7 @@ class ChatCleaner:
         text = HANDLE_CUE.sub(_handle, text)
         if gives_address(text):
             return "[address]"
+        text = ADDRESS_LINE.sub(_address_line, text)
         text = PHONE_WIDE.sub("[phone]", text)
         text = LETTER_O_PHONE.sub(_letter_o, text)
         text = ACCOUNT_NUMBER.sub(lambda m: m.group(0)[:m.start("n") - m.start()] + "[number]", text)
@@ -1032,7 +1135,7 @@ class ChatCleaner:
                 out.append("[name]")
             else:
                 got = self(m.text)
-                window = got in ("[address]", "[place]")
+                window = got in ("[address]", "[place]") or address_answer(got)
                 out.append(got)
         return out
 
@@ -1040,3 +1143,138 @@ class ChatCleaner:
 def clean(text, names=(), usernames=()):
     """One text cleaned, with these sender names and usernames (an import builds one Cleaner)."""
     return Cleaner(names).chat(names, usernames)(text)
+
+
+# ---- re-cleaning files already written
+
+CHAT_FIELDS = frozenset({"text", "customer", "store", "examples"})  # string fields that hold chat text
+
+
+def _chat_turns(turns):
+    return isinstance(turns, list) and bool(turns) and all(isinstance(t, dict) for t in turns) \
+        and any(t.get("from") in ("customer", "store") for t in turns)
+
+
+def _scrub_turns(turns, cleaner):
+    """A replay entry's turns through ChatCleaner.texts (the name and address windows too): only
+    each turn's text changes; from, media, min and any other key stay as they are."""
+    msgs = [SimpleNamespace(text=t["text"] if isinstance(t.get("text"), str) else "", team=t.get("from") == "store")
+            for t in turns]
+    got = cleaner.chat().texts(msgs)
+    out = []
+    for t, m, text in zip(turns, msgs, got):
+        t = dict(t)
+        if m.text:
+            t["text"] = text
+        out.append(t)
+    return out
+
+
+def scrub(data, cleaner=None):
+    """data (a replay line's entry, a card, or any JSON value) with every chat text cleaned again,
+    with no model call: a list of turns that come from customer or store goes through
+    ChatCleaner.texts as one chat; any other string in a field named text, customer or store, and
+    each string of an examples list, goes through the message function. Ids, labels, numbers,
+    keys and their order stay. There are no sender names here (the files hold none), so the rules
+    that read them (full names, the display names) find nothing new; every cue rule runs."""
+    cleaner = cleaner if cleaner is not None else Cleaner()
+    one = cleaner.chat()
+
+    def walk(v):
+        if isinstance(v, list):
+            return [walk(x) for x in v]
+        if not isinstance(v, dict):
+            return v
+        out = {}
+        for k, x in v.items():
+            if k == "turns" and _chat_turns(x):
+                out[k] = _scrub_turns(x, cleaner)
+            elif k in CHAT_FIELDS and isinstance(x, str):
+                out[k] = one(x) if x else x
+            elif k in CHAT_FIELDS and isinstance(x, list):
+                out[k] = [(one(s) if s else s) if isinstance(s, str) else walk(s) for s in x]
+            else:
+                out[k] = walk(x)
+        return out
+
+    return walk(data)
+
+
+def _write_bytes(path, data):
+    from arena import personas  # here, not at the top: personas imports this module
+    personas._write(path, data)
+
+
+def scrub_file(path_in, path_out, cleaner=None):
+    """Cleans an existing replay.jsonl (one entry a line, blank lines kept) or a card .json (written
+    as arena/personas.py writes cards: indent 1) again into path_out, which may be path_in: the
+    file is written whole under a new name and moved on, mode 600. Returns (entries, entries
+    changed), counts only. A line that is not JSON stops it with its line number, nothing written."""
+    cleaner = cleaner if cleaner is not None else Cleaner()
+    raw = Path(path_in).read_text(encoding="utf-8")
+    if os.fspath(path_in).endswith(".jsonl"):
+        lines, n, changed = [], 0, 0
+        for k, line in enumerate(raw.split("\n"), 1):
+            if not line.strip():
+                lines.append(line)
+                continue
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                raise ValueError(f"line {k} is not JSON") from None
+            new = scrub(entry, cleaner)
+            n, changed = n + 1, changed + (new != entry)
+            lines.append(json.dumps(new, ensure_ascii=False))
+        _write_bytes(path_out, "\n".join(lines).encode("utf-8"))
+        return n, changed
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        raise ValueError("the file is not JSON") from None
+    new = scrub(data, cleaner)
+    _write_bytes(path_out, (json.dumps(new, ensure_ascii=False, indent=1) + "\n").encode("utf-8"))
+    return 1, int(new != data)
+
+
+def scrub_folder(dir_in, dir_out, cleaner=None):
+    """scrub_file on every .json file right in dir_in (a cards folder; links and folders skipped)
+    into dir_out under the same name (made, mode 700, when missing). Returns (files, files changed)."""
+    cleaner = cleaner if cleaner is not None else Cleaner()
+    os.makedirs(dir_out, mode=0o700, exist_ok=True)
+    n = changed = 0
+    with os.scandir(dir_in) as it:
+        names = sorted(e.name for e in it if e.name.endswith(".json") and e.is_file(follow_symlinks=False))
+    for name in names:
+        _, c = scrub_file(os.path.join(dir_in, name), os.path.join(dir_out, name), cleaner)
+        n, changed = n + 1, changed + c
+    return n, changed
+
+
+def main(argv=None):
+    """python3 -I arena/clean.py scrub IN OUT: IN a replay .jsonl, a card .json or a cards folder.
+    Prints counts only; an error by its type only (its text could hold a line)."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    if len(args) != 3 or args[0] != "scrub":
+        print("usage: python3 -I arena/clean.py scrub IN OUT (a replay .jsonl, a card .json or a cards folder)",
+              file=sys.stderr)
+        return 2
+    _, src, dst = args
+    try:
+        if os.path.isdir(src) and not os.path.islink(src):
+            n, changed = scrub_folder(src, dst)
+            print(f"cards: {n}, changed: {changed}")
+        else:
+            n, changed = scrub_file(src, dst)
+            print(f"entries: {n}, changed: {changed}")
+    except ValueError as e:  # our own message: a line number, never the line
+        print(f"Stopped: {e}" if str(e).startswith(("line ", "the file")) else
+              f"Stopped: {type(e).__name__}", file=sys.stderr)
+        return 3
+    except Exception as e:
+        print(f"Stopped: {type(e).__name__}", file=sys.stderr)
+        return 3
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

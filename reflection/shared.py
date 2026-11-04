@@ -17,7 +17,7 @@ MAX_CHARS characters and MIN_WORDS to MAX_WORDS words. Every word must be an Eng
 openers or SAFE words, so a made-up brand, a first name, a misspelled or split number and a word of
 another language are refused without being listed one by one; the list holds no capitalised
 entry, no first name the cleaner knows and no NUMBERISH word (number words, ordinals, fractions and
-money slang). Number words and their sound alikes (won too tree) are folded to digits before the
+money slang). Number words and their sound alikes (won too, tree oh) are folded to digits before the
 digit test (_folded). The checks reuse arena/clean.py (names,
 phones, emails, links, places and addresses), engine/risk.py (the normal form, links, phones,
 handles and the copy runs), kit/send_check.py (currency, spelled amounts, the Franco tens and words)
@@ -292,10 +292,14 @@ SOUNDS = {"zero": 0, "oh": 0, "o": 0, "nil": 0, "nought": 0, "naught": 0, "one":
           "seven": 7, "sevn": 7, "eight": 8, "ate": 8, "ait": 8, "eit": 8, "nine": 9, "nein": 9, "nyne": 9,
           "nain": 9}
 WEAK_SOUNDS = frozenset({"one", "to", "for"})  # plain words alone: count only in a run with strong ones
-# a digit wherever they stand: no plain word, or one a pattern has no need of (review crossowner round 3)
+# a digit wherever they stand: no plain word, or one a pattern has no need of (review crossowner round 3).
+# won, ate, tree and oh are common words (won a giveaway, a tree looks dry), so they are no digit alone,
+# only beside another sound alike (root's call on review crossowner round 3; see _folded)
 ALWAYS_SOUNDS = frozenset({"fife", "sicks", "siks", "fiv", "sevn", "nein", "nyne", "wun", "tew", "thre",
-                           "ate", "ait", "tree", "won", "oh", "fore", "nain"})
+                           "ait", "fore", "nain"})
 STRONG_ANYWHERE = 3  # this many strong sound alikes (not WEAK_SOUNDS) anywhere in a line are a number
+# words skipped between sound alikes, so "won then oh then too" is one run, as "won oh too" is
+FILLERS = frozenset({"then", "and", "or", "plus", "dash", "dot", "space"})
 TOKEN = re.compile(r"[a-z]+(?:['’-][a-z]+)*")
 
 
@@ -387,22 +391,31 @@ def _not_english(plain):
 
 
 def _folded(toks):
-    """The line's words with number words and their sound alikes as digits: a run of three or more
-    of them with at least two that are not plain words alone (one, to, for), STRONG_ANYWHERE strong
-    ones anywhere in the line, a sound alike in ALWAYS_SOUNDS (fife, won, tree), and double or triple
-    before one. The first part of a contraction (won in won't, split by _tokens) is no sound alike.
-    Any digit in it is a number."""
+    """The line's words with number words and their sound alikes as digits. A run is sound alikes
+    next to each other, FILLERS (then, and, or) between them skipped. A run of three or more with at
+    least two that are not plain words alone (one, to, for) is all digits; in a shorter run two side
+    by side are digits unless both are plain words alone (size ate oh, won too, for ate; never one
+    to one). So are STRONG_ANYWHERE strong ones anywhere in the line, a sound alike in ALWAYS_SOUNDS
+    (fife, nain), and double or triple before one. A strong one alone stays a word (won a giveaway,
+    ate late). The first part of a contraction (won in won't, split by _tokens) is no sound alike.
+    Any digit in it is a number; a digit or a number word in the line is refused by check() as well."""
     out, i, n = list(toks), 0, len(toks)
     sound = [t in SOUNDS and not (k + 1 < n and toks[k + 1] == "t" and f"{t}'t" in CONTRACTIONS)
              for k, t in enumerate(toks)]
-    while i < n:
+    seq = [k for k, t in enumerate(toks) if t not in FILLERS]  # the line read without its fillers
+    while i < len(seq):
         j = i
-        while j < n and sound[j]:
+        while j < len(seq) and sound[seq[j]]:
             j += 1
-        run = toks[i:j]
-        strong = [t for t in run if t not in WEAK_SOUNDS]
+        run = seq[i:j]
+        strong = [k for k in run if toks[k] not in WEAK_SOUNDS]
         if len(run) >= 3 and len(strong) >= 2:
-            out[i:j] = [str(SOUNDS[t]) for t in run]
+            fold = run
+        else:
+            fold = [k for a, k in enumerate(run) if any(
+                k in strong or run[b] in strong for b in (a - 1, a + 1) if 0 <= b < len(run))]
+        for k in fold:
+            out[k] = str(SOUNDS[toks[k]])
         i = max(j, i + 1)
     strong_at = [k for k, t in enumerate(toks) if sound[k] and t not in WEAK_SOUNDS]
     for k, t in enumerate(toks):

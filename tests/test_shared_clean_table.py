@@ -248,6 +248,10 @@ CLEAN = [
     "If the device won't turn on, ask whether the charger works with another device.",
     "If the device won’t charge, ask whether the cable is damaged before anything else.",
     "Customers who say the price is too high and the wait too long want reassurance first.",
+    # root's call on review crossowner round 3: won, ate and tree alone are words
+    "Customers who won a giveaway want to know when the prize ships, so share the date plainly.",
+    "If a client ate late and skipped the workout, suggest a lighter session the next morning.",
+    "If a customer says a tree looks dry after delivery, explain how often to water it.",
     # review crossowner round 3, item 6 (C16): a contraction and a possessive are words
     "When a customer says they don't trust online payment, offer cash on delivery plainly.",
     "If the customer's order is late, apologise and share the tracking first.",
@@ -358,14 +362,28 @@ class CleanTable(unittest.TestCase):
                 ("When customers ask about the zee ex label, share the size chart.",
                  "a word not in the English word list"),
                 ("When the customer at house won and too and tree asks, answer calmly.", "a number in words"),
-                ("When the customer says oh, ask again and wait for the reply.", "a number in words"),
-                ("When the customer ate the cost, thank them and confirm the order.", "a number in words"),
+                ("When the customer asks for size ate oh, share the size chart.", "a number in words"),
+                ("When the customer writes won then oh then too, answer calmly.", "a number in words"),
+                ("When the customer won too, thank them and offer the next size.", "a number in words"),
+                ("When the customer writes too, then tu, answer calmly.", "a number in words"),
+                ("When customers ask about the for ate hoodie, share the size chart.", "a number in words"),
                 ("When the customer fore the order, check the stock first.", "a number in words"),
                 ("When customers text from the number with nain at the end, answer calmly.", "a number in words"),
                 ("When the customer writes too, then tu, then too again, answer calmly.", "a number in words")):
             with self.subTest(line=line):
                 self.assertIn(reason, shared.check(line))
-        self.assertNotIn("a number in words", shared.check("When the customer writes too, then tu, answer calmly."))
+        # two strong ones apart, not beside each other, are fewer than STRONG_ANYWHERE
+        self.assertNotIn("a number in words", shared.check("When the customer writes too, waits, then tu, answer calmly."))
+
+    def test_one_strong_sound_alike_alone_is_a_word(self):
+        # root's call on review crossowner round 3: a single isolated won, ate, tree or oh is accepted residual
+        for line in ("When the customer says oh, ask again and wait for the reply.",
+                     "When the customer ate the cost, thank them and confirm the order."):
+            with self.subTest(line=line):
+                self.assertNotIn("a number in words", shared.check(line))
+        for word in ("ait", "fore", "nain", "fife"):  # these stay digits wherever they stand
+            with self.subTest(word=word):
+                self.assertIn("a number in words", shared.check(f"When the customer writes {word}, answer calmly."))
 
     def test_with_no_word_list_a_word_outside_the_openers_and_safe_is_refused(self):
         # review crossowner round 3, item 6 (C07): an empty list refuses, never passes

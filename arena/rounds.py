@@ -335,11 +335,20 @@ class Between:
         return gate.Fresh(examiner, self.pool, state=self.state, agent_model=self.agent_model,
                           customer_model=self.customer_model, calls=self.calls)
 
+    def _lessons(self, judge):
+        """The lessons the study writes and the gate reads: the Sales agent's (reflection/lessons.py)."""
+        from reflection.lessons import Lessons
+        return Lessons(self.db, judge=judge)
+
+    def _others(self):
+        """The other agents' plugs the study reads (night.other_plugs), the built ones beside the database."""
+        from reflection import night
+        return night.other_plugs(self.plug, db=Path(self.state) / "ascent.db" if self.state else None)
+
     def __call__(self, round_no):
         from reflection import judge as judge_mod
         from reflection import night
         from reflection import study as parts
-        from reflection.lessons import Lessons
         ids, self.pending = self.pending, []
         out = {"after_round": round_no, "cases": len(ids), "proposed": 0, "passed": 0, "refused": 0,
                "waits_for_yes": 0, "handed": 0, "fixed": 0, "broke": 0, "calls": 0, "lessons": [], "notes": []}
@@ -354,12 +363,12 @@ class Between:
             return out
         before = self.calls.taken
         study_m, open_m = self.calls.model(self.models["study"]), self.calls.model(self.models["open"])
-        lessons = Lessons(self.db, judge=judge_mod.Judge(model=open_m))
+        lessons = self._lessons(judge_mod.Judge(model=open_m))
         examiner = lessons.examiner = night.Counted(self._exam(lessons))
         study = night.LinkedStudy(self.db, self.plug, proposer=parts.Proposer(model=study_m),
                                   tagger=parts.Tagger(model=study_m), fit=parts.FitCheck(model=open_m),
                                   adapter=parts.Adapter(model=open_m), lessons=lessons,
-                                  others=night.other_plugs(self.plug, db=Path(self.state) / "ascent.db" if self.state else None),
+                                  others=self._others(),
                                   ideas=parts.Ideas(model=study_m))
         study.log = _Only(study.log, ids)
         until = float(self.now())
@@ -499,6 +508,57 @@ class Between:
 
 
 FULL_HELD = "passed the Arena's exam but not the full exam, so it stays in the Arena and is not handed live"
+
+
+def turn_examiner(agent, judge_model):
+    """examiner(plug, kept, model) for a built agent: its exam (reflection/turn_exam.py Examiner) with the
+    gate's counts, judged by judge_model."""
+    def make(plug, kept, model):
+        from reflection import turn_exam
+        return turn_exam.Examiner(agent, kept=kept, model=model, judge_model=judge_model, count=True)
+    return make
+
+
+class BuiltBetween(Between):
+    """Study between rounds for an agent Quick start built (decisions 84 and 85): each lost practice match
+    becomes a case in the agent's own database (arena/learn_built.py), the night study runs on the round's
+    cases with the engine's lessons (engine/lessons.py, as reflection/night.py has them for a built agent),
+    every new lesson takes the built agent's exam and the rerun of its own practice wins (arena/gate.py
+    FreshTurn), and only one that passes and may go ahead with no further yes is handed in the next round
+    (Pool). The lessons are written in the agent's own database, as its night writes them: a high risk one
+    waits for a person's yes there, and nothing is handed live from here (live and full stay None).
+    agent: its kit/turn.py Agent; state: its folder (its practice wins); reports: the folder beside the
+    database (the call count); judge_model: the exam's and the rerun's judge, taken from calls."""
+
+    def __init__(self, db, agent, *, reports, judge_model, calls, pool, agent_model, customer_model, models,
+                 examiner=None, now=time.time):
+        self.agent, self.reports = agent, Path(reports)
+        self.judge_model = judge_model  # not yet counted: the rerun (arena/gate.py TurnGate) counts it
+        super().__init__(db, agent.plug, calls=calls, state=agent.folder, pool=pool, agent_model=agent_model,
+                         customer_model=customer_model, models=models,
+                         examiner=examiner or turn_examiner(agent, calls.model(judge_model)), now=now)
+
+    def learn(self, match, judged, match_id):
+        """A lost practice match as a case in the agent's database, kept for the study after its round."""
+        from arena import learn_built
+        case = learn_built.to_case(self.db, self.plug, match, judged, match_id)
+        self.pending.append(case)
+        return case
+
+    def _lessons(self, judge):
+        from engine.lessons import Lessons as EngineLessons
+        return EngineLessons(self.db, self.plug, judge=judge)
+
+    def _others(self):
+        from reflection import night
+        return night.other_plugs(self.plug, db=self.reports / "ascent.db")
+
+    def _exam(self, lessons):
+        from arena import gate
+        examiner = self.scoped = self.examiner(self.plug, self.pool, self.calls.model(self.models["exam"]))
+        return gate.FreshTurn(examiner, self.pool, agent=self.agent, state=self.state, reports=self.reports,
+                              agent_model=self.agent_model, customer_model=self.customer_model,
+                              judge_model=self.judge_model, calls=self.calls)
 
 
 def _broke_something(row):

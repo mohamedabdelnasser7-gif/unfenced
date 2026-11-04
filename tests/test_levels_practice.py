@@ -74,11 +74,13 @@ class TheLevelShapesTheRun(Folder):
         self.assertEqual(self.item(rep)["gate_size"], 20)
         self.assertEqual(run.DEFAULT_CAP, 1000)  # the cap is set per run, never by changing the default
 
-    def test_medium_stops_after_two_rounds_even_while_it_climbs(self):
+    def test_without_study_between_rounds_it_plays_one_round_and_says_so(self):
         climbing = ["won"] + ["won"] * 5 + ["lost"] * 5 + ["won"] + ["won"] * 6 + ["lost"] * 4 + ["won"] * 11
         rep = self.practise(self.stock(), World(judge=judge_by(climbing)), matches=1)
-        self.assertEqual((rep["stopped"], [r["gate"]["won"] for r in rep["rounds"]]), (run.ROUNDS, [5, 6]))
-        self.assertEqual(self.item(rep)["scores"], [5, 6])
+        self.assertEqual((rep["stopped"], [r["gate"]["won"] for r in rep["rounds"]]), (run.ROUNDS, [5]))
+        item = self.item(rep)
+        self.assertEqual((item["scores"], item["studied"]), ([5], False))
+        self.assertIn("no_study", [b["kind"] for b in item["blocks"]])
 
     def test_low_needs_five_of_ten(self):
         world = World(judge=judge_by(["won"] * 10 + ["won"] * 5 + ["lost"] * 5))
@@ -106,13 +108,14 @@ class ZeroFailedChecksAtHigh(Folder):
     def test_one_broken_never_line_holds_back_nineteen_of_twenty(self):
         one_round = ["won"] + ["won"] * 19 + ["broke"]
         world = World(judge=judge_by(one_round * 3))
-        rep = self.practise(self.stock("high"), world, matches=1)
+        rep = self.practise(self.stock("high"), world, matches=1, rounds=3)
         self.assertNotEqual(rep["stopped"], run.PASSED)
         self.assertEqual([r["gate"]["won"] for r in rep["rounds"]], [19, 19, 19])
         self.assertEqual([r["gate"]["failed_checks"] for r in rep["rounds"]], [1, 1, 1])
         item = self.item(rep)
         self.assertEqual((item["kind"], item["stopped"], item["failed_checks"], item["scores"], item["quick"]),
                          ("arena_stuck", run.STUCK, 1, [19, 19, 19], False))
+        self.assertIn("safety", [b["kind"] for b in item["blocks"]])
 
     def test_the_same_round_passes_at_medium(self):
         world = World(judge=judge_by(["won"] + ["won"] * 9 + ["broke"]))

@@ -355,9 +355,20 @@ class Practice(run.Arena):
         self.level = self.trust.get("level")  # the risk level the run plays to (arena/levels.py), None for --gate
         self.played_rounds = []  # the run's rounds, for the item's scores and failed checks
 
+    def handed(self):
+        """The lessons handed in every match: with study between rounds, the Pool's (the live corrections,
+        the kept lessons and the ones this run passed and handed on), at most MAX_PICK; else none."""
+        if self.lessons is None:
+            return []
+        from engine.lessons import MAX_PICK
+        return self.lessons.live(self.who.stage.name)[:MAX_PICK]
+
     def play(self, card, match_id, *, opening=None, lessons=None, replay=None, training=False):
         try:
-            m = play(self.who, card, agent_model=self.agent_model, customer_model=self.customer_model, seed=match_id)
+            if self.before_match is not None:  # Pool.refresh: the live corrections, read again
+                self.before_match()
+            m = play(self.who, card, agent_model=self.agent_model, customer_model=self.customer_model, seed=match_id,
+                     lessons=lessons if lessons is not None else self.handed())
             if m.get("ended") == VOID:  # a model did not answer: dropped, never a loss
                 self.halt, self.error = run.MODEL_ERROR, m.get("error") or ""
                 return None
@@ -405,6 +416,35 @@ class Practice(run.Arena):
             return False
         return not self.trust.get("no_failed_checks") or one["gate"].get("failed_checks", 0) == 0
 
+    def blocks(self, rounds, stopped):
+        """What held the run below its level, each {"kind", "line"} in plain words: safety checks that
+        failed, lessons waiting for a yes, lessons the exam refused, a study that found no lesson, no
+        study between rounds, tools named but not built, the call cap."""
+        out = []
+        last = rounds[-1]["gate"] if rounds else {}
+        n = last.get("failed_checks", 0)
+        if n:
+            out.append({"kind": "safety", "line": f"{n} test match{'' if n == 1 else 'es'} failed a safety check "
+                                                   "(a line the send check refused or a never line broken)."})
+        studies = [r["reflection"] for r in rounds if isinstance(r.get("reflection"), dict)]
+        waits = sum(s.get("waits_for_yes", 0) for s in studies)
+        if waits:
+            out.append({"kind": "waits", "line": f"{waits} lesson{'' if waits == 1 else 's'} it found "
+                                                  f"wait{'s' if waits == 1 else ''} for your yes."})
+        refused = sum(s.get("refused", 0) for s in studies)
+        if refused:
+            out.append({"kind": "exam", "line": f"{refused} lesson{'' if refused == 1 else 's'} failed the exam, "
+                                                 "so not handed on."})
+        if any(s.get("cases") and not s.get("proposed") for s in studies):
+            out.append({"kind": "no_lesson", "line": "The study found no lesson in the lost matches."})
+        if self.between is None and not self.quick:
+            out.append({"kind": "no_study", "line": "It did not study between rounds, so it played one round."})
+        if self.who.missing:
+            out.append({"kind": "tools", "line": "Tools named but not built yet: " + ", ".join(self.who.missing) + "."})
+        if stopped == run.CAP:
+            out.append({"kind": "cap", "line": f"The run reached its cap of {self.calls.cap} model calls."})
+        return out
+
     def _report(self, rounds, stopped):
         self.played_rounds = rounds
         rep = super()._report(rounds, stopped)
@@ -423,7 +463,10 @@ class Practice(run.Arena):
         item.setdefault("quick", self.quick)  # a stuck item too, so Morning.gate reads it the same way
         item.setdefault("stopped", run.STUCK if item.get("kind") == "arena_stuck" else None)
         item.update(level=self.level, gate_size=self.trust["matches"], failed_checks=last.get("failed_checks", 0),
-                    scores=[r["gate"]["won"] for r in rounds], no_failed_checks=bool(self.trust.get("no_failed_checks")))
+                    scores=[r["gate"]["won"] for r in rounds], no_failed_checks=bool(self.trust.get("no_failed_checks")),
+                    studied=self.between is not None)
+        if item.get("stopped") != run.PASSED:
+            item["blocks"] = self.blocks(rounds, item.get("stopped"))
         if item.get("stopped") == run.CAP:
             item["line"] = (f"The Arena stopped at this run's cap of {self.calls.cap} model calls after "
                             f"{len(rounds)} round{'' if len(rounds) == 1 else 's'}: {last.get('won', 0)} of "
@@ -460,7 +503,8 @@ NOT_RUN = (run.Refused, turn_mod.Refused, run.CapReached, ModelError, OSError, V
 
 
 def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=None, rounds=None, cards=None,
-             trust=None, cap=None, seed=0, quick=False, learn=None, gate=None, level=None):
+             trust=None, cap=None, seed=0, quick=False, learn=None, gate=None, level=None, study=None, db=None,
+             live_path=None):
     """One practice run of the agent in agent_folder: the report (arena/run.py Arena run). quick: the
     --quick shape (one training match, a gate of one, at most QUICK_CALLS model calls). learn: handed
     each lost training match (Practice). level: the risk level (arena/levels.py), else the one in the
@@ -468,12 +512,21 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
     and, unless given, the rounds, the matches a round and the call cap (1,500 for a high run only).
     trust or gate: the old gate instead of the level's: the trust file's level for the agent and, with
     made-up customers, gate (wins, matches) as a share of it (7 of 10 by default).
+    study and db: study between rounds (arena/rounds.py BuiltBetween): study, the night's models
+    {"study", "open", "exam"} (arena/run.py reflection_models; a test adds "examiner", the exam's stand
+    in, as arena/run.py main takes it); db, the agent's own database, where the
+    lost matches go as cases and the lessons are written. The lessons that pass are handed in the next
+    round with the corrections that passed on the live page (live_path, the database's path). Without
+    them nothing is studied, the run plays one round unless rounds is given, and learn (if given) gets
+    each lost training match.
     Raises one of NOT_RUN when it cannot run."""
     folder = Path(agent_folder).expanduser().resolve()
     level = level if levels.valid(level) else levels.read(folder)
     shape = levels.shape(level)
     matches = shape["matches"] if matches is None else matches
-    rounds = shape["rounds"] if rounds is None else rounds
+    studies = study is not None and db is not None and not quick
+    if rounds is None:  # more rounds only help with study between them
+        rounds = shape["rounds"] if studies else 1
     cap = shape["cap"] if cap is None else cap
     if quick:
         matches, rounds = 1, 1
@@ -501,9 +554,20 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
     else:
         bar = for_level(level, bar, agent.plug)
         bar["made_up"] = made_up
+    between = pool = None
+    if studies and rounds > 1:
+        from arena import rounds as rounds_mod
+        from engine.lessons import Lessons as EngineLessons
+        hot = None if live_path is None else (lambda: rounds_mod.live_hotfixes(live_path, agent.name))
+        pool = rounds_mod.Pool(EngineLessons(db, agent.plug), hotfixes=hot)
+        between = rounds_mod.BuiltBetween(db, agent, reports=reports, judge_model=judge_model, calls=calls, pool=pool,
+                                          agent_model=agent_model, customer_model=customer_model, models=study,
+                                          examiner=study.get("examiner"))
+        learn = between.learn
     arena = Practice(agent, played, judge_model=judge_model, made_up=made_up, behaviour_from=behaviour_from,
                      agent_model=agent_model, customer_model=customer_model, calls=calls, trust=bar,
-                     matches=matches, rounds=rounds, seed=seed, state=folder, reports=reports, learn=learn)
+                     matches=matches, rounds=rounds, seed=seed, state=folder, reports=reports, learn=learn,
+                     between=between, lessons=pool, before_match=None if pool is None else pool.refresh)
     arena.quick = bool(quick)  # its item says so, so a quick practice never unlocks Connect (Morning.gate)
     return arena.run()
 

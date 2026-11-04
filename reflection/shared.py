@@ -469,7 +469,10 @@ def practice_cards(kind, root):
     return out
 
 
-SOURCE = re.compile(r"shared pool of [a-z][a-z0-9_]* agents, pattern ([0-9a-f]{12}), learned from (\d+) owners")
+# read only at the start of a source, where the study writes it (adapted <fit> from the <line>: "...");
+# the same words quoted inside another lesson's source are not a lesson from the pool
+SOURCE = re.compile(r"(?:adapted [a-z]+ from the )?shared pool of [a-z][a-z0-9_]* agents, pattern ([0-9a-f]{12}), "
+                    r"learned from (\d+) owners(?=:|$)")
 
 
 def source_line(kind, pid, owners):
@@ -479,10 +482,10 @@ def source_line(kind, pid, owners):
 def owners_in(source):
     """How many owners a lesson from the pool was learned from, read off its source line; None for
     any other lesson."""
-    m = SOURCE.search(source or "") if isinstance(source, str) else None
+    m = SOURCE.match(source) if isinstance(source, str) else None
     return int(m.group(2)) if m else None
 
 
 def pattern_in(source):
-    m = SOURCE.search(source or "") if isinstance(source, str) else None
+    m = SOURCE.match(source) if isinstance(source, str) else None
     return m.group(1) if m else None

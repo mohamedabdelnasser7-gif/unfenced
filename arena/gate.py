@@ -269,8 +269,9 @@ def needs_round(agent, wins):
 class CorrectionRound:
     """One practice round for a correction (DECISIONS item 70): ROUND_MATCHES fresh practice matches
     with the correction handed first, on the agent's practice customers (arena/madeup.py for_agent:
-    the saved ones, else new ones), the held out ones that can reach the good result first. Every
-    model is taken from calls. Writes no match, no item and no case."""
+    the saved ones, else new ones), the held out ones that can reach the good result first, never a
+    customer of the agent's fixed test set (arena/practice.py read_test), which only plays in the
+    gate's own test matches. Every model is taken from calls. Writes no match, no item and no case."""
 
     def __init__(self, *, agent, folder, kept, agent_model, customer_model, judge_model, calls,
                  matches=ROUND_MATCHES, fact_checks=True):
@@ -281,10 +282,14 @@ class CorrectionRound:
 
     def cards(self):
         """The practice customers the round plays, in order: the held out ones that can reach the good
-        result, then the rest that can, each once, repeated when there are fewer than the matches."""
-        from arena import madeup
+        result, then the rest that can, each once, repeated when there are fewer than the matches. The
+        saved test customers (practice.read_test) are left out; run.Refused when test-set.json is there
+        but cannot be read, so the round is not run rather than guessed."""
+        from arena import madeup, practice
+        test = {i for i, _ in practice.read_test(self.folder)}  # before the writer: a torn file costs no call
         cards, _ = madeup.for_agent(self.folder, self.agent.name, self.agent.card, self.customer_model,
                                     madeup.owner_cards(self.folder))
+        cards = [c for c in cards if c["id"] not in test]
         winnable = [c for c in cards if run_mod.can_buy(c)]
         try:
             held = [c["id"] for c in run_mod.split(cards)[1] if run_mod.can_buy(c)]

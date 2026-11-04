@@ -1,12 +1,14 @@
 """The levels seal check's findings (review levels seal check items 1 to 5): a folder whose three record
 files were all deleted, or left with none by a crash inside Start a new test set, counts every saved
-practice customer as trained, so none of them joins the next test set. Fake models only."""
+practice customer as trained, so none of them joins the next test set; a correction's practice round
+never plays a saved test customer. Fake models only."""
 import os
 from unittest import mock
 
-from arena import practice, run
+from arena import gate, practice, run
+from kit import turn
 from tests import test_levels_testset as testset  # the module, so its tests are not run twice
-from tests.test_customers_shape import Base
+from tests.test_customers_shape import Base, Writer
 
 NAME = "support_calm_helper"
 
@@ -73,6 +75,39 @@ class DeleteAll(Base):
                         rep = self.practise(NAME, 30, 20)
                     self.assertFalse(set(rep["held_out_cards"]) & before)
             self.assertEqual(crashed, 4 if tear == "roster gone" else 5)
+
+
+class CorrectionRoundCards(Base):
+    """Item 2: the test customers only ever play in the gate's own test matches."""
+    practise = testset.Kept.practise
+
+    def round_of(self, folder, writer=None):
+        cr = gate.CorrectionRound.__new__(gate.CorrectionRound)
+        cr.folder, cr.agent, cr.customer_model = folder, turn.load(folder), writer or Writer()
+        cr.matches = gate.ROUND_MATCHES
+        return cr
+
+    def test_a_correction_round_never_plays_a_saved_test_customer(self):
+        for name in self.folders:
+            for shape in ((20, 10), (30, 20)):
+                with self.subTest(name=name, shape=shape):
+                    folder = self.folders[name]
+                    rep = self.practise(name, *shape)
+                    saved = {i for i, _ in practice.read_test(folder)}
+                    self.assertTrue(set(rep["held_out_cards"]) <= saved)
+                    got = [c["id"] for c in self.round_of(folder).cards()]
+                    self.assertEqual(len(got), gate.ROUND_MATCHES)
+                    self.assertFalse(set(got) & saved)
+
+    def test_a_torn_test_set_stops_the_round_before_the_writer(self):
+        folder = self.folders[NAME]
+        self.practise(NAME, 20, 10)
+        (folder / practice.TEST_FILE).write_text('{"test": [', encoding="utf-8")
+        writer = Writer()
+        with self.assertRaises(run.Refused):
+            self.round_of(folder, writer).cards()
+        self.assertEqual(writer.asks, [])
+
 
 if __name__ == "__main__":
     import unittest

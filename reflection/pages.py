@@ -561,16 +561,25 @@ def looked_at(m, path, query):
 _TAKEN = re.compile(r"^There is an agent called ([a-z][a-z0-9_]*) already\.")
 
 
+def _taken_agent(flash):
+    """The agent a Quick start name clash line names: "There is an agent called X already", or a built-in
+    agent's own line (qs_mod.BUILT_IN); None for any other line."""
+    taken = _TAKEN.match(flash)
+    if taken:
+        return taken.group(1)
+    return next((agent for agent, (said, _) in qs_mod.BUILT_IN.items() if flash.startswith(said.split(". ")[0] + ".")),
+                None)
+
+
 def flash_html(flash, ctx):
     """The one-time message, escaped. Quick start's "There is an agent called X already" refusal gets
     a link to X's page when X is an agent on this page, so the user can see the one that has the name."""
     if not flash:
         return ""
     link = ""
-    taken = _TAKEN.match(str(flash))
+    agent = _taken_agent(str(flash))
     m = ctx.get("m")
-    if taken and _AGENT.match(taken.group(1)) and m is not None and taken.group(1) in getattr(m, "plugs", {}):
-        agent = taken.group(1)
+    if agent and _AGENT.match(agent) and m is not None and agent in getattr(m, "plugs", {}):
         link = f' <a href="/agents/{h(agent)}{ctx["q"]}">Open {h(name(agent))}</a>'
     return f'<p class="flash" role="status">{h(flash)}{link}</p>'
 
@@ -978,6 +987,13 @@ def overview_tab(m, view, a, agent, st, ctx):
                     '</div></section>')
         if tok:
             left.append(data_form(ctx, agent))
+        own = m.offers(agent) if hasattr(m, "offers") else None
+        body = (offers_list(own["offers"]) + f'<small>{OFFERS_SAID}</small>' if own and own["offers"]
+                else f'<b>{OFFERS_NONE}</b>')
+        left.append(f'<section class="grp sq" aria-labelledby="of-h"><h3 id="of-h">{OFFERS_HEAD}</h3><div class="lr">'
+                    f'{body}</div></section>')
+        if tok:
+            left.append(offers_form(ctx, agent))
         if agent not in m.read_arena()[0]:  # no saved run yet: Run the Arena here too, polled the same way
             go = run_arena(m, agent, ctx, ctx["path"] + ctx["q"])
             if go:
@@ -1022,7 +1038,11 @@ def arena_tab(m, view, a, agent, st, ctx):
     learn = ""
     if agent in m.plugs and hasattr(m, "next_step") and not (hasattr(m, "training") and m.training(agent)):
         learn = mo.next_step_html(m.next_step(agent), agent)  # the one next step under a run that did not pass
-    level = level_card(m, agent, m.read_arena()[0].get(agent), c, c["path"] + c["q"])
+    item = m.read_arena()[0].get(agent)
+    level = level_card(m, agent, item, c, c["path"] + c["q"])
+    said = mo.offer_lines(item) if item else []
+    if said:  # the store team's real rate and the wins as sales and closes (decision 105): report only
+        level = "".join(f'<p class="quiet" role="note">{h(x)}</p>' for x in said) + level
     card = train_card(m, a, agent, c) if able else ""
     top = arena_live(m, agent) if able else ""
     low = arena_live(m, agent, "tiles") if able else ""
@@ -1602,6 +1622,9 @@ def new_agent(m, quick, ctx, run=None):
         if built or building or run is not None and run.error is None:
             card.append(f'<div class="cact"><span class="started">{icon("check")}Build started</span></div>')
         elif tok:
+            clash = quick.name_clash(m, t["card"])
+            if clash:  # decision 106: said before Build is pressed; Build refuses it too
+                card.append(f'<p class="err" role="status" dir="auto">{h(clash)}</p>')
             card.append('<div class="cact">' + level_picker(ctx, t["card"])
                         + '<span class="cnote">You can keep typing while it builds.</span></div>')
         out.append("".join(card) + "</div></div>")
@@ -1676,6 +1699,36 @@ SHEET = "Use a sheet instead"
 SHEET_NOW = ": add your rows or a CSV file in the Add data box."
 SHEET_LATER = ": once it is built, add your rows or a CSV file in the Add data box under its steps."
 MCP_NEXT = "Connect through MCP: coming next"  # every tile, greyed, never a link
+
+
+OFFERS_HEAD = "Offers"
+OFFERS_NONE = "No offers yet. Add what it may offer a customer who hesitates."
+OFFERS_NOTE = "One offer a line: what it is; its terms; when it fits. A percent on the line, like 10%, is that offer's."
+OFFERS_SAID = "It offers only these, when their when line fits, and never makes one up."
+
+
+def offer_text(o):
+    """One offer in plain words: what it is, its terms, and when it fits, as the owner or the card wrote them."""
+    out = _cap(o["what"]) + "."
+    if o.get("terms"):
+        out += f" {_cap(o['terms'])}."
+    if o.get("when"):
+        out += f" When: {o['when'].rstrip('.')}."
+    return out
+
+
+def offers_list(offers):
+    return '<ul class="offers">' + "".join(f'<li dir="auto">{h(offer_text(o))}</li>' for o in offers) + "</ul>"
+
+
+def offers_form(ctx, agent):
+    """The box that adds offers to a built agent (Morning.add_offers), cloned from the Add data box."""
+    return (f'<section class="say sq" id="add-offers" aria-label="Add offers"><form method="post" action="{mo.OFFERS_PATH}">'
+            f'{_hidden(ctx, agent=agent)}<span class="lab">Add offers</span><div class="box"><textarea name="text" '
+            f'aria-label="Offers to add, one a line" maxlength="{mo.MAX_OFFERS_TEXT}" dir="auto" '
+            'placeholder="Free delivery; on any order; always"></textarea></div><div class="say-f"><span></span>'
+            f'<button class="send pill" type="submit">Add{icon("arrow")}</button></div><p class="quiet">{h(OFFERS_NOTE)}'
+            '</p></form></section>')
 
 
 def data_form(ctx, agent):
@@ -1761,6 +1814,8 @@ def plan_card(card, data=None, sheet=False):
         rows.append(("A bad result", f'<p dir="auto">{h(card["bad"])}</p>'))
     if never:
         rows.append(("It never", f"<ul>{never}</ul>"))
+    if card.get("offers"):  # what it may offer a customer who hesitates (decision 105)
+        rows.append((OFFERS_HEAD, offers_list(card["offers"])))
     out = [f'<section class="plan" aria-label="The agent"><h3 dir="auto">{h(card["name"])}</h3><dl>'
            + "".join(f"<div><dt>{t}</dt><dd>{v}</dd></div>" for t, v in rows) + "</dl></section>"]
     if card["needs"]:

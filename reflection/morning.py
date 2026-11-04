@@ -608,7 +608,15 @@ REFLECT_STEPS = (("read", "reading lost chats"), ("lesson", "writing a lesson"),
 REFLECT_RUNNING = "Reflecting: " + ", then ".join(w for _, w in REFLECT_STEPS)
 NO_LOST = "No lost chats to learn from yet. In the Arena, Train learns from the matches a run loses."
 NO_LOST_CHATS = "No lost chats to learn from yet."  # an agent with no Arena here (Morning.no_lost)
-NO_KEY = "Reflection needs a model key. Watch a recorded reflection run instead."
+# Offers the user adds on a built agent's Overview (Morning.add_offers, decision 105); the Arena item's offer lines
+OFFERS_PATH = "/agents/offers"
+MAX_OFFERS_TEXT = 4000
+_PERCENT = re.compile(r"(?<![\d.])(\d{1,2}(?:\.\d{1,2})?|100)\s*[%٪]")
+TEAM_RATE_LINE = ("The store team's real rate on these customers: {won} of {chats} chats. Report only; the bar "
+                  "stays {needs} of {of}.")
+TEAM_RATE_ONLY = "The store team's real rate on these customers: {won} of {chats} chats. Report only."
+WON_AS_LINE = "Won as a sale: {sales}. Won as a correct close: {closes}."
+NO_KEY = "Reflection needs a model key. Without one, watch the recorded replay of an Arena run and a Sales chat."
 REPLAY = "python3 -I recorded/play.py"  # the recorded replay docs/judges.md names
 REFLECT_NOT_HERE = "Run reflection is for an agent on this page, so nothing was started."
 REFLECT_NO_DB = "Run reflection needs the database folder. Start the page with --db."
@@ -1736,6 +1744,57 @@ class Morning:
         folder = self.agent_folder(agent)
         return None if folder is None else sample.read(folder)
 
+    def offers(self, agent):
+        """The built agent's own offers (kit/offers.py read, decision 105), or None."""
+        from kit import offers
+        folder = self.agent_folder(agent)
+        return None if folder is None else offers.read(folder)
+
+    def add_offers(self, agent, text, now=None):
+        """Offers the user adds to a built agent (decision 105), one a line: what it is; its terms; when it fits.
+        A percent on the line (10%) is that offer's percent, so the agent may say it; every line is cleaned and
+        capped by kit/offers.py and written whole. Refused, with nothing saved, for any other agent."""
+        from kit import offers
+        from reflection.quickstart import line as plain  # the card's line rule: no dashes, spaces folded
+        folder = self.agent_folder(agent)
+        if folder is None or folder.is_symlink() or not folder.is_dir():
+            raise Refused("Only an agent made here takes offers.")
+        text = str(text or "")
+        if len(text) > MAX_OFFERS_TEXT:
+            raise Refused(f"At most {MAX_OFFERS_TEXT} characters of offers at once, please.")
+        have = offers.read(folder) or offers.clean({})
+        ids = {o["id"] for o in have["offers"]}
+        added = []
+        for raw in text.replace("\r\n", "\n").split("\n"):
+            parts = [plain(x, offers.MAX_LINE) for x in raw.split(";", 2)]
+            if not parts[0]:
+                continue
+            o = {"kind": "choice", "what": parts[0]}
+            for k, v in zip(("terms", "when"), parts[1:]):
+                if v:
+                    o[k] = v
+            pct = _PERCENT.findall(raw)
+            if len(set(pct)) == 1:
+                o["percent_off"] = pct[0]
+            n = len(ids) + len(added) + 1
+            while f"own_{n}" in ids:
+                n += 1
+            o["id"] = f"own_{n}"
+            added.append(o)
+        if not added:
+            raise Refused("Write one offer a line: what it is; its terms; when it fits.")
+        if len(have["offers"]) + len(added) > offers.MAX_OFFERS:
+            raise Refused(f"An agent keeps at most {offers.MAX_OFFERS} offers. Send fewer.")
+        before = len(have["offers"])
+        try:
+            offers.write(folder, dict(have, offers=have["offers"] + added))
+        except offers.Refused as e:
+            raise Refused(str(e)) from None
+        n = len((offers.read(folder) or {"offers": []})["offers"]) - before
+        if n <= 0:
+            raise Refused("Those lines did not read as offers, so nothing was saved.")
+        return f"Added {n} {'offer' if n == 1 else 'offers'}. Its next practice and its replies read them."
+
     def add_data(self, agent, text, raw=b"", now=None):
         """Rows or a file the user adds to a built agent's sample data, marked as the user's (kit/sample.py
         add): parsed in code as JSON, CSV or plain lines, never run, every value capped and plain. Its next
@@ -2655,7 +2714,7 @@ class Morning:
                                       "facts": item.get("fact_checks") is not False,
                                       "sealed": seal_mod.holds(item, k), "retry": None,
                                       "stopped": item.get("stopped") if isinstance(item.get("stopped"), str) else None,
-                                      **_level_fields(item)}
+                                      **_level_fields(item), **_offer_fields(item)}
         for agent, got in out.items():  # the run before it: {at, file, gate_won, gate_played, stopped} or None
             prev = older.get(agent)
             got["before"] = None if prev is None else {k: prev.get(k) for k in ("at", "file", "gate_won", "gate_played",
@@ -3989,6 +4048,8 @@ TWO_TAB_ACTIONS = {**{k: v for k, v in ACTIONS.items() if k not in A3_ONLY},
                    # a new test set when the agent's matches, test set or roster is torn, changed or gone (Unrecorded)
                    NEW_TEST_PATH: lambda m, f, now=None: m.new_test_set(_field(f, "agent"), now=now),
                    # rows or a file the user adds to a built agent's sample data (kit/sample.py)
+                   # offers the user adds to a built agent (kit/offers.py, decision 105)
+                   OFFERS_PATH: lambda m, f, now=None: m.add_offers(_field(f, "agent"), _field(f, "text"), now=now),
                    DATA_PATH: lambda m, f, now=None: m.add_data(_field(f, "agent"), _field(f, "text"),
                                                                  _sheet(f, "file"), now=now)}
 
@@ -4375,6 +4436,37 @@ def _retry_item(name, item):
 def _count(v):
     """A whole count from a saved file, or None for anything else."""
     return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None
+
+
+def _offer_fields(item):
+    """The Arena item's offer fields (decision 105, written by arena/run.py), checked: team_rate {won, chats}
+    from the item or its gate_mix (a dict with won and chats or played, or [won, chats]), sales and closes
+    (whole counts). Anything of the wrong type reads as missing (None)."""
+    rate = item.get("team_rate")
+    if rate is None and isinstance(item.get("gate_mix"), dict):
+        rate = item["gate_mix"].get("team_rate")
+    won = chats = None
+    if isinstance(rate, dict):
+        won, chats = _count(rate.get("won")), _count(rate.get("chats", rate.get("played")))
+    elif isinstance(rate, list) and len(rate) == 2:
+        won, chats = _count(rate[0]), _count(rate[1])
+    ok = won is not None and chats is not None and won <= chats
+    return {"team_rate": {"won": won, "chats": chats} if ok else None,
+            "sales": _count(item.get("sales")), "closes": _count(item.get("closes"))}
+
+
+def offer_lines(item):
+    """The Arena item's offer lines for the page: the store team's real rate against the gate's bar, and the
+    wins as sales and as correct closes; [] when the item has neither (decision 105)."""
+    out = []
+    rate = item.get("team_rate")
+    if rate:
+        of = item.get("gate_size") or item.get("gate_played")
+        out.append(TEAM_RATE_LINE.format(won=rate["won"], chats=rate["chats"], needs=item["needs"], of=of)
+                   if item.get("needs") and of else TEAM_RATE_ONLY.format(won=rate["won"], chats=rate["chats"]))
+    if item.get("sales") is not None or item.get("closes") is not None:
+        out.append(WON_AS_LINE.format(sales=item.get("sales") or 0, closes=item.get("closes") or 0))
+    return out
 
 
 def _level_fields(item):

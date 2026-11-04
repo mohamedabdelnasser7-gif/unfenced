@@ -558,15 +558,18 @@ def buys(card):
     return not card.get("unwinnable")
 
 
-def decks(base, pool, held):
+def decks(base, pool, held, gate=None):
     """(training cards, gate cards) the Arena draws from, from the base cards, the pool's grown
-    cards and held, the ids of the base cards held out for the gate (arena/run.py fixed_split).
+    cards and held, the ids of the base cards kept out of training (arena/run.py fixed_split).
     Every card starts at its weight with each part (base, grown) by its chats, and the unwinnable
     share is read off that whole deck. Grown cards train only, never the gate. Training cards:
     each weight times its losses (Pool.weight), then each side brought back to its share of the
-    training draws and the capped wants held on them (arena/cards.py cap_wants). Gate cards: the
-    held cards that can buy, at their weights before any loss, the capped wants held on the gate
-    draws on their own. The caps are the owner's recipe's, saved in the pool when it was built, or
+    training draws and the capped wants held on them (arena/cards.py cap_wants). Gate cards
+    (decision 101): every base card that can buy, trained or not, at its real share of the chats
+    (arena/run.py real_mix), never the training weight a loss raised, the capped wants held on the
+    gate draws on their own; gate: ids that name the gate for one run instead (--held-out, a fixed
+    test set), the same real shares among them. A grown card is cut from the hard chats, so its
+    count is no share of the real mix. The caps are the owner's recipe's, saved in the pool when it was built, or
     the example recipe's (item 33) for a pool never built. Base cards built with the pool already
     in them (a "grown" count on each, arena/personas.py --state) take no grown card again. The
     base cards are never changed in place."""
@@ -591,7 +594,9 @@ def decks(base, pool, held):
     _shares(train, sides)
     cards_mod.cap_wants(train, caps)
     _hold(train, caps)
-    gate = [c for c in out if c["id"] in held and buys(c)]
+    from arena import run as run_mod
+    named = None if gate is None else set(gate)
+    gate = run_mod.real_mix([c for c in out[:len(base)] if named is None or c["id"] in named])
     _shares(gate, {False: 1.0, True: 0.0})
     cards_mod.cap_wants(gate, caps)
     _hold(gate, caps)

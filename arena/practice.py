@@ -90,12 +90,14 @@ different customers (arena/madeup.py for_agent count) and holds out exactly G of
 reach the good result as the test set (test_set): the kinds in their shares, each kind's cards
 ranked by a hash of the card's fingerprint and id, so the same ids come back while card.json is
 unchanged. Test cards never train, so their matches never reach learn; "never" cards only train.
-Each round every test customer plays at most once (the draw is without replacement), and the
+Each round every test customer plays at most once (arena/run.py gate_plan with once: the test
+customers share alike, and no card group plays more than 3 of 10 of the gate, decision 101, unless
+the test set's groups cannot fill it, which the report says in a line), and the
 training matches play the other customers the same way, each once before any plays again, up to
 matches. A level that asks for more test matches than there are test customers is refused. N and G
 come from the risk level unless given (arena/levels.py shape: 20 and 10, or 30 and 20 at high). On
-the old gate (--trust or --gate) and in --quick, with no gate_size, the split and the weighted draws
-are arena/run.py's, as before.
+the old gate (--trust or --gate) and in --quick, with no gate_size, the split, the training draws and
+the gate's real mix are arena/run.py's.
 
 The test set is kept (fixed_test). The first run's test ids are saved in the agent's folder,
 test-set.json beside card.json, each with the card fingerprint of the person it names, and later runs
@@ -502,8 +504,10 @@ class Practice(run.Arena):
             f.write(json.dumps(line, ensure_ascii=False) + "\n")
 
     def pick(self, deck, r, k):
-        """With a fixed test set (once): the next card of this round's shuffled bag of deck, so no card
-        plays twice before every card of deck has played; a new bag each round. Else arena/run.py's draw."""
+        """The training draw. With a fixed test set (once): the next card of this round's shuffled bag of
+        deck, so no card plays twice before every card of deck has played; a new bag each round. Else
+        arena/run.py's draw. The gate plays its plan (arena/run.py gate_plan, decision 101): with once,
+        each test customer at most once a round, no card group past the cap."""
         if not self.once:
             return super().pick(deck, r, k)
         bag = self.bags.get(id(deck))

@@ -85,7 +85,7 @@ class Loop(Base):
         self.assertEqual(cases, ["persona-01"] * 6)  # training losses only; held-out losses go nowhere
         item = json.loads((self.dir / rep["stuck"]["file"]).read_text(encoding="utf-8"))
         self.assertEqual(item["kind"], "arena_stuck")
-        self.assertIn("0 of 4 held-out matches won after 3 rounds", item["line"])
+        self.assertIn("0 of 4 gate matches won after 3 rounds", item["line"])
         self.assertEqual(item["lost"][0]["quote"]["text"], "The Mercurial Vapor 17 Elite is 16,500 EGP.")
 
     def test_between_runs_before_each_later_round(self):
@@ -374,7 +374,9 @@ class Parts(Base):
                          [(match_mod.prompt_sha(prompt), str(self.dir / "p.txt"))] * 5 + [(match_mod.GENERIC_SHA, None)] * 5)
         self.assertTrue(all(prompt not in json.dumps(m) for m in saved))
         by_id = {c["id"]: c for c in cards}  # the gate reruns a win against the card it was played with
-        self.assertEqual([m["persona"] for m in saved], [by_id[m["card"]] for m in saved])
+        # the gate's copy carries its real share of chats as its weight (decision 101); the card is the same
+        bare = lambda c: {k: v for k, v in c.items() if k != "arena_weight"}  # noqa: E731
+        self.assertEqual([bare(m["persona"]) for m in saved], [bare(by_id[m["card"]]) for m in saved])
 
     def test_cli_refuses_a_database_that_is_not_there(self):
         """Review round 1, finding 10: --db names the agent's database; a path with no file is
@@ -472,12 +474,12 @@ class MorningItem(Base):
         view = page.view(1_790_000_000.0)
         a = [x for x in view["agents"] if x["agent"] == run.AGENT][0]
         self.assertEqual(a["arena"]["file"], rep["stuck"]["file"])  # the newest one
-        self.assertIn("0 of 4 held-out matches won after 3 rounds", a["arena"]["line"])
+        self.assertIn("0 of 4 gate matches won after 3 rounds", a["arena"]["line"])
         self.assertEqual(sorted(view["problems"]), ["A saved Arena item could not be read: arena-sales-bad.json",
                                                    "A saved Arena item could not be read: arena-sales-x.json"])
         html = morning.render(view, token=None)
         self.assertIn("<h3>The Arena</h3>", html)
-        self.assertIn("0 of 4 held-out matches won after 3 rounds", html)
+        self.assertIn("0 of 4 gate matches won after 3 rounds", html)
         self.assertIn("Lost persona-02:", html)
         self.assertIn('(turn 1, agent: "The Mercurial Vapor 17 Elite is 16,500 EGP.")', html)
         self.assertNotIn("old line", html)

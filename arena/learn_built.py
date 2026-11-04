@@ -21,7 +21,8 @@ that has the database: each lost training match is written as it is judged. from
 folder) is what the night runs first (reflection/night.py): every training match the agent saved in
 its folder, won or lost, not written yet. The study needs cases that ended good and not good before
 it looks for a pattern, and a new agent has no live cases, so its practice wins are written too,
-each closing with the plug's good result. Gate matches never are: the held-out cards never train it.
+each closing with the plug's good result. Gate matches never are: only training ids are read here
+(decision 104's Train on a run's lost gate matches is the page's step, not this night read).
 
 A practice match has no result tool, so a lost case closes on the plug's first bad deciding
 result, as its last row (or ending its action when the result ends one), and settles at once
@@ -172,7 +173,7 @@ def from_folder(db, plug, folder, *, until=None):
     (arena-matches.jsonl, arena/practice.py), won or lost, written as a case under plug, timed when
     it was played: a win closes with the plug's good result, a loss as to_case writes it. The night
     study needs both sides to find a pattern (engine/study.py), and a new agent has no live cases
-    yet. Gate matches are left out (the held-out cards never train the agent), and so is any match
+    yet. Gate matches are left out (only training ids are read, TRAINING), and so is any match
     of another agent or played at or after until, and an off topic match the agent won (arena/scope.py):
     it declined, so it never reached the good result a win closes with; a lost one is written. A case already written is left as it is. Returns
     {"written", "won", "lost"} counts of the cases written now."""

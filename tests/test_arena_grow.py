@@ -257,8 +257,9 @@ def share(cards, rx):
 
 
 class GateAndTraining(unittest.TestCase):
-    """The base cards split first and the split kept; grown and trained cards never in the gate;
-    the gate at weights before any loss; the caps held on the training draws and on the gate's."""
+    """The base cards split first and the split kept; grown cards never in the gate; the gate at the
+    real share of chats, never a loss weight (decision 101); the caps held on the training draws and
+    on the gate's."""
 
     def setUp(self):
         self.base = demo_cards()
@@ -286,12 +287,18 @@ class GateAndTraining(unittest.TestCase):
         lose(pool, self.base[1], 10)  # persona-02 lost ten times, in some earlier run
         got = {c["id"]: c["arena_weight"] for c in grow.decks(self.base, pool, held)[1]}
         self.assertEqual(got, fresh)
-        self.assertAlmostEqual(got["persona-02"] / got["persona-04"], 0.179 / 0.107, places=3)
+        # decision 101: each at its real share of chats, never its training weight
+        self.assertAlmostEqual(got["persona-02"] / got["persona-04"], self.base[1]["chats"] / self.base[3]["chats"],
+                               places=3)
 
     def test_printing_is_capped_on_the_gate_draws_on_their_own(self):
         pool = grow.Pool(folder(self), "sales")
-        gate = grow.decks(self.base, pool, {"persona-05", "persona-06"})[1]
+        named = {"persona-05", "persona-06"}  # a gate named for one run (--held-out)
+        gate = grow.decks(self.base, pool, named, gate=named)[1]
         self.assertEqual(sorted(c["id"] for c in gate), ["persona-05", "persona-06"])
+        self.assertLessEqual(share(gate, self.rx), 0.25)
+        gate = grow.decks(self.base, pool, named)[1]  # decision 101: every base card that can buy, trained or not
+        self.assertEqual(sorted(c["id"] for c in gate), sorted(c["id"] for c in self.base if not c["unwinnable"]))
         self.assertLessEqual(share(gate, self.rx), 0.25)
 
     def test_printing_stays_at_most_a_quarter_of_the_gate_when_rounding_would_push_it_over(self):

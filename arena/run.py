@@ -5,10 +5,17 @@
         [--replay FILE [--replay-max 10]] [--fact-checks on|off] [--seed 0] [--json] [--quick]
 
 Each round: N training matches, each card drawn by its arena_weight from the cards the agent may
-train on, then the gate: the agent's trust level of matches (its "matches") drawn the same way
-from the held-out cards that can buy, which never train it (their losses go nowhere). The gate
-passes at the level's "wins". With no --held-out, the held-out cards are a seeded share of the
-cards that can buy, spread over their worries; a card that will not buy is never a gate match.
+train on, then the gate: the agent's trust level of matches (its "matches"). The gate follows the
+real customer mix (decision 101): every card that can buy, trained or not, plays at its real share
+of the real chats (real_mix: its chats, never the training weight a loss raised), no one card group
+plays more than GATE_CAP of the gate (3 of 10, scaled to the gate's size; the rest go to the next
+most common groups, gate_plan), and every gate match is new: a fresh id and seed, never a training
+match's or one saved before (gate_id). With one card group that can buy the cap cannot hold, so it
+is relaxed just enough and the report says so in a line. A card that will not buy, a card grown
+from real chats and the off topic customer are never gate matches. The gate passes at the level's
+"wins". The held-out cards (a seeded share of the cards that can buy, spread over their worries,
+or --held-out) never train; --held-out also names the gate for that run (a check or a test), its
+cards at their real shares among themselves, the cap held the same way.
 With --db the Arena practises on its own copy of the Sales agent's database (DECISIONS item 46):
 at the start of the run the live database is copied to <db>.arena beside it (arena_copy, replacing
 the last run's copy, whose lessons that failed the eval gate and still wait come along with their
@@ -78,14 +85,14 @@ item, so the gate reads that agent's own wins and nothing else. --state names th
 only for a run with no database (its wins feed no gate); one of the two is needed.
 
 Both sides grow (items 30, 48, 51; arena/grow.py). The base cards are split first, and the held
-ids are saved in the owner's pool of practice customers, so the gate keeps the same cards run
+ids are saved in the owner's pool of practice customers, so the same cards stay out of training run
 after run while the pool grows and while the base card ids and the seed stay; a card grown from
 real chats is never held out, and a new split holds a card that has trained only when too few
 have not (fixed_split). The cards grown from real chats then join the training cards only. In training
 a card whose group beat the agent is drawn more often (per loss, grow.LOST_WEIGHT, at most
 grow.MAX_COUNTED_LOSSES losses counted), and each side's
-share and the capped wants are held on the training draws; the gate draws at the weights before
-any loss, its capped wants held on its own. Each training match's result is counted in the pool,
+share and the capped wants are held on the training draws; the gate plays every base card that can
+buy at its real share of chats, before any loss, its capped wants held on its own (decision 101). Each training match's result is counted in the pool,
 practice-<kind>.json in the owner's state folder (grow.owner_of: the folder above the agent's
 when its owner.json names the owner the plug names, else the agent's own). Agents of one kind
 under one owner share the pool; a new one starts with zero lessons and faces the same customers.
@@ -101,6 +108,7 @@ import datetime
 import fcntl
 import functools
 import json
+import math
 import os
 import random
 import re
@@ -128,6 +136,7 @@ DEFAULT_CAP = 1000
 DEFAULT_ROUNDS = 5
 NO_GAIN_ROUNDS = 2
 HELD_OUT_SHARE = 0.3
+GATE_CAP = 0.3  # decision 101: no one card group plays more than 3 of 10 gate matches (scaled to the gate's size)
 GROWN = "grown-"  # the id of a card grown from real chats (arena/grow.py): it trains, never takes the gate
 PUBLIC_TRUST = {"matches": 10, "wins": 7, "zero_failed_checks": True}  # the Sales level, public (DECISIONS item 63)
 TZ = "Africa/Cairo"
@@ -268,9 +277,9 @@ def can_buy(card):
 
 def split(cards, held_out=None, share=HELD_OUT_SHARE, seed=0, never=()):
     """(training cards, held-out cards). held_out: card ids; else a seeded share of the cards that
-    can buy, one card a worry in a seeded worry order, then a second round, so the gate is spread
-    over worries. A card that will not buy is never held out by the draw: the gate only plays cards
-    that can buy (Arena.gate_cards), so a held-out card that cannot would only be lost to training.
+    can buy, one card a worry in a seeded worry order, then a second round, so the cards kept out of
+    training are spread over worries. A card that will not buy is never held out by the draw: it is
+    never a gate match (real_mix), so holding it out would only lose it to training.
     A card grown from real chats (grown-...) and a card in never (one that has trained) are never
     held out, by the draw or by name."""
     ids = [c["id"] for c in cards]
@@ -312,7 +321,8 @@ def split(cards, held_out=None, share=HELD_OUT_SHARE, seed=0, never=()):
 
 def fixed_split(cards, held_out, seed, pool):
     """split() of the base cards with the owner's pool (arena/grow.py), the held ids saved in the
-    pool, so the gate stays the same set run after run while the pool grows. A saved split is used
+    pool, so the cards kept out of training stay the same set run after run while the pool grows
+    (the gate itself plays the real mix, decision 101). A saved split is used
     again while the base card ids and the seed are the same and none of its held cards played a
     training match itself (pool.trained_ids; another card of their worry may have); a saved split
     split() refuses (a held card trained in a --held-out run, or none can buy now) is drawn again.
@@ -364,6 +374,113 @@ def draw(cards, rng):
     return rng.choices(cards, weights=weights)[0]
 
 
+def _chats(card):
+    n = card.get("chats")
+    return n if isinstance(n, int) and not isinstance(n, bool) and n > 0 else 0
+
+
+def real_mix(cards):
+    """The gate's cards (decision 101): copies of the cards that can buy, each arena_weight its real
+    share, its chats over the chats of every card here, never the training weight a loss raised.
+    Cards that name no chats (made-up customers) share alike. A card that will not buy, a card grown
+    from real chats (cut from the hard chats, so no share of the mix) and the off topic customer are
+    never part of it."""
+    out = [dict(c) for c in cards if can_buy(c) and not str(c.get("id", "")).startswith(GROWN)
+           and not scope.is_off(c)]
+    total = sum(_chats(c) for c in out)
+    for c in out:
+        c["arena_weight"] = _chats(c) / total if total else 1 / len(out)
+    return out
+
+
+def gate_cap(cards, size, once=False, share=GATE_CAP):
+    """(most, line): the gate matches one card group (arena/grow.py group) may play in a round of size,
+    share of size and at least 1 (3 of 10, 6 of 20), and the line the report prints when that cannot
+    hold: with too few groups that can buy (one card, or every card of one worry) the cap is raised
+    just enough to fill the gate, and the line says so. once: each card plays at most once a round
+    (a fixed test set). "" when the cap holds."""
+    from arena import grow
+    rooms = {}
+    for c in cards:
+        g = grow.group(c)
+        rooms[g] = rooms.get(g, 0) + (1 if once else size)
+    base = most = max(1, math.floor(size * share + 1e-9))
+    while most < size and sum(min(most, r) for r in rooms.values()) < size:
+        most += 1
+    if sum(min(most, r) for r in rooms.values()) < size:
+        raise Refused(f"the gate plays {size} matches a round but only {sum(rooms.values())} cards can buy, "
+                      "each once a round")
+    if most == base:
+        return most, ""
+    n = len(rooms)
+    return most, (f"only {n} card group{'' if n == 1 else 's'} can buy, so the gate's cap of {base} of {size} matches "
+                  f"a group is relaxed: one group may play up to {most} of {size}")
+
+
+def _fill(weights, size, room, rng):
+    """size seats over the keys of weights by their weights (largest remainder, ties by rng), none past its
+    room; the seats a full key cannot take go to the others by their weights, so the next most common
+    take them first; a key of no weight gets one only when every key with weight is full."""
+    got = dict.fromkeys(weights, 0)
+    left = size
+    while left > 0:
+        open_ = [k for k in weights if got[k] < room[k]]
+        if not open_:
+            break
+        mass = sum(weights[k] for k in open_)
+        w = {k: weights[k] if mass > 0 else 1.0 for k in open_}
+        mass = mass if mass > 0 else float(len(open_))
+        exact = {k: left * w[k] / mass for k in open_}
+        part = {k: math.floor(exact[k]) for k in open_}
+        tie = {k: rng.random() for k in open_}
+        for k in sorted(open_, key=lambda k: (-(exact[k] - part[k]), -w[k], tie[k]))[:left - sum(part.values())]:
+            part[k] += 1
+        given = 0
+        for k in open_:
+            add = min(part[k], room[k] - got[k])
+            got[k] += add
+            given += add
+        left -= given
+    return got
+
+
+def gate_plan(cards, size, rng, most, once=False):
+    """The cards of one round's size gate matches, in play order (decision 101): each card group gets
+    its share of the matches by its cards' arena_weight (real_mix: the real share of chats), at most
+    most (gate_cap), the rest to the next most common groups; within a group, its cards by their
+    shares the same way. once: no card plays twice in the round (a fixed test set)."""
+    from arena import grow
+    groups = {}
+    for c in cards:
+        groups.setdefault(grow.group(c), []).append(c)
+    weight = {g: sum(max(0.0, float(c.get("arena_weight") or 0)) for c in cs) for g, cs in groups.items()}
+    per = _fill(weight, size, {g: min(most, len(cs) if once else size) for g, cs in groups.items()}, rng)
+    plan = []
+    for g, cs in groups.items():
+        w = {i: max(0.0, float(c.get("arena_weight") or 0)) for i, c in enumerate(cs)}
+        got = _fill(w, per[g], {i: 1 if once else per[g] for i in w}, rng)
+        plan += [cs[i] for i, n in got.items() for _ in range(n)]
+    rng.shuffle(plan)
+    return plan
+
+
+def saved_ids(state):
+    """The ids of every match saved in state's matches file, training, gate or replay; empty when none."""
+    out = set()
+    try:
+        lines = (Path(state) / MATCHES_FILE).read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return out
+    for line in lines:
+        try:
+            m = json.loads(line)
+        except (ValueError, RecursionError):
+            continue
+        if isinstance(m, dict) and isinstance(m.get("id"), str):
+            out.add(m["id"])
+    return out
+
+
 def load_trust(path, agent=AGENT):
     if path is None:
         return dict(PUBLIC_TRUST)
@@ -398,18 +515,21 @@ class Arena:
         match, every one of them handed in the next matches, dropped once the step between rounds has run.
         off_topic and judge_model: practice match 10 of each round is the off topic customer (arena/scope.py),
         judged by judge_model; with either missing it is never played."""
+        # the gate (decision 101): every card that can buy at its real share, or the named ones (held_out)
         if pool is None:
             self.train, self.held = split(cards, held_out, seed=seed)
-            self.gate_cards = [c for c in self.held if can_buy(c)]  # a card that will not buy is no test of the agent
+            self.gate_cards = real_mix(self.held if held_out else cards)
         else:  # the base cards split first, then the grown cards and the weights (arena/grow.py decks)
             from arena import grow
             _, self.held = fixed_split(cards, held_out, seed, pool)
-            self.train, self.gate_cards = grow.decks(cards, pool, {c["id"] for c in self.held})
+            self.train, self.gate_cards = grow.decks(cards, pool, {c["id"] for c in self.held},
+                                                     gate={c["id"] for c in self.held} if held_out else None)
         self.calls = calls
         self.agent_model, self.customer_model = calls.model(agent_model), calls.model(customer_model)
         self.judge_model = None if judge_model is None else calls.model(judge_model)
         self.off_topic = bool(off_topic)
         self.trust = trust or dict(PUBLIC_TRUST)
+        self.gate_most, self.gate_line = gate_cap(self.gate_cards, self.trust["matches"], once=getattr(self, "once", False))
         self.quick = False  # main sets it for --quick: its item never unlocks Connect (Morning.gate)
         self.facts = self.trust.get("zero_failed_checks", True) if fact_checks is None else bool(fact_checks)
         self.prompt, self.matches, self.rounds, self.seed = prompt, int(matches), int(rounds), seed
@@ -423,6 +543,8 @@ class Arena:
         self.now = now
         self.run_id = time.strftime("%Y%m%dT%H%M%S", time.gmtime(now()))
         self.rng = random.Random(f"draw:{seed}:{self.run_id}")
+        self.gate_rng = random.Random(f"gate:{seed}:{self.run_id}")  # its own, so the training draws stay as they were
+        self.used = None  # the match ids saved before this run and played in it (gate_id)
         if self.matches < 1 or self.rounds < 1:
             raise Refused("--matches and --rounds must be at least 1")
 
@@ -476,9 +598,22 @@ class Arena:
         return m, judged
 
     def pick(self, deck, r, k):
-        """The card for match k of round r from deck (the training cards or the gate's): a weighted
-        draw with replacement. arena/practice.py draws each card once a round instead."""
+        """The card for training match k of round r from deck: a weighted draw with replacement.
+        arena/practice.py draws each card once a round instead. The gate has its plan (gate_plan)."""
         return draw(deck, self.rng)
+
+    def gate_id(self, r, k):
+        """A new id, so a new seed, for gate match k of round r (decision 101): <run>-r<r>-g<k>, never an id
+        saved before in the matches file nor one this run played (two runs stamped the same second move to
+        a higher number). A training match's id ends -t<k>, so a gate match is never one of them."""
+        if self.used is None:
+            self.used = saved_ids(self.state)
+        n = k
+        while f"{self.run_id}-r{r}-g{n:02d}" in self.used:
+            n += self.trust["matches"]
+        mid = f"{self.run_id}-r{r}-g{n:02d}"
+        self.used.add(mid)
+        return mid
 
     def scope_card(self):
         """The card the off topic writer and judge read (arena/scope.py): the Sales agent's; practice.py its own."""
@@ -596,9 +731,11 @@ class Arena:
                 # the quick note, for the next matches; never from the off topic customer, whose ask is no sale
                 if not judged["won"] and self.notes is not None and not off:
                     one["training"].setdefault("notes", []).append(self.notes.after_loss(m, judged, m["id"]))
+            plan = gate_plan(self.gate_cards, self.trust["matches"], self.gate_rng, self.gate_most,
+                             once=getattr(self, "once", False))
             for k in range(1, self.trust["matches"] + 1):
-                card = self.pick(self.gate_cards, r, k)
-                out = self.play(card, f"{self.run_id}-r{r}-g{k:02d}")
+                card = plan[k - 1]  # the real mix, at most gate_most of a card group, every match a new id
+                out = self.play(card, self.gate_id(r, k))
                 if out is None:
                     return self._report(rounds, self.halt)
                 if out is UNJUDGED:
@@ -610,7 +747,8 @@ class Arena:
                 if "failed_check" in judged:  # a built agent's verdict marks its safety checks (arena/practice.py)
                     one["gate"]["failed_checks"] = one["gate"].get("failed_checks", 0) + bool(judged["failed_check"])
                 if not judged["won"]:
-                    one["gate"]["lost"].append({"card": m["card"], "why": judged["why"], "quote": judged["quote"]})
+                    one["gate"]["lost"].append({"card": m["card"], "why": judged["why"], "quote": judged["quote"],
+                                                "match": m["id"]})
             wins = one["gate"]["won"]
             if self._passed(one):
                 return self._report(rounds, PASSED)
@@ -653,6 +791,8 @@ class Arena:
     def _report(self, rounds, stopped):
         rep = {"agent": self.agent, "run": self.run_id, "stopped": stopped, "trust": self.trust, "fact_checks": self.facts,
                "training_cards": [c["id"] for c in self.train], "held_out_cards": [c["id"] for c in self.held],
+               "gate_mix": {"cards": len(self.gate_cards), "most": self.gate_most, "of": self.trust["matches"],
+                            "line": self.gate_line},
                "rounds": rounds, "calls": {"day": self.calls.day, "used": self.calls.count, "cap": self.calls.cap}}
         if self.calls.problem:
             rep["calls"]["problem"] = self.calls.problem
@@ -689,7 +829,7 @@ class Arena:
                 "needs": self.trust["wins"], "quick": self.quick, "fact_checks": self.facts, "lost": last["lost"][:3],
                 "reflection": self.reflection_rows(rounds),
                 "line": f"The Arena ran {len(rounds)} round{'' if len(rounds) == 1 else 's'} and stopped, {stopped}: "
-                        f"{last['won']} of {last['played']} held-out matches won in the last, {self.trust['wins']} needed."}
+                        f"{last['won']} of {last['played']} gate matches won in the last, {self.trust['wins']} needed."}
         return self._write_item(item)
 
     def stuck_item(self, rounds):
@@ -698,7 +838,7 @@ class Arena:
         item = {"agent": self.agent, "kind": "arena_stuck", "at": self.now(), "run": self.run_id,
                 "rounds": len(rounds), "gate_won": last["won"], "gate_played": last["played"],
                 "needs": self.trust["wins"], "fact_checks": self.facts, "lost": last["lost"][:3],
-                "line": f"The Arena is stuck: {last['won']} of {last['played']} held-out matches won after "
+                "line": f"The Arena is stuck: {last['won']} of {last['played']} gate matches won after "
                         f"{len(rounds)} rounds, {self.trust['wins']} needed, no gain in the last {NO_GAIN_ROUNDS}."}
         if any("reflection" in r for r in rounds):
             item["reflection"] = self.reflection_rows(rounds)
@@ -950,9 +1090,15 @@ def next_step(rep):
 
 def text(rep):
     lines = [f"Arena run {rep['run']} for {rep['agent']}: stopped, {rep['stopped']}.",
-             f"  trust level: {rep['trust']['wins']} of {rep['trust']['matches']} held-out matches; "
+             f"  trust level: {rep['trust']['wins']} of {rep['trust']['matches']} gate matches; "
              f"fact checks {'on' if rep['fact_checks'] else 'off'}",
-             f"  cards: {len(rep['training_cards'])} to train on, held out {', '.join(rep['held_out_cards'])}"]
+             f"  cards: {len(rep['training_cards'])} to train on, held out of training {', '.join(rep['held_out_cards'])}"]
+    mix = rep.get("gate_mix")
+    if mix:  # decision 101: the gate's real mix and its cap, and the line when the cap was relaxed
+        lines.append(f"  gate: {mix['cards']} card{'' if mix['cards'] == 1 else 's'} that can buy, each at its real share of "
+                     f"chats, at most {mix['most']} of {mix['of']} matches a card group, every match new")
+        if mix.get("line"):
+            lines.append(f"  {mix['line']}")
     for r in rep["rounds"]:
         t, g = r["training"], r["gate"]
         lines.append(f"  round {r['round']}: training {t['won']} of {t['played']} won, {len(t['cases'])} cases to "

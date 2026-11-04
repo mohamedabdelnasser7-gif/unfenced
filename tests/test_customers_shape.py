@@ -260,7 +260,7 @@ class OldShape(Base):
         train, held = run.split(cards)
         self.assertEqual((rep["training_cards"], rep["held_out_cards"]),
                          ([c["id"] for c in train], [c["id"] for c in held]))
-        self.assertEqual(len(seen), 3 + rep["trust"]["matches"])  # every match drawn by arena/run.py draw
+        self.assertEqual(len(seen), 3)  # every training match drawn by arena/run.py draw; the gate by its plan (101)
 
 
 def fake_play(log, won=False):

@@ -516,7 +516,8 @@ class AQuickStartAgent(unittest.TestCase):
         self.p = pages.Pages(self.m)
         (folder / "arena-stock_watch-r1.json").write_text(json.dumps(seal.sign(
             {"agent": "stock_watch", "kind": "arena_rounds", "at": NOW, "run": "r1", "gate_won": 10, "gate_played": 10,
-             "needs": 7, "gate_size": 10, "level": "medium", "lost": [], "line": "x", "practice": True, "quick": False}, folder)),
+             "needs": 7, "gate_size": 10, "level": "medium", "failed_checks": 0, "lost": [], "line": "x", "practice": True,
+             "quick": False}, folder)),
             encoding="utf-8")
 
     def test_whatsapp_is_next_and_other_channels_are_not_connected_yet(self):

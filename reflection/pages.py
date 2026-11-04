@@ -1160,6 +1160,8 @@ def train_card(m, a, agent, ctx):
 
 
 LEVEL_HELP = "Correct a lost reply and press Try again, add sample data on the Overview, or lower the level."
+# the help when the wins reached the level and a broken never line held it: no level allows one (decision 110)
+SAFETY_HELP = "Correct a lost reply and press Try again, or add sample data on the Overview."
 
 
 def level_card(m, agent, run, ctx, back):
@@ -1178,7 +1180,8 @@ def level_card(m, agent, run, ctx, back):
         need = levels_mod.needs(level, size)
         if size < rule["gate"]:  # a smaller run than the level's gate: the level asks for a new run (Morning.gate)
             need = f'{levels_mod.needs(level)} of {rule["gate"]}'
-        safe = " with no failed safety check" if rule["no_failed_checks"] else ""
+        safe = (" with no failed safety check; a broken never line fails it" if rule["no_failed_checks"]
+                else "; a broken never line fails it")
         played = run.get("gate_played")
         short = played is not None and played < size  # cut short (the cap, or a match left unjudged)
         unjudged = run.get("unjudged") or 0  # the last round's test matches the judge could not read
@@ -1199,7 +1202,8 @@ def level_card(m, agent, run, ctx, back):
             if blocks:
                 out.append(f'<p class="lab">What holds it back</p><ul class="blk">{blocks}</ul>')
             if not unjudged:  # a match left unjudged needs only a new run; the help's steps cannot pass it
-                out.append(f'<p class="quiet">{LEVEL_HELP}</p>')
+                held = levels_mod.safety_only(level, run.get("gate_won"), size, run.get("never_broken"))
+                out.append(f'<p class="quiet">{SAFETY_HELP if held else LEVEL_HELP}</p>')
     else:
         out.append(f'<p class="calm">{h(levels_mod.WORDS[level])} Its first Arena run shows the score against it.</p>')
     if ctx["token"]:

@@ -97,6 +97,7 @@ MAX_FILE = 32_000_000  # MAX_PATTERNS rows of MAX_OWNERS sealed owners (48 hex) 
 HASH = re.compile(r"[0-9a-f]{32}")
 SEALED = re.compile(r"([0-9a-f]{32})([0-9a-f]{16})")  # an owner in the file: its hash, then its seal
 NAMED = re.compile(r"([0-9a-f]{32})([0-9a-f]{32})([0-9a-f]{16})")  # an owner name, its owner, the seal
+BROKEN = "the pool file could not be read, or none of its patterns was sealed by the shared folder's key"
 HELD = "the owner's id changed since its name last gave; nothing is given until the operator clears the name"
 PID = re.compile(r"[0-9a-f]{12}")
 LABEL = re.compile(r"[a-z]+(?: [a-z]+){0,3}")
@@ -562,7 +563,7 @@ class Pool:
             raise Refused("a kind is lowercase letters, digits and _, starting with a letter")
         self.kind, self.root = kind, check_root(root)
         self.path = self.root / POOL_FILE.format(kind=kind)
-        self._key = None
+        self._key, self._holding = None, False
         self._read()
 
     # the owner key and the hashes
@@ -578,7 +579,7 @@ class Pool:
                 return None
             from arena.personas import _write
             os.makedirs(self.root, mode=0o700, exist_ok=True)
-            with self._locked():
+            with contextlib.nullcontext() if self._holding else self._locked():
                 if not path.exists():
                     _write(path, secrets.token_hex(32).encode("ascii"))
         raw = path.read_bytes()[:200].strip()
@@ -672,8 +673,10 @@ class Pool:
         fd = os.open(self.root / f".patterns-{self.kind}.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX)
+            self._holding = True  # a key made under it does not take the lock again
             yield
         finally:
+            self._holding = False
             os.close(fd)
 
     def _save(self):
@@ -692,12 +695,29 @@ class Pool:
         kept or dropped, by any owner id."""
         return self.key_hash(key) in self.keys
 
+    def ready(self, key, owner, name=None):
+        """Read under the lock before the writer is asked: BROKEN, "given before" or HELD when this
+        owner's lesson or chat is not to be written up, None when it is. Makes no key."""
+        with self._locked():
+            self._read()
+            if self.broken:
+                return BROKEN
+            if self._secret(make=False) is None:  # a fresh pool: nothing given, no name known
+                return None
+            if self.given(key):
+                return "given before"
+            if self.held(name, owner):
+                return HELD
+        return None
+
     def clear(self, name):
         """The operator's step after an owner's id was made again: the name may give under its new id."""
         with self._locked():
             self._read()
             if self.broken:
                 raise Refused("the pool file could not be read; nothing is written")
+            if self._secret(make=False) is None:
+                return False
             if self.names.pop(self.name_hash(name), None) is not None:
                 self._save()
                 return True
@@ -714,12 +734,11 @@ class Pool:
         worry = _label(worry) if what == LOST else None
         if worry and check(f"The customer worries about the {worry} here."):
             worry = None
-        oh, kh = self.owner_hash(owner), self.key_hash(key)
         with self._locked():
-            self._read()
+            self._read()  # read under the lock before any key is made: a broken pool makes none
             if self.broken:
-                raise Refused("the pool file could not be read, or none of its patterns was sealed by the shared "
-                              "folder's key; nothing is written")
+                raise Refused(BROKEN + "; nothing is written")
+            oh, kh = self.owner_hash(owner), self.key_hash(key)
             if name:
                 if self.held(name, owner):
                     return None, [HELD]
@@ -759,6 +778,8 @@ class Pool:
         """The patterns of this kind (lesson or lost) seen at MIN_OWNERS or more distinct owners, most
         owners first. but: an owner whose own patterns are left out (an agent never reads back what
         its own owner gave)."""
+        if not self.patterns:  # nothing to read: no key is made for it
+            return []
         mine = self.owner_hash(but) if but else None
         out = [p for p in self.patterns if p["what"] == what and len(set(p["owners"])) >= MIN_OWNERS
                and (mine is None or mine not in p["owners"])]
@@ -848,7 +869,8 @@ def owner_id(folder):
 class Link:
     """One agent's way into its kind's pool. owner: the owner's id (owner_id), or "" (gives nothing).
     writer: Writer or a test's stand in. give, give_lost: the writer's calls a night at most. A give
-    whose writer raised says failed, and the night then asks the writer nothing more."""
+    whose writer raised or gave no line, or whose pool reads broken or refused it, says failed, and
+    the night then asks the writer nothing more. The pool is read before the writer is asked."""
 
     def __init__(self, kind, owner, writer, root, give=GIVE, give_lost=GIVE_LOST, name=None, db=None):
         self.kind, self.owner, self.writer, self.name = kind, owner or "", writer, name or None
@@ -895,15 +917,21 @@ class Link:
     def _give(self, what, key, data, sources, worry=None):
         if not self.owner:
             return {"pattern": None, "why": "this agent names no owner, so it gives nothing"}
-        if self.pool.given(key):
-            return {"pattern": None, "why": "given before"}
-        if self.pool.held(self.name, self.owner):
-            return {"pattern": None, "why": HELD}
+        why = self.pool.ready(key, self.owner, self.name)
+        if why == BROKEN:  # counted as failed: nothing more is asked of the writer tonight
+            return {"pattern": None, "why": why, "failed": True}
+        if why:
+            return {"pattern": None, "why": why}
         try:
             line = self.writer(what, self.kind, data)
         except Exception as e:  # a failing writer gives nothing tonight; asked again another night
             return {"pattern": None, "why": f"the writer failed ({type(e).__name__})", "asked": True, "failed": True}
-        got, reasons = self.pool.add(what, line or "", self.owner, key, worry=worry, sources=sources, name=self.name)
+        if not line:  # no line (nothing, or not the JSON asked for): failed, asked again another night
+            return {"pattern": None, "why": "the writer gave no line", "asked": True, "failed": True}
+        try:
+            got, reasons = self.pool.add(what, line, self.owner, key, worry=worry, sources=sources, name=self.name)
+        except Refused as e:  # broken since it was read: failed, as above
+            return {"pattern": None, "why": f"the pool refused it ({e})", "asked": True, "failed": True}
         if got is None:
             return {"pattern": None, "why": "dropped: " + "; ".join(reasons), "asked": True}
         return {"pattern": got["id"], "owners": len(set(got["owners"])), "why": None, "asked": True}

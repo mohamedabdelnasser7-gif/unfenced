@@ -370,8 +370,11 @@ class PoolTest(unittest.TestCase):
         self.assertTrue(pool.broken)
         self.assertEqual(pool.patterns, [])
         with self.assertRaises(shared.Refused):
-            pool.add(shared.LESSON, CLEAN_EN, OWNER_C, "k5")  # makes a new key, which seals none of them
-        self.assertTrue((self.root / shared.KEY_FILE).exists())
+            pool.add(shared.LESSON, CLEAN_EN, OWNER_C, "k5")  # read under the lock first: no key is made
+        self.assertFalse((self.root / shared.KEY_FILE).exists())
+        self.assertEqual(pool.shared(shared.LESSON, but=OWNER_C), [])
+        self.assertFalse((self.root / shared.KEY_FILE).exists())
+        (self.root / shared.KEY_FILE).write_text("b" * 64)  # a new key, which seals none of them
         with self.assertRaises(shared.Refused):
             shared.Pool("support", self.root).add(shared.LESSON, CLEAN_EN, OWNER_C, "k6")
         self.assertEqual(path.read_bytes(), before)
@@ -538,3 +541,73 @@ class PracticeCards(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RefusePath(unittest.TestCase):
+    """Red team crossowner round 2 item 4 and review item 2: the pool is read under the lock before
+    the writer is asked; a broken pool, a pool that refuses, and a writer with no line each count as
+    failed, so the night asks the writer nothing more."""
+
+    def setUp(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.root = Path(d.name) / "shared"
+        self.asked = []
+
+    def writer(self, line):
+        def w(what, kind, data):
+            self.asked.append(what)
+            return line
+        return w
+
+    def broken(self):
+        self.root.mkdir(parents=True, exist_ok=True)
+        (self.root / "patterns-support.json").write_text("{cut short", encoding="utf-8")
+
+    def test_a_broken_pool_is_failed_before_the_writer_is_asked(self):
+        self.broken()
+        link = shared.Link("support", OWNER_A, self.writer(CLEAN_EN), self.root)
+        for got in (link.give_lesson("a", {"id": 1, "text": "Spin the fans slowly."}),
+                    link.give_chat("c1", [{"text": "hello"}], "price")):
+            self.assertTrue(got["failed"])
+            self.assertIsNone(got["pattern"])
+        self.assertEqual(self.asked, [])
+        self.assertFalse((self.root / shared.KEY_FILE).exists())
+
+    def test_a_writer_with_no_line_is_failed_and_not_kept_as_given(self):
+        shared.Pool("support", self.root).add(shared.LESSON, CLEAN_EN, OWNER_B, "other")  # the pool has a key
+        for line in (None, ""):
+            with self.subTest(line=line):
+                link = shared.Link("support", OWNER_A, self.writer(line), self.root)
+                got = link.give_lesson("a", {"id": 2, "text": "Spin the fans slowly."})
+                self.assertEqual((got["failed"], got["asked"], got["pattern"]), (True, True, None))
+                self.assertEqual(link.pool.ready(f"{link.db}\x00lesson:2", OWNER_A), None)  # asked again later
+
+    def test_a_pool_that_breaks_after_it_was_read_is_failed(self):
+        link = shared.Link("support", OWNER_A, self.writer(CLEAN_EN), self.root)
+        with mock.patch.object(shared.Pool, "ready", return_value=None):
+            self.broken()
+            got = link.give_lesson("a", {"id": 3, "text": "Spin the fans slowly."})
+        self.assertTrue(got["failed"])
+        self.assertIn("the pool refused it", got["why"])
+
+    def test_a_grow_night_on_a_broken_pool_asks_the_writer_nothing(self):
+        from arena import grow
+        from arena.scripted import ScriptedModel
+        from arena.tag import Tagger
+        from kit.db import Db
+        from tests.test_arena_grow import LOST, NOW, SINCE, recipe, write_chats, write_owner, write_plug
+        owner = self.root.parent / "agents"
+        owner.mkdir(parents=True)
+        write_owner(owner, "north")
+        write_plug(owner / "store_north", "store_north", "sales", owner="north")
+        self.root.mkdir()
+        (self.root / "patterns-sales.json").write_text("{cut short", encoding="utf-8")
+        db = Db(":memory:")
+        self.addCleanup(db.close)
+        write_chats(db, tuple((f"{LOST[0]}-{i}", LOST[1]) for i in range(8)))
+        link = shared.Link("sales", shared.owner_id(owner / "store_north"), self.writer(LOST_EN), self.root)
+        counts = grow.grow(db, grow.Pool(owner, "sales"), since=SINCE, until=NOW, shared=link,
+                           tagger=Tagger(model=ScriptedModel(recipe()), cap=50, recipe=recipe()))
+        self.assertEqual(self.asked, [])
+        self.assertEqual(counts.get("writer failed"), 1)

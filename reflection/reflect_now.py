@@ -22,7 +22,16 @@ holder (holder()); the next press takes it over once that process is gone (gone)
 
 Steps marks where it is for the page: reading lost chats until the proposer or the idea part first
 asks its model, writing a lesson from then, the exam once a lesson takes it.
+
+The Sales agent practises on a copy of its database, <db>.arena (arena/run.py arena_copy), so the
+chats it lost in the Arena are cases there, never in the live log (DECISIONS 46 and 96). While that copy
+holds them, its Run reflection studies them there (run_arena): the study and the eval gate the Arena runs
+between rounds (arena/rounds.py Between), on the night's study models, then the full exam, and only a
+lesson that passes both is written to the live database (rounds.hand_live), so no live customer meets a
+lesson that was not examined. With no Arena loss in the copy it runs the night on the live database, as
+for any agent. The day's call count, the night lock and the steps are the same.
 """
+import functools
 import os
 import secrets
 import socket
@@ -174,3 +183,93 @@ def run(db, db_path, plug, *, folder, models, calls, steps, until=None):
     if Path(db_path).resolve() != DEFAULT_PATH.resolve():
         rep["snapshot"]["db"] = str(db_path)
     return rep, night.save(rep, db_path)
+
+
+def arena_path(db_path):
+    """The Sales agent's Arena copy of the database at db_path (arena/run.py arena_copy): <db>.arena."""
+    from arena import run as run_mod
+    live = Path(db_path)
+    return live.with_name(live.name + run_mod.ARENA_SUFFIX)
+
+
+ARENA_CASES = ("SELECT case_id, MIN(at) FROM trace WHERE agent = ? AND json_extract(detail, '$.arena') = 1 "
+               "GROUP BY case_id ORDER BY MIN(at), case_id")
+
+
+def arena_losses(db_path, agent):
+    """The chats agent lost in its newest Arena run, as cases in the Arena's copy (arena/learn.py to_case:
+    only a lost match becomes one): [(case id, its first row's time)]; [] with no copy or none there. Read
+    only: the copy is opened read only and never made here."""
+    import sqlite3
+    path = arena_path(db_path)
+    if path.is_symlink() or not path.is_file():
+        return []
+    try:
+        c = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+        try:
+            return [(r[0], float(r[1])) for r in c.execute(ARENA_CASES, (agent,))]
+        finally:
+            c.close()
+    except sqlite3.Error:  # no log table yet, or a copy being made: nothing to study
+        return []
+
+
+def run_arena(db_path, plug, *, models, agent_model, customer_model, calls, steps, until=None):
+    """Run reflection on the Sales agent's Arena losses (arena_losses): the study between rounds and its
+    eval gate (arena/rounds.py Between) on the Arena's copy, read from the oldest of those losses, then the
+    full exam before a lesson that passed is written to the live database at db_path. models: {"study",
+    "open", "exam"} (arena/run.py reflection_models; a test adds "examiner" and "full", as arena/run.py main
+    takes them); agent_model and customer_model: the Arena's, for the gate's rerun of past wins. Each call is
+    taken from calls. Returns Between's counts with "cases", the losses read, and "cards", the live ids of
+    the lessons written to the live database. Refused (ValueError) when the copy holds a lesson mined from
+    history rows (DECISIONS item 20)."""
+    from arena import rounds as rounds_mod, run as run_mod
+    from kit.db import Db
+    from reflection.lessons import Lessons as SalesLessons
+    losses = arena_losses(db_path, plug.agent)
+    models = dict(models)
+    full = models.pop("full", None if "examiner" in models else rounds_mod.full_examiner)
+    examiner = models.pop("examiner", functools.partial(rounds_mod.real_examiner, cap=rounds_mod.EXAM_CAP))
+    marked = {"study": steps.marking(models["study"], LESSON), "open": models["open"], "exam": models["exam"]}
+
+    def at_exam(make):  # each exam the gate makes marks EXAM when a lesson takes it
+        if make is None:
+            return None
+
+        def made(p, kept, model):
+            examine = make(p, kept, model)
+
+            def run_it(text, stages):
+                steps.mark(EXAM)
+                return examine(text, stages)
+            return run_it
+        return made
+    copy = Db(str(arena_path(db_path)))
+    live = []
+    try:
+        mined = run_mod.history_lessons(copy)
+        if mined:
+            raise ValueError("the Arena's copy holds lessons mined from history rows; every agent starts from zero "
+                             "(DECISIONS item 20)")
+        pool = rounds_mod.Pool(SalesLessons(copy), hotfixes=lambda: rounds_mod.live_hotfixes(str(db_path), plug.agent))
+        pool.refresh()  # the corrections sent on the live page, as before every Arena match
+
+        def live_lessons():  # opened at the first lesson that passes the gate, not before
+            live.append(Db(str(db_path)))
+            return SalesLessons(live[0])
+        until = time.time() if until is None else float(until)
+        between = rounds_mod.Between(copy, plug, calls=calls, state=run_mod.state_dir(db_path), pool=pool,
+                                     agent_model=agent_model, customer_model=customer_model, models=marked,
+                                     examiner=at_exam(examiner), live=live_lessons, full=at_exam(full),
+                                     now=lambda: until)
+        between.pending = [case for case, _ in losses]
+        if losses:
+            between.since = min(at for _, at in losses) - 1.0
+        out = between(0)
+    finally:
+        for d in [copy] + live:
+            d.close()
+    out["cases"] = len(losses)
+    out["cards"] = [one["live_id"] for one in out["lessons"] if one.get("live_id") is not None]
+    out["until"] = until
+    return out

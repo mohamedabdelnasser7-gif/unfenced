@@ -530,7 +530,25 @@ CSP = ("default-src 'none'; style-src 'sha256-" + base64.b64encode(hashlib.sha25
 
 STALE_PLAN = "Not rolled back: the lessons changed after the plan was shown. Look at the plan again."
 TRY_NOT_BUILT = "Try again is not built for this agent yet, so nothing was started."
-ARENA_NOT_HERE = "Run the Arena is for an agent made here, so nothing was started."
+ARENA_NOT_HERE = "Run the Arena is for the Sales agent or an agent made here, so nothing was started."
+ARENA_NO_DB = "Run the Arena for the Sales agent needs the database folder. Start the page with --db."
+# Run the Arena plays a short run unless Full run is pressed (DECISIONS 96): one round of SHORT_MATCHES practice
+# matches and a gate of one, at most SHORT_CALLS model calls. Measured: about 2 s a model call, and a quick Sales
+# run of 2 matches took 33 calls in 67 s, so about 16 calls a match; 3 practice matches and 1 test match is about
+# 66 calls, a little over 2 minutes. Its item says quick, so it never unlocks Connect (Morning.gate).
+SHORT_MATCHES = 3
+SHORT_CALLS = 120
+ARENA_SHORT_SAID = ("A short run: one round of a few practice matches, about two minutes. A short run never unlocks "
+                    "Connect.")
+ARENA_FULL_BUTTON = "Full run"
+ARENA_FULL_SAID = "Full run plays every round its level asks for and takes much longer. Only a full run can unlock Connect."
+# The next step under a newest Arena run that did not pass (next_step, DECISIONS 96): the owner's words.
+NEXT_REFLECT = "Run reflection to learn from these {n} lost chats."
+NEXT_REFLECT_ONE = "Run reflection to learn from this lost chat."
+NEXT_AGAIN = "Run the Arena again to see if it helped."
+NEXT_NO_GAIN = "Two runs without a gain. Send a correction on this page, or lower the risk level."
+NEXT_NO_LESSON = "Reflection found no lesson in these chats. Send a correction on this page, or lower the risk level."
+CORRECT_WORDS, LOWER_WORDS = "Send a correction on this page", ", or lower the risk level"
 LEVEL_NOT_HERE = "A risk level is for an agent made here, so nothing was changed."
 LEVEL_BAD = "Pick low, medium or high, please. Nothing was changed."
 NO_STUDY = "It plays one round: the study between rounds needs its model keys"
@@ -681,6 +699,7 @@ class Morning:
         self.arena_models = None
         self.arena_start = lambda work, name: threading.Thread(target=work, name=name, daemon=True).start()
         self.arena_shape = {}
+        self.arena_cards = None  # the Sales agent's cards folder (a test's); None: _sales_cards
         # the study between rounds' models (arena/practice.py study=): None takes arena/run.py
         # reflection_models when the models are real; a test hands a callable giving its fakes
         self.arena_reflection = None
@@ -908,29 +927,50 @@ class Morning:
         warn = practice.room_warning(folder)  # the 99 customer cap leaves too few new ones at its level
         return f"{NEW_TEST_SET} {warn}" if warn else NEW_TEST_SET
 
+    def _arena_dir(self, agent):
+        """Where the agent's Arena matches file is: the folder of an agent made here, the database's folder
+        for the Sales agent (arena/run.py state_dir), else None."""
+        folder = self.agent_folder(agent)
+        if folder is None and agent == SALES.agent and self.db_path is not None:
+            from arena import run as run_mod
+            return run_mod.state_dir(self.db_path)
+        return folder
+
     def arena_played(self, agent):
         """The practice matches the running Run the Arena played so far: the lines its matches file gained
-        since it started (arena/run.py MATCHES_FILE, in the agent's folder); 0 when none runs."""
+        since it started (arena/run.py MATCHES_FILE, in _arena_dir); 0 when none runs."""
         with self._arena_lock:
             start = self._arena_from.get(agent) if agent in self._arenas else None
         if start is None:
             return 0
-        return max(0, _lines(self.agent_folder(agent)) - start)
+        return max(0, _lines(self._arena_dir(agent)) - start)
 
-    def run_arena(self, agent, now=None):
-        """Run the Arena on an agent's page (arena/practice.py practise): a full practice run of an agent
-        made here against made-up customers, with its sample data, in a background thread, so the page
-        returns at once and its Arena tab polls the progress. Refused for any other agent (the Sales agent
-        runs through arena/run.py), when a run goes for the agent already, when the day's model call cap
-        has no room, with no model key, or while a night holds the night lock on this database (the
-        scheduled night or one run by hand; this page's own Run reflection of another agent does not stop
-        it). It takes no lock itself, so a night that starts after it runs beside it. Each lost match becomes
-        a case the night studies, as after Build (QuickStart._practise). Its item saves beside the database
-        and shows on the Arena tab."""
+    def run_arena(self, agent, now=None, full=False):
+        """Run the Arena on an agent's page, in a background thread, so the page returns at once and its Arena
+        tab polls the progress (DECISIONS 96). A short run unless full: one round of SHORT_MATCHES practice
+        matches and a gate of one, at most SHORT_CALLS model calls, its item marked quick so it never unlocks
+        Connect. full: the agent's full level shape, the only run whose sealed item can unlock Connect.
+
+        An agent made here practises with its sample data (arena/practice.py practise); each lost practice
+        match becomes a case in this database that its Run reflection studies (as after Build,
+        QuickStart._practise), and a full run studies between rounds. The Sales agent plays arena/run.py's
+        Arena on this page's database (run_mod.play with --db): it practises on the copy <db>.arena, its lost
+        chats become cases there, which its Run reflection studies (reflect_now.run_arena), and a full run
+        studies between rounds there; only a lesson that passed the gate is written to this database.
+
+        Refused for any other agent, for the Sales agent with no database folder, when a run goes for the
+        agent already or its Run reflection runs, when the day's model call cap has no room, with no model
+        key, or while a night holds the night lock on this database (the scheduled night or one run by hand;
+        this page's own Run reflection of another agent does not stop it). It takes no lock itself, so a
+        night that starts after it runs beside it. Its item saves beside the database and shows on the Arena
+        tab."""
         from arena import retry as retry_mod, run as run_mod
-        folder = self.agent_folder(agent)
-        if agent == SALES.agent or folder is None or folder.is_symlink() or not folder.is_dir():
+        sales = agent == SALES.agent and agent in self.plugs
+        folder = None if sales else self.agent_folder(agent)
+        if not sales and (folder is None or folder.is_symlink() or not folder.is_dir()):
             raise Refused(ARENA_NOT_HERE)
+        if sales and self.db_path is None:
+            raise Refused(ARENA_NO_DB)
         if not retry_mod.has_room(run_mod.state_dir(self.db_path)):
             raise Refused("The day's model call cap has no room left, so nothing was started. Run it again "
                           "tomorrow, Cairo time.")
@@ -943,6 +983,7 @@ class Morning:
         held = scheduler.live_holder(self.db, time.time())
         if held is not None and not reflect_now.ours(held) and not reflect_now.gone(held):
             raise Refused(ARENA_LOCKED)
+        where = self._arena_dir(agent)
         with self._arena_lock:
             if agent in self._arenas:
                 raise Refused("The Arena is running for this agent already. Its matches show here as it plays.")
@@ -951,12 +992,29 @@ class Morning:
             self._arenas.add(agent)
             self._arena_note.pop(agent, None)
             self._arena_record.pop(agent, None)
-            self._arena_from[agent] = _lines(folder)
+            self._arena_from[agent] = _lines(where)
         db_path, shape = self.db_path, dict(self.arena_shape)
+        short = {"quick": True, "matches": SHORT_MATCHES, "limit": SHORT_CALLS}
+
+        def sales_run():  # arena/run.py's Arena on this database's copy, as arena/run.py --db plays it
+            args = run_mod.parser().parse_args(["--db", str(db_path), "--cards", str(self._sales_cards())]
+                                               + ([] if full else ["--quick"]))
+            if not full:
+                args.matches, args.rounds = SHORT_MATCHES, 1
+            if self.arena_models is None:  # real models: arena/run.py makes them, and the night's between rounds
+                agent_model = customer_model = None
+            else:
+                agent_model, customer_model = self.arena_models()[:2]
+            reflection = None if self.arena_reflection is None else self.arena_reflection()
+            run_mod.play(args, agent_model=agent_model, customer_model=customer_model, reflection=reflection,
+                         limit=None if full else SHORT_CALLS)
 
         def work():  # the thread's work: never raises, a failure becomes the tab's one line
             note, db, record = None, None, None
             try:
+                if sales:
+                    sales_run()
+                    return
                 from arena import practice
                 if self.arena_models is None:
                     from kit import model as model_mod
@@ -973,7 +1031,9 @@ class Morning:
                     db = Db(db_path)  # its own connection: the page's answers keep theirs
                     learn = learn_built.learner(db, turn_mod.load(folder).plug)
                 study = None
-                if self.arena_reflection is not None:
+                if not full:  # the short run: one round, no study between rounds
+                    pass
+                elif self.arena_reflection is not None:
                     study = self.arena_reflection()
                 elif self.arena_models is None:  # real models: the night's study models, else one round
                     try:
@@ -984,7 +1044,7 @@ class Morning:
                 practice.practise(folder, agent_model=models[0], customer_model=models[1], judge_model=models[2],
                                   learn=learn, study=study if db is not None else None, db=db, live_path=db_path,
                                   # the off topic customer only with models made here, after the key check above
-                                  **{"off_topic": self.arena_models is None, **shape})
+                                  **{"off_topic": self.arena_models is None, **(shape if full else short)})
             except Exception as e:
                 try:
                     from arena.practice import Unrecorded
@@ -999,13 +1059,13 @@ class Morning:
                         db.close()
                     except Exception:
                         pass
-            with self._arena_lock:
-                self._arenas.discard(agent)
-                self._arena_from.pop(agent, None)
-                if note:
-                    self._arena_note[agent] = note
-                if record:
-                    self._arena_record[agent] = record
+                with self._arena_lock:
+                    self._arenas.discard(agent)
+                    self._arena_from.pop(agent, None)
+                    if note:
+                        self._arena_note[agent] = note
+                    if record:
+                        self._arena_record[agent] = record
         try:
             self.arena_start(work, f"arena-{agent}")
         except Exception:
@@ -1014,6 +1074,14 @@ class Morning:
                 self._arena_from.pop(agent, None)
             raise
         return ARENA_STARTED
+
+    def _sales_cards(self):
+        """The Sales agent's practice customers: arena_cards (a test's), else the cleaned real cards when this
+        install has them (arena/run.py DEFAULT_CARDS), else the made-up set (DEMO_CARDS)."""
+        from arena import run as run_mod
+        if self.arena_cards is not None:
+            return Path(self.arena_cards)
+        return run_mod.DEFAULT_CARDS if run_mod.DEFAULT_CARDS.is_dir() else run_mod.DEMO_CARDS
 
     def reflecting(self, agent):
         """Where the agent's running Run reflection is (reflect_now READ, LESSON or EXAM), or None."""
@@ -1041,12 +1109,57 @@ class Morning:
                     return NO_KEY
             except night_mod.Refused:
                 return NO_KEY
+        return None if self.lost_count(agent) else NO_LOST
+
+    def arena_losses(self, agent):
+        """The Sales agent's lost Arena chats its Run reflection studies, in the copy <db>.arena
+        (reflect_now.arena_losses); [] for any other agent or with no database folder."""
+        if agent != SALES.agent or self.db_path is None:
+            return []
+        from reflection import reflect_now
+        return reflect_now.arena_losses(self.db_path, agent)
+
+    def lost_count(self, agent, until=None):
+        """How many lost chats Run reflection would read for the agent: the Sales agent's Arena losses in its
+        copy while there are some (arena_losses), else the lost chats in this database's night window
+        (reflect_now.lost_chats)."""
+        n = len(self.arena_losses(agent))
+        if n:
+            return n
         from reflection import reflect_now
         try:
-            lost = reflect_now.lost_chats(self.db, self.plugs[agent])
+            return reflect_now.lost_chats(self.db, self.plugs[agent], until=until)
         except Exception:  # a database with no log yet: nothing lost
-            lost = 0
-        return None if lost else NO_LOST
+            return 0
+
+    def next_step(self, agent):
+        """The one next step under the agent's newest Arena run when that run did not pass its gate (DECISIONS
+        96), or None: {"kind", "n", "lower"}. kind "again": a Run reflection since that run wrote a lesson, so
+        Run the Arena again; "no_gain": that run and the one before both missed and its share of test matches
+        won is no higher, so a correction or a lower risk level; "no_lesson": a Run reflection since that run
+        found no lesson, the same way on; "reflect": n lost chats wait for Run reflection. lower: the agent has a
+        risk level to lower (an agent made here). The page knows a reflection only while it runs: after a
+        restart it starts again from "reflect"."""
+        run = self.read_arena()[0].get(agent)
+        if run is None or run.get("stopped") == "passed":
+            return None
+        lower = self.agent_folder(agent) is not None
+        with self._arena_lock:
+            done = self._reflected.get(agent)
+        since = done is not None and float(done.get("at") or 0) >= run["at"]
+        if since and done.get("cards"):
+            return {"kind": "again", "n": 0, "lower": lower}
+        before = run.get("before")
+
+        def share(r):
+            won, played = r.get("gate_won"), r.get("gate_played")
+            return (won or 0) / played if played else 0.0
+        if before is not None and before.get("stopped") != "passed" and share(run) <= share(before):
+            return {"kind": "no_gain", "n": 0, "lower": lower}
+        if since:
+            return {"kind": "no_lesson", "n": 0, "lower": lower}
+        n = self.lost_count(agent) if agent in self.plugs else 0
+        return {"kind": "reflect", "n": n, "lower": lower} if n else None
 
     def run_reflection(self, agent, now=None):
         """Run reflection on an agent's page (reflection/reflect_now.py, DECISIONS 92 and 93): that agent's
@@ -1056,7 +1169,10 @@ class Morning:
         when the day's model call cap has no room, with no lost chats, while a Run the Arena or a Run
         reflection goes for the agent, and while the night lock is held (the scheduled night or another
         Run reflection on this database). The lock is held until the run ends, so the scheduled night waits. A
-        holder left by a page stopped mid run (Ctrl+C) is taken over once its process is gone (reflect_now.gone)."""
+        holder left by a page stopped mid run (Ctrl+C) is taken over once its process is gone (reflect_now.gone).
+        While the Sales agent's Arena copy holds the chats it lost there (arena_losses), it studies those in the
+        copy instead (reflect_now.run_arena, DECISIONS 96): the gate between Arena rounds and the full exam, and
+        only a lesson that passes both is written to this database."""
         from arena import retry as retry_mod, run as run_mod
         from reflection import reflect_now, scheduler
         if not isinstance(agent, str) or agent not in self.plugs or agent not in self.lessons:
@@ -1072,7 +1188,8 @@ class Morning:
                 raise Refused(f"{NO_KEY} In the repo folder: {REPLAY}")
         if not retry_mod.has_room(run_mod.state_dir(self.db_path)):
             raise Refused(REFLECT_CAP)
-        if not reflect_now.lost_chats(self.db, self.plugs[agent], until=now):
+        arena = bool(self.arena_losses(agent))  # the Sales agent's Arena losses, studied in its copy
+        if not arena and not reflect_now.lost_chats(self.db, self.plugs[agent], until=now):
             raise Refused(NO_LOST)
         folder = self.agent_folder(agent)
         if folder is not None and (folder.is_symlink() or not folder.is_dir()):
@@ -1106,12 +1223,24 @@ class Morning:
             try:
                 models = self.reflection_models() if self.reflection_models is not None else run_mod.reflection_models()
                 calls = run_mod.Calls(run_mod.state_dir(db_path) / run_mod.CALLS_FILE, run_mod.DEFAULT_CAP)
-                rep, path = reflect_now.run(db, db_path, plug, folder=folder, models=models, calls=calls, steps=steps,
-                                            until=now)
-                done = {"file": path.name, "at": rep["window"]["until"], "lost": rep["decided"]["bad"],
-                        "read": rep["read"]["cases"], "candidates": len(rep["candidates"]),
-                        "cards": [c["lesson_id"] for c in rep["cards"] if c.get("lesson_id") is not None],
-                        "notes": list(rep["notes"]), "calls": rep.get("calls", 0)}
+                if arena:  # the Sales agent's Arena losses: studied in the copy, the gate before live
+                    if self.arena_models is not None:
+                        play = self.arena_models()[:2]
+                    else:
+                        from kit import model as model_mod
+                        play = (model_mod.Model(), model_mod.Model())
+                    got = reflect_now.run_arena(db_path, plug, models=models, agent_model=play[0],
+                                                customer_model=play[1], calls=calls, steps=steps, until=now)
+                    done = {"file": None, "at": got["until"], "lost": got["cases"], "read": got["cases"],
+                            "candidates": got["proposed"], "written": got["proposed"], "cards": got["cards"],
+                            "notes": list(got["notes"]), "calls": got["calls"], "arena": True}
+                else:
+                    rep, path = reflect_now.run(db, db_path, plug, folder=folder, models=models, calls=calls,
+                                                steps=steps, until=now)
+                    done = {"file": path.name, "at": rep["window"]["until"], "lost": rep["decided"]["bad"],
+                            "read": rep["read"]["cases"], "candidates": len(rep["candidates"]),
+                            "cards": [c["lesson_id"] for c in rep["cards"] if c.get("lesson_id") is not None],
+                            "notes": list(rep["notes"]), "calls": rep.get("calls", 0)}
             except Exception as e:
                 note = f"The last reflection could not finish ({' '.join(str(e).split())[:200] or type(e).__name__})."
             finally:
@@ -1959,6 +2088,7 @@ class Morning:
             agents.append({
                 "agent": agent, "buttons": agent in self.lessons, "night": k.newest.get(agent),
                 "arena": arena.get(agent), "mode_card": modes.get(agent),
+                "next": self.next_step(agent) if agent in arena else None,
                 "snapshot": self._snapshot(agent),
                 "new": [i for i in mine if i["added_at"] >= now - DAY],
                 "live": [i for i in mine if i["state"] in (KEPT, TRYING)],
@@ -2067,7 +2197,7 @@ class Morning:
         retry: the newest Try again item (arena/retry.py, kind arena_retry) of that run, for the screen
         only, as {file, at, results, stopped}, each result {card, result, why, text}; None when there is
         none. A retry item is never the agent's item, so it never counts for the gate."""
-        out, problems, retries = {}, [], {}
+        out, problems, retries, older = {}, [], {}, {}
         if self.reports is None or not self.reports.is_dir():
             return out, problems
         k = seal_mod.key(self.reports)  # read only: a page never makes the key
@@ -2095,6 +2225,15 @@ class Morning:
                              "turn": q.get("turn") if isinstance(q.get("turn"), int) else None,
                              "who": str(q.get("who") or ""), "text": str(q.get("text") or "")})
             seen = out.get(item["agent"])
+            if seen is not None and (item["at"], path.name) > (seen["at"], seen["file"]):
+                older[item["agent"]] = seen  # the run before the newest, for next_step
+            elif seen is not None:
+                prev = older.get(item["agent"])
+                if prev is None or (item["at"], path.name) > (prev["at"], prev["file"]):
+                    older[item["agent"]] = {"at": float(item["at"]), "file": path.name,
+                                            "gate_won": _count(item.get("gate_won")),
+                                            "gate_played": _count(item.get("gate_played")),
+                                            "stopped": item.get("stopped") if isinstance(item.get("stopped"), str) else None}
             if seen is None or (item["at"], path.name) > (seen["at"], seen["file"]):
                 out[item["agent"]] = {"file": path.name, "at": float(item["at"]), "line": item["line"], "lost": lost[:3],
                                       "rounds": _arena_rounds(item.get("reflection")), "kind": item["kind"],
@@ -2103,7 +2242,13 @@ class Morning:
                                       "needs": _count(item.get("needs")), "practice": item.get("practice") is True,
                                       "quick": item["quick"] if isinstance(item.get("quick"), bool) else None, "run": str(item.get("run")),
                                       "facts": item.get("fact_checks") is not False,
-                                      "sealed": seal_mod.holds(item, k), "retry": None, **_level_fields(item)}
+                                      "sealed": seal_mod.holds(item, k), "retry": None,
+                                      "stopped": item.get("stopped") if isinstance(item.get("stopped"), str) else None,
+                                      **_level_fields(item)}
+        for agent, got in out.items():  # the run before it: {at, file, gate_won, gate_played, stopped} or None
+            prev = older.get(agent)
+            got["before"] = None if prev is None else {k: prev.get(k) for k in ("at", "file", "gate_won", "gate_played",
+                                                                                 "stopped")}
         for agent, got in retries.items():  # only a retry of the run on screen; a newer run hides an older try
             if agent in out and got["retried"] == out[agent]["run"]:
                 out[agent]["retry"] = got
@@ -3007,6 +3152,7 @@ def _agent_html(a, token):
                 + "</li>" for x in stuck["lost"]) + "</ul>")
         if stuck.get("rounds"):
             out.append("<ul>" + "".join(f'<li class="meta">{h(x)}</li>' for x in stuck["rounds"]) + "</ul>")
+        out.append(next_step_html(a.get("next"), a["agent"]))
     snap = a["snapshot"]
     if snap is not None:
         back = f' To roll back to it: <code>{h(snap["command"])}</code>' if snap["command"] else ""
@@ -3833,6 +3979,30 @@ def _level_fields(item):
             "scores": [s for s in (_count(x) for x in scores[:20]) if s is not None],
             "blocks": blocks, "stopped": item["stopped"] if isinstance(item.get("stopped"), str) else None,
             "studied": item.get("studied") is True, "unjudged": _count(item.get("unjudged")) or 0}
+
+
+def next_step_html(step, agent):
+    """The next step line (Morning.next_step) in the owner's words, its correction and risk level words as
+    links to those controls on the agent's page: the correction box on its Overview, the risk level on its
+    Arena tab. An agent with no risk level (the Sales agent) gets the correction only. Empty for None."""
+    if not step:
+        return ""
+    kind = step.get("kind")
+    if kind == "reflect":
+        n = step.get("n") or 0
+        return f'<div class="nr next"><p>{h(NEXT_REFLECT_ONE if n == 1 else NEXT_REFLECT.format(n=n))}</p></div>'
+    if kind == "again":
+        return f'<div class="nr next"><p>{h(NEXT_AGAIN)}</p></div>'
+    line = {"no_gain": NEXT_NO_GAIN, "no_lesson": NEXT_NO_LESSON}.get(kind)
+    if line is None:
+        return ""
+    page = f"/agents/{urllib.parse.quote(str(agent), safe='')}"
+    text = h(line if step.get("lower") else line.replace(LOWER_WORDS, ""))
+    text = text.replace(h(CORRECT_WORDS), f'<a href="{h(page)}#say">{h(CORRECT_WORDS)}</a>', 1)
+    if step.get("lower"):
+        words = LOWER_WORDS[len(", or "):]
+        text = text.replace(h(words), f'<a href="{h(page)}?tab=arena#lv-h">{h(words)}</a>', 1)
+    return f'<div class="nr next"><p>{text}</p></div>'
 
 
 def _arena_rounds(rows):

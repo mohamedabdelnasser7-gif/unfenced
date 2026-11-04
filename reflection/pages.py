@@ -236,7 +236,8 @@ class Pages:
                         "/console/correct": lambda m, f, now=None: m.correct(mo._field(f, "agent"), mo._field(f, "line"),
                                                                              now=now, by=console_mod.OPERATOR),
                         # Run the Arena on an agent's page (Morning.run_arena), refused while it builds
-                        ARENA_PATH: lambda m, f, now=None: self._arena(m, mo._field(f, "agent"), now),
+                        ARENA_PATH: lambda m, f, now=None: self._arena(m, mo._field(f, "agent"), now,
+                                                                        full=mo._field(f, "full") == "yes"),
                         # Run reflection beside it (Morning.run_reflection), with the same refusals
                         REFLECT_PATH: lambda m, f, now=None: self._reflect(m, mo._field(f, "agent"), now)}
 
@@ -362,7 +363,7 @@ class Pages:
         except Exception as e:
             run.join_note = f"It could not join this page ({e}). Restart the page to see it."
 
-    def _arena(self, m, agent, now):
+    def _arena(self, m, agent, now, full=False):
         """Run the Arena (Morning.run_arena), refused while a build on this page may be writing the agent
         and while the short practice Build started for it still runs."""
         run = self.run
@@ -372,7 +373,7 @@ class Pages:
             raise mo.Refused("Its first short practice is still running. Run the Arena once it ends.")
         if not hasattr(m, "run_arena"):
             raise mo.Refused(mo.ARENA_NOT_HERE)
-        return m.run_arena(agent, now=now)
+        return m.run_arena(agent, now=now, full=full)
 
     def _reflect(self, m, agent, now):
         """Run reflection (Morning.run_reflection), refused as Run the Arena is: while a build on this page
@@ -974,7 +975,7 @@ def overview_tab(m, view, a, agent, st, ctx):
         left.append(f'<section class="grp sq" aria-labelledby="rf-h"{reflect_live(m, agent)}><h3 id="rf-h">'
                     f'Reflection</h3>{learn}</section>')
     if tok:
-        left.append(f'<section class="say sq" aria-label="Send an idea or a correction"><form method="post" action="/correct">'
+        left.append(f'<section class="say sq" id="say" aria-label="Send an idea or a correction"><form method="post" action="/correct">'
                     f'{_hidden(ctx, agent=agent)}<span class="lab">Send an idea or a correction</span><div class="box">'
                     f'<textarea name="line" aria-label="Your idea or correction" maxlength="{mo.MAX_LEN}" dir="auto" required>'
                     f'</textarea></div><div class="say-f"><p class="quiet">{icon("loop")}{SAY_NOTE}</p><button class="send" type="submit">Send{icon("arrow")}</button></div></form></section>')
@@ -999,6 +1000,8 @@ def arena_tab(m, view, a, agent, st, ctx):
     live = arena_live(m, agent) if go else ""
     learn = run_reflection(m, a, agent, c, c["path"] + c["q"])
     learn = f'<div{reflect_live(m, agent)}>{learn}</div>' if learn else ""  # beside Run the Arena
+    if agent in m.plugs and hasattr(m, "next_step"):  # the one next step under a run that did not pass (decision 96)
+        learn += mo.next_step_html(m.next_step(agent), agent)
     level = level_card(m, agent, m.read_arena()[0].get(agent), c, c["path"] + c["q"])
     return (f'<div class="qs"{live}><div class="ar"><section class="ar-l" aria-labelledby="m-h"><div class="sec-h"><h2 id="m-h">Practice '
             f'matches</h2><small>Where it slipped</small></div><div class="tiles">{tiles}</div>{retry}{go}{learn}</section>'
@@ -1060,7 +1063,7 @@ def level_card(m, agent, run, ctx, back):
 
 
 ARENA_PATH = "/arena/run"
-ARENA_SAID = "Plays its practice matches against made-up customers, with its sample data. A few minutes."
+ARENA_SAID = "Plays its practice matches against made-up customers, with its sample data."
 
 
 def arena_live(m, agent):
@@ -1069,10 +1072,14 @@ def arena_live(m, agent):
 
 
 def run_arena(m, agent, ctx, back):
-    """Run the Arena (Morning.run_arena) for an agent made here: the button while no run goes and the page
-    has a token, how many matches it played while one runs, and a line when the last one could not finish.
-    Empty for any other agent (the Sales agent has Try again)."""
-    if not hasattr(m, "run_arena") or m.agent_folder(agent) is None:
+    """Run the Arena (Morning.run_arena) for an agent made here or the Sales agent with the database folder:
+    the short run's button and Full run beside it, each with its line, while no run goes and the page has a
+    token; how many matches it played while one runs; and a line when the last one could not finish. Empty for
+    any other agent."""
+    if not hasattr(m, "run_arena"):
+        return ""
+    sales = agent == mo.SALES.agent and agent in m.plugs and getattr(m, "db_path", None) is not None
+    if m.agent_folder(agent) is None and not sales:
         return ""
     if m.arena_running(agent):
         n = m.arena_played(agent)
@@ -1086,8 +1093,11 @@ def run_arena(m, agent, ctx, back):
     if note and ctx["token"] and getattr(m, "arena_record", lambda a: None)(agent):  # torn or gone: the one step
         out.append(_post(ctx, mo.NEW_TEST_PATH[1:], "Start a new test set", "yes", agent=agent, back=back))
     if ctx["token"]:
-        out.append(f'<p class="quiet">{ARENA_SAID}</p>'
-                   + _post(ctx, ARENA_PATH[1:], f'{icon("flask")}Run the Arena', "yes", agent=agent, back=back))
+        out.append(("" if sales else f'<p class="quiet">{ARENA_SAID}</p>')  # the Sales agent has no sample data
+                   + _post(ctx, ARENA_PATH[1:], f'{icon("flask")}Run the Arena', "yes", agent=agent, back=back)
+                   + f'<p class="quiet">{h(mo.ARENA_SHORT_SAID)}</p>'
+                   + _post(ctx, ARENA_PATH[1:], h(mo.ARENA_FULL_BUTTON), "gb", agent=agent, back=back, full="yes")
+                   + f'<p class="quiet">{h(mo.ARENA_FULL_SAID)}</p>')
     return f'<div class="act">{"".join(out)}</div>' if out else ""
 
 
@@ -1132,6 +1142,9 @@ def reflect_result(a, done):
     else:
         if not done["lost"]:
             why = mo.NO_LOST
+        elif done.get("written"):  # the Sales agent's Arena losses: lessons written in its copy, none passed the gate
+            why = (f'It wrote {_plural(done["written"], "lesson")} from them; none passed the exam, so none reaches a '
+                   "real customer.")
         elif not done["candidates"]:
             why = f'It found no lesson in {_plural(done["lost"], "lost chat")}.'
         else:

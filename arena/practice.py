@@ -1120,9 +1120,11 @@ def shared_cards(folder, plug):
 
 def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=None, rounds=None, cards=None,
              trust=None, cap=None, seed=0, quick=False, learn=None, gate=None, level=None, study=None, db=None,
-             live_path=None, customers=None, gate_size=None, off_topic=False):
+             live_path=None, customers=None, gate_size=None, off_topic=False, limit=None):
     """One practice run of the agent in agent_folder: the report (arena/run.py Arena run). quick: the
-    --quick shape (one training match, a gate of one, at most QUICK_CALLS model calls). learn: handed
+    --quick shape (one training match, a gate of one, at most QUICK_CALLS model calls); with matches given,
+    that many training matches in its one round, and limit (when given) in place of QUICK_CALLS: the page's
+    short run (reflection/morning.py run_arena). learn: handed
     each lost training match (Practice). level: the risk level (arena/levels.py), else the one in the
     agent's level.json; it sets the gate (its size, the wins it needs, no failed safety check at high)
     and, unless given, the rounds, the matches a round and the call cap (1,500 for a high run only).
@@ -1144,6 +1146,7 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
     folder = Path(agent_folder).expanduser().resolve()
     level = level if levels.valid(level) else levels.read(folder)
     shape = levels.shape(level)
+    given = matches  # the short run's training matches, kept through quick below
     matches = shape["matches"] if matches is None else matches
     studies = study is not None and db is not None and not quick
     if rounds is None:  # more rounds only help with study between them
@@ -1154,7 +1157,7 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
         customers = shape["customers"] if customers is None else customers
         gate_size = shape["gate"] if gate_size is None else gate_size
     if quick:
-        matches, rounds = 1, 1
+        matches, rounds = given or 1, 1
     reports = reports_of(folder)
     for where in (folder, reports):
         if paths.inside_repo(where) and not paths.within(where, paths.DATA):
@@ -1163,7 +1166,7 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
     agent = turn_mod.load(folder)
     if agent.name == run.AGENT:
         raise run.Refused("the Sales agent practises through arena/run.py")
-    calls = run.Calls(reports / run.CALLS_FILE, cap, limit=run.QUICK_CALLS if quick else None)
+    calls = run.Calls(reports / run.CALLS_FILE, cap, limit=(limit or run.QUICK_CALLS) if quick else None)
     held, base = None, customers  # base: the shape's customers, before any top up
     if gate_size is not None:  # the saved test set, read before any model call
         _whole(gate_size)
@@ -1303,7 +1306,7 @@ def main(argv=None, *, agent_model=None, customer_model=None, judge_model=None):
         judge_model = judge_model or model_mod.Model()
     try:
         rep = practise(args.agent, agent_model=agent_model, customer_model=customer_model, judge_model=judge_model,
-                       matches=args.matches, rounds=args.rounds, cards=args.cards, trust=args.trust, cap=args.cap,
+                       matches=None if args.quick else args.matches, rounds=args.rounds, cards=args.cards, trust=args.trust, cap=args.cap,
                        seed=args.seed, quick=args.quick, gate=gate, level=args.level, off_topic=made)
     except NOT_RUN as e:
         print(f"Not run: {e}", file=sys.stderr)

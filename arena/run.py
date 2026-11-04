@@ -657,7 +657,9 @@ class Arena:
             rep["error"] = self.error
         if stopped == STUCK:
             rep["stuck"] = self.stuck_item(rounds)
-        elif rounds and (stopped == PASSED or any("reflection" in r for r in rounds)):  # a round one pass unlocks Connect too
+        elif rounds and (stopped == PASSED or self.quick or any("reflection" in r for r in rounds)):
+            # a round one pass unlocks Connect too; a short run (quick) always saves its item, so the page shows
+            # its losses and the next step, and never unlocks Connect with it (Morning.gate reads quick)
             rep["item"] = self.rounds_item(rounds, stopped)
         return rep
 
@@ -1032,9 +1034,8 @@ def quick_notes(plug, calls, model):
     return notes_mod.RunNotes(plug, fast_mod.Writer(model=calls.model(model)), never=fast_mod.NEVER, known=known)
 
 
-def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
-    """reflection: for tests, the models of the step between rounds ({"study", "open", "exam"}) and
-    optionally "examiner" (arena/rounds.py Between); a real run makes them (reflection_models)."""
+def parser():
+    """The command line's options (main), which the Morning page's Run the Arena parses too."""
     ap = argparse.ArgumentParser(prog="arena/run.py", description="The Arena: persona matches and the gate.")
     ap.add_argument("--cards", default=str(DEFAULT_CARDS), help="a folder of card files: plain files, no links")
     ap.add_argument("--matches", type=int, default=10, help="training matches a round")
@@ -1053,7 +1054,13 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--quick", action="store_true", help="a short run for judges: one training match, a gate of one"
                     f" match, at most {QUICK_CALLS} model calls")
-    args = ap.parse_args(argv)
+    return ap
+
+
+def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
+    """reflection: for tests, the models of the step between rounds ({"study", "open", "exam"}) and
+    optionally "examiner" (arena/rounds.py Between); a real run makes them (reflection_models)."""
+    args = parser().parse_args(argv)
     if args.quick:
         args.matches, args.rounds = 1, 1
         if not (args.db or args.state):
@@ -1064,6 +1071,21 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
         if not model_mod.has_key():
             print(model_mod.NO_KEY_LINE, file=sys.stderr)
             return 2
+    try:
+        rep = play(args, agent_model=agent_model, customer_model=customer_model, reflection=reflection)
+    except (Refused, hist.Refused, match_mod.PromptRefused, OSError, ValueError, OverflowError, RecursionError) as e:
+        print(f"Not run: {e}", file=sys.stderr)
+        return 2
+    print(json.dumps(rep, ensure_ascii=False, indent=1) if args.json else text(rep))
+    return 0 if rep["stopped"] == PASSED else 1
+
+
+def play(args, *, agent_model=None, customer_model=None, reflection=None, limit=None):
+    """One Arena run from parsed options (parser): the report, or Refused (or an error main names). The command
+    line (main) and the Morning page's Run the Arena (reflection/morning.py run_arena) both run it. A real run
+    makes its models here (agent_model or customer_model None), after the caller checked the key. limit: at
+    most this many model calls in this run, on top of the day's cap (the page's short run); --quick's own
+    QUICK_CALLS otherwise."""
     db, live = None, []
     try:
         cards = load_cards(args.cards)
@@ -1082,7 +1104,7 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
         if paths.inside_repo(state) and not paths.within(state, paths.DATA):
             raise Refused("the Arena's files would sit inside the repo, where real chat lines and the trust level"
                           " could be committed; keep --db or --state outside it or under data/ (DECISIONS item 17)")
-        calls = Calls(state / CALLS_FILE, args.cap, limit=QUICK_CALLS if args.quick else None)
+        calls = Calls(state / CALLS_FILE, args.cap, limit=limit or (QUICK_CALLS if args.quick else None))
         from arena import grow
         from reflection import shared as shared_mod  # with a database, its install's shared pool (item 83)
         practice = grow.for_state(state, AGENT, shared_root=shared_mod.root_for(args.db) if args.db else None)
@@ -1099,6 +1121,7 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
                 raise Refused("the step between rounds needs its models: give reflection with the agent's models")
         judge_model = None
         if made:
+            from kit import model as model_mod
             agent_model = agent_model or model_mod.Model()
             customer_model = customer_model or model_mod.Model()
             judge_model = model_mod.Model()  # the off topic match's judge (arena/scope.py), only with a key
@@ -1158,15 +1181,11 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
         if practice.changed:
             practice.save()
         rep["pool"] = practice.summary()
-    except (Refused, hist.Refused, match_mod.PromptRefused, OSError, ValueError, OverflowError, RecursionError) as e:
-        print(f"Not run: {e}", file=sys.stderr)
-        return 2
     finally:
         for d in [db] + live:
             if d is not None:
                 d.close()
-    print(json.dumps(rep, ensure_ascii=False, indent=1) if args.json else text(rep))
-    return 0 if rep["stopped"] == PASSED else 1
+    return rep
 
 
 if __name__ == "__main__":

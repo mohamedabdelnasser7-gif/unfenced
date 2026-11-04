@@ -323,6 +323,9 @@ class Between:
         self.pending = []
         self.live, self._live = live, None
         self.scoped = None  # the exam made for this round (its source names a rewrite's earlier fails)
+        # where the study's read starts: None, the days before now as a round reads them; Run reflection on the
+        # Sales agent's page sets the oldest row of the Arena's losses (reflection/reflect_now.py run_arena)
+        self.since = None
 
     def learn(self, match, judged, match_id):
         """A lost training match as a case (arena/learn.py), kept for the study after its round."""
@@ -374,7 +377,7 @@ class Between:
                                   ideas=parts.Ideas(model=study_m))
         study.log = _Only(study.log, ids)
         until = float(self.now())
-        rep = study.run(until - (read_days(self.plug) + 2) * DAY, until, now=until)
+        rep = study.run(self._since(until), until, now=until)
         out["notes"] += rep["notes"]
         for card in rep["cards"]:
             out["lessons"].append(self._gate(lessons, examiner, card["lesson_id"], until))
@@ -404,7 +407,7 @@ class Between:
         as any lesson that passes; one that still fails stays out, as does a lesson whose exam
         could not run. Each try is named in out["rewrites"] as {of, try, lesson_id, idea, passed,
         why}, and each rewritten lesson is in out["lessons"] with "rewrite_of"."""
-        since = until - (read_days(self.plug) + 2) * DAY
+        since = self._since(until)
         rewrites = []
         for first in list(out["lessons"]):
             if first["passed"] or not _broke_something(lessons.exam_of(first["lesson_id"])):
@@ -433,6 +436,10 @@ class Between:
                 chain.append(got["lesson_id"])
         if rewrites:
             out["rewrites"] = rewrites
+
+    def _since(self, until):
+        """Where the study reads from: since when set, else the days a round reads before until."""
+        return float(self.since) if self.since is not None else until - (read_days(self.plug) + 2) * DAY
 
     def _source(self, lessons, chain):
         """Point a scoped exam at the situations the earlier tries in chain failed (none for ())."""

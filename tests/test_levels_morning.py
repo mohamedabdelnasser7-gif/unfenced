@@ -185,7 +185,7 @@ class RunTheArenaStudies(Page):
         world = Climb((self.folder / "instructions.md").read_text(encoding="utf-8"), [[FIRST]])
         self.m.arena_models = lambda: (world, world, world)
         self.m.arena_reflection = lambda: {"study": world, "open": world, "exam": world, "examiner": Exams()}
-        self.m.run_arena("stock_watch")
+        self.m.run_arena("stock_watch", full=True)
         self.starts[0][0]()
         got = self.m.read_arena()[0]["stock_watch"]
         self.assertEqual((got["studied"], got["scores"]), (True, [0, 5]))
@@ -194,7 +194,7 @@ class RunTheArenaStudies(Page):
 
     def test_test_fakes_with_no_study_play_one_round(self):
         self.m.arena_models = lambda: (World(), World(), World())
-        self.m.run_arena("stock_watch")
+        self.m.run_arena("stock_watch", full=True)
         self.starts[0][0]()
         got = self.m.read_arena()[0]["stock_watch"]
         self.assertEqual((got["studied"], len(got["scores"])), (False, 1))

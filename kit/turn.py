@@ -150,12 +150,15 @@ INVISIBLE = "\u115f\u1160\u3164\uffa0\u2800"
 
 
 def _unmarked(v):
-    return "".join(ch for ch in v if ch in JOINERS or unicodedata.category(ch) != "Cf")
+    """v in its NFKC form (fullwidth, bold and presentation forms as plain letters), with every format mark but
+    the two joiners and every letter that shows nothing (INVISIBLE) taken out (red team scopeguard2 r3, item 8)."""
+    return "".join(ch for ch in unicodedata.normalize("NFKC", v)
+                   if ch in JOINERS or (unicodedata.category(ch) != "Cf" and ch not in INVISIBLE))
 
 
 def _line(v, what):
     v = _unmarked(v) if isinstance(v, str) else v
-    if not isinstance(v, str) or not v.strip():
+    if not isinstance(v, str) or not "".join(ch for ch in v if ch not in JOINERS).strip():  # nothing that shows
         raise Refused(f"card.json {what}: one plain line")
     if len(v) > MAX_CARD_LINE:
         raise Refused(f"card.json {what}: at most {MAX_CARD_LINE} characters")

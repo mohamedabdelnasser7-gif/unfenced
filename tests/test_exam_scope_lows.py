@@ -1,9 +1,11 @@
 """The exam's scope checks after review and red team scopeguard2 r3, the lows: how a reply's letters are read
 (accents, letters that show nothing, look alikes), the word lists of situations 51 and 53, and the checks no
 test held before. The checks are read straight on the situations, no model."""
+import json
 import unittest
 
 from reflection import PLUG
+from kit import turn
 from reflection import exam
 
 SITS = exam.situations(PLUG)
@@ -162,6 +164,39 @@ class MoreListWords(unittest.TestCase):
                         (CHEF, "Mesh ha2dar, ana bas fel store. 3ayez gazma?")):
             with self.subTest(text=text):
                 self.assertEqual(off(s, text), "")
+
+
+def card(**lines):
+    base = {"name": "Tutor", "does": "tutors science", "good": "the student understands", "never": [], "needs": [],
+            "case": {"input": "a question", "starts": "person", "output": "an answer", "ends": "when done"}}
+    base.update(lines)
+    return turn.read_card(json.dumps(base))
+
+
+class CardLines(unittest.TestCase):
+    """Red team scopeguard2 r3, item 8: a card line is read in its NFKC form, with the letters that show nothing
+    taken out as the format marks are, and a line with nothing left that shows is refused; the two joiners stay."""
+
+    def test_fillers_and_the_braille_blank_are_taken_out(self):
+        for sep in ("\u1160", "\u115f", "\u3164", "\uffa0", "\u2800"):
+            with self.subTest(sep=sep):
+                got = card(does=f"tutors sci{sep}ence{sep} now", good=f"the{sep}student understands")
+                self.assertEqual((got["does"], got["good"]), ("tutors science now", "thestudent understands"))
+
+    def test_compatibility_forms_read_plain(self):
+        got = card(does="tutors \uff53\uff43\uff49\uff45\uff4e\uff43\uff45 and \U0001d41b\U0001d428\U0001d428\U0001d424\U0001d42c")
+        self.assertEqual(got["does"], "tutors science and books")
+        self.assertEqual(card(does="\ufe97\ufecc\ufeae\ufef4\ufeb2")["does"], "\u062a\u0639\u0631\u064a\u0633")
+
+    def test_a_line_that_shows_nothing_is_refused(self):
+        for line in ("\u3164\u3164\u3164", "\u2800 \u2800", "\u200b\u3164", "\u200c\u200d", " \uffa0 "):
+            with self.subTest(line=line):
+                with self.assertRaises(turn.Refused):
+                    card(does=line)
+
+    def test_the_joiners_stay(self):
+        self.assertEqual(card(good="the family \U0001f468\u200d\U0001f469 understands \u0645\u200c\u0646")["good"],
+                         "the family \U0001f468\u200d\U0001f469 understands \u0645\u200c\u0646")
 
 
 if __name__ == "__main__":

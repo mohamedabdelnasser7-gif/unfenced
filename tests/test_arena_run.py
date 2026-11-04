@@ -77,7 +77,7 @@ class Loop(Base):
     def test_stuck_after_two_rounds_with_no_gain_writes_the_morning_item(self):
         cases = []
         cards = [card(1, "price"), card(2, "price")]
-        a = self.arena(cards, Customer(), matches=2, held_out=["persona-02"],
+        a = self.arena(cards, Customer(), matches=2, held_out=["persona-02"], rounds=4,  # the old shape: two gated rounds with no gain make it stuck (decision 113 plays 2 by default)
                        learn=lambda m, j, mid: cases.append(m["card"]) or mid)
         rep = a.run()
         self.assertEqual(rep["stopped"], run.STUCK)
@@ -91,8 +91,12 @@ class Loop(Base):
     def test_between_runs_before_each_later_round(self):
         seen = []
         self.arena([card(1, "price"), card(2, "price")], Customer(), matches=1, held_out=["persona-02"],
-                   between=seen.append).run()
+                   between=seen.append, rounds=3).run()
         self.assertEqual(seen, [1, 2])
+        seen.clear()  # the default 2 rounds (decision 113): one study, before the practice only round
+        self.arena([card(1, "price"), card(2, "price")], Customer(), matches=1, held_out=["persona-02"],
+                   between=seen.append).run()
+        self.assertEqual(seen, [1])
 
     def test_cap_stops_and_the_count_is_saved(self):
         rep = self.arena([card(1, "size"), card(2, "size")], Customer(), matches=5, cap=7).run()
@@ -291,7 +295,7 @@ class Parts(Base):
         self.assertEqual(code, 1)
         rep = json.loads(printed.getvalue())
         self.assertEqual(rep["stopped"], run.ROUNDS)
-        self.assertEqual(rep["calls"]["cap"], 1000)  # the default a day, raised from 300 (DECISIONS item 33)
+        self.assertEqual(rep["calls"]["cap"], 3000)  # the default a day: 300, then 1000 (item 33), then 3000 (113)
         self.assertTrue((out / run.CALLS_FILE).is_file())
 
     def test_cli_keeps_the_arena_files_next_to_the_database(self):
@@ -466,7 +470,8 @@ class MorningItem(Base):
         SalesLessons(db)
         page = morning.Morning(db, [PLUG], reports=self.dir)
         self.assertEqual(page.view(1_790_000_000.0)["agents"], [])  # no item, no Arena part
-        rep = self.arena([card(1, "price"), card(2, "price")], Customer(), matches=1, held_out=["persona-02"]).run()
+        rep = self.arena([card(1, "price"), card(2, "price")], Customer(), matches=1, held_out=["persona-02"],
+                         rounds=4).run()  # the old shape: two gated rounds with no gain make it stuck (decision 113 plays 2 by default)
         older = dict(json.loads((self.dir / rep["stuck"]["file"]).read_text(encoding="utf-8")),
                      at=1.0, run="old", line="old line")
         (self.dir / "arena-sales-old.json").write_text(json.dumps(older), encoding="utf-8")

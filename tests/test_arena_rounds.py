@@ -221,7 +221,7 @@ class Between(Base):
         html = morning.render(view, token=None)
         self.assertIn("Round 1: gate 0 of 1 won; then Reflection on 2 lost matches: lessons proposed 2, passed 1, "
                       "refused 1, handed to the next round 1; eval gate fixed 1, broke 0.", html)
-        self.assertIn("Round 2: gate 0 of 1 won.", html)
+        self.assertIn("Round 2: practice 0 of 2 won, no gate.", html)  # the practice only round (decision 113)
 
     def test_every_call_of_the_night_study_counts_against_the_arena_cap(self):
         db = self.db()
@@ -346,8 +346,11 @@ class Between(Base):
         self.assertEqual(len(rep["rounds"]), 2)
         self.assertFalse(any("reflection" in r for r in rep["rounds"]))
         self.assertEqual((self.night.calls, self.exam_model.calls), (0, 0))
-        self.assertNotIn("item", rep)
-        self.assertFalse(list(state.glob("arena-sales-*.json")))
+        # decision 113: a run that played its practice only round and missed saves its item, so the page shows
+        # its losses, with no study in it
+        self.assertTrue(rep["rounds"][1].get("practice_only"))
+        self.assertEqual([r["reflection"] for r in rep["item"]["reflection"]], [None, None])
+        self.assertEqual(len(list(state.glob("arena-sales-*.json"))), 1)
 
     def test_one_round_with_a_db_has_no_step_between(self):
         db = self.db()

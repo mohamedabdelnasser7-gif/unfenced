@@ -43,7 +43,7 @@ class UnreadableJudge(tap.Base):
         code, rep = self.main("--matches", "4", "--json", world=world)
         self.assertEqual((code, rep["stopped"]), (1, run.MODEL_ERROR))
         self.assertIn("3 matches in a row", rep["error"])
-        self.assertEqual(world.calls["judge"], 6)  # each match asked twice
+        self.assertEqual(world.calls["judge"], 8)  # each match asked twice: the 4 play as one group (10 at a time)
         self.assertEqual(self.matches(), [])
 
 

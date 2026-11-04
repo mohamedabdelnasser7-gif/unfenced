@@ -152,7 +152,7 @@ def record_arena(agent_model, customer_model, *, scripted, cards_dir=run_mod.DEF
     trace = []
     cards = run_mod.load_cards(cards_dir)
     with tempfile.TemporaryDirectory() as tmp:
-        calls = run_mod.Calls(Path(tmp) / run_mod.CALLS_FILE, run_mod.DEFAULT_CAP, limit=run_mod.QUICK_CALLS)
+        calls = run_mod.Calls(Path(tmp) / run_mod.CALLS_FILE, limit=run_mod.QUICK_CALLS)
         arena = run_mod.Arena(cards, agent_model=Traced(agent_model, "agent", trace),
                               customer_model=Traced(customer_model, "customer", trace), calls=calls,
                               trust=dict(run_mod.QUICK_TRUST), matches=1, rounds=1, state=tmp)

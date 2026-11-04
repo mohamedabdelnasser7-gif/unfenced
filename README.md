@@ -91,7 +91,7 @@ A new agent never learns on real people first. The Arena is self play between Me
 - **It gets harder.** A practice customer who beats the agent comes back more often, and new ones grow from real losses. One match each round is an off-topic customer, written from the agent's card; with no key it is skipped, never faked.
 - **No repeated mistakes in a run.** After each lost match a short note tells the agent to try something new for the rest of the run, and between rounds the run studies its losses and plays on with the lessons that passed.
 
-A Quick start agent's run takes up to 2 rounds of 10 practice and 10 gate matches, or 3 rounds with 20 gate matches when the job is high risk.
+A run plays at most 30 matches: 10 practice matches, then the gate (10 matches, or 20 when a Quick start job is high risk). A gate that reaches the level passes at once. If it misses, the agent studies its losses, plays 10 more practice matches with what it learned, and passes on its average when it won at least 21 of the 30 (7 of 10) and no match broke a never line. Up to 10 matches play at once, set by UNFENCED_ARENA_PARALLEL. Stop ends a run before its next matches, and a stopped run never passes. Model calls are capped at 3,000 a day, set by UNFENCED_DAILY_CALLS in .env.
 
 Code: `arena/run.py`, `arena/match.py`, `arena/verdict.py`, `arena/factcheck.py`, `arena/close.py`, `arena/personas.py`, `arena/clean.py`, `arena/grow.py`.
 

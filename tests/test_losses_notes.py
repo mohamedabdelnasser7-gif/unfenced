@@ -138,7 +138,9 @@ class BuiltAgentRun(StudyBase):
         def play(agent, card, **kw):
             self.handed.append((str(kw.get("seed")), kw.get("fast")))
             return real(agent, card, **kw)
-        with mock.patch.object(practice, "play", play):
+        # groups of 3, so a later group plays with the notes of the one before (at the default 10 a round of 10
+        # practice matches is one group and its notes reach no match of it)
+        with mock.patch.object(practice, "play", play), mock.patch.object(run, "PARALLEL", 3):
             rep = practice.practise(folder, agent_model=world, customer_model=world, judge_model=world, study=study,
                                     db=db)
         self.assertEqual(study, given)  # the caller's models are left as given

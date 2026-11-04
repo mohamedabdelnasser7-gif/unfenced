@@ -186,7 +186,7 @@ def day_cap_reached(home):
     path = Path(home) / arena_run.CALLS_FILE
 
     def capped():
-        calls = arena_run.Calls(path, arena_run.DEFAULT_CAP)
+        calls = arena_run.Calls(path)
         return calls.problem is not None or calls.count >= calls.cap
     return capped
 
@@ -441,7 +441,7 @@ def new_mode(db_path, state):
     from arena import run as arena_run
     from assistant import arena as assistant_arena
     from assistant import newmode
-    calls = arena_run.Calls(Path(state) / arena_run.CALLS_FILE, arena_run.DEFAULT_CAP)
+    calls = arena_run.Calls(Path(state) / arena_run.CALLS_FILE)
     made = []
 
     def play(day, added):
@@ -791,7 +791,7 @@ def _studied(args, plug, folder, state, until):
         from reflection import shared as shared_mod  # the shared pool of this kind across owners (item 83)
         home = folder if folder is not None else Path(args.db).expanduser().resolve().parent  # as grow.night
         from arena import run as arena_run  # the writer counts on the Arena's day cap, as in grow.night
-        calls = arena_run.Calls(home / arena_run.CALLS_FILE, arena_run.DEFAULT_CAP)
+        calls = arena_run.Calls(home / arena_run.CALLS_FILE)
         writer = shared_mod.Writer(model=calls.model(model_mod.Model(timeout=parts.TIMEOUT, route=model_mod.OPEN)))
         try:  # an owner id or shared folder that cannot be read leaves the pool out, not the night
             link, left_out = shared_mod.Link.for_agent(plug, home, writer, shared_mod.root_for(args.db), db=args.db), None

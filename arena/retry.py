@@ -65,7 +65,7 @@ def saved_lost(state, run, cards):
     return out
 
 
-def has_room(state, cap=run_mod.DEFAULT_CAP):
+def has_room(state, cap=None):
     """Does the day's call count in state have room for one more model call? A count file that
     cannot be read has none (Calls fails closed)."""
     calls = run_mod.Calls(Path(state) / run_mod.CALLS_FILE, cap)
@@ -73,7 +73,7 @@ def has_room(state, cap=run_mod.DEFAULT_CAP):
 
 
 def retry(*, agent, run, cards, state, reports, pool, agent_model, customer_model, facts=True,
-          cap=run_mod.DEFAULT_CAP, now=time.time, built=None, judge_model=None):
+          cap=None, now=time.time, built=None, judge_model=None):
     """Play each card's lost match of run again and write the arena_retry item. pool: the lessons the
     matches hand (arena/rounds.py Pool on the agent's kept lessons, with its live hotfixes). Stops at
     the call cap or at a model that does not answer; the cards left are not played. Returns the item,

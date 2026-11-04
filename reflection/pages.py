@@ -1385,7 +1385,11 @@ def run_arena(m, agent, ctx, back):
         n = m.arena_played(agent)
         said = (f"Running the Arena: {n} practice {'match' if n == 1 else 'matches'} played so far." if n
                 else "Running the Arena: its first matches are starting.")
-        return running_pill(said)
+        if not ctx["token"]:  # Stop while it runs (Morning.stop_run): it ends before its next matches
+            return running_pill(said)
+        return running_pill(said) + ('<div class="act">' + _post(ctx, mo.STOP_PATH[1:], mo.STOP_BUTTON, "gb",
+                                                                 agent=agent, back=back)
+                                     + f'<p class="quiet">{h(mo.ARENA_STOP_SAID)}</p></div>')
     out = []
     note = m.arena_note(agent)
     if note:

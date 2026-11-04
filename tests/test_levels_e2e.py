@@ -1,7 +1,7 @@
 """One practice run end to end at medium and at high (decisions 84 and 85, arena/practice.py practise with
 study= and db=, no shape given): the level alone sets how many customers the writer makes, the fixed test
-set, each test customer once a round, the round count, the study between rounds and the call cap (1,500
-for a high run only). The stock fixture and the three agents of tests/three_agents.json, so it holds for
+set, each test customer once a round, the round count (2 at every level, the second practice only, decision 113), the study between rounds and the call cap (the
+day's UNFENCED_DAILY_CALLS setting, 3000 when not set; a high run keeps at least 1,500). The stock fixture and the three agents of tests/three_agents.json, so it holds for
 any agent kind. A fake model only."""
 import shutil
 import tempfile
@@ -18,8 +18,8 @@ from tests.test_arena_practice import FIXTURE
 from tests.test_arena_rounds import IDEA_HEAD, Exams
 from tests.test_levels_study import FIRST, SECOND, Climb
 
-SHAPE = {"medium": {"customers": 20, "test": 10, "rounds": 2, "cap": 1000, "scores": [0, 5], "stopped": run.ROUNDS},
-         "high": {"customers": 30, "test": 20, "rounds": 3, "cap": 1500, "scores": [0, 10, 20], "stopped": run.PASSED}}
+SHAPE = {"medium": {"customers": 20, "test": 10, "rounds": 2, "cap": 3000, "scores": [0], "stopped": run.ROUNDS},
+         "high": {"customers": 30, "test": 20, "rounds": 2, "cap": 3000, "scores": [0], "stopped": run.ROUNDS}}
 
 
 class Logged(Climb):
@@ -101,7 +101,11 @@ class EndToEnd(unittest.TestCase):
                 played, starts = self.rounds_of(log)
                 self.assertEqual((len(rep["rounds"]), len(played)), (want["rounds"], want["rounds"]))
                 for r, one in enumerate(played, 1):
-                    self.assertEqual(sorted(one["g"]), sorted(test), f"round {r}: each test customer once")
+                    if r == want["rounds"]:  # the last round plays practice only, no gate (decision 113)
+                        self.assertEqual(one["g"], [], f"round {r}: no gate")
+                        self.assertTrue(rep["rounds"][r - 1].get("practice_only"))
+                    else:
+                        self.assertEqual(sorted(one["g"]), sorted(test), f"round {r}: each test customer once")
                     self.assertEqual(sorted(one["t"]), sorted(train), f"round {r}: each practice customer once")
                 studies = [i for i, (mid, _) in enumerate(log) if mid == "study"]
                 self.assertEqual(len(studies), want["rounds"] - 1)  # one study between each two rounds
@@ -111,14 +115,15 @@ class EndToEnd(unittest.TestCase):
                 self.assertEqual(rep["calls"]["cap"], want["cap"])
                 self.assertLessEqual(rep["calls"]["used"], want["cap"])
                 if name == "stock_watch":  # the fixture's fake agent climbs the same way every run
-                    self.assertEqual(([r["gate"]["won"] for r in rep["rounds"]], rep["stopped"]),
+                    self.assertEqual(([r["gate"]["won"] for r in rep["rounds"] if not r.get("practice_only")],
+                                      rep["stopped"]),
                                      (want["scores"], want["stopped"]))
-        self.assertEqual(run.DEFAULT_CAP, 1000)  # the higher cap is set per run, never by the default
+        self.assertEqual(run.DEFAULT_CAP, 3000)  # the high floor is set per run, never by the default
 
-    def test_medium_twenty_customers_ten_test_two_rounds_cap_1000(self):
+    def test_medium_twenty_customers_ten_test_two_rounds_days_cap(self):
         self.check("medium")
 
-    def test_high_thirty_customers_twenty_test_three_rounds_cap_1500(self):
+    def test_high_thirty_customers_twenty_test_two_rounds_days_cap(self):
         self.check("high")
 
 

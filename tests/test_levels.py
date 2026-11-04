@@ -26,11 +26,11 @@ class WhatEachLevelNeeds(unittest.TestCase):
         self.assertEqual(levels.needs(levels.HIGH, 10), 8)
         self.assertEqual(levels.needs(levels.MEDIUM, 20), 14)
         self.assertEqual(levels.needs(levels.LOW, 3), 2)
-        self.assertEqual(levels.shape(levels.HIGH), {"rounds": 3, "matches": 10, "gate": 20, "cap": 1500,
+        self.assertEqual(levels.shape(levels.HIGH), {"rounds": 2, "matches": 10, "gate": 20, "cap": 1500,
                                                      "customers": 30, "no_failed_checks": True})
         for lv in (levels.LOW, levels.MEDIUM):  # other failed checks count at high only (decision 110)
-            self.assertEqual(levels.shape(lv), {"rounds": 2, "matches": 10, "gate": 10, "cap": 1000,
-                                                "customers": 20, "no_failed_checks": False})
+            self.assertEqual(levels.shape(lv), {"rounds": 2, "matches": 10, "gate": 10, "cap": None,
+                                                "customers": 20, "no_failed_checks": False})  # None: the day's cap
 
     def test_every_level_says_a_broken_never_line_fails_it(self):
         for lv in levels.ORDER:

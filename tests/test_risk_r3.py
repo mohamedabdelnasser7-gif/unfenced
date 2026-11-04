@@ -301,5 +301,39 @@ class Table(unittest.TestCase):
                 self.assertIn(mark, risk.code_check(text, PLUG.risk, tools=False))
 
 
+
+class MarketingSpendAndPost(unittest.TestCase):
+    """Review engfix r2, finding 5, red team engfix r2, finding 3: plain "publish" is no mark (publish_post
+    stays), spend reads promote, boost, ad, campaign, ممول and اعلان, and goes_out reads posting straight
+    away, without approval or going live, while the time of day to post stays low."""
+
+    def setUp(self):
+        from pathlib import Path
+        from engine import plug as plug_mod
+        self.risk = plug_mod.load(str(Path(__file__).resolve().parent.parent / "marketing" / "plug.json")).risk
+
+    MARKED = (("Promote the post.", "spend"), ("Boost it on Friday.", "spend"), ("Run an ad for the new boots.", "spend"),
+              ("Make an ad.", "spend"), ("Start a campaign.", "spend"), ("خليه بوست ممول.", "spend"),
+              ("اعمل اعلان للبوست.", "spend"), ("Use publish_post for every draft.", "goes_out"),
+              ("Post it straight away.", "goes_out"), ("Post it right away.", "goes_out"),
+              ("Publish the post without approval.", "goes_out"), ("Post without waiting for the owner.", "goes_out"),
+              ("Share it at once.", "goes_out"), ("Don't wait for approval.", "goes_out"),
+              ("Skip the owner's ok.", "goes_out"), ("Go live with it.", "goes_out"), ("Push it live.", "goes_out"),
+              ("Make it live.", "goes_out"))
+    PLAIN = ("Post in the evening.", "Publish in the evening.", "Share the post in the evening.",
+             "Put the best photo first.", "Add a photo of the sole first.", "Send the draft to the owner for a yes.",
+             "Answer comments in the same voice as the post.")
+
+    def test_each_is_marked(self):
+        for text, group in self.MARKED:
+            with self.subTest(text=text):
+                self.assertIn(group, groups(text, self.risk))
+
+    def test_plain_lines_stay_unmarked(self):
+        for text in self.PLAIN:
+            with self.subTest(text=text):
+                self.assertEqual(risk.code_check(text, self.risk, tools=False), [])
+
+
 if __name__ == "__main__":
     unittest.main()

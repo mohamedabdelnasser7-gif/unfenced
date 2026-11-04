@@ -80,11 +80,13 @@ class RunNotes:
         return row
 
     def _answer(self, turns, theirs):
-        """The agent's last reply in the lost match when the guard lets it through, else None."""
+        """The agent's last reply in the lost match when the guard lets it through, else None. No number word
+        passes here (plain_words=False): the reply is the agent's own words to a customer, so "I can do fifteen
+        for the Elite" is held back (red team losses round 1, item 5)."""
         said = [t["text"] for t in turns if t["from"] == engine_fast.AGENT and "text" in t]
         if not said:
             return None
-        if engine_fast.guard(said[-1], self.plug, theirs, never=self.never, known=self._known()):
+        if engine_fast.guard(said[-1], self.plug, theirs, never=self.never, known=self._known(), plain_words=False):
             return None
         return said[-1]
 
@@ -115,7 +117,7 @@ class RunNotes:
             return ()
         return tuple(got) if isinstance(got, (set, frozenset, list, tuple)) else ()
 
-    def for_prompt(self, chat_id=None, now=None, source=None):
+    def for_prompt(self, chat_id=None, now=None):
         """Every note held, oldest first, under the heading, for the end of the agent's prompt; ""
         with none. Every match of the run is the agent's next case, so the match's own chat id does
         not matter."""

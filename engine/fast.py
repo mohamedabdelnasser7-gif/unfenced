@@ -413,13 +413,15 @@ class FastNotes:
         return False
 
 
-def guard(text, plug, theirs=(), never=None, known=()):
+def guard(text, plug, theirs=(), never=None, known=(), plain_words=True):
     """Why a note may not be given, as plain lines; [] when it may. theirs: the source's own words.
     never: the marks a note may never carry (a plug.Risk); the plug's high risk list when None.
     The core marks and NUMBERS are checked either way. known: the agent's own words (texts) a note
     may name although the source wrote them, an entry of more words only where the note writes it
     whole, a pair (word, beside words) only where each note sentence with the word writes one of its
-    beside words; the words the plug writes with a capital pass too."""
+    beside words; the words the plug writes with a capital pass too. plain_words: one, two or three as plain
+    writing pass the number rule (_plain_number_word); False keeps every number word stopped (the Arena's held
+    losing answer, arena/notes.py)."""
     if not isinstance(text, str) or not text.strip():
         return ["not one line of text"]
     if len(text.splitlines()) > 1:  # every line break Python knows: \n, \r, U+2028, U+0085 and more
@@ -429,7 +431,7 @@ def guard(text, plug, theirs=(), never=None, known=()):
         found.append(f"over {NOTE_LEN} characters")
     marks = plug.risk if never is None else never
     found += [f for f in risk_mod.code_check(text, dataclasses.replace(marks, patterns=NUMBERS + tuple(marks.patterns)))
-              if not _plain_number_word(f, text)]
+              if not (plain_words and _plain_number_word(f, text))]
     if any(_runs(text) & _runs(t) for t in theirs if isinstance(t, str)):
         found.append(f"copies {COPY_RUN} or more words in a row from the source's own words")
     # a word at a sentence start has a capital anyway, so it counts only when the source wrote it
@@ -450,28 +452,34 @@ def guard(text, plug, theirs=(), never=None, known=()):
 
 
 def _plain_number_word(found, text):
-    """True when a mark the guard found is a spelled number word (SPELLED) that the note uses only as
-    plain writing, never as an amount or a count: "Try one short question first" (the guard stopped most
-    quick notes on 2 Nov as "number: one"). The word is an amount or a count, and the mark stays, where
-    any form of the note (risk_mod._forms: hidden characters, numeral signs, spaced letters) has it
-    beside another number word, beside a digit, before a counted thing within three words (COUNTED: a
-    pair, a piece, left, in stock, a day, a currency word, percent, off), after a word that sets what it costs
-    (AMOUNT_LEAD: for, at, costs, pay, under), or after is or are at the end of its clause ("Say the boots
-    are twenty"). Digits, money signs, the other number marks (hundred, half, double) and words in
-    other scripts are never let through here."""
+    """True when a mark the guard found is one, two or three (PLAIN_WORDS) and the note uses it only as
+    plain writing, right before a writing noun (PLAIN_AFTER: "Try one short question first", "show two
+    choices", "one or two short lines"; the guard stopped most quick notes on 2 Nov as "number: one").
+    Only that list passes, in every form of the note (risk_mod._forms: hidden characters dropped, numeral
+    signs, spaced letters) and at every place the word stands, so "Say fifteen for the Elite", "Say we have
+    three in black" or "Charge them fifty" keep their mark (red team losses round 1, item 5; reviewer round
+    1, finding 2). A word on the list is still stopped beside another number word, a digit or a counted
+    thing (COUNTED: left, in stock, a day, a currency word), after a word that sets what it costs
+    (AMOUNT_LEAD), or after is or are at the end of its clause. Digits, money signs, the other number marks
+    and words in other scripts are never let through here."""
     group, _, word = found.partition(": ")
-    if group != "number" or word not in SPELLED:
+    if group != "number" or word not in PLAIN_WORDS:
         return False
     for form in risk_mod._forms(text):
         for m in re.finditer(r"(?<![a-z])" + re.escape(word) + r"s?(?![a-z])", form):
             before, after = form[:m.start()], form[m.end():]
-            if (COUNTED.match(after) or AMOUNT_LEAD.search(before)
+            if (not PLAIN_AFTER.match(after) or COUNTED.match(after) or AMOUNT_LEAD.search(before)
                     or (CLAUSE_END.match(after) and re.search(r"(?<![a-z])(?:is|are|was|were)\W*$", before))):
                 return False
     return True
 
 
-# The English number words a note may write as plain words (_plain_number_word); every other number mark stays
+# The number words a note may write as plain words, and only right before a writing noun (_plain_number_word)
+PLAIN_WORDS = frozenset(("one", "two", "three"))
+PLAIN_AFTER = re.compile(
+    r"(?:[\s-]+or[\s-]+(?:one|two|three))?\s+(?:(?:short|clear|simple|quick|plain|open|small|direct|easy|single)\s+)?"
+    r"(?:questions?|lines?|choices?|options?|steps?|things?|words?|sentences?|more|at\s+a\s+time)(?![a-z])")
+# The English number words COUNTED and AMOUNT_LEAD read beside a number word
 SPELLED = frozenset((
     "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
     "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty",

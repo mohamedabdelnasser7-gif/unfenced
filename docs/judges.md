@@ -45,7 +45,7 @@ Run the Arena, Train and Run reflection use your model key and count toward the 
 
 ## Chat with the Sales agent
 
-Open Agents, then Sales. The Try Sales box sits on its page. Write to it the way a customer would, about a product, a size or delivery, and the trained Sales agent answers on the demo store with your own model key. No real order or message goes out, and these chats never count for the gate, the exam or Connect. Start over opens a new chat. Each answer counts toward the same daily model call cap as the Arena.
+Open Agents, then Sales. The Try Sales box sits on its page. Write to it the way a customer would, about a product, a size or delivery, and the Sales agent answers on the demo store with your own model key, using the lessons its database has kept (none on a fresh clone). No real order or message goes out, and these chats never count for the gate, the exam or Connect. Start over opens a new chat. Each answer counts toward the same daily model call cap as the Arena.
 
 With no key in `.env`, the box says so and points you to the recorded replay below.
 

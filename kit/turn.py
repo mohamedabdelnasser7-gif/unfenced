@@ -144,6 +144,9 @@ def _read(folder, name):
 # the prompt, the scope line or the off topic writer (red team scopeguard2 r1, item 5; r2, item 7). The two
 # joiners stay (JOINERS): Arabic and emoji need them.
 JOINERS = "\u200c\u200d"
+# Letters that show nothing: the Hangul fillers and the braille blank (red team scopeguard2 r3, items 5 and 8).
+# The exam reads them as hidden marks (reflection/exam.py _hidden).
+INVISIBLE = "\u115f\u1160\u3164\uffa0\u2800"
 
 
 def _unmarked(v):

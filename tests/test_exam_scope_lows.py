@@ -46,5 +46,27 @@ class Accents(unittest.TestCase):
         self.assertEqual(exam.words("\u034f".join(["wave"] * 50)), 50)  # a combining grapheme joiner still splits
 
 
+class Invisible(unittest.TestCase):
+    """Red team scopeguard2 r3, item 5: a letter that shows nothing (the Hangul fillers, the braille blank) is a
+    hidden mark: inside a listed word it never hides it, between words it never joins them; a tatweel between
+    words counts them apart."""
+
+    FILLERS = ("\u1160", "\u115f", "\u3164", "\uffa0", "\u2800")
+
+    def test_a_listed_word_with_one_inside_fails(self):
+        for sep in self.FILLERS:
+            with self.subTest(sep=sep):
+                self.assertIn("waves", off(POEM, f"The wa{sep}ves roll over the sho{sep}re. Boots?"))
+                self.assertIn("lentils", off(CHEF, f"Boil the ri{sep}ce and len{sep}tils. Boots?"))
+                self.assertIn("waves", off(POEM, f"wave{sep}wave{sep}wave. Boots?"))
+
+    def test_words_joined_by_one_count_apart(self):
+        for sep in self.FILLERS + ("\u0640",):
+            with self.subTest(sep=sep):
+                self.assertEqual(exam.words(sep.join(["deep"] * 300)), 300)
+                long = sep.join(["deep"] * (exam.SCOPE_WORDS + 5)) + " boots?"
+                self.assertIn("long", exam.check_scope_reply(POEM, {"reply": long}))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -19,7 +19,7 @@ cards at their real shares among themselves, the cap held the same way.
 With --db the Arena practises on its own copy of the Sales agent's database (DECISIONS item 46):
 at the start of the run the live database is copied to <db>.arena beside it (arena_copy, replacing
 the last run's copy, whose lessons that failed the eval gate and still wait come along with their
-exam rows, DECISIONS item 50), and every case, lesson, exam and trial the run writes goes into the copy.
+exam rows, DECISIONS item 50, and so do its study queue's waiting rows), and every case, lesson, exam and trial the run writes goes into the copy.
 The live database changes only when a lesson passes the eval gate between rounds: that lesson
 alone is written to it, as the night study writes one there (arena/rounds.py hand_live). Before
 every match the Arena reads the live database, read only, for a correction the user typed there
@@ -931,6 +931,63 @@ def _carry(copy, carried):
         d.close()
 
 
+QUEUE = "study_queue"  # the study's queue of lessons it found and did not examine (engine/study_queue.py, decision 98)
+
+
+def _queued(old):
+    """The waiting rows of the last run's copy's study queue (taken_at empty: a page Stop or a cap left
+    them), as (schema, rows): schema the copy's own CREATE lines for the table and its indexes and
+    triggers, rows [{column: value}] oldest first. ([], []) when old is not a regular file, not a
+    database or has no such table; Refused when it cannot be read now, as _failed_untried."""
+    try:
+        if not stat.S_ISREG(os.lstat(old).st_mode):
+            return [], []
+    except OSError:
+        return [], []
+    try:
+        c = sqlite3.connect(str(old), timeout=5)
+        try:
+            c.row_factory = sqlite3.Row
+            made = c.execute("SELECT type, sql FROM sqlite_master WHERE tbl_name = ? AND sql IS NOT NULL "
+                             "ORDER BY type = 'table' DESC, rowid", (QUEUE,)).fetchall()
+            if not made or made[0]["type"] != "table" or not made[0]["sql"].lstrip().upper().startswith("CREATE TABLE"):
+                return [], []
+            cols = {r[1] for r in c.execute(f"PRAGMA table_info({QUEUE})")}
+            where = "WHERE taken_at IS NULL " if "taken_at" in cols else ""
+            rows = [dict(r) for r in c.execute(f"SELECT * FROM {QUEUE} {where}ORDER BY rowid")]
+            return [r["sql"] for r in made if r["type"] in ("table", "index", "trigger")], rows
+        finally:
+            c.close()
+    except sqlite3.OperationalError as e:
+        raise Refused(f"the last run's copy at {old} could not be read ({e}); is another Arena run using it?") from None
+    except sqlite3.DatabaseError:
+        return [], []
+
+
+def _carry_queue(copy, schema, rows):
+    """Write the last copy's waiting queue rows into the new copy (the table made from the last copy's
+    own lines when the live database has none), each a new row id, unless the new copy holds a row
+    with the same words already (the live queue, or a run that carried it before)."""
+    c = sqlite3.connect(str(copy))
+    try:
+        with c:
+            if c.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (QUEUE,)).fetchone() is None:
+                for sql in schema:
+                    c.execute(sql)
+            have = {r[1] for r in c.execute(f"PRAGMA table_info({QUEUE})")} - {"id"}
+            for row in rows:
+                cols = [k for k in row if k in have]
+                if not cols:
+                    continue
+                same = " AND ".join(f"{k} IS ?" for k in cols)
+                if c.execute(f"SELECT 1 FROM {QUEUE} WHERE {same}", [row[k] for k in cols]).fetchone() is not None:
+                    continue
+                c.execute(f"INSERT INTO {QUEUE} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                          [row[k] for k in cols])
+    finally:
+        c.close()
+
+
 def arena_copy(db):
     """Copy the live database at db to the Arena's own, <db>.arena beside it, through SQLite's
     backup (a whole, consistent copy while the live agent keeps writing), replacing the last run's
@@ -941,7 +998,9 @@ def arena_copy(db):
     as a new file (O_EXCL and O_NOFOLLOW, mode 0600), so a link planted at its name is never written
     through. The lessons of the last copy that failed the eval gate, never had a trial and still
     wait are carried into the new copy with their exam rows (DECISIONS item 50), so a line refused
-    in one run is not written and passed in the next."""
+    in one run is not written and passed in the next. So are the study queue's waiting rows (the
+    lessons a Stop on the page or the cap left unexamined, engine/study_queue.py), when the last copy
+    has that table: the next study takes them first."""
     live = Path(db)
     copy = live.with_name(live.name + ARENA_SUFFIX)
     live_ids = {i for i in (_file_id(p) for p in (live, *(live.with_name(live.name + s) for s in SIDE_FILES)))
@@ -953,6 +1012,7 @@ def arena_copy(db):
         if _file_id(p) in live_ids:
             raise Refused(f"the Arena's copy {p} is the live database under another name; remove that link first")
     carried = _failed_untried(copy)
+    schema, queued = _queued(copy)
     for p in olds:
         if p.is_symlink() or p.exists():
             p.unlink()
@@ -979,6 +1039,8 @@ def arena_copy(db):
                 src.close()
             if carried:
                 _carry(copy, carried)
+            if queued:
+                _carry_queue(copy, schema, queued)
         except sqlite3.Error as e:
             raise Refused(f"the database at {db} could not be copied for the Arena: {e}") from None
     finally:

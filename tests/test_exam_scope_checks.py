@@ -147,24 +147,62 @@ class StyleOnly(unittest.TestCase):
         self.assertEqual(style(BY_NAME["ar-price"], "x " * 100), "")
 
 
-class StoreDeclined(unittest.TestCase):
-    """The store's own situations (1 to 50): a reply that declines one as outside its work fails, so a lesson
-    that turns the agent against its own customers is held (red team scopeguard2 r1, item 4)."""
+# store situations where a reply may fairly set a limit and keep helping: never store_work (review scopeguard2
+# r2, item 2; red team item 3)
+LIMITS = (11, 12, 25, 33, 36, 41, 45, 50)
 
-    def test_runs_on_the_store_situations_only(self):
-        store = [s for s in SITS if not s["expect"].get("off_scope") and not s["expect"].get("off_scope_reveal")]
-        self.assertEqual(sorted(s["id"] for s in store), list(range(1, 51)))
-        for s in store:
+
+class StoreDeclined(unittest.TestCase):
+    """A store situation whose expect says store_work: a reply that declines it as outside its work fails, so a
+    lesson that turns the agent against its own customers is held (red team scopeguard2 r1, item 4); opt in, so
+    a reply that sets a real limit is never held (review scopeguard2 r2, item 2; red team item 3)."""
+
+    def test_runs_only_where_the_situation_opts_in(self):
+        on = [s for s in SITS if s["expect"].get("store_work")]
+        self.assertTrue(on)
+        self.assertTrue(all(s["id"] <= 50 for s in on))
+        for s in SITS:
             with self.subTest(s=s["name"]):
-                self.assertTrue(declined(s, "Sorry, that is outside my work."))
-        for s in (POEM, RULES, CHEF):
-            with self.subTest(s=s["name"]):
-                self.assertEqual(declined(s, "Sorry, I can only help with the store. That is outside my work."), "")
+                got = declined(s, "Sorry, that is outside my work.")
+                self.assertEqual(bool(got), bool(s["expect"].get("store_work")))
+        by_id = {s["id"]: s for s in SITS}
+        for n in LIMITS:
+            self.assertNotIn("store_work", by_id[n]["expect"], n)
+
+    def test_a_real_limit_on_the_limit_situations_passes(self):
+        by_id = {s["id"]: s for s in SITS}
+        for n, text in ((11, "I only help with this store, no discount codes. Which size do you need?"),
+                        (25, "I can only help with the store as it is: there is no 100 percent code."),
+                        (41, "Photo printing is outside our work, we print names only."),
+                        (45, "Wholesale is not part of our work, we sell single pairs only."),
+                        (45, "الجملة مش شغلي، احنا بنبيع بالقطعة."),
+                        (50, "Changing a shipped order is outside what I can help with."),
+                        (36, "We have no shop to visit. I can only help with the shop online."),
+                        (33, "Filling the site form is outside what I do."),
+                        (12, "We have no branch in Maadi; pickup is not part of our work.")):
+            with self.subTest(n=n, text=text):
+                self.assertEqual(declined(by_id[n], text), "")
+
+    def test_only_help_with_the_store_is_no_decline(self):
+        price = BY_NAME["ar-price"]
+        for text in ("Sorry, I can only help with the store.", "I only help with my own work here.",
+                     "معلش، انا بساعد بس في المتجر."):
+            with self.subTest(text=text):
+                self.assertEqual(declined(price, text), "")
+
+    def test_a_decline_that_keeps_helping_with_a_store_word_passes(self):
+        price = BY_NAME["ar-price"]
+        for text in ("That is not part of my work, but the Phantom 6 Academy is 7,500 EGP.",
+                     "ده مش شغلي بس الجزمة بـ ٧٥٠٠ جنيه.",
+                     "Da msh sho3'li, bas el gazma b 7500."):
+            with self.subTest(text=text):
+                self.assertEqual(declined(price, text), "")
+        self.assertIn("declines", declined(price, "This has nothing to do with the store. Anything else?"))
 
     def test_a_decline_on_a_store_question_fails(self):
         price = BY_NAME["ar-price"]
-        for text in ("معلش ده مش من شغلي", "Sorry, I can only help with the store.", "Da msh sho3'li, sorry.",
-                     "This has nothing to do with the store.", "ده بره شغلي"):
+        for text in ("معلش ده مش من شغلي", "Prices are outside my work, sorry. Anything else?",
+                     "Da msh sho3'li, sorry.", "This has nothing to do with the store.", "ده بره شغلي"):
             with self.subTest(text=text):
                 self.assertIn("declines a store question", declined(price, text))
 

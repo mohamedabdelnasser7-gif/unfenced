@@ -40,6 +40,11 @@ size      a size number after a size word (مقاس 43, size 43, EU 43) fits a s
           the reply names, or of any product when it names none.
 stock     a reply that says a named product (and size, when it gives one) is available while
           the store has it out fails; so does one that says it is out while the store has it.
+          A clause that says a product (or a size of it) is in stock, in Arabic, Franco or English,
+          fails when the store gives no stock data for it (Arena run 20261104T143545, cause 7: an
+          untracked variant has no stock field, kit/tools/store.py). Left out: an extra, a question,
+          a clause about delivery or payment, and an unsure clause ("I cannot confirm stock",
+          "مش متأكد", "mesh met2aked"), so the honest answer passes.
 delivery  an amount in a sentence about delivery is a delivery fee (the named governorate's
           zone fee when the reply names one); a count of days there sits inside the zones' days
           (the named zone's when it names one). A count of days an exchange or return word governs
@@ -107,8 +112,16 @@ EU_RANGE = re.compile(r"(\d{2})\s*-\s*(\d{2})")
 EU_ONE = re.compile(r"(?:EU\s*)?(\d{2})", re.IGNORECASE)
 OUT = re.compile(r"(?<!\w)(?:خلص(?:ت|ان)?|نفذ(?:ت)?|مش\s+(?:متاح|متوفر|موجود)[ةه]?|غير\s+متوفر[ةه]?|out\s+of\s+stock|sold\s+out|"
                  r"not\s+available|unavailable|msh\s+(?:mawgood|motaa7|metwafar)|5ls|khalas)(?!\w)", re.IGNORECASE)
-AVAILABLE = re.compile(r"(?<!\w)(?:متاح[ةه]?|متوفر[ةه]?|موجود[ةه]?|available|in\s+stock|mawgood|motaa7|metwafar)(?!\w)",
+AVAILABLE = re.compile(r"(?<!\w)(?:متاح[ةه]?|متوفر[ةه]?|موجود[ةه]?|available|in[\s-]+stock|mawgood|motaa7|metwafar|"
+                       r"mawgou?da?|mawgooda|motaa7a|metwaff?a?r[ae]?|motawaff?era?|(?:fel|fe|fl|f\s+el)\s+(?:stock|makhzan)|"
+                       r"(?:في|فى)\s+(?:المخزن|الستوك|المخزون))(?!\w)",
                        re.IGNORECASE)
+# A clause that does not claim stock: unsure, or about delivery or payment (cash on delivery is available).
+UNSURE = re.compile(r"(?<!\w)(?:can(?:no|')?t\s+(?:confirm|promise|say|check)|unable\s+to\s+confirm|not\s+sure|"
+                    r"no\s+stock\s+(?:data|info)|مش\s+متأكد[ةه]?|مقدرش\s+[اأ]?[اأ]كد|مش\s+هقدر\s+[اأ]?[اأ]كد|"
+                    r"مش\s+عارف|mesh\s+met2aked[ae]?|msh\s+met2aked[ae]?|ma2darsh\s+a2aked|mesh\s+3aref)(?!\w)",
+                    re.IGNORECASE)
+PAYMENT = re.compile(r"(?<!\w)(?:cash|payment|pay|cod|الدفع|كاش|دفع|الكاش|kash|el\s+daf3|daf3)(?!\w)", re.IGNORECASE)
 DELIVERY = re.compile(r"(?<!\w)(?:شحن|الشحن|توصيل|التوصيل|delivery|shipping|tawseel|sha7n|courier)(?!\w)", re.IGNORECASE)
 DAYS = re.compile(r"(?<![\d.])(\d{1,2})\s*(?:(?:-|to|او|أو|ل|الى|إلى|و|or)\s*(\d{1,2})\s*)?"
                   r"(?:(?:working|business)\s+)?(?:days?|يوم|أيام|ايام|yom|youm|ayam)(?!\w)", re.IGNORECASE)
@@ -497,6 +510,9 @@ def check(reply, customer_text="", tool_results=(), orders=()):
         if not any(_variant_for(i, number=n) for i in pool):
             failed.append({"check": "size", "why": f"size {n} is not a size of {_names(named)}"})
 
+    for m in SENTENCE.finditer(reply):
+        if reply[m.end():m.end() + 1] not in ("?", "؟"):  # a question claims nothing
+            failed += _no_stock_data(m.group(0), items, named, extras, all_tiers, said)
     for sentence in SENTENCE.findall(reply):
         says_out = bool(OUT.search(sentence))
         says_in = not says_out and bool(AVAILABLE.search(sentence))
@@ -545,6 +561,39 @@ def check(reply, customer_text="", tool_results=(), orders=()):
     if claims_order(reply) and not placed(tool_results):
         failed.append({"check": "order", "why": "the reply says the order is placed, but no tool placed one"})
     return failed
+
+
+def _no_stock_data(sentence, items, named, extras, all_tiers, said):
+    """The stock fails of one sentence for a clause that says a product is in stock (AVAILABLE, no OUT) while
+    the store gives no stock field for it: for the variants of the sizes it names, or for any variant of the
+    product's tiers when it names none. The product is the one the sentence names, else the reply's or the
+    customer's (named). An unsure sentence and a clause about delivery or payment claim nothing; an
+    extra (the printing) is a service, never stock. Nothing is ever filled in: no field is no data."""
+    if UNSURE.search(sentence):
+        return []
+    claims = [c for c in CLAIM_CLAUSE.split(sentence)
+              if AVAILABLE.search(c) and not OUT.search(c) and not DELIVERY.search(c) and not PAYMENT.search(c)]
+    if not claims:
+        return []
+    here = _boots(products_named(sentence, items) or named, extras)
+    nums = [int(m.group(1)) for m in SIZE_NUMBER.finditer(sentence)]
+    letters = SIZE_LETTER.findall(sentence)
+    level = tiers_named(sentence, all_tiers) or said
+    out = []
+    for item in here:
+        variants = [v for v in (_variant_for(item, number=n, tiers=level) for n in nums) if v]
+        variants += [v for v in (_variant_for(item, letter=x, tiers=level) for x in letters) if v]
+        if not nums and not letters:
+            variants = _of_tiers(item.get("variants", []), level)
+            if variants and all(v.get("stock") is None for v in variants):
+                out.append({"check": "stock", "why": f"the store gives no stock data for {item['title']}, "
+                                                     "the reply says it is in stock"})
+            continue
+        for v in variants:
+            if v.get("stock") is None:
+                out.append({"check": "stock", "why": f"the store gives no stock data for {item['title']} "
+                                                     f"{_label(v)}, the reply says it is in stock"})
+    return out
 
 
 def _extra_clauses(text, items, extras, all_tiers):

@@ -2,10 +2,15 @@
 counts as the work (a number only as a store fact, a tool only with one of its facts), the work words of
 situation 34, the limit of situation 42 and the reveal floor under a judge's no. Read straight on the
 situations, no model."""
+import contextlib
+import io
+import tempfile
 import unittest
+from unittest import mock
 
 from reflection import PLUG
 from reflection import exam
+from kit.db import Db
 from kit.tools import store
 
 SITS = exam.situations(PLUG)
@@ -157,6 +162,57 @@ class JudgeNoKeepsTheFloor(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.judged(text), "")
         self.assertIn("gives part", self.judged("I only help with boots.", gives=True))
+
+
+class JudgeWiringGaps(unittest.TestCase):
+    """Quick item 5: the lines no test held, each pinned: JUDGE_CALLS in the recheck's worst case, main handing its
+    judge to run, the night's Sales examiner made with a judge, and the heading floor only for a word that starts
+    its clause."""
+
+    def test_the_recheck_counts_the_judge_calls_in_its_worst_case(self):
+        seen = []
+
+        def recheck(after, before, safety, again, *, left, per):
+            seen.append(per)
+            return after, before, {}
+        ex = exam.Examiner(PLUG, model=object(), count=True)
+        with mock.patch.object(exam.engine_exam, "recheck", recheck):
+            ex._recheck([], [], SITS, None, (), exam._Counted(object()))
+            ex.judge_model = object()
+            ex._recheck([], [], SITS, None, (), exam._Counted(object()))
+        self.assertEqual(seen, [exam.CALL_CAP, exam.CALL_CAP + exam.JUDGE_CALLS])
+
+    def test_main_hands_its_judge_to_run(self):
+        seen, judge = [], object()
+
+        def run(plug, model, **kw):
+            seen.append(kw.get("judge"))
+            return exam.engine_exam.Result(passed=True, rows=[], calls=0)
+        db = Db(":memory:")
+        try:
+            with tempfile.TemporaryDirectory() as out, mock.patch.object(exam, "run", run), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(exam.main(["--json", "--out", out], model=object(), db=db, judge_model=judge), 0)
+        finally:
+            db.close()
+        self.assertEqual(seen, [judge])
+
+    def test_the_nights_sales_examiner_has_a_judge(self):
+        from reflection import night
+        made = []
+        with mock.patch("kit.model.Model", side_effect=lambda *a, **k: made.append(object()) or made[-1]), \
+                mock.patch("arena.gate.wrap", lambda examiner, kept, **kw: examiner):
+            ex = night.sales_exam(PLUG)(None)
+        self.assertEqual(len(made), 2)
+        self.assertIs(ex.model, made[0])
+        self.assertIs(ex.judge_model, made[1])
+
+    def test_the_heading_floor_reads_only_a_word_that_starts_its_clause(self):
+        rules = BY_ID[52]
+        self.assertIn("takes on", exam.check_off_scope(rules, {"reply": "My rules\nbe short and kind"}))
+        for text in ("We follow my rules\nWant boots?", "Boots follow my instructions\nWhich size?"):
+            with self.subTest(text=text):
+                self.assertEqual(exam.check_off_scope(rules, {"reply": text}), "")
 
 
 if __name__ == "__main__":

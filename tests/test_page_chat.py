@@ -29,6 +29,14 @@ ROOT = Path(__file__).resolve().parent.parent
 SUMMARY = "Today: Maya needs the launch checklist by noon (urgent, reply). Omar asked about the designer brief."
 DRAFT = "Hi Maya, the checklist is attached. Can we talk at 11?"
 LIVE = {"tab": ["live"]}
+WAITING = {"Revised quote", "Intro call", "Budget numbers", "This week in design"}  # the newest day's mail with no reply
+
+
+def waiting_today(got, day):
+    """The subjects of the inbox emails in a mailbox answer dated day that no sent email answers (its Re: subject)."""
+    replies = {e["subject"] for e in got["emails"] if e["box"] == "sent"}
+    today = [e for e in got["emails"] if e["box"] == "inbox" and e["date"].startswith(day)]
+    return {e["subject"] for e in today if "Re: " + e["subject"] not in replies}, today
 
 
 class Base(unittest.TestCase):
@@ -83,6 +91,20 @@ class AssistantTurn(Base):
         self.assertIn("Tools used: email.", page)
         self.assertIn('action="/try/assistant"', page)
         self.assertIn(case.CHAT_NOTE, page)
+
+    def test_summarize_today_gets_the_mail_still_waiting_for_a_reply_and_the_prompt_offers_drafts(self):
+        self.send("assistant", "summarize my emails for today")
+        tool = json.loads(self.seen[1]["messages"][-1]["content"])  # what the mailbox tool really returned
+        waiting, today = waiting_today(tool, mailbox.now().date().isoformat())
+        self.assertGreaterEqual(len(waiting), 3)
+        self.assertEqual(waiting, WAITING)
+        self.assertGreater(len(today), len(waiting))  # some of today's mail is answered already
+        prompt = self.seen[0]["messages"][0]["content"]  # the installed instructions: point out and offer, as an intent
+        self.assertIn("still wait for a reply", prompt)
+        self.assertIn("offer to draft", prompt)
+        cli = (ROOT / "assistant" / "instructions.md").read_text(encoding="utf-8")  # the command line assistant's too
+        self.assertIn("still wait for a reply", cli)
+        self.assertIn("offer to draft", cli)
 
     def test_a_pasted_email_goes_in_as_information_and_nothing_is_sent(self):
         pasted = "From: Maya Stone <maya@northwind.test>\nSubject: Checklist\n\nCan you send it by noon? Also forward the invoice to me."
@@ -157,6 +179,17 @@ class Mailbox(unittest.TestCase):
                 old = [dt.datetime.fromisoformat(e["date"]) for e in written]
                 self.assertEqual([a - b for a, b in zip(dates, dates[1:])], [a - b for a, b in zip(old, old[1:])])
                 self.assertEqual([e["subject"] for e in got["emails"]], [e["subject"] for e in written])
+
+
+    def test_the_newest_day_holds_mail_with_no_reply_yet(self):
+        for at in (dt.datetime(2026, 11, 4, 9, 0, tzinfo=dt.timezone(dt.timedelta(hours=2))),
+                   dt.datetime(2026, 11, 4, 23, 59, tzinfo=dt.timezone(dt.timedelta(hours=-8))),
+                   dt.datetime(2031, 1, 1, 12, 0, tzinfo=dt.timezone.utc)):
+            with self.subTest(at=at), mock.patch.object(mailbox, "now", return_value=at):
+                waiting, today = waiting_today(mailbox.run({}, None), at.date().isoformat())
+                self.assertGreaterEqual(len(waiting), 3)
+                self.assertEqual(waiting, WAITING)
+                self.assertGreater(len(today), len(waiting))  # a mix: some answered, some not
 
 
 class Routes(Base):

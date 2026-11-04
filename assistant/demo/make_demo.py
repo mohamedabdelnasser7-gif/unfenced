@@ -6,6 +6,9 @@ up; every address is under .test, a name no real mail can use. No real person's 
 
 The Inbox holds one email with an instruction hidden in it (the memory poisoning check) and the
 Sent holds promises the user made, so the reader (assistant/mbox.py) has follow-ups to find.
+The newest day mixes mail the user answered with mail still waiting for a reply (a quote asked for by
+tomorrow, a meeting request, Omar chasing the numbers promised by Thursday, a newsletter), so a
+summary of today has replies to draft.
 The files are written the same way every time, so a test can rebuild and compare them.
 """
 import argparse
@@ -22,7 +25,8 @@ USER = {"name": "Nadia Example", "address": "nadia@demo.test",
         "about": "Runs a small product studio; mornings for deep work, afternoons for calls."}
 PEOPLE = {"maya": "Maya Stone <maya@northwind.test>", "omar": "Omar Field <omar@lumen.test>",
           "sara": "Sara Vale <sara@kitehouse.test>", "news": "Weekly Reads <digest@weeklyreads.test>",
-          "billing": "Billing Team <billing@quickledger.test>"}
+          "billing": "Billing Team <billing@quickledger.test>", "leo": "Leo Brandt <leo@harborline.test>",
+          "hana": "Hana Reed <hana@fieldnote.test>"}
 ME = f"{USER['name']} <{USER['address']}>"
 # (id, day, time, who, subject, body); a sent row has who "me" and names the inbox id it answers
 INBOX = [
@@ -41,6 +45,17 @@ INBOX = [
     ("in10", 29, "09:05", "maya", "Launch day", "Are we still on track for the launch next week?"),
     ("in11", 29, "16:05", "omar", "Designer brief", "Could you send me the brief for the designer role?"),
     ("in12", 29, "17:00", "sara", "Parking", "Is there parking near the studio for the workshop?"),
+    # the newest day (the one kit/tools/mailbox.py moves onto today) also holds mail with no reply yet
+    ("in13", 29, "10:20", "leo", "Revised quote",
+     "Hi Nadia, thanks for the call. Could you send a revised quote for the smaller scope, two screens instead of "
+     "four, by tomorrow at noon? Our board meets in the afternoon and I want it in the pack. Best, Leo"),
+    ("in14", 29, "11:40", "hana", "Intro call",
+     "Hi Nadia, Maya passed on your name. Could we have a 30 minute call tomorrow around 12:00 about a small app "
+     "for our team? Happy to move if that does not suit. Thanks, Hana"),
+    ("in15", 29, "13:05", "omar", "Budget numbers",
+     "Hi Nadia, just checking on the budget numbers. You said you would come back to me by Thursday, and I need "
+     "them to plan the designer role. Thanks, Omar"),
+    ("in16", 29, "14:30", "news", "This week in design", "Five short reads on pricing and studio life."),
 ]
 SENT = [
     ("se01", "in01", 26, "08:20", "Hi Maya,\nYes, I will go through it today and send notes by Wednesday.\nThanks,\nNadia"),

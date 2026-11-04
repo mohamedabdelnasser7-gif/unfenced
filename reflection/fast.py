@@ -36,7 +36,10 @@ data (a name, a password, a national id, an account), or a date, a day or a time
 2026-10-31, after the red team round). The engine still refuses a link, a phone number, a handle,
 more than one line and three or more words in a row copied from the customer. Ordinals (first,
 then, last) and "once" are not numbers here: the order of questions is what most notes are about.
-Only the fast note guard changed: the lessons' risk check still reads the plug's whole high list.
+Only the fast note guard changed then. Since engine fix A (2026-11-03) the plug's list is narrow (amounts,
+discounts, promises, payment, policy changes, data beyond the order) and the lessons' risk check reads
+it with no tool marks; the note guard keeps the plug's old words and patterns (_PLUG_WORDS_BEFORE), so
+a note may say no more than it could before.
 The engine's name check lets known() through: the topic words, the catalogue's words and the
 delivery places, so a note may name the Vapor or Cairo the customer typed, never their name. A
 place of more words passes only whole ("Sheikh Zayed", never "Zayed" alone), and a place of one
@@ -107,7 +110,7 @@ _NEVER_WORDS = {
         "geneh", "gneh", "guineh", "جنيه", "ج.م", "دولار", "ريال", "درهم"),
     "discount": (
         "discount", "coupon", "promo", "voucher", "free", "freebie", "rebate", "cashback", "markdown",
-        "bargain", "cheaper", "money off", "complimentary", "gift", "on the house", "khasm",
+        "bargain", "cheaper", "money off", "complimentary", "gift", "gratis", "expense", "on the house", "khasm",
         "خصم", "تخفيض", "ببلاش", "مجان", "كوبون", "اوفر"),
     "promise": (
         "promise", "guarantee", "warranty", "refund", "money back", "exchange", "replacement", "assure",
@@ -133,6 +136,50 @@ _NEVER_WORDS = {
         "negotiable", "negotiate", "negotiating", "negotiation", "include", "including", "inclusive",
         "covered", "cover", "reserve"),
 }
+# The Sales plug's high list words as they stood before engine fix A (2026-11-03), when the lessons'
+# risk check was narrowed to amounts, discounts, promises, payment, policy changes and data beyond the
+# order. A note's guard is not narrowed: it still reads every one of them, after _NEVER_WORDS and before
+# the plug's own list, so its words and their order are as they were.
+_PLUG_WORDS_BEFORE = {
+    "number": (
+        "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven",
+        "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty",
+        "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred", "thousand", "million",
+        "half", "quarter", "dozen", "double", "twice", "triple", "percent", "price", "cost", "total",
+        "subtotal", "fee", "charge", "shipping", "delivery", "discount", "offer", "sale", "coupon", "promo",
+        "free", "cheap", "expensive", "money", "amount", "egp", "le", "pound", "dollar", "usd", "euro",
+        "riyal", "dirham", "sar", "aed", "kwd", "qar", "wa7ed", "etnen", "itnen", "talata", "tlata", "khamsa",
+        "sitta", "tamanya", "meya", "alf", "nos", "bkam", "bekam", "taman", "shahn", "tawseel", "khasm",
+        "felous", "fulus", "geneh", "gneh", "guineh", "واحد", "اتنين", "اثنين", "تلات", "ثلاث", "اربع", "خمس",
+        "سته", "ستين", "سبع", "تمان", "ثمان", "تسع", "عشر", "ميه", "ميت", "الف", "مليون", "نص", "ضعف", "مرتين",
+        "سعر", "اسعار", "بكام", "تمن", "ثمن", "جنيه", "ج.م", "مصاريف", "رسوم", "شحن", "توصيل", "خصم", "تخفيض",
+        "عرض", "اوفر", "ببلاش", "مجان", "فلوس", "كوبون", "اجمالي", "مجموع"),
+    "promise": (
+        "promise", "promising", "guarantee", "warranty", "refund", "return", "exchange", "exchanging",
+        "replace", "replacing", "swap", "money back", "deliver", "arrive", "arrival", "tomorrow", "today",
+        "tonight", "within", "deadline", "on time", "date", "day", "week", "hour", "saturday", "sunday",
+        "monday", "tuesday", "wednesday", "thursday", "friday", "bokra", "bukra", "naharda", "enaharda",
+        "estebdal", "tabdeel", "badal", "daman", "madmoun", "madmoon", "وعد", "ضمان", "مضمون", "ضامن",
+        "استرجاع", "ترجيع", "مرتجع", "استرداد", "استبدال", "تبديل", "بدل", "يوصل", "توصل", "وصول", "هيجي",
+        "بكره", "النهارده", "انهارده", "الليله", "خلال", "ميعاد", "موعد", "تاريخ", "يوم", "ايام", "اسبوع",
+        "ساعه"),
+    "policy": (
+        "policy", "policies", "terms", "condition", "cash on delivery", "cod", "cash", "pay", "payment",
+        "instapay", "visa", "card", "wallet", "invoice", "receipt", "stock", "sold out", "restock", "cancel",
+        "cancellation", "available", "availability", "siasa", "shorot", "kash", "سياسه", "شروط", "دفع", "كاش",
+        "فيزا", "كارت", "انستاباي", "محفظه", "فاتوره", "ايصال", "مخزون", "ستوك", "متاح", "متوفر", "نفد",
+        "خلصان", "الغاء", "لغي"),
+    "personal_data": (
+        "name", "phone", "mobile", "number", "address", "email", "location", "national id", "id card",
+        "birthday", "age", "password", "account", "instagram", "facebook", "esm", "rakam", "telefon", "mobil",
+        "اسم", "رقم", "ارقام", "تليفون", "تلفون", "موبايل", "عنوان", "ايميل", "لوكيشن", "بطاقه", "قومي", "عمر",
+        "حساب"),
+}
+# The plug's high list patterns before engine fix A, kept for the note guard like the words above.
+_PLUG_PATTERNS_BEFORE = (("number", "[%$£€¥]"), ("personal_data", "@"))
+# The low risk line a note is written to, as the plug had it before engine fix A: the plug's own line now
+# lets a lesson ask for the order details, which a note never names.
+NOTE_LOW = "Low risk: tone, wording, the order of questions, when to ask for the size, greetings."
 # Never words read as whole words only, with no ending: the risk check's word endings would read
 # "on us" in "focus on using" and "final" in "finally" (review round 3). Kept here, on the note
 # guard's side, so the lesson risk check (engine/risk.py) reads its words as before.
@@ -163,6 +210,22 @@ _NEVER_PATTERNS = (
     ("policy", r"\blast\s+(?:pair|piece|item|unit)s?\b"),
     ("discount", r"\bthrow(?:s|ing|n)?\s+(?:it\s+|them\s+)?in\b|\broom\s+to\s+(?:move|negotiate)\b"
                  r"|\b(?:do|go)\s+better\s+than\b"),
+    # red team engfix round 1, finding 4: notes that give money away with no amount. Kept here as well as
+    # on the plug, so a narrower plug never opens the note guard. "deal" is no word ("deal with the size")
+    # and "a bit off" only after knock or take ("the fit is a bit off").
+    ("discount", r"\b(?:skip|skips|skipped|skipping|absorb|absorbs|absorbed|absorbing|waive|waives|waived|waiving)\s+"
+                 r"(?:the\s+|their\s+|its\s+|any\s+)?(?:(?:delivery|shipping)\s+)?(?:fee|charge|cost)s?\b"
+                 r"|\bleave\s+(?:the\s+|their\s+|its\s+)?(?:(?:delivery|shipping)\s+)?(?:fee|charge|cost)s?\s+(?:out|off)\b"),
+    ("discount", r"\bcosts?\s+(?:them\s+|you\s+)?nothing\b"
+                 r"|\bwithout\s+(?:a|any|the)\s+(?:(?:delivery|shipping)\s+)?(?:fee|charge|cost)\b"
+                 r"|\bat\s+(?:our|my|the\s+store['’]?s)\s+(?:own\s+)?(?:expense|cost)\b"
+                 r"|\bfor\s+less\b|\b(?:knock|take|takes|taking|took)\s+(?:a\s+(?:bit|little)|a\s+few\s+[a-z]+|something|some)\s+off\b"),
+    ("discount", r"\b(?:agree|agrees|agreed|agreeing)\s+(?:to|with|on)\s+(?:the\s+|their\s+|whatever\s+|any\s+|that\s+)?"
+                 r"(?:price|offer|amount|figure)\b"
+                 r"|\b(?:accept|accepts|accepted|accepting|match|matches|matched|matching)\s+(?:their|whatever|any)\s+"
+                 r"(?:[a-z]+\s+)?(?:price|offer|amount|figure)\b"),
+    ("discount", r"\bas\s+an?\s+(?:thank[\s-]*you|gift|bonus|present|treat|extra)\b"
+                 r"|\b(?:a|special|good|great|better|best|sweet|nice)\s+deal\b"),
 )
 
 
@@ -171,7 +234,8 @@ def _never(plug_risk):
     on both keeps the name above), each word once; a _WHOLE_WORDS word as a whole word pattern."""
     whole = tuple((g, w) for g, ws in _WHOLE_WORDS.items() for w in ws)
     seen, words = {w for _, w in whole}, []
-    for group, w in [(g, w) for g, ws in _NEVER_WORDS.items() for w in ws] + list(plug_risk.words):
+    for group, w in ([(g, w) for g, ws in _NEVER_WORDS.items() for w in ws]
+                     + [(g, w) for g, ws in _PLUG_WORDS_BEFORE.items() for w in ws] + list(plug_risk.words)):
         if w.casefold() in TOPIC_WORDS or w.casefold() in seen:
             continue
         seen.add(w.casefold())
@@ -179,9 +243,10 @@ def _never(plug_risk):
     numbers = {p for _, p in engine_fast.NUMBERS}  # the engine checks these for every agent
     patterns = (_NEVER_PATTERNS + tuple((g, r"(?<![a-z0-9_])" + r"\s+".join(w.split()) + r"(?![a-z0-9_])")
                                         for g, w in whole)
-                + tuple((g, p) for g, p in plug_risk.patterns if p not in numbers))
+                + _PLUG_PATTERNS_BEFORE
+                + tuple((g, p) for g, p in plug_risk.patterns if p not in numbers and (g, p) not in _PLUG_PATTERNS_BEFORE))
     tools = tuple(t for t in plug_risk.tools if t.casefold() not in TOPIC_WORDS)
-    return Risk(high_about=NEVER_ABOUT, low_about=plug_risk.low_about, words=tuple(words),
+    return Risk(high_about=NEVER_ABOUT, low_about=NOTE_LOW, words=tuple(words),
                 patterns=patterns, tools=tools)
 
 
@@ -271,7 +336,7 @@ class Writer:
 
 def messages(plug, view):
     """The two messages: the instructions, then the case as data."""
-    system = WRITE.format(good=plug.decides.good, agent=describe(plug), low=plug.risk.low_about,
+    system = WRITE.format(good=plug.decides.good, agent=describe(plug), low=NOTE_LOW,
                           topics=TOPICS, never=NEVER_ABOUT, limit=engine_fast.NOTE_LEN)
     return [{"role": "system", "content": system},
             {"role": "user", "content": json.dumps(view, ensure_ascii=False)}]

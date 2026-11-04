@@ -164,6 +164,8 @@ ICON = dict(mo.ICONS, pen='<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5
 # a person reads why the card waits, never the engine's word lists.
 PLAIN_RISK = {"number": "it talks about a number, like a price, a size or a delivery time",
               "money": "it talks about money", "spend": "it talks about spending money",
+              "amount": "it states an amount of money", "discount": "it offers a discount or something free",
+              "payment": "it changes how the customer pays",
               "promise": "it makes a promise to the customer", "policy": "it touches store policy",
               "personal_data": "it touches someone's personal data", "other_brands": "it names other brands",
               "goes_out": "it sends something out in your name", "calendar": "it changes your calendar",
@@ -993,7 +995,10 @@ def level_card(m, agent, run, ctx, back):
         safe = " with no failed safety check" if rule["no_failed_checks"] else ""
         played = run.get("gate_played")
         short = played is not None and played < size  # cut short (the cap, or a match left unjudged)
-        score = (f'<b>{run["gate_won"]} won of {played} played</b> (the run stopped before all {size})' if short
+        unjudged = run.get("unjudged") or 0  # the last round's test matches the judge could not read
+        why = (f'{"one test match" if unjudged == 1 else f"{unjudged} test matches"} could not be judged'
+               if unjudged else f"the run stopped before all {size}")
+        score = (f'<b>{run["gate_won"]} won of {played} played</b> ({why})' if short
                  else f'<b>{run["gate_won"]} of {size}</b>')
         out.append(f'<p class="score">{score}, your level needs {need}{safe}</p>')
         gate = m.gate(agent)
@@ -1007,7 +1012,8 @@ def level_card(m, agent, run, ctx, back):
             blocks = "".join(f'<li dir="auto">{h(b["line"])}</li>' for b in run.get("blocks") or [])
             if blocks:
                 out.append(f'<p class="lab">What holds it back</p><ul class="blk">{blocks}</ul>')
-            out.append(f'<p class="quiet">{LEVEL_HELP}</p>')
+            if not unjudged:  # a match left unjudged needs only a new run; the help's steps cannot pass it
+                out.append(f'<p class="quiet">{LEVEL_HELP}</p>')
     else:
         out.append(f'<p class="calm">{h(levels_mod.WORDS[level])} Its first Arena run shows the score against it.</p>')
     if ctx["token"]:
@@ -1045,6 +1051,8 @@ def run_arena(m, agent, ctx, back):
     note = m.arena_note(agent)
     if note:
         out.append(f'<p class="no-yet" role="status">{h(note)}</p>')
+    if note and ctx["token"] and getattr(m, "arena_record", lambda a: None)(agent):  # torn or gone: the one step
+        out.append(_post(ctx, mo.NEW_TEST_PATH[1:], "Start a new test set", "yes", agent=agent, back=back))
     if ctx["token"]:
         out.append(f'<p class="quiet">{ARENA_SAID}</p>'
                    + _post(ctx, ARENA_PATH[1:], f'{icon("flask")}Run the Arena', "yes", agent=agent, back=back))

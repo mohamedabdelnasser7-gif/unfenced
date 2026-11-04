@@ -30,7 +30,10 @@ owner's cleaned real cards (arena/madeup.py blend) and never from another owner'
 the agent's kind, the job it does, picked from the kinds already running here when it is the same
 job (DECISIONS item 79), and the plug names that kind, so a second agent of a kind its owner runs is
 a sibling (arena/grow.py siblings): it shares their practice customers, and its first night reads
-their kept lessons first, each on trial only through its own gate (engine/study.py, step 6). Tools come only from what the repo has (TOOLS); anything else the card names is
+their kept lessons first, each on trial only through its own gate (engine/study.py, step 6). Right
+after the siblings, that first night also reads the shared pool of its kind (reflection/shared.py,
+DECISIONS item 83): lesson patterns seen at 2 or more other owners, each on trial only through its
+own gate the same way. Tools come only from what the repo has (TOOLS); anything else the card names is
 marked not connected yet and the plug leaves it out, and so is a need that names a service no repo tool
 reaches (OUTSIDE), whatever tool the model matched it to. No chat goes to a person (DECISIONS 53): a card, plug or
 instructions that hand a chat to a person, the team or the owner, in English or Arabic, are refused

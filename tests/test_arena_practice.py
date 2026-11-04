@@ -140,6 +140,15 @@ class Base(unittest.TestCase):
 
 
 class EndToEnd(Base):
+    def test_each_saved_match_says_whether_it_was_a_test_match(self):
+        code, rep = self.main("--matches", "2", "--json")
+        self.assertEqual(code, 0, self.err)
+        ms = self.matches()
+        self.assertTrue(ms)
+        for m in ms:
+            self.assertIs(m[practice.TEST_KEY], m["id"].rsplit("-", 1)[-1].startswith("g"), m["id"])
+        self.assertEqual({m[practice.TEST_KEY] for m in ms}, {True, False})
+
     def test_a_fixture_plug_practises_and_writes_the_files_a_sales_run_writes(self):
         code, rep = self.main("--matches", "2", "--json")
         self.assertEqual(code, 0, self.err)
@@ -260,7 +269,8 @@ class NoSend(Base):
         cards = [f"agents/stock_watch/practice-cards/persona-{i:02d}.json" for i in range(1, count + 1)]
         self.assertEqual(self.files(), sorted(
             ["agents/stock_watch/card.json", "agents/stock_watch/instructions.md", "agents/stock_watch/plug.json",
-             f"agents/stock_watch/{run.MATCHES_FILE}", f"agents/stock_watch/{practice.TEST_FILE}", run.CALLS_FILE, "arena-calls.lock", run.seal.KEY_FILE,
+             f"agents/stock_watch/{run.MATCHES_FILE}", f"agents/stock_watch/{practice.TEST_FILE}",
+             f"agents/stock_watch/{practice.ROSTER_FILE}", run.CALLS_FILE, "arena-calls.lock", run.seal.KEY_FILE,
              rep["item"]["file"]]
             + cards))
         after = {p for p in REPO.rglob("*") if "__pycache__" not in p.parts and ".git" not in p.parts}

@@ -13,6 +13,8 @@ changes a lesson; the one answer it takes (an operator correction) goes through 
                  the night reports, exams and lessons as a log, beside the lessons table.
     writes.json  the same records as JSON as they were saved, on every tab
     Corrections  every correction, tagged user or operator, with its status and exam
+    From         a lesson taken from the shared pool across owners says "learned from N owners", in
+                 the lessons table and its side panel, read off its source line (reflection/shared.py)
 
 A row opens the side panel (row=<key>): Saw, Decided, Raw. What the engine did not save says
 NOT_SAVED and is never filled in. A lost match, a failed exam situation or a flagged live turn shows
@@ -42,6 +44,7 @@ from engine import lessons as lessons_mod
 from engine.lessons import KEPT, PULLED, TRYING, WAITING
 from kit import connections as conn_mod
 from kit import sample as sample_mod
+from reflection import shared as shared_mod
 
 NOT_SAVED = "not saved for this turn"
 RECENT = 600            # seconds: a record this new marks its stage as running
@@ -218,7 +221,8 @@ def _db(m, agent, out, rec):
         status = _status(les, held)
         row = {"id": les["id"], "text": les["text"], "source": les.get("source") or "", "status": status,
                "state": les["state"], "added_at": les["added_at"], "risk": les.get("risk"),
-               "why": risk_reason(les.get("risk_why")) if les.get("risk") == "high" else "", "raw": les}
+               "why": risk_reason(les.get("risk_why")) if les.get("risk") == "high" else "", "raw": les,
+               "owners": shared_mod.owners_in(les.get("source"))}  # a lesson from the shared pool: how many owners
         by_id[les["id"]] = row
         out["lessons"].append(row)
         rec.add("R", les["added_at"], f"lesson {les['id']} added ({status.lower()}): {les['text']}", les,
@@ -882,13 +886,23 @@ def reflect_html(data, st, day):
         rows.append(f'<tr class="{"sel" if st["row"] == key else ""}"><td class="mono"><a href="{href(st, day, row=key, pane="")}">'
                     f'{x["id"]}</a></td><td class="sit"><a href="{href(st, day, row=key, pane="")}">{h(x["text"])}</a>'
                     + (f'<small class="why">{h(x["why"])}</small>' if x.get("why") else "")
-                    + f'</td><td class="dim">{h(_short(x["source"]))}</td><td><span class="badge {cls}">{x["status"]}</span></td></tr>')
+                    + f'</td><td class="dim">{h(_from(x))}</td><td><span class="badge {cls}">{x["status"]}</span></td></tr>')
     table = (f'<div class="tbl"><table><thead><tr><th>ID</th><th>Lesson</th><th>From</th><th>Status</th></tr></thead>'
              f'<tbody>{"".join(rows)}</tbody></table></div>' if rows else '<p class="empty">No lessons yet.</p>')
     return ('<div class="ph"><h2>Reflection</h2><span class="n">night reports, exams and every lesson</span></div>'
             f'<div class="split"><div><div class="stats"><span>Study log</span></div><div class="log scroll">{log}</div></div>'
             f'<div><div class="stats"><span>Lessons</span><span>kept <b>{count["KEPT"]}</b></span><span>trial '
             f'<b>{count["TRIAL"]}</b></span><span>held <b>{count["HELD"]}</b></span></div>{table}</div></div>')
+
+
+def _learned(x):
+    """A lesson from the shared pool: "learned from N owners", read off its source line; else ""."""
+    n = x.get("owners")
+    return f"learned from {n} owners" if isinstance(n, int) and not isinstance(n, bool) else ""
+
+
+def _from(x):
+    return f"shared pool, {_learned(x)}" if _learned(x) else _short(x["source"])
 
 
 def _short(source, n=60):
@@ -1030,7 +1044,8 @@ def _panel(kind, x, data):
         raw = _ns("Request and response of each situation") + _json_box("The saved exam row", ex["raw"])
         return f"Exam for lesson {ex['lesson']}", False, None, {"saw": saw, "dec": dec, "raw": raw}
     les = x
-    saw = _box("Lesson", les["text"]) + _box("From", les["source"] or NOT_SAVED)
+    saw = _box("Lesson", les["text"]) + _box("From", (f"{_learned(les)}\n" if _learned(les) else "")
+                                              + (les["source"] or NOT_SAVED))
     dec = _box("Status", les["status"])
     if les.get("why"):  # a high risk lesson: why it waits, as its risk check saved it
         dec += _box("Why it waits" if les["status"] in ("HELD", "WAITING") else "Risk", les["why"], "bad")

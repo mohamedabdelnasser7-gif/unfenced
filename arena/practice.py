@@ -2,6 +2,7 @@
 
     python3 -I arena/practice.py --agent DIR [--level low|medium|high] [--matches 10] [--rounds 2]
         [--cards DIR] [--trust FILE] [--cap 1000] [--gate W/N] [--seed 0] [--json] [--quick]
+    python3 -I arena/practice.py --agent DIR --new-test-set
 
 DIR is the agent's folder, <db folder>/agents/<name>/, with plug.json, instructions.md and card.json
 (kit/turn.py load). The Sales agent practises through arena/run.py, never here.
@@ -99,11 +100,32 @@ are arena/run.py's, as before.
 The test set is kept (fixed_test). The first run's test ids are saved in the agent's folder,
 test-set.json beside card.json, each with the card fingerprint of the person it names, and later runs
 hold out the same people. A customer with a training match on record (any match in
-arena-matches.jsonl that is not a test match, a quick run's too) is never a test customer, so when the
-level is raised (10 to 20 test customers) or the saved ones are short, new customers that never
-trained fill the gap, and the writer writes more when too few are left. Saved test customers a smaller
-run does not need sit out (they never train). A test-set.json or a matches file that is there but
-cannot be read stops the run (fail closed).
+arena-matches.jsonl that is not a test match, a quick run's too; each match saved says which it is) is
+never a test customer, so when the level is raised (10 to 20 test customers) or the saved ones are
+short, new customers that never trained fill the gap, and the writer writes more when too few are
+left. Saved test customers a smaller run does not need sit out (they never train). The test set's
+kinds always follow the shape's mix (easy, unsure and hard as test_set draws them: 4, 4 and 2 of 10,
+8, 8 and 4 of 20), so a test-set.json edited to other kinds is rebuilt from customers that never
+trained, never trusted. Each match line and test-set.json carry the run's seal (kit/seal.py, the key
+beside the gate item's, reports_of): a line counts as a test match only while its seal holds, and a
+test-set.json whose seal does not hold is rebuilt, so neither file can be edited to hide a customer
+that trained or to choose the test customers. Since the seal is per line, a deleted training line is
+caught by a sealed roster beside them, trained.json, of every customer that ever trained (card id and
+fingerprint): each training match adds its customer before its line is saved, it never shrinks, and
+trained is the union of the roster and the matches file (keep_trained; a folder with no roster has it
+built once from its matches file and every practice customer saved in it, so deleting all three files
+never makes a customer that trained new again). A test-set.json, a matches file or a roster that is
+there but cannot be read, a line of it that cannot be read, a roster whose seal does not hold, a
+matches file deleted while test-set.json is there, or a roster deleted while a sealed line or
+test-set.json is there stops the run before any model call (fail closed); Start a new test set
+(new_test_set) is the one way on.
+
+The shared pool across owners (reflection/shared.py, DECISIONS item 83). An agent in an agents/
+folder practises against the lost patterns of its kind seen at 2 or more owners too, as the Sales
+Arena does (arena/grow.py decks): the shared folder beside the database (shared_root), read as
+practice_cards gives them, each a fresh practice customer holding the pattern alone. They join the
+training draw only, after the gate cards are split off, so they never take the gate; each weighs as
+much as an average training card, and the report counts them (shared_cards).
 """
 import argparse
 import hashlib
@@ -112,8 +134,10 @@ import math
 import os
 import re
 import secrets
+import shlex
 import string
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -122,7 +146,7 @@ if __name__ == "__main__" and str(ROOT) not in sys.path:  # run by its path unde
 
 from arena import good, levels, madeup, match as match_mod, paths, run, scope  # noqa: E402
 from arena.match import LEAVE, VOID, plain  # noqa: E402
-from kit import sample, turn as turn_mod  # noqa: E402
+from kit import sample, seal, turn as turn_mod  # noqa: E402
 from kit.chats import Chats  # noqa: E402
 from kit.db import Db  # noqa: E402
 from kit.model import ModelError  # noqa: E402
@@ -381,12 +405,14 @@ def read_gate(text):
 class Practice(run.Arena):
     """arena/run.py Arena with a new agent's match and verdict, and a Morning page item every run."""
 
-    def __init__(self, agent, cards, *, judge_model, made_up, behaviour_from=0, learn=None, once=False, **kw):
+    def __init__(self, agent, cards, *, judge_model, made_up, behaviour_from=0, learn=None, once=False, shared=(),
+                 **kw):
         self.agent, self.who, self.made_up, self.lost = agent.name, agent, bool(made_up), []
         self.once, self.bags = bool(once), {}  # once: each card once a round (a fixed test set)
         self.behaviour_from = behaviour_from  # the owner's real cards that lent the customers their behaviour
         self.unread = 0  # unjudged matches in a row (UNREAD_IN_A_ROW stops the run)
         super().__init__(cards, learn=learn, **kw)  # learn(m, judged, mid): a lost training match becomes a case
+        self.shared_cards = self._train_on(shared)
         self.judge_model = self.calls.model(judge_model)
         self.prompt_sha, self.prompt_file = match_mod.prompt_sha(prompt_for(agent.card)), None
         self.level = self.trust.get("level")  # the risk level the run plays to (arena/levels.py), None for --gate
@@ -399,6 +425,18 @@ class Practice(run.Arena):
             return []
         from engine.lessons import MAX_PICK
         return self.lessons.live(self.who.stage.name)[:MAX_PICK]
+
+    def _train_on(self, shared):
+        """The shared pool's practice customers (see the module lines) into the training draw only,
+        each at the average training card's weight; the gate cards are split already. Returns how many."""
+        shared = [dict(c) for c in shared or () if str(c.get("id", "")).startswith(run.GROWN)]
+        if not shared or not self.train:
+            return 0
+        weight = sum(max(0.0, float(c.get("arena_weight", 1.0))) for c in self.train) / len(self.train) or 1.0
+        for c in shared:
+            c["arena_weight"] = weight
+        self.train = self.train + shared
+        return len(shared)
 
     def play(self, card, match_id, *, opening=None, lessons=None, replay=None, training=False):
         try:
@@ -435,13 +473,28 @@ class Practice(run.Arena):
             return run.VOIDED
         judged["failed_check"] = failed_check(judged)  # counted per gate round (arena/run.py Arena.run)
         m.update(id=match_id, won=judged["won"], why=judged["why"], quote=judged["quote"], persona=card,
-                 prompt_sha=self.prompt_sha, prompt_file=None)
-        if not judged["won"] and training and not scope.is_off(card):  # only practice matches, never off topic: the item's lost, what Try again plays (81)
+                 prompt_sha=self.prompt_sha, prompt_file=None, **{TEST_KEY: not training})
+        # only practice matches a customer could have won, never off topic: the item's lost, what Try again
+        # plays (81); a never customer only when its loss failed a safety check, a slip of the agent's own
+        if not judged["won"] and training and not scope.is_off(card) and (run.can_buy(card) or judged["failed_check"]):
             self.lost.append({"id": match_id, "card": m["card"], "why": judged["why"], "quote": judged["quote"]})
-        self.state.mkdir(parents=True, exist_ok=True)
-        with open(self.state / run.MATCHES_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(m, ensure_ascii=False) + "\n")
+        self.save(m)
         return m, judged
+
+    def save(self, m):
+        """Appends match m to the agent's matches file with the run's seal on the line (kit/seal.py, the
+        key beside the gate item's, reports_of), so trained reads its test_match field only on a line the
+        run wrote; m itself is left as it is. A match that is not a test match adds its customer to the
+        sealed roster first (keep_trained), so the roster is beside every sealed line and deleting the
+        line later never hides that the customer trained."""
+        self.state.mkdir(parents=True, exist_ok=True)
+        test = m.get(TEST_KEY) is True and isinstance(m.get("id"), str) and bool(_TEST_MATCH.search(m["id"]))
+        who = m.get("persona")
+        keep_trained(self.state, () if test else
+                     [(m["card"], who.get("from_card", _ANY) if isinstance(who, dict) else _ANY)])
+        line = seal.sign(dict(m), reports_of(self.state))
+        with open(self.state / run.MATCHES_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(line, ensure_ascii=False) + "\n")
 
     def pick(self, deck, r, k):
         """With a fixed test set (once): the next card of this round's shuffled bag of deck, so no card
@@ -483,9 +536,14 @@ class Practice(run.Arena):
     def blocks(self, rounds, stopped):
         """What held the run below its level, each {"kind", "line"} in plain words: safety checks that
         failed, lessons waiting for a yes, lessons the exam refused, a study that found no lesson, no
-        study between rounds, tools named but not built, the call cap."""
+        study between rounds, tools named but not built, the call cap; first, test matches left unjudged."""
         out = []
         last = rounds[-1]["gate"] if rounds else {}
+        n = last.get("unjudged", 0)
+        if n:
+            out.append({"kind": "unjudged", "line": f"{n} test match{'' if n == 1 else 'es'} could not be judged "
+                                                     "(the judge's answer could not be read twice), so the round "
+                                                     "could not pass. Run the Arena again."})
         n = last.get("failed_checks", 0)
         if n:
             out.append({"kind": "safety", "line": f"{n} test match{'' if n == 1 else 'es'} failed a safety check "
@@ -513,7 +571,7 @@ class Practice(run.Arena):
         self.played_rounds = rounds
         rep = super()._report(rounds, stopped)
         rep.update(made_up=self.made_up, behaviour_from=self.behaviour_from, tools=list(self.who.tools),
-                   tools_left_out=list(self.who.missing))
+                   tools_left_out=list(self.who.missing), shared_cards=self.shared_cards)
         if "stuck" not in rep and "item" not in rep:
             rep["item"] = self.rounds_item(rounds, stopped)
         return rep
@@ -522,7 +580,7 @@ class Practice(run.Arena):
         item.update(made_up=self.made_up, practice=True)
         rounds = self.played_rounds
         # the last round's lost practice matches, never a test match, so the tab's tiles, Correct this and
-        # Try again work on practice customers only (decisions 81 and 85)
+        # Try again work on practice customers only (decisions 81 and 85), each one it could have won (play)
         last_round = f"{self.run_id}-r{len(rounds)}-t"
         item["lost"] = [{k: x[k] for k in ("card", "why", "quote")} for x in self.lost
                         if str(x["id"]).startswith(last_round)]
@@ -530,6 +588,7 @@ class Practice(run.Arena):
         item.setdefault("quick", self.quick)  # a stuck item too, so Morning.gate reads it the same way
         item.setdefault("stopped", run.STUCK if item.get("kind") == "arena_stuck" else None)
         item.update(level=self.level, gate_size=self.trust["matches"], failed_checks=last.get("failed_checks", 0),
+                    unjudged=last.get("unjudged", 0),
                     scores=[r["gate"]["won"] for r in rounds], no_failed_checks=bool(self.trust.get("no_failed_checks")),
                     studied=self.between is not None)
         if item.get("stopped") != run.PASSED:
@@ -561,6 +620,9 @@ def text(rep):
     else:
         who = "made up from the agent's card, no real chats yet" if rep["made_up"] else "real cards"
     lines.append("  practice customers: " + who)
+    if rep.get("shared_cards"):
+        lines.append(f"  {rep['shared_cards']} more practice customers from the shared pool of this kind, patterns "
+                     "seen at 2 or more owners, training only")
     lines.append("  tools: " + (", ".join(rep["tools"]) or "none")
                  + (f"; named in the plug but not built: {', '.join(rep['tools_left_out'])}" if rep["tools_left_out"] else ""))
     return "\n".join(lines)
@@ -594,7 +656,28 @@ def _whole(size):
 TEST_FILE = "test-set.json"
 MAX_TEST_FILE = 64 * 1024
 _TEST_MATCH = re.compile(r"-r\d+-g\d+$")  # a test match's id ends -r<round>-g<k> (arena/run.py Arena.run)
+TEST_KEY = "test_match"  # on every match Practice saves: true for a test match, false for a training match
+ROSTER_FILE = "trained.json"  # the sealed roster of every customer that ever trained (keep_trained)
+ROSTER_KEY = "trained"
+MAX_ROSTER_FILE = 1024 * 1024
 _ANY = object()  # a training match whose saved person names no card fingerprint: the id counts whatever it is
+
+
+def _kind(c):
+    return str(c.get("kind") or "")
+
+
+def _quota(counts, size):
+    """{kind: how many} of size drawn from counts ({kind: how many there are}), each kind in its share,
+    the largest remainders first (ties by kind name); {} when counts holds none."""
+    total = sum(counts.values())
+    if not total:
+        return {}
+    exact = {k: size * n / total for k, n in counts.items()}
+    quota = {k: int(v) for k, v in exact.items()}
+    for k in sorted(counts, key=lambda k: (quota[k] - exact[k], k))[:size - sum(quota.values())]:
+        quota[k] += 1
+    return quota
 
 
 def _choose(winnable, size):
@@ -602,46 +685,73 @@ def _choose(winnable, size):
     cards in the order of a hash of their fingerprint and id."""
     kinds = {}
     for c in winnable:
-        kinds.setdefault(str(c.get("kind") or ""), []).append(c)
-    exact = {k: size * len(v) / len(winnable) for k, v in kinds.items()}
-    quota = {k: int(v) for k, v in exact.items()}
-    for k in sorted(kinds, key=lambda k: (quota[k] - exact[k], k))[:size - sum(quota.values())]:
-        quota[k] += 1
+        kinds.setdefault(_kind(c), []).append(c)
+    quota = _quota({k: len(v) for k, v in kinds.items()}, size)
     return sorted(c["id"] for k, v in kinds.items() for c in sorted(v, key=_rank)[:quota[k]])
 
 
+def shape_mix(count):
+    """{kind: how many} of the made-up customers a shape of count writes that can reach the good result
+    (arena/madeup.py mix without the never kind): what the test set's kinds are drawn from."""
+    return {k: n for k, n in madeup.mix(count).items() if k != "never" and n}
+
+
+class Unrecorded(run.Refused):
+    """read_test, trained or keep_trained refused: the agent's record of its test set (file:
+    test-set.json) or of who trained (file: arena-matches.jsonl or trained.json) is torn, cannot be read,
+    no longer holds its seal or is gone. Only new_test_set gets past it, never a skipped line."""
+
+    def __init__(self, line, file):
+        super().__init__(line)
+        self.file = file
+
+
 def read_test(folder):
-    """The saved test customers, [(id, fingerprint)], [] when there is no test-set.json. run.Refused when
-    it is there but cannot be read, is a link or is not a list of them (fail closed)."""
+    """The saved test customers, [(id, fingerprint)], [] when there is no test-set.json or its seal does
+    not hold (write_test seals it with the key of reports_of the folder, as each match line is), so one
+    written or edited by hand, or one from before the seal, is rebuilt from customers that never
+    trained, never trusted. run.Refused when it is there but cannot be read, is a link or is not a list
+    of them, each with its id and from_card (fail closed)."""
     path = Path(folder) / TEST_FILE
     if not path.exists() and not path.is_symlink():
         return []
-    bad = run.Refused(f"the agent's {TEST_FILE} cannot be read, so the run did not start; it keeps the test "
-                      "customers, so it is never guessed")
+    bad = Unrecorded(f"the agent's {TEST_FILE} cannot be read, so the run did not start; it keeps the test "
+                     "customers, so it is never guessed", TEST_FILE)
     try:
         if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_TEST_FILE:
             raise bad
-        got = json.loads(path.read_text(encoding="utf-8")).get("test")
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        got = doc.get("test")
     except (OSError, ValueError, AttributeError, RecursionError):
         raise bad from None
     if not isinstance(got, list):
         raise bad
     out = []
     for e in got:
-        if not isinstance(e, dict) or not isinstance(e.get("id"), str) or \
-                not isinstance(e.get("from_card"), (str, type(None))):
+        if not isinstance(e, dict) or not isinstance(e.get("id"), str) or "from_card" not in e or \
+                not isinstance(e["from_card"], (str, type(None))):
             raise bad
         out.append((e["id"], e["from_card"]))
+    if not seal.holds(doc, seal.key(reports_of(folder))):  # written or edited by hand, or before the seal
+        return []
     return out
 
 
 def write_test(folder, entries):
-    """Writes test-set.json whole (a hidden file renamed into place); refuses a link."""
+    """Writes test-set.json whole (a hidden file renamed into place) with the run's seal on it (kit/seal.py,
+    the key of reports_of the folder; read_test trusts it only while the seal holds); refuses a link."""
     folder = Path(folder)
     path = folder / TEST_FILE
     if path.is_symlink():
         raise run.Refused(f"the agent's {TEST_FILE} is a link")
-    text = json.dumps({"test": [{"id": i, "from_card": f} for i, f in entries]}, ensure_ascii=False) + "\n"
+    doc = seal.sign({"test": [{"id": i, "from_card": f} for i, f in entries]}, reports_of(folder))
+    text = json.dumps(doc, ensure_ascii=False) + "\n"
+    matches = folder / run.MATCHES_FILE  # there from now on, so a deleted one is told from a first run (trained)
+    if matches.is_symlink():
+        raise run.Refused("the agent's saved matches are a link")
+    if not matches.exists():
+        os.close(os.open(matches, os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0), 0o644))
+    keep_trained(folder)  # the roster is there before the test set, so a deleted one is told (trained)
     tmp = folder / f".{TEST_FILE}.{secrets.token_hex(4)}.tmp"
     try:
         with open(tmp, "x", encoding="utf-8") as f:
@@ -652,64 +762,360 @@ def write_test(folder, entries):
             tmp.unlink()
 
 
-def trained(folder):
-    """{(card id, fingerprint)} of every match on record in the folder's arena-matches.jsonl that is not a
-    test match: the people that played a training match (a quick run's too). A line
-    that cannot be read is skipped, as every reader of the file does; a file that is there but cannot
-    be read is run.Refused (fail closed)."""
-    path = Path(folder) / run.MATCHES_FILE
+def is_test(m, k):
+    """True when match line m is a test match: its TEST_KEY is true, its id is a test match's, and the
+    run's seal on the line holds with key k (seal.key of reports_of the agent's folder). A line with
+    no seal, a seal that does not hold (a line relabelled, written by hand or given another line's
+    seal) or no key is never a test match."""
+    return (isinstance(m, dict) and m.get(TEST_KEY) is True and isinstance(m.get("id"), str)
+            and bool(_TEST_MATCH.search(m["id"])) and seal.holds(m, k))
+
+
+def _lines(folder):
+    """({(card id, fingerprint)} of the training lines in the folder's arena-matches.jsonl, True when a line
+    holds the run's seal): every line that is not a test match (is_test) counts as training, one written
+    before TEST_KEY or the seal, relabelled or written by hand too. Unrecorded (fail closed) when the file
+    is a link or not a plain file, cannot be read or holds a line that is not a match (never skipped), and
+    when it is gone while test-set.json is there (write_test makes it with the test set)."""
+    folder = Path(folder)
+    path = folder / run.MATCHES_FILE
     if not path.exists() and not path.is_symlink():
-        return set()
-    out = set()
+        if (folder / TEST_FILE).exists() or (folder / TEST_FILE).is_symlink():
+            raise Unrecorded(f"the agent's saved matches are gone while its {TEST_FILE} is there, so the run did "
+                             "not start; they say which customers trained, and a test customer never has",
+                             run.MATCHES_FILE)
+        return set(), False
+    bad = Unrecorded("the agent's saved matches cannot be read, so the run did not start; they say "
+                     "which customers trained, and a test customer never has", run.MATCHES_FILE)
+    if path.is_symlink() or not path.is_file():
+        raise bad
+    out, sealed, k = set(), False, seal.key(reports_of(folder))  # read only: a reader never makes the key
     try:
-        with open(path, encoding="utf-8") as f:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with open(fd, encoding="utf-8") as f:
             for line in f:
+                if not line.strip():
+                    continue
                 try:
                     m = json.loads(line)
                 except (ValueError, RecursionError):
-                    continue
+                    raise bad from None
                 if not isinstance(m, dict) or not isinstance(m.get("card"), str):
-                    continue
-                if isinstance(m.get("id"), str) and _TEST_MATCH.search(m["id"]):
+                    raise bad
+                sealed = sealed or seal.holds(m, k)
+                if is_test(m, k):
                     continue
                 who = m.get("persona")
                 out.add((m["card"], who.get("from_card", _ANY) if isinstance(who, dict) else _ANY))
     except (OSError, UnicodeDecodeError):
-        raise run.Refused("the agent's saved matches cannot be read, so the run did not start; they say "
-                          "which customers trained, and a test customer never has") from None
+        raise bad from None
+    return out, sealed
+
+
+def _roster_gone():
+    return Unrecorded(f"the agent's {ROSTER_FILE} is gone while its saved matches carry the run's seal or its "
+                      f"{TEST_FILE} is there, so the run did not start; it keeps every customer that ever trained, "
+                      "and a test customer never has", ROSTER_FILE)
+
+
+def _read_roster(folder):
+    """The sealed roster (ROSTER_FILE) as {(card id, fingerprint)}, None when there is none. Unrecorded
+    (fail closed) when it is a link or not a plain file, too big, cannot be read, is not a list of
+    customers each with a card id (and a from_card text or null, or none for any card), names another
+    agent's folder (one copied from a sibling under the same key), or its seal does not hold with the key
+    of reports_of the folder (edited, written by hand or sealed elsewhere)."""
+    path = Path(folder) / ROSTER_FILE
+    if not path.exists() and not path.is_symlink():
+        return None
+    bad = Unrecorded(f"the agent's {ROSTER_FILE} cannot be read or was changed after the run wrote it, so the run "
+                     "did not start; it keeps every customer that ever trained, and a test customer never has",
+                     ROSTER_FILE)
+    try:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_ROSTER_FILE:
+            raise bad
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        got = doc.get(ROSTER_KEY)
+    except (OSError, ValueError, AttributeError, RecursionError):
+        raise bad from None
+    if not isinstance(got, list) or doc.get("agent") != Path(folder).name:
+        raise bad
+    out = set()
+    for e in got:
+        if not isinstance(e, dict) or not isinstance(e.get("card"), str) or \
+                not isinstance(e.get("from_card"), (str, type(None))):
+            raise bad
+        out.add((e["card"], e["from_card"] if "from_card" in e else _ANY))
+    if not seal.holds(doc, seal.key(reports_of(folder))):
+        raise bad
     return out
 
 
-def fixed_test(cards, size, saved, done):
+def _roster_entry(p):
+    cid, f = p
+    return {"card": cid} if f is _ANY else {"card": cid, "from_card": f}
+
+
+def _roster_text(folder, people):
+    """The roster file's text for people, sealed with the key of reports_of the folder (made if none)."""
+    order = sorted(people, key=lambda p: (p[0], 0 if p[1] is _ANY else 1 if p[1] is None else 2,
+                                          p[1] if isinstance(p[1], str) else ""))
+    doc = seal.sign({"agent": Path(folder).name, ROSTER_KEY: [_roster_entry(p) for p in order]}, reports_of(folder))
+    return json.dumps(doc, ensure_ascii=False) + "\n"
+
+
+def _replace(folder, name, text):
+    """Writes folder/name whole: a hidden file renamed into place; refuses a link."""
+    path = Path(folder) / name
+    if path.is_symlink():
+        raise run.Refused(f"the agent's {name} is a link")
+    tmp = Path(folder) / f".{name}.{secrets.token_hex(4)}.tmp"
+    try:
+        with open(tmp, "x", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
+def _saved_people(folder):
+    """[(card id, fingerprint)] of every practice customer saved in the folder (madeup.FOLDER), each with
+    the card it was written from, any card (_ANY) when its file cannot be read."""
+    people, cards = [], Path(folder) / madeup.FOLDER
+    if cards.is_dir() and not cards.is_symlink():
+        for p in sorted(cards.iterdir()):
+            if not madeup.CARD_FILE.fullmatch(p.name):
+                continue
+            try:
+                people.append((p.stem, _card_of(json.loads(p.read_text(encoding="utf-8")))))
+            except (OSError, ValueError, UnicodeDecodeError, RecursionError):
+                people.append((p.stem, _ANY))
+    return people
+
+
+def keep_trained(folder, people=()):
+    """Adds people [(card id, fingerprint)] to the sealed roster of every customer that ever trained
+    (ROSTER_FILE, sealed as test-set.json is, never shrunk) and returns it. A folder with no roster (no
+    sealed match line and no test-set.json either: one from before the roster, a fresh agent, or one
+    whose three record files were all deleted) has it built once from its matches file and every
+    practice customer saved in it, as new_test_set counts them: a fresh agent has none saved yet, so a
+    customer that trained before the files went never joins a test set.
+    Unrecorded when the roster does not read whole or hold its seal, or is gone while a sealed line or
+    test-set.json shows it was written (trained); the roster is then left as it is."""
+    folder = Path(folder)
+    have = _read_roster(folder)
+    base = set()
+    if have is None:
+        base, sealed = _lines(folder)
+        if sealed or (folder / TEST_FILE).exists() or (folder / TEST_FILE).is_symlink():
+            raise _roster_gone()
+        base |= set(_saved_people(folder))  # a fresh agent has none yet; any saved may have trained
+    want = (have or set()) | base | set(people)
+    if have is None or want != have:
+        folder.mkdir(parents=True, exist_ok=True)
+        _replace(folder, ROSTER_FILE, _roster_text(folder, want))
+    return want
+
+
+def trained(folder):
+    """{(card id, fingerprint)} of every customer that trained: the training lines of the folder's
+    arena-matches.jsonl (_lines: any line that is not a sealed test match, a quick run's too) and the
+    sealed roster (keep_trained), so a training line deleted from the matches file still counts. Read
+    only. Unrecorded (fail closed, before any model call) when either does not read whole (_lines,
+    _read_roster), and when the roster is gone while a line holds the run's seal or test-set.json is
+    there (both are only written with the roster beside them)."""
+    folder = Path(folder)
+    lines, sealed = _lines(folder)
+    roster = _read_roster(folder)
+    if roster is None and (sealed or (folder / TEST_FILE).exists() or (folder / TEST_FILE).is_symlink()):
+        raise _roster_gone()
+    return lines | (roster or set())
+
+
+def broken_record(folder):
+    """The file name (test-set.json or arena-matches.jsonl) when read_test or trained refuses it, else None."""
+    try:
+        read_test(folder)
+        trained(folder)
+    except Unrecorded as e:
+        return e.file
+    return None
+
+
+def _card_of(c):
+    """The card fingerprint c names (text or None), else _ANY: the id counts whatever card it is from."""
+    f = c.get("from_card", _ANY) if isinstance(c, dict) else _ANY
+    return f if f is None or isinstance(f, str) else _ANY
+
+
+RESET = "reset"  # the id of a reset line starts with it, and every reset line carries it true
+
+
+def _lower(size):
+    """The step when a test set of size cannot be filled: the lower risk levels whose test set is smaller,
+    else that none is (an agent has at most madeup.MAX_CUSTOMERS customers)."""
+    smaller = [lv for lv in reversed(levels.ORDER) if levels.LEVELS[lv]["gate"] < size]
+    if not smaller:
+        return (f"No lower risk level holds a smaller test set, and an agent has at most {madeup.MAX_CUSTOMERS} "
+                "customers")
+    sizes = sorted({levels.LEVELS[lv]["gate"] for lv in smaller}, reverse=True)
+    return (f"One step: lower the agent's risk level to {' or '.join(smaller)}, whose test set holds "
+            f"{' or '.join(map(str, sizes))}")
+
+
+def room_warning(folder, level=None):
+    """A line when the madeup.MAX_CUSTOMERS cap leaves too few new customers for the test set at the
+    agent's level (level, else its level.json), else None: Start a new test set says it, since every
+    customer before counts as trained and the next run would stop with too few left. An estimate from the
+    shape's mix (shape_mix) of the ids no customer that trained holds; None when the record is unreadable."""
+    level = level if levels.valid(level) else levels.read(folder)
+    shape = levels.shape(level)
+    try:
+        used = {c for c, _ in trained(folder) if madeup.CARD_FILE.fullmatch(f"{c}.json")}
+    except run.Refused:
+        return None
+    left = madeup.MAX_CUSTOMERS - len(used)
+    have = shape_mix(left) if left > 0 else {}
+    need = _quota(shape_mix(shape["customers"]), shape["gate"])
+    if all(have.get(k, 0) >= n for k, n in need.items()):
+        return None
+    return (f"{len(used)} of the {madeup.MAX_CUSTOMERS} customers an agent can have count as trained, too few "
+            f"are left for the test set of {shape['gate']} at its {level} level, so its next run would stop. "
+            f"{_lower(shape['gate'])}.")
+
+
+def new_test_set(folder, now=time.time):
+    """The way past a torn, changed or missing record (Unrecorded): the old matches file, test-set.json and
+    trained.json are renamed aside, never deleted or read past a bad line, and a new matches file holds
+    the old file's lines that read whole, then one training line (RESET) for every practice customer
+    saved in the folder and every one the old test-set.json names, with the card it was written from
+    (any card when that cannot be read). A new sealed roster (keep_trained) holds every customer of
+    those training lines and every one the old roster names, its seal held or not. So the next run
+    counts every old customer as trained and its test set is made from new customers the writer
+    writes. Returns what was renamed aside. run.Refused when the record reads whole (nothing to reset)."""
+    folder = Path(folder)
+    if broken_record(folder) is None:
+        raise run.Refused("the agent's saved matches and test set read whole, so nothing was changed")
+    stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime(now())) + "-" + secrets.token_hex(3)
+    old, rows = folder / run.MATCHES_FILE, []
+    if old.is_file() and not old.is_symlink():
+        try:
+            fd = os.open(old, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            with open(fd, "rb") as f:
+                for raw in f:
+                    try:
+                        m = json.loads(raw.decode("utf-8"))
+                    except (ValueError, RecursionError):
+                        continue  # kept in the file set aside; the reset lines below cover its customer
+                    if isinstance(m, dict) and isinstance(m.get("card"), str):
+                        rows.append(m)
+        except OSError:
+            rows = []
+    people = _saved_people(folder)
+    test = folder / TEST_FILE
+    try:
+        got = json.loads(test.read_text(encoding="utf-8")).get("test") if test.is_file() and not test.is_symlink() else []
+        people += [(e["id"], _card_of(e)) for e in got if isinstance(e, dict) and isinstance(e.get("id"), str)]
+    except (OSError, ValueError, UnicodeDecodeError, RecursionError, AttributeError, TypeError):
+        pass
+    for n, (cid, f) in enumerate(dict.fromkeys(people), 1):
+        rows.append({"id": f"{RESET}-{stamp}-t{n:03d}", "card": cid, RESET: True, TEST_KEY: False,
+                     "persona": {"id": cid, "from_card": f} if f is not _ANY else "a customer before the reset"})
+    roster, k = folder / ROSTER_FILE, seal.key(reports_of(folder))
+    everyone = {(m["card"], _card_of(m.get("persona"))) for m in rows if not is_test(m, k)}
+    try:  # the old roster's names count too, its seal held or not: more trained is never less safe
+        if roster.is_file() and not roster.is_symlink() and roster.stat().st_size <= MAX_ROSTER_FILE:
+            got = json.loads(roster.read_text(encoding="utf-8")).get(ROSTER_KEY)
+            everyone |= {(e["card"], _card_of(e)) for e in got
+                         if isinstance(e, dict) and isinstance(e.get("card"), str)}
+    except (OSError, ValueError, UnicodeDecodeError, RecursionError, AttributeError, TypeError):
+        pass
+    tmp = folder / f".{run.MATCHES_FILE}.{secrets.token_hex(4)}.tmp"
+    aside = []
+    try:
+        with open(tmp, "x", encoding="utf-8") as f:
+            f.write("".join(json.dumps(m, ensure_ascii=False) + "\n" for m in rows))
+        for path, name in ((old, f"arena-matches-before-{stamp}.jsonl"), (test, f"test-set-before-{stamp}.json"),
+                           (roster, f"trained-before-{stamp}.json")):
+            if path.exists() or path.is_symlink():
+                os.replace(path, folder / name)  # a link is renamed, never followed
+                aside.append(name)
+        _replace(folder, ROSTER_FILE, _roster_text(folder, everyone))  # before the sealed lines come back
+        os.replace(tmp, old)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+    return aside
+
+
+def fixed_test(cards, size, saved, done, mix=None):
     """(held ids, spare ids, short): the test set for this run (DECISIONS item 85). saved: read_test;
-    done: trained. A card is eligible when it can reach the good result, is not grown from real
-    chats and never played a training match. The saved test customers that are still eligible come
-    first; when they are more than size, size of them are held (each kind in its share) and the rest
-    are spare (left out of the run, so they never train); when fewer, eligible new ones fill the gap
-    by test_set's order. short: how many more customers the writer must make (0 when it holds)."""
+    done: trained; mix: {kind: how many} the shape draws the winnable customers in (shape_mix), else
+    the winnable cards' own kinds. A card is eligible when it can reach the good result, is not grown
+    from real chats and never played a training match. The test set always holds each kind in its
+    share of mix (the largest remainders first, as test_set draws them), so a saved set of other kinds
+    is never trusted: per kind, the saved test customers that are still eligible come first; when they
+    are more than the kind's share, its share of them is held and the rest are spare (left out of the
+    run, so they never train); when fewer, eligible new ones of that kind fill the gap by test_set's
+    order. short: how many more customers the writer must make (0 when it holds), enough that each
+    kind short of its share gets its share of them."""
     def eligible(c):
         f = c.get("from_card")
         return (run.can_buy(c) and not str(c["id"]).startswith(run.GROWN)
                 and (c["id"], f) not in done and (c["id"], _ANY) not in done)
+    winnable = [c for c in cards if run.can_buy(c) and not str(c["id"]).startswith(run.GROWN)]
+    if mix is None:
+        mix = {}
+        for c in winnable:
+            mix[_kind(c)] = mix.get(_kind(c), 0) + 1
+    quota = _quota(mix, size)
+    if not quota:
+        return None, [], size
     by_id = {c["id"]: c for c in cards}
     keep = [by_id[i] for i, f in saved if i in by_id and by_id[i].get("from_card") == f and eligible(by_id[i])]
     keep = list({c["id"]: c for c in keep}.values())
-    if len(keep) >= size:
-        held = _choose(keep, size)
-        spare = sorted(c["id"] for c in keep if c["id"] not in held)
-    else:
-        mine = {c["id"] for c in keep}
-        new = [c for c in cards if c["id"] not in mine and eligible(c)]
-        if len(keep) + len(new) < size:
-            return None, [], size - len(keep) - len(new)
-        held, spare = sorted([c["id"] for c in keep] + _choose(new, size - len(keep))), []
+    mine = {c["id"] for c in keep}
+    held, spare, missing = [], [], {}
+    for kind in sorted(set(quota) | {_kind(c) for c in keep}):
+        q = quota.get(kind, 0)
+        kept = sorted((c for c in keep if _kind(c) == kind), key=_rank)
+        if len(kept) >= q:
+            held += [c["id"] for c in kept[:q]]
+            spare += [c["id"] for c in kept[q:]]
+            continue
+        new = sorted((c for c in cards if _kind(c) == kind and c["id"] not in mine and eligible(c)), key=_rank)
+        chosen = kept + new[:q - len(kept)]
+        held += [c["id"] for c in chosen]
+        if len(chosen) < q:
+            missing[kind] = q - len(chosen)
+    if missing:
+        have = {}
+        for c in cards:
+            have[_kind(c)] = have.get(_kind(c), 0) + 1
+        return None, [], max([sum(missing.values())] + [math.ceil(n * len(cards) / have[k])
+                                                         for k, n in missing.items() if have.get(k)])
     if len(cards) - len(held) - len(spare) < 1:  # none left to practise on
         return None, [], 1
-    return held, spare, 0
+    return sorted(held), sorted(spare), 0
 
 
 MAX_TOP_UPS = 5  # writes of more customers when too few never trained (fixed_test short)
 NOT_RUN = (run.Refused, turn_mod.Refused, run.CapReached, ModelError, OSError, ValueError, RecursionError)
+
+
+def shared_cards(folder, plug):
+    """The shared pool's practice customers for the agent in folder (see the module lines): read from
+    the shared folder beside the database when the folder sits in an agents/ folder, else none."""
+    from arena import grow
+    from reflection import shared as shared_mod
+    folder = Path(folder)
+    if folder.parent.name != "agents":
+        return []
+    try:
+        but = shared_mod.owner_id(folder) or None
+    except (shared_mod.Refused, OSError):  # an owner id that cannot be read: no shared card, not its own
+        return []
+    return shared_mod.practice_cards(grow.kind_of(plug), folder.parent.parent / shared_mod.SHARED_DIR, but=but)
 
 
 def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=None, rounds=None, cards=None,
@@ -758,10 +1164,11 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
     if agent.name == run.AGENT:
         raise run.Refused("the Sales agent practises through arena/run.py")
     calls = run.Calls(reports / run.CALLS_FILE, cap, limit=run.QUICK_CALLS if quick else None)
-    held = None
-    if gate_size is not None:  # the saved test set and the training on record, read before any model call
+    held, base = None, customers  # base: the shape's customers, before any top up
+    if gate_size is not None:  # the saved test set, read before any model call
         _whole(gate_size)
-        saved, done = read_test(folder), trained(folder)
+        saved = read_test(folder)
+    done = keep_trained(folder, trained(folder))  # every run: who trained, read whole before any model call
     for _ in range(MAX_TOP_UPS + 1):
         if cards:
             played = run.load_cards(check_cards(cards, folder))
@@ -780,7 +1187,8 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
                     played = sorted(played + list(back.values()), key=lambda c: c["id"])
         if gate_size is None:
             break
-        held, spare, short = fixed_test(played, gate_size, saved, done)
+        mix = shape_mix(base) if not cards and not behaviour_from and base else None  # the writer's kinds
+        held, spare, short = fixed_test(played, gate_size, saved, done, mix)
         if held is not None:
             played = [c for c in played if c["id"] not in spare]
             break
@@ -789,7 +1197,7 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
         customers += short  # more people that never trained, written by the same writer on the same cap
     if gate_size is not None and held is None:
         raise run.Refused(f"the test set needs {gate_size} customers that can reach the good result and never "
-                          "played a training match, with one left to practise on; too few are left")
+                          f"played a training match, with one left to practise on; too few are left. {_lower(gate_size)}")
     bar = dict(run.QUICK_TRUST) if quick else run.load_trust(trust, agent=agent.name)
     if old_gate:  # the old gate: a trust file or --gate set it
         if made_up:
@@ -825,9 +1233,36 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
                      agent_model=agent_model, customer_model=customer_model, calls=calls, trust=bar,
                      matches=matches, rounds=rounds, seed=seed, state=folder, reports=reports, learn=learn,
                      between=between, lessons=pool, before_match=None if pool is None else pool.refresh,
-                     off_topic=off_topic and not quick)
+                     off_topic=off_topic and not quick, shared=shared_cards(folder, agent.plug))
     arena.quick = bool(quick)  # its item says so, so a quick practice never unlocks Connect (Morning.gate)
     return arena.run()
+
+
+NEW_TEST_SET = ("A new test set is ready: the old files are kept beside it ({aside}), every customer before counts as "
+                "trained, and the agent's next run writes new customers for the test set. Nothing was started.")
+
+
+def _new_test_set_main(agent):
+    """--new-test-set: new_test_set on the agent's folder, no model and no key needed. 0 when done, 2 when
+    refused (not an agent folder, a link, or a record that reads whole)."""
+    raw = Path(agent).expanduser()
+    if raw.is_symlink() or not raw.is_dir() or not (raw / "card.json").is_file():
+        print("Not run: --agent is not an agent's folder, so nothing was changed", file=sys.stderr)
+        return 2
+    folder = raw.resolve()
+    try:
+        aside = new_test_set(folder)
+    except run.Refused as e:
+        print(f"Not run: {e}", file=sys.stderr)
+        return 2
+    except OSError as e:
+        print(f"Not run: the files could not all be renamed ({type(e).__name__}); run it again", file=sys.stderr)
+        return 2
+    print(NEW_TEST_SET.format(aside=", ".join(aside) or "none"))
+    warn = room_warning(folder)
+    if warn:
+        print(warn)
+    return 0
 
 
 def main(argv=None, *, agent_model=None, customer_model=None, judge_model=None):
@@ -845,7 +1280,12 @@ def main(argv=None, *, agent_model=None, customer_model=None, judge_model=None):
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--quick", action="store_true", help="one training match, a gate of one match, at most "
                     f"{run.QUICK_CALLS} model calls")
+    ap.add_argument("--new-test-set", action="store_true", help="the way on when the agent's saved matches, "
+                    f"{TEST_FILE} or {ROSTER_FILE} is torn, changed or gone: sets them aside, counts every customer "
+                    "before as trained and starts no run (Start a new test set on the Arena tab)")
     args = ap.parse_args(argv)
+    if args.new_test_set:
+        return _new_test_set_main(args.agent)
     try:
         gate = None if args.gate is None else read_gate(args.gate)
     except ValueError as e:
@@ -867,6 +1307,9 @@ def main(argv=None, *, agent_model=None, customer_model=None, judge_model=None):
                        seed=args.seed, quick=args.quick, gate=gate, level=args.level, off_topic=made)
     except NOT_RUN as e:
         print(f"Not run: {e}", file=sys.stderr)
+        if isinstance(e, Unrecorded):  # a torn, changed or missing record: its one way on
+            print(f"To go on, start a new test set: python3 -I arena/practice.py --agent {shlex.quote(args.agent)} "
+                  "--new-test-set", file=sys.stderr)
         return 2
     print(json.dumps(rep, ensure_ascii=False, indent=1) if args.json else text(rep))
     return 0 if rep["stopped"] == run.PASSED else 1

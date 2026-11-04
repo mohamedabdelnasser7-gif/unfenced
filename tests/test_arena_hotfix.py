@@ -61,12 +61,12 @@ class Reading(Base):
             kept_lesson(SalesLessons(d), "Ask which size they wear.", ["all"])  # kept, but no correction
         finally:
             d.close()
-        before = correct(db, "Greet the customer by the time of day.", now=time.time() - 60)
+        before = correct(db, "Tell them it arrives tomorrow.", now=time.time() - 60)
         held = correct(db, "Never name a price.", exam=failed)
         fix = correct(db, FIX)
         got = rounds.live_hotfixes(db, PLUG.agent)
         self.assertEqual([g["live_id"] for g in got], [fix])
-        self.assertNotIn(before, [g["live_id"] for g in got])  # waiting behind the newer one, not running
+        self.assertNotIn(before, [g["live_id"] for g in got])  # high risk: it waits for a yes, so it is not running
         self.assertNotIn(held, [g["live_id"] for g in got])
         one = got[0]
         self.assertEqual((one["id"], one["state"], one["stages"], one["source"]), (-fix, KEPT, ["all"], HOTFIX_SOURCE))

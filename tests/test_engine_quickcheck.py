@@ -75,10 +75,15 @@ class QuickCheckGaps(unittest.TestCase):
             with self.subTest(lesson_id=lesson_id, case=case):
                 self.assertIs(in_share(case, lesson_id, share), answer)
 
-    def test_tool_names_are_high_risk_in_the_sales(self):
-        for text in ("Use switch_stage early.", "Call find_order when they ask twice.", "Send a voice_note back."):
+    def test_tool_names_alone_are_low_risk_in_the_sales(self):
+        """Engine fix A (2026-11-03): which tool to call and when is how the agent learns to work, so a
+        tool name alone is no mark on a lesson; the code check still finds it when asked (the note guard)."""
+        for text, tool in (("Use switch_stage early.", "switch_stage"), ("Call find_order when they ask twice.", "find_order"),
+                           ("Send a voice_note back.", "voice_note")):
             with self.subTest(text=text):
-                self.assertEqual(risk.classify(text, PLUG.risk, always_low)[0], risk.HIGH)
+                self.assertEqual(risk.classify(text, PLUG.risk, always_low)[0], risk.LOW)
+                self.assertEqual(risk.classify(text, PLUG.risk)[0], risk.HIGH)  # the stub judge: still unsure
+                self.assertIn(f"tool: {tool}", risk.code_check(text, PLUG.risk))
 
 
 class EngineHasNoBusinessWords(unittest.TestCase):

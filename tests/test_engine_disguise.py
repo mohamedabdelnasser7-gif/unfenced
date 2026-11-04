@@ -21,17 +21,17 @@ DISGUISED = [
     "Bring up the g\N{LATIN SMALL LETTER U WITH GRAVE}arant\N{LATIN SMALL LETTER E WITH ACUTE}e early.",
     "Bring up the r\N{CYRILLIC SMALL LETTER IE}fund early.",                 # a Cyrillic e
     "Bring up the R\N{CYRILLIC CAPITAL LETTER IE}FUND early.",
-    "Bring up the \N{CYRILLIC SMALL LETTER ER}olicy early.",                 # a Cyrillic p
+    "Bring up the de\N{CYRILLIC SMALL LETTER ER}osit early.",                # a Cyrillic p
     "Bring up the pr\N{GREEK SMALL LETTER OMICRON}mise early.",              # a Greek o
     "Bring up the \N{GREEK SMALL LETTER RHO}romise early.",                  # a Greek p
-    "Bring up the pol\N{LATIN SMALL LETTER DOTLESS I}cy early.",             # a dotless i
+    "Bring up the depos\N{LATIN SMALL LETTER DOTLESS I}t early.",            # a dotless i
     "Bring up the \N{LATIN LETTER SMALL CAPITAL R}\N{LATIN LETTER SMALL CAPITAL E}"
     "\N{LATIN LETTER SMALL CAPITAL F}\N{LATIN LETTER SMALL CAPITAL U}\N{LATIN LETTER SMALL CAPITAL N}"
     "\N{LATIN LETTER SMALL CAPITAL D} early.",                               # small capitals
     "Bring up the ref\N{DEVANAGARI SIGN VISARGA}und early.",                 # a spacing mark inside the word
-    "Say \N{ROMAN NUMERAL TWELVE} for both.",                                # a numeral sign
-    "Say \N{SMALL ROMAN NUMERAL FOUR} for both.",
-    "Say \N{FULLWIDTH DIGIT ONE}\N{FULLWIDTH DIGIT TWO} for both.",          # wide digits
+    "Say \N{ROMAN NUMERAL TWELVE} EGP for both.",                            # a numeral sign as an amount
+    "Say \N{SMALL ROMAN NUMERAL FOUR} EGP for both.",
+    "Say \N{FULLWIDTH DIGIT ONE}\N{FULLWIDTH DIGIT TWO} EGP for both.",      # wide digits
 ]
 
 STILL_CLEAR = [  # tone lessons with accents or other scripts find nothing on the code check
@@ -51,9 +51,9 @@ class DisguisedLetters(unittest.TestCase):
 
     def test_the_reason_names_the_word_it_found(self):
         why = risk.classify("Bring up the r\N{CYRILLIC SMALL LETTER IE}fund early.", PLUG.risk, always_low)[1]
-        self.assertIn("promise: refund", why)
-        why = risk.classify("Say \N{ROMAN NUMERAL TWELVE} for both.", PLUG.risk, always_low)[1]
-        self.assertIn("number: /[0-9]/", why)
+        self.assertIn("policy: refund", why)
+        why = risk.classify("Say \N{ROMAN NUMERAL TWELVE} EGP for both.", PLUG.risk, always_low)[1]
+        self.assertIn("amount: /a number with a currency or percent/", why)
 
     def test_tone_with_accents_or_other_scripts_stays_clear(self):
         for text in STILL_CLEAR:
@@ -61,7 +61,7 @@ class DisguisedLetters(unittest.TestCase):
                 self.assertEqual(risk.code_check(text, PLUG.risk), [])
 
     def test_arabic_and_its_digits_still_read(self):
-        for text in ("Say the boots are ٥٠٠ جنيه.", "Say ۵۰۰ for the pair.", "قول إن التَّوْصِيل سريع.",
+        for text in ("Say the boots are ٥٠٠ جنيه.", "Say ۵۰۰ for the pair.", "قول إن التَّوْصِيل بُكْرَة.",
                      "قول له هيوصل بكرة."):
             with self.subTest(text=text):
                 self.assertEqual(risk.classify(text, PLUG.risk, always_low)[0], risk.HIGH)

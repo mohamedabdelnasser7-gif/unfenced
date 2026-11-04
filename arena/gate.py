@@ -269,8 +269,9 @@ def needs_round(agent, wins):
 class CorrectionRound:
     """One practice round for a correction (DECISIONS item 70): ROUND_MATCHES fresh practice matches
     with the correction handed first, on the agent's practice customers (arena/madeup.py for_agent:
-    the saved ones, else new ones), the held out ones that can reach the good result first. Every
-    model is taken from calls. Writes no match, no item and no case."""
+    the saved ones, else new ones), the held out ones that can reach the good result first, never a
+    customer of the agent's fixed test set (arena/practice.py read_test), which only plays in the
+    gate's own test matches. Every model is taken from calls. Writes no match, no item and no case."""
 
     def __init__(self, *, agent, folder, kept, agent_model, customer_model, judge_model, calls,
                  matches=ROUND_MATCHES, fact_checks=True):
@@ -281,10 +282,14 @@ class CorrectionRound:
 
     def cards(self):
         """The practice customers the round plays, in order: the held out ones that can reach the good
-        result, then the rest that can, each once, repeated when there are fewer than the matches."""
-        from arena import madeup
+        result, then the rest that can, each once, repeated when there are fewer than the matches. The
+        saved test customers (practice.read_test) are left out; run.Refused when test-set.json is there
+        but cannot be read, so the round is not run rather than guessed."""
+        from arena import madeup, practice
+        test = {i for i, _ in practice.read_test(self.folder)}  # before the writer: a torn file costs no call
         cards, _ = madeup.for_agent(self.folder, self.agent.name, self.agent.card, self.customer_model,
                                     madeup.owner_cards(self.folder))
+        cards = [c for c in cards if c["id"] not in test]
         winnable = [c for c in cards if run_mod.can_buy(c)]
         try:
             held = [c["id"] for c in run_mod.split(cards)[1] if run_mod.can_buy(c)]
@@ -368,7 +373,15 @@ class FreshTurn(Fresh):
         self.agent, self.reports, self.judge_model = agent, Path(reports), judge_model
 
     def _wins(self):
-        return [w for w in run_mod.past_wins(self.state) if w.get("agent") == self.agent.name]
+        """The agent's own practice wins, never a test match (arena/practice.py is_test: a line whose seal
+        holds with the key beside the database): the fixed test set only ever plays in the gate's test
+        matches, so a correction is never tried on it first. A line relabelled or written by hand is not a
+        test match and stays a win to rerun."""
+        from arena import practice  # here, so loading the gate never loads practice and its writer
+        from kit import seal
+        k = seal.key(practice.reports_of(self.state))  # read only: a reader never makes the key
+        return [w for w in run_mod.past_wins(self.state)
+                if w.get("agent") == self.agent.name and not practice.is_test(w, k)]
 
     def _models(self):
         if self.agent_model is None or self.customer_model is None or self.judge_model is None:

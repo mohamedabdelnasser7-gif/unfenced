@@ -1,0 +1,15 @@
+# Review engfix round 1
+*Created: 2026-11-03. Last updated: 2026-11-03.*
+
+Reviewer at max, risky tier, cdc4ff0 and 2b0faaf on 7f012f9. Filed by root from the reviewer's hand-back. Probes: scratchpad rv-engfix1/probes (p1_fixa_sweep.py, p2_empty_without.py, p3_vote_edges.py, mut.py).
+
+Verdict: FIX FIRST (2 blocking)
+
+1. BLOCKING, sales/plug.json:54-125 (fix A). The narrowed code check misses money, payment, refund, discount and data lessons in Arabic and Franco and some plain English. 64 risky lines tested, 62 get no mark; the old list caught 54 of those. A miss then rests on one model answer (reflection/judge.py); a judge "low" starts a trial with no yes (engine/lessons.py:803). Missing: payment verbs (يدفع, يحول, مقدم, ydfa3, 7awel, mo2adam, "send the money first", card details), discount ("on us", علينا, skip or drop or don't charge a fee, balash, "for nothing", gift, هدية, match a price), amounts (ستين, a lone ج after a number, Franco price words se3r, taman, shahn, tawseel with a number, Franco tens and hundreds), refund and policy ("let them cancel any time", نبدلهوله, returns fine this week), personal data ("for next time", للمرة الجاية, جروب, "their ID"), promises ("this week", "in two days", hywsal fe yomen). Mutants J2 and J4 survived. Fix: add the forms to each group, then one Arabic and one Franco test per group from p1.
+2. BLOCKING, engine/exam.py:349-357 with reflection/exam.py:425-438 (fix B). A rerun without the line that comes back with no words counts as the check failing there, so the break is voted "not new" and the lesson passes; the voted row is cached, so later lessons pass that check on that situation with no recheck. Empty answers come from a cut reply or a turn that spends all tool calls. Proof p2. Fix: treat an empty rerun like one that raised; write a voted row to the cache only from real answers; keep p2 as a test.
+3. DRIFT, engine/exam.py:370-383. The vote counts only checks that failed on the first answer; another safety check failing in both reruns with the line is dropped (p3a). Fix: hold on it too; the reruns already made cover it.
+4. STALE, engine/plug.py:54-57. The plug note still says the code check looks for tool names. Fix: tool names are marks only for the note guard; a tool that must make a lesson high goes in words.
+5. MINOR, marketing/plug.json:80. ads_manager and publish_post lessons now have no code mark. Root call holds; adding the words to spend and a goes-out group is one line.
+6. MINOR, test gaps from surviving mutants: R2 (full exam voted row in _without), R5 (scoped Result.calls drops rerun calls), J6 (the "a pair held" pattern). E4 and E5 are equivalent.
+
+Answers: call caps hold (scoped, full, night bounded at 48 extra calls a lesson); a lesson breaking 1 time in 3 can pass, which is the majority rule's cost (one situation 0.67 to 0.81 pass rate); errors and timeouts count against the lesson except the empty case in 2; order is deterministic; classify and bring_back drop tool marks, the note guard keeps them. Tests 3032 with 1 failure and 1 error from arena/real missing in the pack, not from this change.

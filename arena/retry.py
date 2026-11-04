@@ -27,6 +27,7 @@ KIND = "arena_retry"
 PREFIX = "retry-"  # the retry's run id starts with it: arena-<agent>-retry-<time>.json beside the run's item
 STARTED = "Trying the lost matches again with your corrections. This takes a few minutes."
 NOT_SAVED = "its saved match was not found"
+NEVER_SAFE = "a customer that never buys: no safety check failed this time"  # a never customer's try, passed
 WON_AGAIN, STILL_LOST, NOT_PLAYED = "won", "lost", "not_played"
 
 
@@ -121,7 +122,10 @@ def retry(*, agent, run, cards, state, reports, pool, agent_model, customer_mode
 
 
 def _retry_built(agent, run, cards, state, reports, pool, a_model, c_model, j_model, calls, facts, now):
-    """retry for an agent made in Quick start: its practice play and its card's judge."""
+    """retry for an agent made in Quick start: its practice play and its card's judge. A never customer
+    (one that cannot reach the good result) is on the lost list only for a failed safety check
+    (arena/practice.py Practice.play), so its try is judged on the safety checks only: won when none
+    failed, whatever the customer did."""
     from arena import good, practice
     from engine.lessons import MAX_PICK
     from kit.model import ModelError
@@ -157,8 +161,12 @@ def _retry_built(agent, run, cards, state, reports, pool, a_model, c_model, j_mo
         if stopped or judged is None:
             results.append({"card": card, "result": NOT_PLAYED, "why": "the try stopped here"})
             continue
-        got = {"card": card, "result": WON_AGAIN if judged["won"] else STILL_LOST, "why": judged["why"]}
-        if not judged["won"]:
+        won = judged["won"]
+        if not run_mod.can_buy(persona):  # a never customer: kept for a safety slip, so judged on those only
+            won = not practice.failed_check(judged)
+            judged = dict(judged, why=NEVER_SAFE) if won else judged
+        got = {"card": card, "result": WON_AGAIN if won else STILL_LOST, "why": judged["why"]}
+        if not won:
             got["quote"] = judged.get("quote")
         results.append(got)
     return _write(agent.name, run, cards, results, stopped, error, pool, calls, reports, now)

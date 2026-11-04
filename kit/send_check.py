@@ -352,8 +352,12 @@ HUNDREDS = (r"(?:تلت|تلات|ثلاث|ربع|اربع|أربع|خمس|ست|�
             r"|tis3)(?:o|u|e|a)?\s?(?:meyya|meya|mya|miya|mia)")
 MAGNITUDE_WORDS = (rf"(?:{HUNDREDS}|hundreds?|thousands?|alfein|alfeen|alaf|alf|elf|talaf|tlaf|meyya|meya|mya|miya|meteen|metein|mitein"
                    r"|miteen|mit|ميتين|مية|ميه|مائة|مئة|ميت|ألفين|الفين|ألف|الف|آلاف|الاف|ألاف|الآف|ألآف|تلاف)")
+# The Franco tens, 20 to 90, with and without the 3 and 7 sounds (red team crossowner round 1, item 1).
+FRANCO_TENS = (r"(?:3?[ei]shr[ie]{1,2}n|3?ashr[ie]{1,2}n|ta?lat[ie]{1,2}n|tlat[ie]{1,2}n|arb[ae]?3?[ie]{1,2}n|arba[ae][ie]?n"
+               r"|khams[ie]{1,2}n|5ams[ie]{1,2}n|s[ei]tt?[ie]{1,2}n|saba?3?[ie]{1,2}n|sab[ae][ie]{1,2}n|taman[ie]{1,2}n"
+               r"|t[ei]s3?[ie]{1,2}n|t[ei]sa[ie]{1,2}n)")
 NUMBER_WORDS = (rf"(?:{MAGNITUDE_WORDS}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen"
-                r"|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|nos|tolt|rob3|واحد|اتنين|اثنين|تلاتة|ثلاثة"
+                r"|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|nos|tolt|rob3|" + FRANCO_TENS + r"|واحد|اتنين|اثنين|تلاتة|ثلاثة"
                 r"|اربعة|أربعة|خمسة|ستة|سبعة|تمانية|ثمانية|تسعة|عشرة|عشرين|تلاتين|ثلاثين|اربعين|أربعين|خمسين"
                 r"|ستين|سبعين|تمانين|ثمانين|تسعين)")
 SPELLED_AMOUNT = re.compile(rf"{NUMBER_WORDS}\s*{CURRENCY}(?![\w])", re.IGNORECASE)

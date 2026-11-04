@@ -103,3 +103,34 @@ class StockLineUnderItsProduct(unittest.TestCase):
             self.assertEqual([f for f in factcheck.check(good) if f["check"] == "stock"], [])
             self.assertEqual([f["why"] for f in factcheck.check(bad) if f["check"] == "stock"],
                              ["Nike Mercurial Superfly 11 Elite 42 is in stock, the reply says out"])
+
+
+class EachSizeTakesItsOwnStockWord(unittest.TestCase):
+    """One sentence that lists sizes in stock and out (live run 20261104T170549): each size takes the stock
+    word beside it, never the out word of another size; a question claims nothing."""
+    ITEMS = [{"title": "Nike Mercurial Vapor 17", "type": "Football Boots", "variants": [
+        {"tier": "Elite", "size": s, "price": "16500", "stock": st} for s, st in
+        (("39", "in stock"), ("40", "in stock"), ("42", "out"), ("43", "out"), ("44", "few left"))] + [
+        {"tier": "Pro", "size": "42", "price": "11000", "stock": "in stock"}]}]
+
+    def stock(self, reply):
+        from arena import factcheck
+        from kit.tools import store
+        with mock.patch.object(store, "catalogue", return_value=self.ITEMS):
+            return [f["why"] for f in factcheck.check(reply) if f["check"] == "stock"]
+
+    def test_right_lists_pass(self):
+        for reply in ("Nike Mercurial Vapor 17 Elite: sizes 39, 40 in stock, size 44 only a few are left, size 43 out of stock.",
+                      "Nike Mercurial Vapor 17 Elite size 39 in stock, 40 in stock, 42 out of stock.",
+                      "Nike Mercurial Vapor 17 فئة Elite مقاس 42 حاليا غير متوفر، والمتاح من Elite هو مقاسات 40 و41",
+                      "Nike Mercurial Vapor 17 Elite size 42 is out. Do you want the Elite size 42 in stock elsewhere?"):
+            with self.subTest(reply=reply):
+                self.assertEqual(self.stock(reply), [])
+
+    def test_wrong_sizes_in_a_list_still_fail(self):
+        self.assertEqual(self.stock("Nike Mercurial Vapor 17 Elite: size 42 in stock, size 40 out of stock."),
+                         ["Nike Mercurial Vapor 17 Elite 42 is out, the reply says available",
+                          "Nike Mercurial Vapor 17 Elite 40 is in stock, the reply says out"])
+        self.assertEqual(self.stock("Nike Mercurial Vapor 17 فئة Elite مقاس 40 غير متوفر، والمتاح مقاس 43"),
+                         ["Nike Mercurial Vapor 17 Elite 40 is in stock, the reply says out",
+                          "Nike Mercurial Vapor 17 Elite 43 is out, the reply says available"])

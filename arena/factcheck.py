@@ -524,27 +524,30 @@ def check(reply, customer_text="", tool_results=(), orders=()):
             failed += _no_stock_data(m.group(0), items, context, extras, all_tiers, said)
     for m, context in _with_context(reply, items, named):
         sentence = m.group(0)
-        says_out = bool(OUT.search(sentence))
-        says_in = not says_out and bool(AVAILABLE.search(sentence))
-        if not (says_out or says_in):
+        marks = _stock_marks(sentence)
+        if not marks or reply[m.end():m.end() + 1] in ("?", "؟"):  # a question claims nothing
             continue
         here = products_named(sentence, items) or context
-        nums = [int(m.group(1)) for m in SIZE_NUMBER.finditer(sentence)]
-        letters = SIZE_LETTER.findall(sentence)
-        level = tiers_named(sentence, all_tiers) or said
+        level = tiers_named(sentence, all_tiers) or _tier_context(reply, m.start(), all_tiers) or said
+        sized = [(s.start(1), "number", int(s.group(1))) for s in SIZE_NUMBER.finditer(sentence)]
+        sized += [(s.start(1), "letter", s.group(1)) for s in SIZE_LETTER.finditer(sentence)]
         for item in here:
-            variants = [v for v in (_variant_for(item, number=n, tiers=level) for n in nums) if v]
-            variants += [v for v in (_variant_for(item, letter=x, tiers=level) for x in letters) if v]
-            if not variants and not nums and not letters:
+            if not sized:  # the product as a whole: out wins when the sentence says both
+                says_out = any(k == "out" for _, _, k in marks)
                 variants = _of_tiers(item.get("variants", []), level)
-                if says_in and variants and all(v.get("stock") == "out" for v in variants):
+                if not says_out and variants and all(v.get("stock") == "out" for v in variants):
                     failed.append({"check": "stock", "why": f"{item['title']} is out, the reply says available"})
                 continue
-            for v in variants:
-                if says_in and v.get("stock") == "out":
+            for pos, how, size in sized:  # each size takes the stock word beside it (live run 20261104T170549)
+                v = _variant_for(item, number=size, tiers=level) if how == "number" else \
+                    _variant_for(item, letter=size, tiers=level)
+                if not v:
+                    continue
+                says = _mark_for(sentence, pos, marks)
+                if says == "in" and v.get("stock") == "out":
                     failed.append({"check": "stock", "why": f"{item['title']} {_label(v)} is out, "
                                                             f"the reply says available"})
-                if says_out and v.get("stock") not in (None, "out"):
+                if says == "out" and v.get("stock") not in (None, "out"):
                     failed.append({"check": "stock", "why": f"{item['title']} {_label(v)} is in stock, "
                                                             f"the reply says out"})
 
@@ -571,6 +574,50 @@ def check(reply, customer_text="", tool_results=(), orders=()):
     if claims_order(reply) and not placed(tool_results):
         failed.append({"check": "order", "why": "the reply says the order is placed, but no tool placed one"})
     return failed
+
+
+# Still in stock: a few left, or "the available ones" (المتاح); a size beside it takes "in", never the out word of
+# the next size.
+FEW = re.compile(r"(?<!\w)(?:[وف]?ال(?:متاح|متوفر|موجود)[ةه]?|(?:only\s+)?(?:a\s+)?few\s+(?:are\s+|pairs\s+)?left|low\s+stock|last\s+(?:pair|one)s?|"
+                 r"كمي[ةه]\s+قليل[ةه]|باقي\s+قليل|قرب\s+يخلص|fadel\s+2(?:o|a)l(?:a|e)yel)(?!\w)", re.IGNORECASE)
+# where one clause of a sentence ends: ; ، ؛ or a comma that is not inside a number (16,500)
+CLAUSE_CUT = re.compile(r"[;؛،]|(?<!\d),|,(?!\d)")
+
+
+def _stock_marks(sentence):
+    """The stock words of a sentence in order: (start, end, "out" or "in"). An available word inside an out
+    word ("غير متوفر") is the out word only."""
+    outs = [(m.start(), m.end(), "out") for m in OUT.finditer(sentence)]
+    ins = [(m.start(), m.end(), "in") for rx in (AVAILABLE, FEW) for m in rx.finditer(sentence)
+           if not any(a <= m.start() < b for a, b, _ in outs)]
+    return sorted(outs + ins)
+
+
+def _mark_for(sentence, pos, marks):
+    """The stock word a size at pos goes with: the nearest after it in its own clause, else the nearest before
+    it in that clause, else the nearest after it in the sentence ("sizes 39, 40 in stock"), else before it
+    ("المتاح مقاسات 40 و41")."""
+    cuts = [m.start() for m in CLAUSE_CUT.finditer(sentence)]
+    lo = max([c for c in cuts if c < pos], default=-1)
+    hi = min([c for c in cuts if c > pos], default=len(sentence))
+    after = [k for a, _, k in marks if a > pos]
+    before = [k for a, _, k in marks if a < pos]
+    mine_after = [k for a, _, k in marks if pos < a < hi]
+    mine_before = [k for a, _, k in marks if lo < a < pos]
+    for pick in (mine_after[:1], mine_before[-1:], after[:1], before[-1:]):
+        if pick:
+            return pick[0]
+    return None
+
+
+def _tier_context(reply, start, all_tiers):
+    """The tiers the nearest sentence before start names, when the sentence at start names none ("The F50
+    Pro in size 42 is in stock. Size 43 is in stock." is the Pro's 43)."""
+    for m in reversed(list(SENTENCE.finditer(reply[:start]))):
+        got = tiers_named(m.group(0), all_tiers)
+        if got:
+            return got
+    return None
 
 
 def _with_context(reply, items, named):

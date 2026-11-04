@@ -315,7 +315,13 @@ class BuiltAgentPractice(practice_tests.Base):
 
     def test_shared_lost_patterns_train_a_built_agent_and_never_take_its_gate(self):
         cid = self.seed_pool()
-        code, rep = self.main("--matches", "12", "--json")
+        # The training draw is seeded by the run id, which is the clock's second (arena/run.py Arena),
+        # so on about 1 second in 20 the shared card was not drawn in 12 matches. A fixed clock gives
+        # the same draw on every run, and at NOW it draws the shared card.
+        init = practice.Practice.__init__
+        fixed = lambda self, *a, **k: init(self, *a, now=lambda: NOW, **k)
+        with mock.patch.object(practice.Practice, "__init__", fixed):
+            code, rep = self.main("--matches", "12", "--json")
         self.assertIn(code, (0, 1), self.err)
         self.assertEqual(rep["shared_cards"], 1)
         self.assertIn(cid, rep["training_cards"])

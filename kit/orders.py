@@ -66,9 +66,10 @@ CREATE INDEX IF NOT EXISTS demo_orders_whatsapp ON demo_orders (whatsapp);
 CREATE INDEX IF NOT EXISTS demo_orders_phone ON demo_orders (phone);
 """
 
-# Columns added after the table was first made (decision 105): read by ALTER TABLE when missing.
+# Columns added after the table was first made (decisions 105 and 108): read by ALTER TABLE when missing.
+# down_payment is a pre-order's down payment due now, '' for an order that is no pre-order.
 ORDER_COLUMNS = (("payment", "TEXT NOT NULL DEFAULT ''"), ("discount", "TEXT NOT NULL DEFAULT '0'"),
-                 ("discounts", "TEXT NOT NULL DEFAULT '[]'"))
+                 ("discounts", "TEXT NOT NULL DEFAULT '[]'"), ("down_payment", "TEXT NOT NULL DEFAULT ''"))
 
 # Statuses as the model reads them.
 FINISHED = ("delivered", "refused")
@@ -176,6 +177,9 @@ class Book:
             tags.append(f"payment-{draft['payment']}")
         if draft.get("offer_id"):  # the delivery offer that set the fee (decision 105)
             tags.append(f"offer-{draft['offer_id']}")
+        if draft.get("preorder"):  # a pre-order: its down payment now, the rest on delivery (decision 108)
+            tags += ["preorder", f"down-payment-{amount(draft['down_payment'])}",
+                     f"rest-on-delivery-{amount(draft['rest_on_delivery'])}"]
         if on_shopify():
             return _shopify_create(draft, chat_id, tags)
         with self.db.tx() as c:
@@ -183,13 +187,14 @@ class Book:
             name = f"#{FIRST_ORDER_NUMBER - 1 + n}"
             c.execute(
                 "INSERT INTO demo_orders (id, name, chat_id, whatsapp, phone, customer, governorate, address, items, "
-                "subtotal, fee, total, status, cod_risk, risk_reasons, tags, placed_at, payment, discount, discounts) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'received', ?, ?, ?, ?, ?, ?, ?)",
+                "subtotal, fee, total, status, cod_risk, risk_reasons, tags, placed_at, payment, discount, discounts, "
+                "down_payment) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'received', ?, ?, ?, ?, ?, ?, ?, ?)",
                 (n, name, chat_id, draft["whatsapp"], draft["phone"], draft["name"], draft["governorate"],
                  draft["address"], json.dumps(draft["items"], ensure_ascii=False), draft["subtotal"], draft["fee"],
                  draft["total"], risk["level"], json.dumps(risk["reasons"], ensure_ascii=False), json.dumps(tags),
                  time.time(), draft.get("payment") or "", str(discount_of(draft)),
-                 json.dumps(draft.get("discounts") or [], ensure_ascii=False)))
+                 json.dumps(draft.get("discounts") or [], ensure_ascii=False),
+                 (draft.get("down_payment") or "") if draft.get("preorder") else ""))
         return {"order": name, "store": "demo"}
 
     def demo_order(self, name):

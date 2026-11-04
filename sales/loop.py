@@ -130,7 +130,10 @@ def system_prompt(stage, picked, note=""):
     the plug, then fast reflection's note for this chat when it has one. The offers line (kit/offers.py
     PROMPT_LINE) follows the rules."""
     parts = [INSTRUCTIONS, send_check.prompt_rules(offers=offers.for_check(offers.current(), ()) is not None),
-             offers.PROMPT_LINE, stages.note(stage)]
+             offers.PROMPT_LINE]
+    if offers.preorder(offers.current()):   # the store's pre-order rule, decision 108
+        parts.append(offers.PREORDER_LINE)
+    parts.append(stages.note(stage))
     lessons = slot(PLUG, picked)
     if lessons:
         parts.append(lessons)
@@ -473,7 +476,8 @@ def tool_amounts(chats, chat_id):
 def store_offers(chats, chat_id):
     """The ids of the offers a tool gave in this chat, any turn: each offer in a store or data result that
     ran (ok true), each discount a draft_order result applied and the delivery offer (offer_id) a delivery
-    or draft_order result says set the fee. The send check lets a reply name only
+    or draft_order result says set the fee, and "preorder" when a store or data result gave the pre-order rule
+    or a draft_order result is a pre-order (decision 108). The send check lets a reply name only
     these offers (decision 105). Only a tool result counts, never the customer's text. Never raises: on an
     error no offer is given, so every offer is refused."""
     given = set()
@@ -486,6 +490,8 @@ def store_offers(chats, chat_id):
                 continue
             if isinstance(out.get("offer_id"), str):
                 given.add(out["offer_id"])
+            if isinstance(out.get(offers.PREORDER), dict) or out.get(offers.PREORDER) is True:
+                given.add(offers.PREORDER)   # the store's pre-order rule, or a pre-order draft (decision 108)
             listed, key = (out.get("discounts"), "offer") if s["name"] == draft_order.NAME else (out.get("offers"), "id")
             if isinstance(listed, list):
                 given.update(o[key] for o in listed if isinstance(o, dict) and isinstance(o.get(key), str))

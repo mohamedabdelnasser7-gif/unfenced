@@ -17,7 +17,9 @@ when the store tool gave it in that chat (sales/loop.py store_links).
 
 Every result carries the store's offers (decision 105, kit/offers.py): the offer lines, the payment
 methods and how many offers one order takes, from the agent's own offers or the store data's. A delivery
-offer that brings the fee down replaces the zones' fees among the amounts a reply may quote.
+offer that brings the fee down replaces the zones' fees among the amounts a reply may quote. A store with a
+pre-order rule (decision 108) gives it on every result as "preorder": a size marked out can be ordered with
+its down payment share, delivered within its days.
 
 Sample stock (DECISIONS 107, 2026-11-04): the demo store tracks no variant's stock, so with no real
 store connected an untracked variant's level comes from a separate sample layer, demo/sample-stock.json
@@ -50,7 +52,8 @@ DEFINITION = {"type": "function", "function": {
     "description": (
         "Look up the store's products: names, prices, tiers, sizes, stock level (in stock, few left or out) when the store has it, "
         "and each product's image link when it has one. "
-        "Every answer also lists the store's offers and payment methods: offer only those. "
+        "Every answer also lists the store's offers and payment methods, and its pre-order rule for an out of stock "
+        "size when it has one: offer only those. "
         "Search in English words "
         "like 'phantom' or 'name printing'. Leave query empty to get every product."),
     "parameters": {
@@ -90,11 +93,15 @@ def run(args, ctx):
 
 
 def _with_offers(out):
-    """The result with the store's offers, payment methods and the offer limit, when it has any."""
+    """The result with the store's offers, payment methods, the offer limit and the pre-order rule, when it
+    has any."""
     data = offers.current()
     lines, methods, limit = offers.for_tool(data), offers.payment_methods(data), offers.limit_line(data)
     if lines:
         out["offers"] = lines
+    rule = offers.preorder_for_tool(data)
+    if rule:
+        out[offers.PREORDER] = rule
     if methods:
         out["payment_methods"] = methods
     if limit:

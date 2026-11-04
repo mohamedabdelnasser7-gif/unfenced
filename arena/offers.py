@@ -13,12 +13,21 @@ when its words come in a row in the trigger; a Latin word also matches with a pl
 with one of the joined letters before it. With no offers at all nothing is marked a close card, so an
 agent with no offers plays as before.
 
+A store pre-order rule (decision 108, kit/offers.py preorder) covers a card too: one whose want or buy
+trigger holds one of the rule's covers words ("sold out"), or whose want names a size that every product it
+names (any product when it names none) has only out in the store, can buy through a pre-order.
+
 mark(cards, data) sets "covered_by" (the offers' what lines) and "close" on each card in place.
 team_rate(cards) is the store team's real rate on the cards: the chats they won of the chats they had,
 shown as a report line only; the gate's bar stays as the trust level sets it.
 """
+import re
+
 from kit import offers as kit_offers
+from kit.tools import store
 from kit.tools.delivery import AR_PREFIX, tokens
+
+SIZE = re.compile(r"(?<!\d)(\d{2})(?!\d)")
 
 TEAM_LINE = ("The store team's real rate on these customers: {won} of {chats} chats. "
              "Report only; the bar stays {wins} of {matches}.")
@@ -53,11 +62,37 @@ def _triggers(card):
     return [tokens(t) for t in got or [] if isinstance(t, str) and t.strip()]
 
 
+def _wants(card):
+    got = card.get("want") if isinstance(card, dict) else None
+    return [got] if isinstance(got, str) else [w for w in got or [] if isinstance(w, str) and w.strip()]
+
+
+def wants_out(card):
+    """True when the card's want names a size (a two digit number) that the products it names, in the tiers it
+    names, have only out in the store (any product or tier when it names none), and at least one has that size."""
+    try:
+        items = store.catalogue()
+    except Exception:
+        return False
+    from arena import factcheck   # imported here to keep this module's imports light
+    for want in _wants(card):
+        named = factcheck.products_named(want, items) or items
+        tiers = factcheck.tiers_named(want, store.tiers())
+        for n in SIZE.findall(want):
+            sized = [v for i in named for v in factcheck._of_tiers(i.get("variants", []), tiers)
+                     if str(v.get("size", "")).split(" (")[0] == n]
+            if sized and all(v.get("stock") == "out" for v in sized):
+                return True
+    return False
+
+
 def cover(card, data):
-    """{"covered_by": [the what of each offer a buy trigger meets], "close": True for a card no offer
-    covers that is not told it will never buy}. No offers: nothing covered and no close card."""
+    """{"covered_by": [the what of each offer a buy trigger meets, and of the pre-order rule for a card that
+    wants an out of stock size], "close": True for a card nothing covers that is not told it will never buy}.
+    No offers and no pre-order rule: nothing covered and no close card."""
     offers = [o for o in (data or {}).get("offers", []) if isinstance(o, dict)]
-    if not offers:
+    rule = kit_offers.preorder(data)
+    if not offers and not rule:
         return {"covered_by": [], "close": False}
     triggers = _triggers(card)
     by = []
@@ -65,6 +100,11 @@ def cover(card, data):
         words = [w for w in o.get("covers") or [] if isinstance(w, str)]
         if any(_holds(t, w) for t in triggers for w in words) and o.get("what") not in by:
             by.append(o.get("what") or o.get("id"))
+    if rule:
+        said = triggers + [tokens(w) for w in _wants(card)]
+        words = [w for w in rule.get("covers") or [] if isinstance(w, str)]
+        if (any(_holds(t, w) for t in said for w in words) or wants_out(card)) and rule["what"] not in by:
+            by.append(rule["what"])
     return {"covered_by": by, "close": not by and not card.get("unwinnable")}
 
 

@@ -29,7 +29,14 @@ delivery on top), and the draft keeps the payment, the discounts and the total. 
 out the totals for items and payment alone (a governorate adds the fee and days): no name or address,
 nothing saved, so the agent can tell a customer what an order costs before they decide.
 
-Money keys in results are price, fee, subtotal, discount and total only, so the send check reads them.
+Pre-order (decision 108, kit/offers.py preorder): a size the store marks out is refused, unless the store has a
+pre-order rule. Then the line is marked preorder and so is the whole order: the draft (and a quote) carries the
+down payment, the rule's share of the total after any offer, rounded the way discounts are, the rest due on
+delivery, and the rule's days as days_min and days_max in place of the zone's. The rule is no offer: the order
+keeps its one offer.
+
+Money keys in results are price, fee, subtotal, discount, total, down_payment and rest_on_delivery only, so
+the send check reads them.
 """
 import hmac
 import json
@@ -92,7 +99,8 @@ DEFINITION = {"type": "function", "function": {
 
 SUMMARY_NEXT = (
     "Show this summary to the customer in their language and script: items (with the name to print on a "
-    "printing line), subtotal, any discount with its offer, delivery fee, total, name, address, phone and delivery days. Ask them to confirm. Never show the code. When they answer with a "
+    "printing line), subtotal, any discount with its offer, delivery fee, total, for a pre-order the down payment due now and "
+    "the rest on delivery, name, address, phone and delivery days. Ask them to confirm. Never show the code. When they answer with a "
     "plain yes in a new message, call draft_order again with the same details and confirm set to the code. A "
     "question, or a yes with a change, needs a new summary: call draft_order again without confirm.")
 QUOTE_NEXT = ("These are the totals for these items with the store's offers; nothing is saved. Give the customer "
@@ -242,7 +250,11 @@ def _confirm(book, args, ctx):
     if draft.get("discounts"):
         out["discounts"] = _shown_discounts(draft)
     out.update({"fee": orders.amount(draft["fee"]), "total": orders.amount(draft["total"]),
-                "days_min": draft["days_min"], "days_max": draft["days_max"], "next": CREATED_NEXT})
+                "days_min": draft["days_min"], "days_max": draft["days_max"]})
+    if draft.get("preorder"):
+        out.update(preorder=True, down_payment=orders.amount(draft["down_payment"]),
+                   rest_on_delivery=orders.amount(draft["rest_on_delivery"]))
+    out["next"] = CREATED_NEXT
     return out
 
 
@@ -363,7 +375,29 @@ def quote(args):
                     "days_min": place["days_min"], "days_max": place["days_max"]})
         if place.get("offer_id"):
             out["offer_id"] = place["offer_id"]   # the delivery offer that set the fee
-    out.update({"total": orders.amount(got["total"]), "next": QUOTE_NEXT})
+    out["total"] = orders.amount(got["total"])
+    pre = _preorder(items, got["total"])
+    if pre:
+        out.update({k: orders.amount(v) if k in MONEY else v for k, v in pre.items()})
+    out["next"] = QUOTE_NEXT
+    return out
+
+
+MONEY = ("down_payment", "rest_on_delivery")
+
+
+def _preorder(items, total):
+    """The pre-order part of an order with an out of stock line: {"preorder": True, "down_payment",
+    "rest_on_delivery", and days_min and days_max when the rule gives days}, the amounts as Decimals. {} for an
+    order with every line in stock."""
+    if not any(i.get("preorder") for i in items):
+        return {}
+    data = offers.current()
+    down, rest = offers.down_payment(total, data)
+    out = {"preorder": True, "down_payment": down, "rest_on_delivery": rest}
+    days = offers.preorder(data).get("days")
+    if days:
+        out.update(days_min=days, days_max=days)
     return out
 
 
@@ -399,6 +433,7 @@ def build(args, ctx):
     if got["discounts"]:
         draft["discounts"] = [{"offer": d["offer"], "what": d["what"], "discount": str(d["discount"])}
                               for d in got["discounts"]]
+    draft.update({k: str(v) if k in MONEY else v for k, v in _preorder(items, got["total"]).items()})
     return draft, None
 
 
@@ -413,7 +448,8 @@ def _lines(raw_items, name):
     catalogue = store.catalogue()
     lines, currencies, kinds = {}, set(), {}
     for it in raw_items:
-        item, v, problem = _variant(catalogue, it["product"], it.get("size"), it.get("tier"))
+        item, v, problem = _variant(catalogue, it["product"], it.get("size"), it.get("tier"),
+                                    preorder=bool(offers.preorder(offers.current())))
         if problem:
             return None, None, None, problem
         print_name, problem = _print_name(item, it, name)
@@ -428,6 +464,8 @@ def _lines(raw_items, name):
                           "price": str(orders.money(v["price"])), "quantity": 0}
             if print_name:
                 lines[key]["print_name"] = print_name
+            if v.get("stock") == "out":   # only with a pre-order rule (_variant)
+                lines[key]["preorder"] = True
         line = lines[key]
         line["quantity"] += it["quantity"]
         if line["quantity"] > MAX_QUANTITY:
@@ -445,7 +483,8 @@ def _shown_items(items):
     return [{"product": i["product"], **({"tier": i["tier"]} if i.get("tier") else {}),
              **({"size": i["size"]} if i["size"] else {}),
              **({"print_name": i["print_name"]} if i.get("print_name") else {}),
-             "quantity": i["quantity"], "price": orders.amount(i["price"])} for i in items]
+             "quantity": i["quantity"], "price": orders.amount(i["price"]),
+             **({"preorder": True} if i.get("preorder") else {})} for i in items]
 
 
 def _shown_discounts(draft):
@@ -467,13 +506,16 @@ def shown(draft):
     })
     if draft.get("payment"):
         out["payment"] = draft["payment"]
+    if draft.get("preorder"):
+        out.update(preorder=True, down_payment=orders.amount(draft["down_payment"]),
+                   rest_on_delivery=orders.amount(draft["rest_on_delivery"]))
     return out
 
 
-def _variant(catalogue, product, size, tier=None):
+def _variant(catalogue, product, size, tier=None, preorder=False):
     """(product, variant, None) for an exact title, tier and size from the store data, else
     (None, None, feedback). A product whose variants have tiers needs the tier; one with no tiers
-    refuses it."""
+    refuses it. A variant that is out is refused unless preorder (the store has a pre-order rule)."""
     item = next((i for i in catalogue if _fold(i.get("title")) == _fold(product)), None)
     if item is None:
         return None, None, "No product has that title. Call store and use the exact title it gives."
@@ -498,7 +540,7 @@ def _variant(catalogue, product, size, tier=None):
     if len(found) != 1:
         return None, None, f"{item['title']} comes in: {sizes}. Ask the customer which one."
     v = found[0]
-    if v.get("stock") == "out":
+    if v.get("stock") == "out" and not preorder:
         what = " ".join(x for x in (v.get("tier"), v.get("size")) if x) or "this size"
         return None, None, f"{item['title']} in {what} is out of stock. Tell the customer."
     if "price" not in v:

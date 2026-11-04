@@ -531,6 +531,9 @@ CSP = ("default-src 'none'; style-src 'sha256-" + base64.b64encode(hashlib.sha25
 STALE_PLAN = "Not rolled back: the lessons changed after the plan was shown. Look at the plan again."
 TRY_NOT_BUILT = "Try again is not built for this agent yet, so nothing was started."
 ARENA_NOT_HERE = "Run the Arena is for an agent made here, so nothing was started."
+LEVEL_NOT_HERE = "A risk level is for an agent made here, so nothing was changed."
+LEVEL_BAD = "Pick low, medium or high, please. Nothing was changed."
+NO_STUDY = "It plays one round: the study between rounds needs its model keys"
 ARENA_STARTED = "The Arena is running. Its practice matches show here as it plays; it takes a few minutes."
 
 
@@ -650,6 +653,9 @@ class Morning:
         self.arena_models = None
         self.arena_start = lambda work, name: threading.Thread(target=work, name=name, daemon=True).start()
         self.arena_shape = {}
+        # the study between rounds' models (arena/practice.py study=): None takes arena/run.py
+        # reflection_models when the models are real; a test hands a callable giving its fakes
+        self.arena_reflection = None
 
     def add_built(self):
         """Wire each agent Quick start built since the page started into the running page, as
@@ -884,8 +890,18 @@ class Morning:
                     from kit import turn as turn_mod
                     db = Db(db_path)  # its own connection: the page's answers keep theirs
                     learn = learn_built.learner(db, turn_mod.load(folder).plug)
+                study = None
+                if self.arena_reflection is not None:
+                    study = self.arena_reflection()
+                elif self.arena_models is None:  # real models: the night's study models, else one round
+                    try:
+                        study = run_mod.reflection_models()
+                    except run_mod.Refused as e:
+                        with self._arena_lock:
+                            self._arena_note[agent] = f"{NO_STUDY} ({' '.join(str(e).split())[:160]})."
                 practice.practise(folder, agent_model=models[0], customer_model=models[1], judge_model=models[2],
-                                  learn=learn, **shape)
+                                  learn=learn, study=study if db is not None else None, db=db, live_path=db_path,
+                                  **shape)
             except Exception as e:
                 note = f"The last run could not finish ({' '.join(str(e).split())[:200] or type(e).__name__})."
             finally:
@@ -907,6 +923,25 @@ class Morning:
                 self._arena_from.pop(agent, None)
             raise
         return ARENA_STARTED
+
+    def set_risk_level(self, agent, level, now=None):
+        """Keep, lower or raise the risk level of an agent made here (decision 84, arena/levels.py): its
+        level.json, which its next Arena run plays to and Connect reads (gate). Never starts a run.
+        Refused for any other agent or a level that is not low, medium or high."""
+        from arena import levels
+        folder = self.agent_folder(agent) if isinstance(agent, str) else None
+        if folder is None or folder.is_symlink() or not folder.is_dir():
+            raise Refused(LEVEL_NOT_HERE)
+        if not isinstance(level, str) or level not in levels.LEVELS:
+            raise Refused(LEVEL_BAD)
+        word = levels.WORDS[level]
+        if levels.read(folder) == level:
+            return f"It stays at {level}. {word} Nothing was started."
+        try:
+            levels.write(folder, level)
+        except (OSError, ValueError) as e:
+            raise Refused(f"The level could not be saved ({' '.join(str(e).split())[:120]}), so nothing was changed.")
+        return f"Its risk level is {level} now. {word} Its next Arena run plays to it; nothing was started."
 
     def paused(self, agent):
         """True while the agent's pause switch is on (kit/switch.py). Reads only: a database with no
@@ -1001,6 +1036,9 @@ class Morning:
         if item is None:
             return {"passed": False, "said": "No saved Arena run yet.", "at": None}
         won, played, needs = item["gate_won"], item["gate_played"], item["needs"]
+        folder = self.agent_folder(agent) if item["practice"] else None
+        if folder is not None:  # an agent made here: the gate its own risk level asks for (decision 84)
+            return self._level_gate(item, folder, won, played)
         if won is None or played is None or not needs:
             return {"passed": False, "said": "Its latest Arena run has no gate result.", "at": item["at"]}
         passed = item["kind"] == "arena_rounds" and won >= needs
@@ -1015,6 +1053,36 @@ class Morning:
         said = (f"{run} passed the gate on {_when(item['at'])}." if passed
                 else f"{run}, on {_when(item['at'])}, did not pass the gate.")
         return {"passed": passed, "said": said, "at": item["at"]}
+
+    def _level_gate(self, item, folder, won, played):
+        """gate for an agent made here: the item's test wins against the wins its CURRENT risk level needs
+        for the item's gate size (arena/levels.py needs), so keeping, lowering or raising the level counts
+        at once. A stuck run counts as a rounds run does; the gate must be whole (every test match
+        played); at high no test match may have failed a safety check (a missing count is a fail). A quick
+        run or one with no seal never counts."""
+        from arena import levels
+        level = levels.read(folder)
+        size = item.get("gate_size") or played
+        at = item["at"]
+        if won is None or not played or not size:
+            return {"passed": False, "said": "Its latest Arena run has no gate result.", "at": at}
+        quick = item.get("quick")
+        if quick is not False or not item["sealed"]:
+            what = ("was the quick one" if quick is True else "does not say it was a full run" if quick is not False
+                    else "carries no seal from an Arena run")
+            return {"passed": False, "said": f"Its latest Arena run, on {_when(at)}, {what}; "
+                    "a full run has to pass the gate first.", "at": at}
+        safe = not levels.LEVELS[level]["no_failed_checks"] or item.get("failed_checks") == 0
+        passed = (item["kind"] in ("arena_rounds", "arena_stuck") and played >= size and
+                  won >= levels.needs(level, size) and safe)
+        if passed:
+            said = f"Its practice in the Arena passed the gate for its {level} level on {_when(at)}."
+        elif not safe and won >= levels.needs(level, size):
+            said = (f"Its practice in the Arena, on {_when(at)}, did not pass the gate: a test match failed a "
+                    f"safety check, and its {level} level allows none.")
+        else:
+            said = f"Its practice in the Arena, on {_when(at)}, did not pass the gate for its {level} level."
+        return {"passed": passed, "said": said, "at": at}
 
     def connection_view(self, agent):
         """Each channel the agent asks for, as the page shows it: {channel, name, works, live, at, why,
@@ -1809,7 +1877,7 @@ class Morning:
                                       "needs": _count(item.get("needs")), "practice": item.get("practice") is True,
                                       "quick": item["quick"] if isinstance(item.get("quick"), bool) else None, "run": str(item.get("run")),
                                       "facts": item.get("fact_checks") is not False,
-                                      "sealed": seal_mod.holds(item, k), "retry": None}
+                                      "sealed": seal_mod.holds(item, k), "retry": None, **_level_fields(item)}
         for agent, got in retries.items():  # only a retry of the run on screen; a newer run hides an older try
             if agent in out and got["retried"] == out[agent]["run"]:
                 out[agent]["retry"] = got
@@ -3080,6 +3148,7 @@ ACTIONS = {"/stop": lambda m, f, now=None: m.stop(_field(f, "lesson"), _field(f,
                                                          _field(f, "name") if "name" in f else "", now=now)}
 SHEET_PATH = "/late_sheet"  # a POST that takes a file: multipart, its own size cap (MAX_SHEET)
 SHEET_FIELDS = ("token", "back", "agent", "sheet")
+LEVEL_PATH = "/arena/level"  # a built agent's risk level (Morning.set_risk_level); "/level" is the trial level
 DATA_PATH = "/agents/data"  # rows or a file added to a built agent's sample data (Morning.add_data): multipart too
 DATA_FIELDS = ("token", "back", "agent", "text", "file")
 MAX_DATA_POST = 160 * 1024  # bytes in one sample data POST: the file (kit/sample.py MAX_UPLOAD) and the pasted text
@@ -3128,6 +3197,8 @@ A3_ONLY = ("/idea", "/edit")
 TWO_TAB_ACTIONS = {**{k: v for k, v in ACTIONS.items() if k not in A3_ONLY},
                    # Try again on the Arena screen (Morning.try_again): the two tab page only
                    "/tryagain": lambda m, f, now=None: m.try_again(_field(f, "agent"), now=now),
+                   # keep, lower or raise a built agent's risk level on the Arena screen (decision 84)
+                   LEVEL_PATH: lambda m, f, now=None: m.set_risk_level(_field(f, "agent"), _field(f, "level"), now=now),
                    # rows or a file the user adds to a built agent's sample data (kit/sample.py)
                    DATA_PATH: lambda m, f, now=None: m.add_data(_field(f, "agent"), _field(f, "text"),
                                                                  _sheet(f, "file"), now=now)}
@@ -3515,6 +3586,24 @@ def _retry_item(name, item):
 def _count(v):
     """A whole count from a saved file, or None for anything else."""
     return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None
+
+
+def _level_fields(item):
+    """A built agent's Arena item's level fields (arena/practice.py, decisions 84 and 85), checked: level,
+    gate_size, failed_checks, scores (test wins a round), blocks ({kind, line}, what held it below its
+    level), stopped and studied. Anything of the wrong type reads as missing."""
+    from arena import levels
+    level = item.get("level")
+    scores = item.get("scores") if isinstance(item.get("scores"), list) else []
+    blocks = []
+    for b in _dicts(item.get("blocks"))[:10]:
+        if isinstance(b.get("kind"), str) and isinstance(b.get("line"), str):
+            blocks.append({"kind": b["kind"][:20], "line": " ".join(b["line"].split())[:300]})
+    return {"level": level if isinstance(level, str) and level in levels.LEVELS else None,
+            "gate_size": _count(item.get("gate_size")), "failed_checks": _count(item.get("failed_checks")),
+            "scores": [s for s in (_count(x) for x in scores[:20]) if s is not None],
+            "blocks": blocks, "stopped": item["stopped"] if isinstance(item.get("stopped"), str) else None,
+            "studied": item.get("studied") is True}
 
 
 def _arena_rounds(rows):

@@ -160,6 +160,22 @@ class NearEqual(unittest.TestCase):
                 self.assertEqual(len(got["owners"]), 1)
                 self.assertEqual(pool.shared(shared.LESSON), [])
 
+    def test_short_patterns_join_only_when_their_words_are_the_same(self):
+        two, three = ["cost", "quiet"], ["cost", "quiet", "size"]
+        self.assertFalse(shared.same(two, three))  # under MIN_SAME_WORDS: only the very same words are one
+        self.assertTrue(shared.same(two, list(reversed(two))))
+        self.assertTrue(shared.same(three + ["fit"], three + ["fit", "colour"]))  # 4 of 5 at MIN_SAME_WORDS up
+
+    def test_a_worry_label_that_leaks_is_not_kept(self):
+        pool = shared.Pool("sales", fresh(self))
+        for worry, kept in (("zamalek", None), ("ahmed", None), ("fifty pounds", None), ("delivery time", "delivery time")):
+            with self.subTest(worry=worry):
+                got, why = pool.add(shared.LOST, LOST_EN, OWNER_A, f"chat:{worry}", worry=worry)
+                self.assertEqual(why, [])
+                self.assertEqual(got["worry"], kept)
+                pool.patterns.clear()  # the next label starts a fresh pattern
+                pool._save()
+
     def test_the_same_polar_word_on_both_sides_still_joins(self):
         self.assertTrue(shared.same(shared.words(NEAR_EN), shared.words(CLEAN_EN)))
         self.assertTrue(shared.same(shared.words("Never offer a discount when the customer hesitates on the cost."),

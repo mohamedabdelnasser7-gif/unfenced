@@ -53,6 +53,7 @@ from kit import send_check, tools  # noqa: E402
 from kit.chats import Chats  # noqa: E402
 from kit import db as kit_db  # noqa: E402
 from kit.db import Db  # noqa: E402
+from kit.model import ModelError, counting  # noqa: E402
 from kit.tools import draft_order, store  # noqa: E402
 from kit.turn import INVISIBLE  # noqa: E402
 
@@ -207,13 +208,20 @@ class ExamModel:
             raise Graded()
         self.calls += 1
         try:
-            out = self.model.chat(messages, tools=tools, effort=EFFORT, max_tokens=MAX_TOKENS, whole=True)
+            with counting(self._again):  # kit/model.py asking an empty answer again is a call too
+                out = self.model.chat(messages, tools=tools, effort=EFFORT, max_tokens=MAX_TOKENS, whole=True)
         except Exception as e:
             self.error = e
             raise
         if not out.get("tool_calls"):
             self.first = (out.get("content") or "").strip()
         return out
+
+    def _again(self):
+        """A second ask inside one call: counted, and over the cap a model fault (kept in error)."""
+        if self.calls >= self.cap:
+            raise ModelError(f"the situation took more than {self.cap} model calls")
+        self.calls += 1
 
 
 class _Counted:
@@ -223,10 +231,14 @@ class _Counted:
         self.inner, self.calls, self.parent = inner, 0, parent  # parent: a _Counted that counts these calls too
 
     def chat(self, *args, **kw):
+        self.take()
+        with counting(self.take):  # kit/model.py asking an empty answer again is a call too
+            return self.inner.chat(*args, **kw)
+
+    def take(self):
         self.calls += 1
         if self.parent is not None:
             self.parent.calls += 1
-        return self.inner.chat(*args, **kw)
 
     def __getattr__(self, name):  # the route and model id a part names in its label
         return getattr(self.inner, name)

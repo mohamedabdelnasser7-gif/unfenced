@@ -193,8 +193,9 @@ class NoKeyNoLesson(Setup):
         self.network(Recorder(payload=cut))
         rep, _ = self.night()
         self.assertEqual(rep["cards"], [])
-        self.assertIn(f"waterer: the proposer failed (PartError: Meta answer was cut off at {model_study.MAX_TOKENS} "
-                      "tokens); no candidates", rep["notes"])
+        # cut twice: the first at MAX_TOKENS, the second ask (kit/model.py retry_tokens) at its larger budget
+        self.assertIn(f"waterer: the proposer failed (PartError: Meta answer was cut off at "
+                      f"{kit_model.retry_tokens(model_study.MAX_TOKENS)} tokens); no candidates", rep["notes"])
         # outside the study a cut answer is still an answer
         got = kit_model.Model(route=kit_model.WONDER).chat([], effort="high")
         self.assertEqual(got["content"], "[{\"pattern\"")

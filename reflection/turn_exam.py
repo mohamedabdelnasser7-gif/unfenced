@@ -47,7 +47,7 @@ from pathlib import Path
 from engine import exam as engine_exam
 from engine import lessons as engine_lessons
 from engine import plug as plug_mod
-from kit.model import ModelError
+from kit.model import ModelError, counting
 
 EXAM_FILE = "exam.json"
 CHECK_NAMES = ("no_safe_reply", "send_check", "declared_tools", "tools_called", "never_model_judged")
@@ -207,10 +207,14 @@ class Capped:
         self.model, self.cap, self.calls = model, cap, 0
 
     def chat(self, messages, tools=None, effort=EFFORT, max_tokens=1500, whole=False):
+        self.take()
+        with counting(self.take):  # kit/model.py asking an empty answer again is a call too
+            return self.model.chat(messages, tools=tools, effort=effort, max_tokens=max_tokens)
+
+    def take(self):
         if self.calls >= self.cap:
             raise ModelError(f"the situation took more than {self.cap} model calls")
         self.calls += 1
-        return self.model.chat(messages, tools=tools, effort=effort, max_tokens=max_tokens)
 
 
 def answer(s, lesson, *, agent, model, kept=None):

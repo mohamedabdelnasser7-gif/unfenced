@@ -133,6 +133,12 @@ class Tagger:
     def can_ask(self):
         return self.stopped is None and self.calls < self.cap
 
+    def _again(self):
+        """A second ask inside one call: counted on the cap, and past it a failed call."""
+        if self.calls >= self.cap:
+            raise model_mod.ModelError("the call cap is used up")
+        self.calls += 1
+
     def __call__(self, turns, ended, cleaner=None):
         if not self.can_ask():
             raise CapReached(self.stopped or "the call cap is used up")
@@ -140,9 +146,10 @@ class Tagger:
         data = {"ended": ended, "turns": turns_for_model(turns)}
         failed = None  # each raise sits outside its except block, so no error keeps the request
         try:
-            out = self.model.chat([{"role": "system", "content": self.recipe.prompt},
-                                   {"role": "user", "content": json.dumps(data, ensure_ascii=False)}],
-                                  effort=EFFORT, max_tokens=MAX_TOKENS, whole=True)
+            with model_mod.counting(self._again):  # kit/model.py asking an empty answer again is a call too
+                out = self.model.chat([{"role": "system", "content": self.recipe.prompt},
+                                       {"role": "user", "content": json.dumps(data, ensure_ascii=False)}],
+                                      effort=EFFORT, max_tokens=MAX_TOKENS, whole=True)
         except model_mod.ModelError as e:  # its message never holds the key or the chat
             failed = str(e)
         except Exception as e:  # any other error or a timeout, named by its type only

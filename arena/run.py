@@ -125,7 +125,7 @@ if __name__ == "__main__" and str(ROOT) not in sys.path:  # run by its path unde
 
 from arena import factcheck, match as match_mod, notes as notes_mod, paths, replay as replay_mod, scope, verdict  # noqa: E402
 from kit import seal  # noqa: E402
-from kit.model import ModelError  # noqa: E402
+from kit.model import ModelError, counting  # noqa: E402
 from reflection import history as hist  # noqa: E402
 
 AGENT = "sales"
@@ -242,7 +242,8 @@ the count file could not be read, when it could not; then every take() is refuse
         class Counted:
             def chat(self, messages, tools=None, effort="medium", max_tokens=1500, whole=False):
                 calls.take()
-                return inner.chat(messages, tools=tools, effort=effort, max_tokens=max_tokens, whole=whole)
+                with counting(calls.take):  # kit/model.py asking an empty answer again is a call too
+                    return inner.chat(messages, tools=tools, effort=effort, max_tokens=max_tokens, whole=whole)
 
             def __getattr__(self, name):  # the route and model id a part names in its label
                 return getattr(inner, name)

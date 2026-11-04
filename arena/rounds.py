@@ -72,6 +72,7 @@ from engine.lessons import HOTFIX_SOURCE, KEPT, MAX_PICK, PERSON, PULLED, TRYING
 from engine.plug import ALL
 from engine.risk import LOW
 from engine.study import read_days
+from kit.model import counting
 
 DAY = 86400.0
 LIVE_BUSY = "not handed, live busy"  # a passed lesson the live database could not take this run
@@ -206,12 +207,16 @@ class _Budget:
     def start(self):
         self.left, self.over = self.cap, False
 
-    def chat(self, messages, tools=None, effort="medium", max_tokens=1500, whole=False):
+    def take(self):
         if self.left < 1:
             self.over = True
             raise FullCapReached(f"the full exam would take more than {self.cap} model calls")
         self.left -= 1
-        return self.inner.chat(messages, tools=tools, effort=effort, max_tokens=max_tokens, whole=whole)
+
+    def chat(self, messages, tools=None, effort="medium", max_tokens=1500, whole=False):
+        self.take()
+        with counting(self.take):  # kit/model.py asking an empty answer again is a call too
+            return self.inner.chat(messages, tools=tools, effort=effort, max_tokens=max_tokens, whole=whole)
 
     def __getattr__(self, name):  # the route and model id a part names in its label
         return getattr(self.inner, name)

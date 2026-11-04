@@ -14,6 +14,7 @@ own notice row, so a customer told about the 10 minute window still hears about 
 import time
 
 from kit import env
+from kit.model import counting
 from kit.db import Db
 
 DAY = 24 * 60 * 60
@@ -134,5 +135,9 @@ class Metered:
         self.model, self.limits, self.customer = model, limits, customer
 
     def chat(self, *args, **kwargs):
+        self.take()
+        with counting(self.take):  # kit/model.py asking an empty answer again is a call too
+            return self.model.chat(*args, **kwargs)
+
+    def take(self):
         self.limits.take(self.customer)
-        return self.model.chat(*args, **kwargs)

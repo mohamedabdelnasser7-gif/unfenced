@@ -186,10 +186,13 @@ class Fallback(unittest.TestCase):
                             ("not json", b"<html>"), ("no message", json.dumps({"x": 1}).encode()),
                             ("cut off", ok("half", reason="length"))):
             with self.subTest(failure=label):
-                t = Transport(baseten=[step])
+                # a cut answer is asked once more on the same host with a larger budget (kit/model.py
+                # retry_tokens), never sent to the fallback
+                cut = label == "cut off"
+                t = Transport(baseten=[step, step] if cut else [step])
                 with self.assertRaises(kit_model.ModelError) as e:
                     kit_model.Model(opener=t).chat(HI, whole=True)
-                self.assertEqual(t.hosts(), [BASETEN_URL])
+                self.assertEqual(t.hosts(), [BASETEN_URL] * (2 if cut else 1))
                 self.assertTrue(str(e.exception).startswith("Baseten "))
 
     def test_both_failing_names_both_and_no_key(self):

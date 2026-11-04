@@ -24,7 +24,18 @@ A key given in code (api_key=) or another endpoint pins that one route, with no 
 
 The call carries the API key, so it goes through kit.net and never follows a redirect: urllib's
 default opener follows a 302 on a POST as a GET and keeps the Authorization header.
+
+Reasoning counts against max_tokens, so a long think can leave nothing to answer with: the host
+answers with empty content and no error (seen on the Meta key, muse-spark), or, with whole=True,
+an answer cut off at the limit. Model.chat asks such a call once more with a larger budget
+(retry_tokens: twice the limit, at least 4000, at most RETRY_TOKENS); a call already at RETRY_TOKENS
+is not asked again. The second ask is a model call like any other, so every wrapper that counts calls
+toward a cap counts it too: such a wrapper runs its inner call inside counting(take), and Model.chat
+calls each take() before it asks again (outermost first). A take() that raises (a cap reached)
+stops the second ask, and its error goes up as the wrapper's own would.
 """
+import contextlib
+import contextvars
 import http
 import http.client
 import json
@@ -53,6 +64,39 @@ FALLBACK_CODES = frozenset({429})  # with every 5xx: the host is busy or down, s
 
 EFFORT_REPLY = "medium"   # live replies to customers
 EFFORT_STUDY = "high"     # the night study
+
+RETRY_TOKENS = 16000  # the most a second ask on an empty or cut off answer gets
+RETRY_FLOOR = 4000    # the least it gets
+_COUNTERS = contextvars.ContextVar("kit_model_counters", default=())
+
+
+@contextlib.contextmanager
+def counting(take):
+    """Run a counted model call inside this: take() is called once for each further ask the call makes
+    (Model.chat asking an empty answer again), before it is made, and may raise to refuse it."""
+    token = _COUNTERS.set(_COUNTERS.get() + (take,))
+    try:
+        yield
+    finally:
+        _COUNTERS.reset(token)
+
+
+def retry_tokens(max_tokens):
+    """The budget of the second ask on an empty or cut off answer, or None when it would be no larger."""
+    try:
+        limit = int(max_tokens)
+    except (TypeError, ValueError):
+        return None
+    bigger = min(max(2 * limit, RETRY_FLOOR), RETRY_TOKENS)
+    return bigger if bigger > limit else None
+
+
+def empty(message):
+    """True for an answer with no tool call and no words: content missing, null or only spaces."""
+    if not isinstance(message, dict) or message.get("tool_calls"):
+        return False
+    content = message.get("content")
+    return content is None or (isinstance(content, str) and not content.strip())
 
 
 class Route(typing.NamedTuple):
@@ -102,6 +146,10 @@ class ModelError(Exception):
     """The model call failed. The message never holds the key."""
 
 
+class _Cut(str):
+    """Why a call failed, when the failure is an answer cut off at max_tokens (whole)."""
+
+
 def _phrase(code):
     try:
         return http.HTTPStatus(code).phrase
@@ -147,10 +195,29 @@ class Model:
         whole: an answer the host cut off at max_tokens is an error, not a shorter answer.
         Reasoning tokens count against max_tokens, so a long think can cut the answer.
         With a fallback leg, a first host that times out, cannot be reached, answers 5xx or 429
-        sends the same call to the fallback; any other failure (a 4xx, a cut answer) does not."""
+        sends the same call to the fallback; any other failure (a 4xx, a cut answer) does not.
+        An empty answer, or with whole a cut one, is asked once more with retry_tokens (module note);
+        each counting(take) around this call counts that ask first."""
         self.last_route = self.last_model = None
         if not self._key:
             raise ModelError(self._no_key)
+        message, failed, cut = self._ask(messages, tools, effort, max_tokens, whole)
+        bigger = retry_tokens(max_tokens)
+        if bigger is not None and (cut or (failed is None and empty(message))):
+            for take in _COUNTERS.get():
+                take()
+            # Route name and budgets only, never the request or the answer.
+            log.warning("%s gave %s at %s tokens; asked once more at %d", self.route.name,
+                        "a cut off answer" if cut else "an empty answer", max_tokens, bigger)
+            self.last_route = self.last_model = None
+            message, failed, _ = self._ask(messages, tools, effort, bigger, whole)
+        if failed is not None:
+            raise ModelError(failed)
+        return message
+
+    def _ask(self, messages, tools, effort, max_tokens, whole):
+        """One ask: the first leg, then the fallback leg on the failures it is for. Returns (message,
+        why it failed or None, cut: the failure is an answer cut off at max_tokens)."""
         first = Leg(self.route, self._key, self.model_id)
         message, failed, retry = self._send(first, self.endpoint, messages, tools, effort, max_tokens, whole)
         if failed is not None and retry and self.fallback is not None:
@@ -160,9 +227,8 @@ class Model:
             log.error("%s; this call goes to %s", failed, nxt.route.name)
             message, again, _ = self._send(nxt, nxt.route.endpoint, messages, tools, effort, max_tokens, whole)
             failed = None if again is None else f"{failed}; {again}"
-        if failed is not None:
-            raise ModelError(failed)
-        return message
+            return message, failed, isinstance(again, _Cut)
+        return message, failed, isinstance(failed, _Cut)
 
     def _send(self, leg, endpoint, messages, tools, effort, max_tokens, whole):
         """One request to one leg. Returns (message, None, False) or (None, why, retry), and never
@@ -198,7 +264,7 @@ class Model:
         # finish_reason values from dev.meta.ai/docs/api-reference/chat-completions/schemas (read 29 Oct)
         reason = choice.get("finish_reason") if whole and isinstance(choice, dict) else None
         if reason == "length":
-            return None, f"{name} answer was cut off at {int(max_tokens)} tokens", False
+            return None, _Cut(f"{name} answer was cut off at {int(max_tokens)} tokens"), False
         if reason == "content_filter":
             return None, f"{name} answer was stopped by its content filter", False
         self.last_route, self.last_model = name, leg.model_id

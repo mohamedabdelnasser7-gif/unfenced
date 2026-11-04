@@ -379,6 +379,11 @@ class Metered:
         self.writer, self.limits = writer, limits
 
     def __call__(self, plug, view):
+        self.take()
+        with model_mod.counting(self.take):  # kit/model.py asking an empty answer again is a call too
+            return self.writer(plug, view)
+
+    def take(self):
         over = None
         try:
             self.limits.take(LIMIT_KEY)
@@ -386,7 +391,6 @@ class Metered:
             over = e.which
         if over is not None:
             raise PartError(f"over the model call limit ({over})")
-        return self.writer(plug, view)
 
 
 class FastNotes(engine_fast.FastNotes):

@@ -80,3 +80,26 @@ class DraftKeepsTheDeliveryOffer(unittest.TestCase):
         made = orders.Book(self.db).create(draft, self.cid, {"level": "low", "reasons": []})
         tags = json.loads(orders.Book(self.db).demo_order(made["order"])["tags"])
         self.assertIn("offer-free_delivery", tags)
+
+
+class StockLineUnderItsProduct(unittest.TestCase):
+    """A size line under a product's heading is about that product (Arena run 20261104T170549): "Size 42
+    is out of stock" under the Vapor 17 Elite heading was checked against the Superfly 11 too."""
+
+    def test_a_size_line_follows_the_product_named_just_before_it(self):
+        from arena import factcheck
+        from kit.tools import store
+        items = [{"title": "Nike Mercurial Vapor 17", "type": "Football Boots", "variants": [
+                     {"tier": "Elite", "size": "42", "price": "16500", "stock": "out"},
+                     {"tier": "Elite", "size": "46", "price": "16500", "stock": "in stock"}]},
+                 {"title": "Nike Mercurial Superfly 11", "type": "Football Boots", "variants": [
+                     {"tier": "Elite", "size": "42", "price": "20000", "stock": "in stock"},
+                     {"tier": "Elite", "size": "46", "price": "20000", "stock": "in stock"}]}]
+        good = ("Nike Mercurial Vapor 17 Elite, 16,500 EGP:\nSize 42 is out of stock. Size 46 is in stock.\n\n"
+                "Nike Mercurial Superfly 11 Elite, 20,000 EGP:\nSize 42 is in stock. Size 46 is in stock.")
+        bad = ("Nike Mercurial Vapor 17 Elite, 16,500 EGP:\nSize 46 is in stock.\n\n"
+               "Nike Mercurial Superfly 11 Elite, 20,000 EGP:\nSize 42 is out of stock.")
+        with mock.patch.object(store, "catalogue", return_value=items):
+            self.assertEqual([f for f in factcheck.check(good) if f["check"] == "stock"], [])
+            self.assertEqual([f["why"] for f in factcheck.check(bad) if f["check"] == "stock"],
+                             ["Nike Mercurial Superfly 11 Elite 42 is in stock, the reply says out"])

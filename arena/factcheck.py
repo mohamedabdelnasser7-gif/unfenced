@@ -519,15 +519,16 @@ def check(reply, customer_text="", tool_results=(), orders=()):
         if not any(_variant_for(i, number=n) for i in pool):
             failed.append({"check": "size", "why": f"size {n} is not a size of {_names(named)}"})
 
-    for m in SENTENCE.finditer(reply):
+    for m, context in _with_context(reply, items, named):
         if reply[m.end():m.end() + 1] not in ("?", "؟"):  # a question claims nothing
-            failed += _no_stock_data(m.group(0), items, named, extras, all_tiers, said)
-    for sentence in SENTENCE.findall(reply):
+            failed += _no_stock_data(m.group(0), items, context, extras, all_tiers, said)
+    for m, context in _with_context(reply, items, named):
+        sentence = m.group(0)
         says_out = bool(OUT.search(sentence))
         says_in = not says_out and bool(AVAILABLE.search(sentence))
         if not (says_out or says_in):
             continue
-        here = products_named(sentence, items) or named
+        here = products_named(sentence, items) or context
         nums = [int(m.group(1)) for m in SIZE_NUMBER.finditer(sentence)]
         letters = SIZE_LETTER.findall(sentence)
         level = tiers_named(sentence, all_tiers) or said
@@ -570,6 +571,18 @@ def check(reply, customer_text="", tool_results=(), orders=()):
     if claims_order(reply) and not placed(tool_results):
         failed.append({"check": "order", "why": "the reply says the order is placed, but no tool placed one"})
     return failed
+
+
+def _with_context(reply, items, named):
+    """Each sentence of reply with the products it talks about when it names none: the ones the nearest
+    sentence before it names (a size line under a product's heading, "Size 42 is out of stock", is about
+    that product, Arena run 20261104T170549), else named. A sentence that names products keeps its own."""
+    context = None
+    for m in SENTENCE.finditer(reply):
+        yield m, context or named
+        own = products_named(m.group(0), items)
+        if own:
+            context = own
 
 
 def _no_stock_data(sentence, items, named, extras, all_tiers, said):

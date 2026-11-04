@@ -45,6 +45,13 @@ training match also gets a quick note from the fast half of Reflection (arena/no
 memory and handed in the run's next matches until the step between rounds has run; it is never a
 lesson and never written to any database.
 
+The off topic customer (decisions 88 and 89, arena/scope.py): with off_topic set (main sets it where it
+makes the models, so only with a model key) and a judge model, practice match 10 of each round is a person
+whose ask the customer model writes from the agent's card, outside its work, judged by the judge model with
+the exam's off-topic rules. Its calls count on the day's cap, a loss is a case like any training loss, an
+ask the judge reads as on topic voids the match, and it never plays the gate, trust or the practice pool;
+its matches are never past wins (past_wins). With no model key it is skipped, never faked.
+
 --replay names the persona build's replay.jsonl: once the gate passes, the Sales agent replays up
 to --replay-max real lost chats, each from the customer's real opening against the persona card
 with the chat's worry (arena/replay.py), scored with the same fact checks and verdict and counted
@@ -105,8 +112,9 @@ ROOT = Path(__file__).resolve().parent.parent
 if __name__ == "__main__" and str(ROOT) not in sys.path:  # run by its path under -I
     sys.path.insert(0, str(ROOT))
 
-from arena import factcheck, match as match_mod, paths, replay as replay_mod, verdict  # noqa: E402
+from arena import factcheck, match as match_mod, paths, replay as replay_mod, scope, verdict  # noqa: E402
 from kit import seal  # noqa: E402
+from kit.model import ModelError  # noqa: E402
 from reflection import history as hist  # noqa: E402
 
 AGENT = "sales"
@@ -124,6 +132,8 @@ PASSED, CAP, STUCK, ROUNDS, MODEL_ERROR = "passed", "cap", "stuck", "rounds", "m
 # What play returns for a match it played but could not judge (arena/practice.py: the judge's answer could not
 # be read twice): the run goes on, the match counts neither won nor lost, and the round counts it as unjudged.
 UNJUDGED = "unjudged"
+# What play returns for an off topic match the judge read as on topic (arena/scope.py): neither won nor lost.
+VOIDED = "voided"
 # --quick, the short run for judges (docs/judges.md): one round of one training match and a gate of
 # one match, at most QUICK_CALLS model calls in the run, its files under the ignored data/ folder.
 QUICK_TRUST = {"matches": 1, "wins": 1, "zero_failed_checks": True}
@@ -373,13 +383,15 @@ class Arena:
     def __init__(self, cards, *, agent_model, customer_model, calls, trust=None, prompt=match_mod.GENERIC_PROMPT,
                  prompt_file=None, held_out=None, matches=10, rounds=DEFAULT_ROUNDS, fact_checks=None, seed=0,
                  learn=None, between=None, lessons=None, state, reports=None, now=time.time, pool=None,
-                 before_match=None, notes=None):
+                 before_match=None, notes=None, judge_model=None, off_topic=False):
         """prompt_file: where the customer prompt was read from (None for the generic one), saved
         with each match beside the prompt's fingerprint, so the eval gate can read it again.
         pool: the owner's practice pool (arena/grow.py), which counts each training match's result.
         before_match: called before every match (arena/rounds.py Pool.refresh: the live corrections).
         notes: the run's quick notes (arena/notes.py RunNotes): one written after each lost training
-        match, every one of them handed in the next matches, dropped once the step between rounds has run."""
+        match, every one of them handed in the next matches, dropped once the step between rounds has run.
+        off_topic and judge_model: practice match 10 of each round is the off topic customer (arena/scope.py),
+        judged by judge_model; with either missing it is never played."""
         if pool is None:
             self.train, self.held = split(cards, held_out, seed=seed)
             self.gate_cards = [c for c in self.held if can_buy(c)]  # a card that will not buy is no test of the agent
@@ -389,6 +401,8 @@ class Arena:
             self.train, self.gate_cards = grow.decks(cards, pool, {c["id"] for c in self.held})
         self.calls = calls
         self.agent_model, self.customer_model = calls.model(agent_model), calls.model(customer_model)
+        self.judge_model = None if judge_model is None else calls.model(judge_model)
+        self.off_topic = bool(off_topic)
         self.trust = trust or dict(PUBLIC_TRUST)
         self.quick = False  # main sets it for --quick: its item never unlocks Connect (Morning.gate)
         self.facts = self.trust.get("zero_failed_checks", True) if fact_checks is None else bool(fact_checks)
@@ -427,7 +441,25 @@ class Arena:
         if m.get("ended") == match_mod.VOID:  # a model did not answer: dropped, never a loss
             self.halt, self.error = MODEL_ERROR, m.get("error") or ""
             return None
-        judged = verdict.judge(m, facts=self.facts)
+        if scope.is_off(card):  # judged by the judge model with the exam's off-topic rules (arena/scope.py)
+            m.update(off_scope=True, ask=card["ask"])
+            try:
+                judged = self._judge_off(m)
+            except CapReached:
+                self.halt = CAP
+                return None
+            except ModelError as e:
+                self.halt, self.error = MODEL_ERROR, match_mod.plain(str(e))
+                return None
+            if self.calls.reached:
+                self.halt = CAP
+                return None
+            if judged is None:
+                return UNJUDGED
+            if judged.get("void"):
+                return VOIDED
+        else:
+            judged = verdict.judge(m, facts=self.facts)
         m.update(id=match_id, won=judged["won"], why=judged["why"], quote=judged["quote"], persona=card,
                  prompt_sha=self.prompt_sha, prompt_file=self.prompt_file)
         if replay is not None:
@@ -441,6 +473,38 @@ class Arena:
         """The card for match k of round r from deck (the training cards or the gate's): a weighted
         draw with replacement. arena/practice.py draws each card once a round instead."""
         return draw(deck, self.rng)
+
+    def scope_card(self):
+        """The card the off topic writer and judge read (arena/scope.py): the Sales agent's; practice.py its own."""
+        return scope.SALES_CARD
+
+    def _judge_off(self, m):
+        """arena/scope.py judge, asked once more when its answer cannot be read; None when the second cannot
+        be read either (unjudged)."""
+        for _ in range(2):
+            try:
+                return scope.judge(m, self.scope_card(), self.judge_model, facts=self.facts)
+            except scope.Unreadable:
+                continue
+        return None
+
+    def _off_card(self, match_id, note):
+        """The off topic customer for practice match match_id, written now from the agent's card, or None when it
+        is skipped (no judge model, a writer that did not answer or could not be read twice), said in note.
+        CapReached when the cap stops it."""
+        if self.judge_model is None:
+            note["off_topic"] = {"skipped": scope.NO_JUDGE}
+            return None
+        try:
+            card = scope.write(self.scope_card(), self.customer_model, match_id)
+        except CapReached:
+            raise
+        except ModelError as e:
+            note["off_topic"] = {"skipped": match_mod.plain(str(e))}
+            return None
+        if self.calls.reached:
+            raise CapReached()
+        return card
 
     def _fast(self):
         """The quick notes for match_mod.play (fast=, which it hands to loop.turn)."""
@@ -464,17 +528,37 @@ class Arena:
                    "gate": {"played": 0, "won": 0, "lost": []}}
             rounds.append(one)
             for k in range(1, self.matches + 1):
-                card = self.pick(self.train, r, k)
-                out = self.play(card, f"{self.run_id}-r{r}-t{k:02d}", training=True)
+                mid = f"{self.run_id}-r{r}-t{k:02d}"
+                if self.off_topic and scope.slot(k):  # practice match 10: the off topic customer (arena/scope.py)
+                    try:
+                        card = self._off_card(mid, one["training"])
+                    except CapReached:
+                        self.halt = CAP
+                        return self._report(rounds, CAP)
+                    if card is None:
+                        continue
+                    out = self.play(card, mid, opening=card["ask"], training=True)
+                else:  # levels' pick: each practice customer once a round with a fixed test set (arena/practice.py)
+                    card = self.pick(self.train, r, k)
+                    out = self.play(card, mid, training=True)
                 if out is None:
                     return self._report(rounds, self.halt)
-                if out is UNJUDGED:
-                    one["training"]["unjudged"] = one["training"].get("unjudged", 0) + 1
+                off = scope.is_off(card)
+                if out is UNJUDGED or out is VOIDED:
+                    if out is UNJUDGED:
+                        one["training"]["unjudged"] = one["training"].get("unjudged", 0) + 1
+                    if off:
+                        one["training"]["off_topic"] = {"card": card["id"], "about": card["about"],
+                                                        "result": "void" if out is VOIDED else UNJUDGED}
                     continue
                 m, judged = out
                 one["training"]["played"] += 1
                 one["training"]["won"] += judged["won"]
-                if self.pool is not None:  # a practice customer that beats the agent comes back more often
+                if off:
+                    one["training"]["off_topic"] = {"card": card["id"], "about": card["about"],
+                                                    "result": "won" if judged["won"] else "lost", "why": judged["why"]}
+                # a practice customer that beats the agent comes back more often; the off topic one is no group of it
+                if self.pool is not None and not off:
                     self.pool.record(card, judged["won"])
                 if not judged["won"] and self.learn is not None:
                     one["training"]["cases"].append(self.learn(m, judged, m["id"]))
@@ -796,7 +880,8 @@ def history_lessons(db):
 
 
 def past_wins(state):
-    """The won matches saved in state, oldest first."""
+    """The won matches saved in state, oldest first; never an off topic one (arena/scope.py), which is judged
+    by its own rules, so the eval gate reruns the agent's own customers only."""
     path = Path(state) / MATCHES_FILE
     out = []
     try:
@@ -808,7 +893,7 @@ def past_wins(state):
             m = json.loads(line)
         except (ValueError, RecursionError):
             continue
-        if isinstance(m, dict) and m.get("won") is True and m.get("turns"):
+        if isinstance(m, dict) and m.get("won") is True and m.get("turns") and not m.get("off_scope"):
             out.append(m)
     return out
 
@@ -982,9 +1067,11 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
                 between_models = reflection_models()
             else:
                 raise Refused("the step between rounds needs its models: give reflection with the agent's models")
+        judge_model = None
         if made:
             agent_model = agent_model or model_mod.Model()
             customer_model = customer_model or model_mod.Model()
+            judge_model = model_mod.Model()  # the off topic match's judge (arena/scope.py), only with a key
         learn, lessons, between, before_match, notes = None, None, None, None, None
         if args.db:
             from kit.db import Db
@@ -1029,7 +1116,7 @@ def main(argv=None, *, agent_model=None, customer_model=None, reflection=None):
                       matches=args.matches, rounds=args.rounds,
                       fact_checks=None if args.fact_checks is None else args.fact_checks == "on", seed=args.seed,
                       learn=learn, between=between, lessons=lessons, state=state, pool=practice,
-                      before_match=before_match, notes=notes)
+                      before_match=before_match, notes=notes, judge_model=judge_model, off_topic=made)
         arena.quick = bool(args.quick)
         rep = arena.run()
         if planned is not None:

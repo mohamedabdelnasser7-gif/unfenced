@@ -2,7 +2,10 @@
 and red team found passing: number words with no currency in English, Arabic and Franco (glued forms
 too), spelled digit runs, shops and brands at the start or in lower case, places, platform words,
 the customer's own Franco words, Arabic script and more than one sentence. Each must be refused.
-Plain lines for any agent kind (sales, support, booking, marketing) must still pass."""
+Round 2 adds every line both round 2 reports found passing (sound alikes, split and misspelled
+numbers, ordinals, fractions, money slang, lower case names, brands and places), refused by the
+English word list. Plain lines for any agent kind (sales, support, booking, coaching, marketing)
+must still pass."""
 import unittest
 
 from kit import send_check
@@ -99,6 +102,94 @@ REFUSED = {
         "When the customer writes mesh 3ayez el lon da, offer the other colour quickly.",
         'the customer kept repeating "cash only" so the agent should plan for it',
     ],
+    "round 2 red team: sound alikes, split, misspelled and Franco numbers, ordinals, fractions, other "
+    "languages, roman numerals, lower case names, brands and places": [
+        'Ask them to call zero one zero one two three four five six seven eight.',
+        "Ask them to call oh won oh won too tree for fife sicks sev'n ate before noon.",
+        'Ask them to call oh won oh won too tree for fife sicks sevn ate before noon.',
+        'Ask them to call oh won oh won too tree for fife sicks seven ate before noon.',
+        'When the customer says one won one too, greet them again kindly.',
+        'When the customer offers twenty five less, explain the price calmly.',
+        'When the customer offers fif ty less, explain the price calmly.',
+        'When the customer offers fif-ty less, explain the price calmly.',
+        "When the customer offers fif'ty less, explain the price calmly.",
+        'When the customer offers fiftee less, explain the price calmly.',
+        'When the customer offers fiftyy less, explain the price calmly.',
+        'When the customer offers twen ty fiv e less, explain the price calmly.',
+        'When the customer offers f i f t y less, explain the price calmly.',
+        'When the customer offers fiveteen hundred less, explain the price calmly.',
+        'When the customer offers khamsin less, explain the price calmly.',
+        'When the customer offers ashara less, explain the price calmly.',
+        'When the customer offers kham sin less, explain the price calmly.',
+        'When the customer offers khamsinn less, explain the price calmly.',
+        'When the customer offers khamsin gen-eh less, explain the price calmly.',
+        'When the customer offers tomanya less, explain the price calmly.',
+        'When the customer offers meyteen less, explain the price calmly.',
+        'When the customer offers arbaa less, explain the price calmly.',
+        'When the customer offers nos alf less, explain the price calmly.',
+        'When the customer offers setta w noss less, explain the price calmly.',
+        'When the customer offers 3ashara less, explain the price calmly.',
+        'When the customer asks for the fifth size, explain the price calmly.',
+        'When the customer offers a quarter off, explain the price calmly.',
+        'When the customer asks for a third off, explain the price calmly.',
+        'When the customer offers twentieth less, explain the price calmly.',
+        'When the customer asks for a couple off, explain the price calmly.',
+        'When the customer wants a dozen pairs, explain the price calmly.',
+        'When the customer wants half the pairs, explain the price calmly.',
+        'When the customer asks for the price in gen-eh, explain the price calmly.',
+        'When the customer asks for the price in e g p, explain the price calmly.',
+        'When the customer asks for the price in £, explain the price calmly.',
+        'When the customer offers cinquante less, explain the price calmly.',
+        'When the customer offers cincuenta less, explain the price calmly.',
+        'When the customer gives order xv ii, check it before you reply.',
+        'Ask them to call ٠١٠١٢٣٤٥٦٧٨ before noon.',
+        'When the customer offers ½ off, explain the price calmly.',
+        'When the customer offers ㊿ off, explain the price calmly.',
+        'When the customer offers ५० off, explain the price calmly.',
+        'When the customer offers 五十 off, explain the price calmly.',
+        'Customers of zorvex go quiet after hearing the cost of the boots.',
+        'When the customer compares the boots with zorvex, explain the fit calmly.',
+        'Customers like menna ask for a discount after the price and go quiet.',
+        'Customers like abdelrahman ask for a discount after the price and go quiet.',
+        'Customers like sherif ask for a discount after the price and go quiet.',
+        'Customers in sheraton ask about same day delivery and leave when late.',
+        'Customers in haram ask about same day delivery and leave when late.',
+        'Customers in october city ask about same day delivery and leave when late.',
+        'Customers in smouha ask about same day delivery and leave when late.',
+        'Customers in khobar ask about same day delivery and leave when late.',
+        'Customers in sayeda zeinab ask about same day delivery and leave when late.',
+    ],
+    "round 2 review: lower case shops, names and places, ordinals, Franco tens, money slang": [
+        'When customers of zorvex ask for a refund, offer an exchange first.',
+        'When customers ask whether noorly delivers abroad, explain the policy calmly.',
+        'When customers from qena ask about delivery, explain the courier timing.',
+        'When customers in beni suef ask about delivery, explain the courier timing.',
+        'When customers from kafr el sheikh ask about delivery, explain cash on delivery.',
+        'When customers in port said ask about delivery, explain the courier timing.',
+        'When customers from matrouh ask about delivery, explain the courier timing.',
+        'When customers from menoufia ask about delivery, explain the courier timing.',
+        'When customers from sharqia ask about delivery, explain the courier timing.',
+        'When customers from october ask about delivery, explain the courier timing.',
+        'When ahmed asks about the hoodie again, reply with the size chart first.',
+        'When mona complains about late delivery, apologise and share the tracking.',
+        'When the customer mentions the order from the twentieth, check its status first.',
+        'When customers ask for a hundredth time, stay calm and answer.',
+        'Customers who pay ashara upfront expect a faster delivery.',
+        'Customers who pay tamania upfront expect a faster delivery.',
+        'Customers who pay alfen upfront expect a faster delivery.',
+        'Customers who mention khamastashar expect a discount.',
+        'When customers ask for a quarter off, explain the fixed price.',
+        'When customers ask for a score off, explain the fixed price.',
+        'When the customer at house won too tree asks again, answer calmly.',
+        'When customers text from the number ending in double oh, answer calmly.',
+        'When customers ask about the zorvex hoodie, share the size chart.',
+        'When customers mention the haram branch, explain delivery times.',
+        'When customers mention a tiktok seller, explain the original product.',
+        'When customers ask about snap or tele, answer in chat only.',
+        'When customers ask for a fiver off, explain the fixed price.',
+        'When customers ask for a tenner off, explain the fixed price.',
+        'When customers send a voice note from the abdeen area, reply in text.',
+    ],
     "shape": [
         "When the guest asks twice, answer plainly. Then offer the next free slot.",
         "Zorvex is where buyers go quiet after hearing the cost of the boots.",
@@ -122,6 +213,28 @@ CLEAN = [
     "Ask one short question at a time when a new user is unsure what they need.",
     "Visitors who ask about the brand story stay longer when the answer is short and warm.",
     "Customers who shop for sportswear compare fabrics before they ask about the fit.",
+    'When a customer asks for the price twice, answer once and add the delivery time.',
+    'Offer the size chart before the customer asks for an exchange.',
+    'Customers who hesitate after the price often want reassurance about returns.',
+    'When a guest asks to move a booking, confirm the new time before closing.',
+    'Ask which day suits the guest before offering a time slot.',
+    'When a user reports a bug, thank them and ask for the steps they took.',
+    'If a reader replies to a post with a complaint, answer in private with care.',
+    'When someone asks if the product is original, explain how it is checked.',
+    'Reply to a complaint with an apology before any explanation.',
+    'Thank the customer and confirm the order summary before closing the chat.',
+    'When a patient asks about a late appointment, apologise and offer the next free slot.',
+    'Customers asking about stock usually want to know when it comes back.',
+    'Listen first when a caller is angry, then restate the problem in plain words.',
+    'When no one answers after the quote, follow up once the next day.',
+    'Students who ask about the course length usually want to know the weekly time.',
+    'Followers who comment on a post often want a quick private reply.',
+    'Members who cancel often mention price, so ask what would keep them.',
+    'When a tenant reports a leak, confirm the address details in private.',
+    "When a coach is asked about a missed session, apologise and offer to rebook it.",
+    "Patients who cancelled before often want an earlier appointment, so offer one plainly.",
+    "If a follower asks about a same-day reply, explain when the team is online.",
+    "Offer a one to one call when a learner is stuck on the same lesson twice.",
 ]
 
 
@@ -175,6 +288,42 @@ class CleanTable(unittest.TestCase):
             with self.subTest(form=form):
                 self.assertEqual(shared.check(line.replace(form, "a little")), [])
                 self.assertTrue(numbers & set(shared.check(line)), shared.check(line))
+
+    def test_the_new_guards_say_why(self):
+        cases = [
+            ("Customers of zorvex go quiet after hearing the cost of the boots.", "a word not in the English word list"),
+            ("When mona complains about late delivery, apologise and share the tracking.", "a first name"),
+            ("When customers in port said ask about delivery, explain the courier timing.", "a place"),
+            ("Ask them to call oh won oh won too tree for fife sicks seven ate before noon.", "a number in words"),
+            ("When customers text from the number ending in double oh, answer calmly.", "a number in words"),
+            ("When customers ask for a fiver off, explain the fixed price.", "a word not in the English word list"),
+            ("When the customer asks for the price in gen-eh, explain the price calmly.", "a currency or an amount"),
+        ]
+        for line, reason in cases:
+            with self.subTest(line=line):
+                self.assertIn(reason, shared.check(line))
+
+    def test_the_word_list_is_the_public_domain_dictionary_without_numbers_or_capitals(self):
+        import lzma
+        head = lzma.decompress(shared.WORDS_FILE.read_bytes())[:400].decode("ascii")
+        self.assertIn("Webster's Second International Dictionary (1934), public domain", head)
+        words = shared.english()
+        self.assertGreater(len(words), 150_000)
+        for w in ("customer", "hesitate", "delivery", "refund", "price"):
+            self.assertIn(w, words)
+        for w in ("fiver", "tenner", "score", "quarter", "half", "dozen", "couple", "pair", "grand", "fifth",
+                  "twentieth", "hundredth", "october", "monday", "cairo", "mona", "sherif", "zorvex"):
+            with self.subTest(word=w):
+                self.assertNotIn(w, words)
+        for w in ("customers", "hesitated", "apologised", "colours", "stopped", "don't", "customer's", "same-day"):
+            with self.subTest(word=w):
+                self.assertTrue(shared._english_word(w))
+
+    def test_sound_alikes_count_only_in_a_run(self):
+        self.assertEqual(shared.check("When the customer won too, thank them and offer the next size."), [])
+        self.assertEqual(shared.check("Offer a one to one call when a learner is stuck on the same lesson."), [])
+        self.assertIn("a number in words", shared.check("When the customer at house won too tree asks, answer."))
+        self.assertIn("a number in words", shared.check("When the customer says one won one too, greet them."))
 
     def test_the_franco_tens_with_a_currency_are_a_spelled_amount_in_the_send_check(self):
         for line in ("el zbon 3ayez talateen geneh", "3ayez khamseen gneh bas", "be arba3een geneh"):

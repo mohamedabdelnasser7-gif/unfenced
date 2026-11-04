@@ -11,7 +11,14 @@ or Franco (a lone "one" aside), glued forms included (a ب or b before it, a cur
 bucks, quid or percent after it), no amount, price or currency, no Franco word, no phone, email,
 link or handle, no quoted words and no run of COPY_RUN words copied from what it was written from
 (the lesson's line, the customer's turns), no line that hands a chat to a person, MIN_CHARS to
-MAX_CHARS characters and MIN_WORDS to MAX_WORDS words. The checks reuse arena/clean.py (names,
+MAX_CHARS characters and MIN_WORDS to MAX_WORDS words. Every word must be an English word
+(english: the bundled list reflection/words_en.xz, built by reflection/make_words.py from
+/usr/share/dict/words, Webster's Second International of 1934, in the public domain), or one of the
+openers or SAFE words, so a made-up brand, a first name, a misspelled or split number and a word of
+another language are refused without being listed one by one; the list holds no capitalised
+entry, no first name the cleaner knows and no NUMBERISH word (number words, ordinals, fractions and
+money slang). Number words and their sound alikes (won too tree) are folded to digits before the
+digit test (_folded). The checks reuse arena/clean.py (names,
 phones, emails, links, places and addresses), engine/risk.py (the normal form, links, phones,
 handles and the copy runs), kit/send_check.py (currency, spelled amounts, the Franco tens and words)
 and reflection/quickstart.py names_a_person. A pattern that fails is dropped, never stored: only a
@@ -44,9 +51,11 @@ Where the patterns go, each through the paths siblings already take:
 """
 import contextlib
 import fcntl
+import functools
 import hashlib
 import hmac
 import json
+import lzma
 import os
 import re
 import secrets
@@ -113,6 +122,11 @@ on in at during throughout from
 a an the this that these those such each every any some most many few several all both either neither
 customers customer buyers buyer shoppers shopper clients client people someone anyone visitors visitor
 users user readers reader callers caller guests guest newcomers returning repeat new first hesitant quiet
+students student members member followers follower patients patient subscribers subscriber tenants tenant
+learners learner parents parent fans fan viewers viewer diners diner travellers traveller travelers traveler
+passengers passenger donors donor attendees attendee applicants applicant candidates candidate residents
+resident renters renter tourists tourist listeners listener players player athletes athlete trainees
+trainee leads prospects prospect owners owner audiences audience everyone anybody somebody nobody
 unsure busy price agents agent replies reply messages message questions question they it there
 offer ask tell say share give show suggest explain answer respond confirm check keep let avoid never always
 do don try mention remind thank greet follow wait stay use repeat admit apologise apologize acknowledge
@@ -162,7 +176,7 @@ PLATFORMS = frozenset("""
 instagram insta ig gmail hotmail yahoo outlook icloud whatsapp watsapp whats wa facebook fb messenger tiktok
 snapchat telegram twitter youtube linkedin pinterest jumia amazon shopify talabat careem uber vodafone
 etisalat fawry instapay paypal valu souq olx dubizzle bosta aramex dhl fedex google username usernames
-hashtag hashtags dm dms handle handles
+hashtag hashtags dm dms handle handles snap tele
 """.split()) - {"handle"}  # "handle" is a verb too (handle the doubt); the shapes after a platform word catch the rest
 # places the cleaner (arena/clean.py) leaves, in any case
 PLACES = frozenset("""
@@ -202,6 +216,153 @@ last next previous single only such shared customer customers buyer buyers selle
 convenience corner discount premium luxury cheap cheaper expensive popular known unknown original fake genuine
 authorised authorized licensed profile review reviews rating ratings user personal family who they we you i
 """.split())
+
+
+# number words, ordinals, fractions and money slang: never English words to the word list
+# (reflection/make_words.py leaves them out), whatever else they mean ("one" stays: see _numbers)
+_NUMBERISH = """
+zero two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen
+eighteen nineteen twenty thirty forty fourty fifty sixty seventy eighty ninety hundred thousand million billion
+trillion lakh crore second third fourth fifth sixth seventh eighth ninth tenth eleventh twelfth thirteenth
+fourteenth fifteenth sixteenth seventeenth eighteenth nineteenth twentieth thirtieth fortieth fiftieth
+sixtieth seventieth eightieth ninetieth hundredth thousandth millionth billionth half halve halved halving
+quarter quartered thrice twain dozen score fiver tenner grand quid buck pence penny cent couple pair nil
+nought naught zilch triple quadruple tenfold hundredfold twofold threefold
+"""
+NUMBERISH = frozenset(w for b in _NUMBERISH.split() for w in (b, b + "s", b + "es")) | {"halves", "pennies"}
+WORDS_FILE = Path(__file__).with_name("words_en.xz")
+# common English words that are also first names the cleaner knows (arena/words.py): kept
+NAME_WORDS = frozenset("body may mark said shady sandy".split())
+# words a plain pattern may use that the 1934 list does not hold, and the glued shop words it knows
+SAFE = frozenset("""
+email emails online offline app apps website websites webpage login logins logout signup checkout inbox ok
+okay emoji emojis chatbot chatbots bot bots smartphone laptop wifi password passwords upload uploads download
+downloads voicemail promo promos restock restocked preorder preorders followup refundable unsubscribe faq
+screenshot screenshots blog blogs influencer influencers livestream reschedule rescheduled rebook onboarding
+workout workouts skincare haircut sneakers hoodies feedback reorder subscription subscriptions prioritize
+customize personalize
+""".split()) | GLUED_OK
+CONTRACTIONS = frozenset("""
+don't doesn't didn't isn't aren't wasn't weren't won't wouldn't shouldn't couldn't can't haven't hasn't
+hadn't mustn't needn't it's they're you're we're they've you've we've i'm i've i'll i'd they'll you'll we'll
+it'll he's she's let's that's there's what's who's here's
+""".split())
+_ENDS = (("ies", "y"), ("ied", "y"), ("ier", "y"), ("iest", "y"), ("ily", "y"), ("es", ""), ("s", ""),
+         ("ed", ""), ("ed", "e"), ("d", ""), ("ing", ""), ("ing", "e"), ("er", ""), ("er", "e"), ("est", ""),
+         ("est", "e"), ("ly", ""), ("bly", "ble"), ("ness", ""), ("ment", ""), ("ful", ""), ("less", ""))
+_UK = (("isation", "ization"), ("ise", "ize"), ("yse", "yze"), ("tre", "ter"), ("our", "or"), ("ogue", "og"))
+# number words and the words that sound like them, as the digits they stand for (_folded)
+SOUNDS = {"zero": 0, "oh": 0, "o": 0, "nil": 0, "nought": 0, "naught": 0, "one": 1, "won": 1, "wun": 1,
+          "two": 2, "too": 2, "to": 2, "tu": 2, "tew": 2, "three": 3, "tree": 3, "thre": 3, "four": 4,
+          "for": 4, "fore": 4, "fo": 4, "five": 5, "fife": 5, "fiv": 5, "six": 6, "sicks": 6, "siks": 6,
+          "seven": 7, "sevn": 7, "eight": 8, "ate": 8, "ait": 8, "eit": 8, "nine": 9, "nein": 9, "nyne": 9,
+          "nain": 9}
+WEAK_SOUNDS = frozenset({"one", "to", "for"})  # plain words alone: count only in a run with strong ones
+ALWAYS_SOUNDS = frozenset({"fife", "sicks", "siks", "fiv", "sevn", "nein", "nyne", "wun", "tew", "thre"})
+TOKEN = re.compile(r"[a-z]+(?:['’-][a-z]+)*")
+
+
+@functools.lru_cache(maxsize=1)
+def english():
+    """The bundled English words (WORDS_FILE), less the first names the cleaner knows (but NAME_WORDS)
+    and NUMBERISH. A list that cannot be read is empty, so every word outside the openers and SAFE
+    is refused."""
+    try:
+        raw = lzma.decompress(WORDS_FILE.read_bytes()).decode("ascii")
+    except (OSError, lzma.LZMAError, UnicodeDecodeError):
+        return frozenset()
+    out, prev = set(), ""
+    for line in raw.split("\n"):
+        if not line or line.startswith("#") or not line[0].isdigit():
+            continue
+        prev = prev[:int(line[0])] + line[1:]
+        out.add(prev)
+    return frozenset(out - (first_names() - NAME_WORDS) - NUMBERISH)
+
+
+@functools.lru_cache(maxsize=1)
+def first_names():
+    from arena import words as name_words
+    return frozenset(w for w in name_words.FIRST | name_words.CUE if w.isascii() and w.isalpha())
+
+
+@functools.lru_cache(maxsize=1)
+def governorates():
+    """The Latin spellings of the governorates (demo/governorates.json, as arena/clean.py reads it),
+    each as a tuple of its words."""
+    try:
+        data = json.loads(clean_mod.GOVERNORATES.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return frozenset()
+    return frozenset(tuple(t) for g in data.get("governorates", []) for s in g.get("spellings", [])
+                     if (t := re.findall(r"[a-z]+", s.casefold())) and s.isascii())
+
+
+def _bases(w):
+    """The forms a word may be listed under: itself, a few endings off, British spellings as American."""
+    out = {w}
+    for end, back in _ENDS:
+        if w.endswith(end) and len(w) - len(end) >= 2:
+            b = w[:-len(end)] + back
+            out.add(b)
+            if end in ("ed", "ing", "er", "est") and not back and len(b) >= 3 and b[-1] == b[-2]:
+                out.add(b[:-1])  # stopped, bigger
+    for b in list(out):
+        for uk, us in _UK:
+            if uk in b:
+                out.add(b.replace(uk, us, 1))
+    return out
+
+
+def _english_word(w):
+    w = w.replace("’", "'")
+    if w in CONTRACTIONS:
+        return True
+    if w.endswith("'s"):
+        w = w[:-2]
+    if "'" in w:
+        return False
+    if "-" in w:
+        return _english_word(w.replace("-", "")) or all(_english_word(p) for p in w.split("-"))
+    if w in NUMBERISH or w in first_names() and w not in NAME_WORDS:
+        return False
+    if w in ("a", "i") or w in OPENERS or w in SAFE:
+        return True
+    words_en = english()
+    return any(b in words_en or b in SAFE for b in _bases(w))
+
+
+def _not_english(plain):
+    """The words of a line that are not English words (_english_word), casefolded."""
+    return [w for w in TOKEN.findall(plain.casefold()) if not _english_word(w)]
+
+
+def _folded(toks):
+    """The line's words with number words and their sound alikes as digits: a run of three or more
+    of them with at least two that are not plain words alone (one, to, for), a sound alike that is
+    no plain word (fife, sicks), and double or triple before one. Any digit in it is a number."""
+    out, i = list(toks), 0
+    while i < len(toks):
+        j = i
+        while j < len(toks) and toks[j] in SOUNDS:
+            j += 1
+        run = toks[i:j]
+        strong = [t for t in run if t not in WEAK_SOUNDS]
+        if len(run) >= 3 and len(strong) >= 2:
+            out[i:j] = [str(SOUNDS[t]) for t in run]
+        i = max(j, i + 1)
+    for k, t in enumerate(toks):
+        if t in ALWAYS_SOUNDS:
+            out[k] = str(SOUNDS[t])
+        if t in ("double", "triple") and k + 1 < len(toks) and toks[k + 1] in SOUNDS \
+                and toks[k + 1] not in WEAK_SOUNDS:
+            out[k + 1] = str(SOUNDS[toks[k + 1]]) * (2 if t == "double" else 3)
+    return " ".join(out)
+
+
+def _governorate(toks):
+    n = len(toks)
+    return any(tuple(toks[i:i + len(g)]) == g for g in governorates() for i in range(n - len(g) + 1))
 
 
 def _tokens(text):
@@ -265,20 +426,26 @@ def check(text, sources=()):
         out.append("does not start with a listed opener")
     if any(ch.isdigit() for ch in text) or re.search(r"\d", norm) or re.search(r"\d", plain):
         out.append("a digit")
-    money, number = _numbers(toks)
+    # a word split by a mark (gen-eh, fif'ty) is read joined too
+    joined = [re.sub(r"['’-]", "", w) for w in TOKEN.findall(plain.casefold()) if re.search(r"['’-]", w)]
+    money, number = _numbers(toks + joined)
     if money or "%" in plain or any(rx.search(t) for rx in (CURRENCY, send_check.SPELLED_AMOUNT)
                                     for t in (plain, norm)):
         out.append("a currency or an amount")
     elif any(MAGNITUDE.search(t) for t in (plain, norm)):
         out.append("an amount in words")
-    elif number:
+    elif number or re.search(r"\d", _folded(toks)):
         out.append("a number in words")
-    if any(t in FRANCO for t in toks):
+    if any(t in FRANCO for t in toks + joined):
         out.append("a Franco word: the customer's own words")
     if any(t in PLATFORMS for t in toks):
         out.append("a platform or handle word")
-    if any(t in PLACES for t in toks):
+    if any(t in PLACES for t in toks) or _governorate(toks):
         out.append("a place")
+    if any(w in first_names() and w not in NAME_WORDS for w in TOKEN.findall(plain.casefold())):
+        out.append("a first name")
+    if _not_english(plain):
+        out.append("a word not in the English word list")
     if _shop_like(toks):
         out.append("a shop, brand or page name")
     if QUOTES.search(plain):
@@ -573,7 +740,7 @@ def _label(v):
 
 PROMPT = """You turn one {what} of a {kind} agent into one general pattern that an agent of the same
 kind at another business could learn from. {about}
-Write one plain sentence in English that starts with When, If, Offer, Ask, Customers or Asks. Never
+Write one plain sentence in common English words that starts with When, If, Offer, Ask, Customers or Asks. Never
 write a name of a person, a shop, a brand, a page, an app or a place, a number in digits or words, a
 price, an amount or a currency, a phone number, an email or a link, and never quote anyone's words or
 use the customer's own words. Say what happens or what to do, in general terms.

@@ -496,8 +496,8 @@ class Arena:
     def _off_card(self, match_id, note):
         """The off topic customer for practice match match_id, written now from the agent's card, or None when it
         is skipped (no judge model, a writer that did not answer or could not be read twice, a precheck judge
-        that did not answer) or void before it is played (arena/scope.py precheck: the ask shares a content word
-        with the card, or the judge on the card and the ask alone reads it as on topic or cannot be read), said
+        that did not answer) or void before it is played (arena/scope.py precheck: the judge on the card and the
+        ask alone, told the words it shares with the card, reads it as on topic or cannot be read), said
         in note. CapReached when the cap stops it."""
         if self.judge_model is None:
             note["off_topic"] = {"skipped": scope.NO_JUDGE}

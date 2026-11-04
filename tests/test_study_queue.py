@@ -307,7 +307,14 @@ class NightDeadline(unittest.TestCase):
 
     def test_the_childs_limit_comes_first_when_it_is_sooner(self):
         start = datetime(2026, 11, 10, 3, 0, tzinfo=CAIRO).timestamp()
-        self.assertEqual(sc.deadline_for(start, CAIRO), start + sc.LIMIT - sc.GRACE)
+        self.assertEqual(sc.deadline_for(start, CAIRO, limit=4 * 3600), start + 4 * 3600 - sc.GRACE)
+
+    def test_a_night_from_three_runs_to_nine_and_its_limit_stays_under_stale(self):
+        start = datetime(2026, 11, 10, 3, 0, tzinfo=CAIRO).timestamp()
+        nine = datetime(2026, 11, 10, 9, 0, tzinfo=CAIRO).timestamp()
+        self.assertEqual(sc.deadline_for(start, CAIRO), nine)  # the default limit no longer cuts it at 07:30
+        self.assertGreaterEqual(start + sc.LIMIT - sc.GRACE, nine)
+        self.assertLess(sc.LIMIT, sc.STALE)
 
     def test_the_scheduler_gives_each_night_its_deadline(self):
         db = Db(":memory:")

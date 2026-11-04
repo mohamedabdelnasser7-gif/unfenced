@@ -41,8 +41,9 @@ A deadline (DECISIONS item 98). Each night is given --deadline: the next MORNING
 NIGHT_TZ, or GRACE seconds before the child's own limit when that comes first, so the lesson in its
 exam can end and the rest is saved before the kill. Past it the study examines no more lessons:
 every one it found and did not examine is queued in the agent's database, and the next night (or a
-Run reflection) takes them first (engine/study.py step 10). With NIGHT_HOUR 3 and LIMIT 5 hours, the
-limit comes first: the night queues from 07:30.
+Run reflection) takes them first (engine/study.py step 10). With NIGHT_HOUR 3, LIMIT 6.5 hours and
+GRACE 30 minutes, both fall at 09:00, so the night studies until 09:00 and queues the rest then. STALE
+(7 hours) stays longer than LIMIT, so no second runner takes over a night that still runs.
 
 The night itself asks the courier's API first (reflection/night.py courier_check), so the results
 it brings count that night.
@@ -76,8 +77,8 @@ HOUR_ENV, TZ_ENV = "NIGHT_HOUR", "NIGHT_TZ"
 HOUR_DEFAULT, TZ_DEFAULT = 3, "Africa/Cairo"
 OFF = "off"
 TICK = 60.0                  # seconds between looks
-STALE = 6 * 3600.0           # seconds: a lock or a started run this old is a crash's
-LIMIT = 5 * 3600.0           # seconds a night's child process may run before it is killed
+STALE = 7 * 3600.0           # seconds: a lock or a started run this old is a crash's; longer than LIMIT
+LIMIT = 6.5 * 3600.0         # seconds a night's child process may run before it is killed: from 03:00, past 09:00
 MORNING_HOUR = 9             # the night examines no lesson from this hour in NIGHT_TZ on (DECISIONS item 98)
 GRACE = 30 * 60.0            # seconds before LIMIT the deadline falls, so the queue is saved before the kill
 NIGHTS_LOG = "nights.log"    # next to the database: what each night's child printed

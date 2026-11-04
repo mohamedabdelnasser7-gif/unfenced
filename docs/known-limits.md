@@ -1,5 +1,5 @@
 # Known limits
-*Created: 2026-10-31. Last updated: 2026-11-02.*
+*Created: 2026-10-31. Last updated: 2026-11-04.*
 
 The fact check and the hotfix note check read text our own agent writes. They catch the common ways a wrong price or a customer's name slips into a reply or a note, and every lesson still has to pass the eval gate before it reaches a live agent. These are the shapes they still miss, found in review, and what replaces them next.
 
@@ -68,8 +68,8 @@ A result that shows days later, such as a delivery, settles a case only when it 
 - A made reference (c- and ten letters, for a case with no order number) now comes from a key kept in the database, so one already shown changes once; a sheet made with the old one is skipped and named.
 - The scheduled night runs only while the WhatsApp server runs. A server that was down at NIGHT_HOUR runs that night once when it is back; older missed nights are not made up.
 - A night that is refused (a missing key, no database) or fails is recorded for that agent and night, and is not tried again until the next night.
-- Each scheduled night runs in its own process with 5 hours to finish; one still running then is killed and recorded failed (timeout), and that agent's night is not tried again until the next night. The night also ends itself at 5 hours, and at once when the server stops mid night.
+- Each scheduled night runs in its own process with 6.5 hours to finish (from 03:00, so it studies until 09:00 and queues the rest); one still running then is killed and recorded failed (timeout), and that agent's night is not tried again until the next night. The night also ends itself at 6.5 hours, and at once when the server stops mid night.
 - Quick start refuses a card or plug that hands a case to a person by matching words, so some phrasings get past it (for example "loop in a human"). No hand over tool exists for a built agent, so such a line is a promise in its prompt, not a transfer.
-- A server that stops mid night leaves that night's record running and its lock behind. After 6 hours (STALE) the record reads stopped and the lock is free; until then no night runs on that database, and the stopped agent's night is not tried again until the next night.
+- A server that stops mid night leaves that night's record running and its lock behind. After 7 hours (STALE) the record reads stopped and the lock is free; until then no night runs on that database, and the stopped agent's night is not tried again until the next night.
 
 Next: the tracking number saved on the Sales order row when the store ships it, so the API check reaches every order.

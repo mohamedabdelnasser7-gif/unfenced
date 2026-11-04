@@ -360,10 +360,6 @@ class AnyKind(unittest.TestCase):
                 self.assertIn(study.POOL_NO_GATE, rep["notes"])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class RemintedOwnerId(unittest.TestCase):
     """Red team crossowner round 2, item 2: deleting an owner's owner-id file makes a new id. What was
     given is kept by the lesson's own id, so the same lesson is not given again, and the owner's name
@@ -457,3 +453,7 @@ class RemintedOwnerId(unittest.TestCase):
         data["cleared"] = [row[:32] + "0" * 32 + row[64:]]  # moved to another owner hash by hand
         path.write_text(json.dumps(data))
         self.assertTrue(shared.Pool("fans", self.root).broken)
+
+
+if __name__ == "__main__":
+    unittest.main()

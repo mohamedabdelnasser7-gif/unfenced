@@ -3,6 +3,7 @@ check blocks every leak class in English, Arabic and Franco, a pattern seen at o
 shared, near equal patterns from two owners join, owners are kept as keyed hashes only, a dropped
 pattern is never stored, and lost patterns become practice customers holding nothing of a chat.
 The writer runs on the fake model; no key, no network."""
+import ast
 import hashlib
 import json
 import os
@@ -541,10 +542,6 @@ class PracticeCards(unittest.TestCase):
         self.assertEqual(shared.practice_cards("sales", root), [])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class RefusePath(unittest.TestCase):
     """Red team crossowner round 2 item 4 and review item 2: the pool is read under the lock before
     the writer is asked; a broken pool, a pool that refuses, and a writer with no line each count as
@@ -675,3 +672,20 @@ class RefusePath(unittest.TestCase):
                            tagger=Tagger(model=ScriptedModel(recipe()), cap=50, recipe=recipe()))
         self.assertEqual(self.asked, [])
         self.assertEqual(counts.get("writer failed"), 1)
+
+
+class MainGuardLast(unittest.TestCase):
+    """Review crossowner round 3, item 8: a class written after the main guard never runs when the
+    file is run as a script, so in the shared test files the guard is the last statement."""
+
+    def test_the_main_guard_ends_each_shared_test_file(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        for name in ("test_shared_pool.py", "test_shared_lessons.py", "test_shared_arena.py"):
+            with open(os.path.join(here, name), encoding="utf-8") as f:
+                body = ast.parse(f.read()).body
+            guards = [i for i, n in enumerate(body) if isinstance(n, ast.If) and "__main__" in ast.unparse(n.test)]
+            self.assertEqual(guards, [len(body) - 1], name)
+
+
+if __name__ == "__main__":
+    unittest.main()

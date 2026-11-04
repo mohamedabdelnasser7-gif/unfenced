@@ -692,9 +692,10 @@ class Link:
                           said, worry=worry)
 
 
-def practice_cards(kind, root):
+def practice_cards(kind, root, but=None):
     """Fresh practice customers from the shared lost patterns of this kind, for any owner's Arena:
-    at most MAX_CARDS, most owners first. A card holds the pattern as how the customer behaves and
+    at most MAX_CARDS, most owners first. but: the Arena's own owner id (owner_id), whose own
+    patterns are left out, as an agent's lessons are (an owner never practises on what it gave). A card holds the pattern as how the customer behaves and
     nothing of any chat (no want, example or line), training only (a grown- id, arena/grow.py decks)."""
     if root is None:
         return []
@@ -703,7 +704,7 @@ def practice_cards(kind, root):
     except Refused:
         return []
     out = []
-    for p in pool.shared(LOST)[:MAX_CARDS]:
+    for p in pool.shared(LOST, but=but)[:MAX_CARDS]:
         arabic = bool(send_check.ARABIC.search(p["text"]))
         out.append({"id": f"grown-shared-{p['id']}", "worry": p["text"], "unwinnable": False,
                     "why_unwinnable": None, "want": [], "buy_trigger": [], "patience": {"median": 3.0, "most": 4},

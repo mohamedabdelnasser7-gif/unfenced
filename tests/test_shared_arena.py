@@ -61,7 +61,7 @@ def grow_at(owner, name, root, *lines, chats=(LOST,), give_lost=shared.GIVE_LOST
         write_chats(db, chats)
         pool = grow.Pool(owner, "sales")
         w, model = writer(*lines)
-        link = shared.Link("sales", name, w, root, give_lost=give_lost)
+        link = shared.Link("sales", shared.owner_id(owner / f"store_{name}"), w, root, give_lost=give_lost)
         tag = ScriptedModel(recipe()) if calls is None else calls.model(ScriptedModel(recipe()))
         counts = grow.grow(db, pool, since=SINCE, until=NOW, tagger=Tagger(model=tag, cap=50, recipe=recipe()),
                            calls=calls, shared=link)
@@ -97,10 +97,11 @@ class SharedPracticeCustomers(unittest.TestCase):
         got = cards[0]
         self.assertTrue(got["id"].startswith("grown-shared-"))
         self.assertEqual(got["shared"]["owners"], 2)
-        for agent in (self.c_agent, self.b_agent):
-            pool = grow.for_state(agent, shared_root=self.root)
-            self.assertEqual([c["id"] for c in pool.shared], [got["id"]])
-            self.assertEqual(pool.summary()["shared_cards"], 1)
+        pool = grow.for_state(self.c_agent, shared_root=self.root)  # a third owner plays it
+        self.assertEqual([c["id"] for c in pool.shared], [got["id"]])
+        self.assertEqual(pool.summary()["shared_cards"], 1)
+        self.assertEqual(grow.for_state(self.b_agent, shared_root=self.root).shared, [])  # it gave it: not back
+        self.assertEqual(shared.practice_cards("sales", self.root, but=shared.owner_id(self.b_agent)), [])
         pool = grow.for_state(self.c_agent, shared_root=self.root)
         for seed in range(6):
             _, held = run.split(self.base + pool.shared, seed=seed)
@@ -142,12 +143,13 @@ class SharedPracticeCustomers(unittest.TestCase):
         self.assertNotIn(WORD_B, files["the shared pool"])
         self.assertNotIn(WORD_B, files["C's decks"])
         self.assertEqual(pool_c.items, [])  # C's own pool holds no chat of A or B
-        # the fresh card from the shared pattern does reach B and C, holding the pattern only
+        # the fresh card from the shared pattern reaches C, holding the pattern only; B gave it, so not B
         fresh = pool_c.shared
         self.assertEqual(len(fresh), 1)
         self.assertIn("delivery time", fresh[0]["worry"])
         self.assertEqual((fresh[0]["want"], fresh[0]["examples"], fresh[0]["buy_trigger"]), ([], [], []))
-        self.assertIn(fresh[0]["id"], files["B's decks"])
+        self.assertNotIn(fresh[0]["id"], files["B's decks"])
+        self.assertIn(fresh[0]["id"], files["C's decks"])
         self.assertIn(fresh[0]["id"], files["C's decks"])
         with self.assertRaises(grow.Refused):  # an owner's pool still never opens another owner's file
             grow.Pool(self.b, "sales", path=self.a / "practice-sales.json")
@@ -191,6 +193,15 @@ class SharedPracticeCustomers(unittest.TestCase):
             rep = grow.night(agent / "ascent.db", plug_mod.load(agent / "plug.json"), recipe_mod.EXAMPLE, SINCE, NOW,
                              folder=agent, own=True, shared_root=self.root)
         return rep, w, json.loads((agent / run.CALLS_FILE).read_text(encoding="utf-8"))["calls"]
+
+    def test_the_night_counts_no_shared_card_its_own_owner_gave(self):
+        pool = shared.Pool("sales", self.root)
+        pool.add(shared.LOST, LINE, shared.owner_id(self.b_agent), "chat:x")
+        pool.add(shared.LOST, NEAR, "elsewhere", "chat:y")
+        rep, _, _ = self.night_at(self.b_agent)
+        self.assertFalse(rep.get("shared_cards"), rep)
+        rep, _, _ = self.night_at(self.c_agent)
+        self.assertEqual(rep.get("shared_cards"), 1, rep)
 
     def test_the_writer_counts_on_the_arena_call_cap(self):
         _, a_agent = owner_at(self, "west")
@@ -297,6 +308,21 @@ class BuiltAgentPractice(practice_tests.Base):
         self.assertTrue(all("-t" in i and "-g" not in i for i in played), played)  # training matches only
         self.assertTrue(any("-g" in m["id"] for m in self.matches()))  # the gate did play, on other cards
         self.assertIn("1 more practice customers from the shared pool", practice.text(rep))
+
+    def test_a_built_agent_never_practises_on_what_its_own_owner_gave(self):
+        base = tmp(self)
+        mine, other = base / "agents" / "store_north", base / "agents" / "store_east"
+        for folder, name in ((mine, "north"), (other, "east")):
+            write_plug(folder, folder.name, "sales", owner=name)
+            write_owner(folder, name)
+        pool = shared.Pool("sales", base / shared.SHARED_DIR)
+        pool.add(shared.LOST, LINE, shared.owner_id(mine), "chat:a")
+        pool.add(shared.LOST, NEAR, "south", "chat:b")
+        load = grow.plug_mod.load
+        self.assertEqual(practice.shared_cards(mine, load(mine / "plug.json")), [])
+        self.assertEqual(len(practice.shared_cards(other, load(other / "plug.json"))), 1)
+        (mine / shared.OWNER_ID_FILE).write_text("bad", encoding="utf-8")  # unreadable id: none, never its own
+        self.assertEqual(practice.shared_cards(mine, load(mine / "plug.json")), [])
 
     def test_another_kind_or_no_agents_folder_reads_no_shared_card(self):
         self.seed_pool(kind="other_kind")

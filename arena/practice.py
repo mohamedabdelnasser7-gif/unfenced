@@ -451,7 +451,11 @@ def shared_cards(folder, plug):
     folder = Path(folder)
     if folder.parent.name != "agents":
         return []
-    return shared_mod.practice_cards(grow.kind_of(plug), folder.parent.parent / shared_mod.SHARED_DIR)
+    try:
+        but = shared_mod.owner_id(folder) or None
+    except shared_mod.Refused:  # an owner id that cannot be read: no shared card rather than its own
+        return []
+    return shared_mod.practice_cards(grow.kind_of(plug), folder.parent.parent / shared_mod.SHARED_DIR, but=but)
 
 
 def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=DEFAULT_MATCHES,

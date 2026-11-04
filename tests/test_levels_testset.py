@@ -8,20 +8,18 @@ import os
 from unittest import mock
 
 from arena import madeup, practice, run
-from kit import turn
+from kit import seal, turn
 from tests.test_customers_shape import Base, Writer
 
 
 def recorded_play(log, won=False):
     """Practice.play with no model that saves each match in the agent's matches file as the real one
-    does (its id, the card id, the person and whether it was a test match), so the training on record
-    is real."""
+    does (its id, the card id, the person and whether it was a test match, sealed by Practice.save), so
+    the training on record is real."""
     def play(self, card, match_id, *, opening=None, lessons=None, replay=None, training=False):
         log.append((match_id, card["id"]))
         m = {"id": match_id, "card": card["id"], "won": won, "persona": card, practice.TEST_KEY: not training}
-        self.state.mkdir(parents=True, exist_ok=True)
-        with open(self.state / run.MATCHES_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(m) + "\n")
+        self.save(m)
         return m, {"won": won, "why": "fake", "quote": ""}
     return play
 
@@ -121,8 +119,10 @@ class TrainedOnRecord(Base):
         self.dir.mkdir()
 
     def lines(self, *rows):
+        """Each row sealed with the folder's key as Practice.save seals it; a str row as it is."""
         (self.dir / run.MATCHES_FILE).write_text("".join(
-            (r if isinstance(r, str) else json.dumps(r)) + "\n" for r in rows), encoding="utf-8")
+            (r if isinstance(r, str) else json.dumps(seal.sign(dict(r), self.dir))) + "\n" for r in rows),
+            encoding="utf-8")
 
     def test_a_test_match_is_one_its_line_says_is(self):
         self.lines({"id": "a-r1-g01", "card": "persona-01", "persona": {"from_card": "F"}, practice.TEST_KEY: True},
@@ -295,7 +295,7 @@ class Gaps(Base):
                 path.write_text(json.dumps({"test": [{"id": "persona-01", "from_card": bad}]}), encoding="utf-8")
                 with self.assertRaises(run.Refused):
                     practice.read_test(d)
-        path.write_text(json.dumps({"test": [{"id": "persona-01", "from_card": None}]}), encoding="utf-8")
+        practice.write_test(d, [("persona-01", None)])
         self.assertEqual(practice.read_test(d), [("persona-01", None)])
 
     def test_a_training_match_whose_person_names_no_card_rules_out_the_id_whatever_its_card(self):

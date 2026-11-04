@@ -97,7 +97,10 @@ short, new customers that never trained fill the gap, and the writer writes more
 left. Saved test customers a smaller run does not need sit out (they never train). The test set's
 kinds always follow the shape's mix (easy, unsure and hard as test_set draws them: 4, 4 and 2 of 10,
 8, 8 and 4 of 20), so a test-set.json edited to other kinds is rebuilt from customers that never
-trained, never trusted. A test-set.json or a matches file that is there but
+trained, never trusted. Each match line and test-set.json carry the run's seal (kit/seal.py, the key
+beside the gate item's, reports_of): a line counts as a test match only while its seal holds, and a
+test-set.json whose seal does not hold is rebuilt, so neither file can be edited to hide a customer
+that trained or to choose the test customers. A test-set.json or a matches file that is there but
 cannot be read, a line of it that cannot be read, or a matches file deleted while test-set.json is
 there stops the run (fail closed).
 
@@ -125,7 +128,7 @@ if __name__ == "__main__" and str(ROOT) not in sys.path:  # run by its path unde
 
 from arena import good, levels, madeup, match as match_mod, paths, run  # noqa: E402
 from arena.match import LEAVE, VOID, plain  # noqa: E402
-from kit import sample, turn as turn_mod  # noqa: E402
+from kit import sample, seal, turn as turn_mod  # noqa: E402
 from kit.chats import Chats  # noqa: E402
 from kit.db import Db  # noqa: E402
 from kit.model import ModelError  # noqa: E402
@@ -445,10 +448,17 @@ class Practice(run.Arena):
         # never customer only when its loss failed a safety check, a slip of the agent's own
         if not judged["won"] and training and (run.can_buy(card) or judged["failed_check"]):
             self.lost.append({"id": match_id, "card": m["card"], "why": judged["why"], "quote": judged["quote"]})
-        self.state.mkdir(parents=True, exist_ok=True)
-        with open(self.state / run.MATCHES_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(m, ensure_ascii=False) + "\n")
+        self.save(m)
         return m, judged
+
+    def save(self, m):
+        """Appends match m to the agent's matches file with the run's seal on the line (kit/seal.py, the
+        key beside the gate item's, reports_of), so trained reads its test_match field only on a line the
+        run wrote; m itself is left as it is."""
+        self.state.mkdir(parents=True, exist_ok=True)
+        line = seal.sign(dict(m), reports_of(self.state))
+        with open(self.state / run.MATCHES_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(line, ensure_ascii=False) + "\n")
 
     def pick(self, deck, r, k):
         """With a fixed test set (once): the next card of this round's shuffled bag of deck, so no card
@@ -635,9 +645,11 @@ def shape_mix(count):
 
 
 def read_test(folder):
-    """The saved test customers, [(id, fingerprint)], [] when there is no test-set.json. run.Refused when
-    it is there but cannot be read, is a link or is not a list of them, each with its id and from_card
-    (fail closed)."""
+    """The saved test customers, [(id, fingerprint)], [] when there is no test-set.json or its seal does
+    not hold (write_test seals it with the key of reports_of the folder, as each match line is), so one
+    written or edited by hand, or one from before the seal, is rebuilt from customers that never
+    trained, never trusted. run.Refused when it is there but cannot be read, is a link or is not a list
+    of them, each with its id and from_card (fail closed)."""
     path = Path(folder) / TEST_FILE
     if not path.exists() and not path.is_symlink():
         return []
@@ -646,7 +658,8 @@ def read_test(folder):
     try:
         if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_TEST_FILE:
             raise bad
-        got = json.loads(path.read_text(encoding="utf-8")).get("test")
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        got = doc.get("test")
     except (OSError, ValueError, AttributeError, RecursionError):
         raise bad from None
     if not isinstance(got, list):
@@ -657,16 +670,20 @@ def read_test(folder):
                 not isinstance(e["from_card"], (str, type(None))):
             raise bad
         out.append((e["id"], e["from_card"]))
+    if not seal.holds(doc, seal.key(reports_of(folder))):  # written or edited by hand, or before the seal
+        return []
     return out
 
 
 def write_test(folder, entries):
-    """Writes test-set.json whole (a hidden file renamed into place); refuses a link."""
+    """Writes test-set.json whole (a hidden file renamed into place) with the run's seal on it (kit/seal.py,
+    the key of reports_of the folder; read_test trusts it only while the seal holds); refuses a link."""
     folder = Path(folder)
     path = folder / TEST_FILE
     if path.is_symlink():
         raise run.Refused(f"the agent's {TEST_FILE} is a link")
-    text = json.dumps({"test": [{"id": i, "from_card": f} for i, f in entries]}, ensure_ascii=False) + "\n"
+    doc = seal.sign({"test": [{"id": i, "from_card": f} for i, f in entries]}, reports_of(folder))
+    text = json.dumps(doc, ensure_ascii=False) + "\n"
     matches = folder / run.MATCHES_FILE  # there from now on, so a deleted one is told from a first run (trained)
     if matches.is_symlink():
         raise run.Refused("the agent's saved matches are a link")
@@ -682,11 +699,21 @@ def write_test(folder, entries):
             tmp.unlink()
 
 
+def is_test(m, k):
+    """True when match line m is a test match: its TEST_KEY is true, its id is a test match's, and the
+    run's seal on the line holds with key k (seal.key of reports_of the agent's folder). A line with
+    no seal, a seal that does not hold (a line relabelled, written by hand or given another line's
+    seal) or no key is never a test match."""
+    return (isinstance(m, dict) and m.get(TEST_KEY) is True and isinstance(m.get("id"), str)
+            and bool(_TEST_MATCH.search(m["id"])) and seal.holds(m, k))
+
+
 def trained(folder):
     """{(card id, fingerprint)} of every match on record in the folder's arena-matches.jsonl that is not a
     test match: the people that played a training match (a quick run's too). A test match is one whose
-    line says so (TEST_KEY true, written with each match) and whose id is a test match's; any other line,
-    one written before TEST_KEY was too, counts as training, so no line can hide a training match.
+    line says so (TEST_KEY true, written with each match), whose id is a test match's and whose seal
+    holds (is_test; Practice.save seals each line); any other line, one written before TEST_KEY or the
+    seal, relabelled or written by hand too, counts as training, so no line can hide a training match.
     run.Refused (fail closed, before any model call) when the file is a link or not a plain file, cannot
     be read or holds a line that is not a match (never skipped), and when it is gone while test-set.json
     is there (write_test makes it with the test set, so it was deleted)."""
@@ -701,7 +728,7 @@ def trained(folder):
                       "which customers trained, and a test customer never has")
     if path.is_symlink() or not path.is_file():
         raise bad
-    out = set()
+    out, k = set(), seal.key(reports_of(folder))  # read only: a reader never makes the key
     try:
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         with open(fd, encoding="utf-8") as f:
@@ -714,7 +741,7 @@ def trained(folder):
                     raise bad from None
                 if not isinstance(m, dict) or not isinstance(m.get("card"), str):
                     raise bad
-                if m.get(TEST_KEY) is True and isinstance(m.get("id"), str) and _TEST_MATCH.search(m["id"]):
+                if is_test(m, k):
                     continue
                 who = m.get("persona")
                 out.add((m["card"], who.get("from_card", _ANY) if isinstance(who, dict) else _ANY))

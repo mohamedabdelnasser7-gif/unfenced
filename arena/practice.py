@@ -453,7 +453,7 @@ def shared_cards(folder, plug):
         return []
     try:
         but = shared_mod.owner_id(folder) or None
-    except shared_mod.Refused:  # an owner id that cannot be read: no shared card rather than its own
+    except (shared_mod.Refused, OSError):  # an owner id that cannot be read: no shared card, not its own
         return []
     return shared_mod.practice_cards(grow.kind_of(plug), folder.parent.parent / shared_mod.SHARED_DIR, but=but)
 

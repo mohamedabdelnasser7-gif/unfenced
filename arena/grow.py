@@ -536,7 +536,7 @@ def for_state(state, default_kind=DEFAULT_KIND, shared_root=None):
         from reflection import shared as shared_mod
         try:
             pool.shared = shared_mod.practice_cards(pool.kind, shared_root, but=shared_mod.owner_id(state) or None)
-        except shared_mod.Refused:  # an owner id that cannot be read: no shared card rather than its own
+        except (shared_mod.Refused, OSError):  # an owner id that cannot be read: no shared card, not its own
             pool.shared = []
     return pool
 
@@ -897,8 +897,8 @@ def night(db_path, plug, recipe_path, since, until, folder=None, own=True, share
                                              shared_root, db=db_path)
             link.pool  # opened now, so a refused folder is said once
             pool.shared = shared_mod.practice_cards(pool.kind, shared_root, but=link.owner or None)
-        except shared_mod.Refused as e:
-            link, rep["shared_stopped"] = None, str(e)
+        except (shared_mod.Refused, OSError) as e:  # the pool is left out; the night goes on
+            link, rep["shared_stopped"] = None, shared_mod.left_out(e)
     db = Db(str(db_path))
     try:
         rep.update(grow(db, pool, since=since, until=until, tagger=tagger, calls=calls,

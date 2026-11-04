@@ -950,6 +950,13 @@ class Link:
                           said, worry=worry)
 
 
+def left_out(e):
+    """The note a night gives when the shared pool could not be opened for an agent (a Refused
+    says why in plain words; an OSError by its kind only, never a path)."""
+    why = str(e) if isinstance(e, Refused) else type(e).__name__
+    return f"the shared pool was left out tonight ({why})"
+
+
 def practice_cards(kind, root, but=None):
     """Fresh practice customers from the shared lost patterns of this kind, for any owner's Arena:
     at most MAX_CARDS, most owners first. but: the Arena's own owner id (owner_id), whose own
@@ -959,10 +966,11 @@ def practice_cards(kind, root, but=None):
         return []
     try:
         pool = Pool(kind, root)
-    except Refused:
+        lost = pool.shared(LOST, but=but)[:MAX_CARDS]
+    except (Refused, OSError):  # a folder or key that cannot be read gives no card
         return []
     out = []
-    for p in pool.shared(LOST, but=but)[:MAX_CARDS]:
+    for p in lost:
         arabic = bool(send_check.ARABIC.search(p["text"]))
         out.append({"id": f"grown-shared-{p['id']}", "worry": p["text"], "unwinnable": False,
                     "why_unwinnable": None, "want": [], "buy_trigger": [], "patience": {"median": 3.0, "most": 4},

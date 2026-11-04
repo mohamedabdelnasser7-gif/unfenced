@@ -181,8 +181,10 @@ Every model call goes to a Meta model through one client ([kit/model.py](kit/mod
 
 ## Agents on the engine today
 
-- **Sales agent**, wired through every step above, and the only agent on a live channel. It sells for Beyond the Limits, a made-up store name with real products and prices.
-- **Personal assistant.** Sorts email, drafts replies, books meetings without clashes, turns promises into tasks and writes a morning brief; it sends nothing without your yes. Its Arena plays simulated days judged by six code checks. Its case moves to one email thread next, with its own Arena shape.
+- **Sales agent**, wired through every step above, and the only agent on a live channel. It sells for Beyond the Limits, a made-up store name with real products and prices. Its latest Arena run, on 4 November, won 16 of 20 matches. Three of the four losses were our own price check marking a correct reply wrong; that check is fixed and tested, and the fourth was a practice customer who left.
+- **Family Dinner Planner**, the example agent every new install gets, built from one request like any Quick start agent. Its first run won 7 of 10, enough for its old level, but twice it put meat in a plan for a vegan or vegetarian family. That is why a broken "never" line now fails the gate at every level, and why an agent that handles diets or allergies starts at the high level.
+- **Personal assistant.** Sorts email, drafts replies, books meetings without clashes, turns promises into tasks and writes a morning brief; it sends nothing without your yes. It practises on the same Arena as every built agent, one request or email thread per match, with a sample mailbox and calendar until your own are connected.
+- **Marketing agent.** The first link between two agents of one business. When the Sales agent's night finds something that belongs to marketing, such as a joke customers keep making, it sends the Marketing agent a short note instead of making a lesson.
 - **Agents from Quick start.** Trained from zero in the Arena, gated, and improved by Train, corrections, Run reflection and the night study.
 
 Built for the Sales agent only today: the live WhatsApp channel and the 53-situation exam.
@@ -193,7 +195,7 @@ Built for the Sales agent only today: the live WhatsApp channel and the 53-situa
 - A live off-topic check on every real reply.
 - Hand-off to a person, where a person's reply becomes a human hotfix.
 - One agent with several kinds of case.
-- A business making agents that manage the business, linked to each other, each learning through its own gate.
+- One business, many agents. A store builds its sales, support, stock and marketing agents and links them, so each passes what it learns to the agent it belongs to, each still through its own gate. The note from Sales to Marketing is the first of those links.
 
 ## How we got here
 

@@ -394,6 +394,25 @@ class PoolTest(unittest.TestCase):
         self.assertFalse(shared.Pool("support", self.root).broken)  # no file yet is a fresh pool
         self.assertGreaterEqual(shared.MAX_FILE, shared.MAX_PATTERNS * shared.MAX_OWNERS * 51)
 
+    def test_a_file_whose_rows_all_fail_the_row_check_is_broken_and_never_written_over(self):
+        # red team crossowner round 2, item 3: an older file format, or rows the clean check now refuses
+        path, data = self.two_shared()
+        cases = {"owners unsealed": lambda p: p.update(owners=[o[:32] for o in p["owners"]]),
+                 "text now refused": lambda p: p.update(text="Customers of zorvex go quiet after hearing the cost."),
+                 "not a row": lambda p: p.clear()}
+        for name, edit in cases.items():
+            with self.subTest(name):
+                d = json.loads(json.dumps(data))
+                for p in d["patterns"]:
+                    edit(p)
+                path.write_text(json.dumps(d))
+                before = path.read_bytes()
+                pool = shared.Pool("support", self.root)
+                self.assertTrue(pool.broken)
+                with self.assertRaises(shared.Refused):
+                    pool.add(shared.LESSON, CLEAN_EN, OWNER_C, "k7")
+                self.assertEqual(path.read_bytes(), before)
+
     def test_rows_copied_to_another_kind_do_not_verify(self):
         path, data = self.two_shared()
         data["kind"] = "sales"

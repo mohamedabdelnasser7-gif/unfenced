@@ -635,12 +635,14 @@ class Pool:
                 data, failed = {}, True
         if data.get("kind", self.kind) != self.kind:
             raise Refused("the pool file is for another kind of agent")
-        rows = [p for p in (data.get("patterns") or [])[:MAX_PATTERNS] if _pattern_ok(p)]
-        # rows but no key, or a key none of them was sealed with (a new key after the old was lost):
-        # the read is broken, and add() writes nothing rather than wipe the pool
+        raw = data.get("patterns") or []
+        rows = [p for p in raw[:MAX_PATTERNS] if _pattern_ok(p)]
+        # rows but none of them good (an older file format, or rows the clean check now refuses), no
+        # key, or a key none of them was sealed with (a new key after the old was lost): the read is
+        # broken, and add() writes nothing rather than wipe the pool. The raw rows count, not the good
         key = self._secret(make=False)
         self.patterns = [p for p in (self._unsealed(p) for p in rows) if p is not None] if key else []
-        self.broken = failed or bool(rows) and not self.patterns
+        self.broken = failed or bool(raw) and not self.patterns
         for p in self.patterns:
             p["words"] = words(p["text"])
         keys = data.get("keys")

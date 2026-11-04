@@ -417,7 +417,9 @@ class Practice(run.Arena):
         judged["failed_check"] = failed_check(judged)  # counted per gate round (arena/run.py Arena.run)
         m.update(id=match_id, won=judged["won"], why=judged["why"], quote=judged["quote"], persona=card,
                  prompt_sha=self.prompt_sha, prompt_file=None, **{TEST_KEY: not training})
-        if not judged["won"] and training:  # only practice matches: the item's lost, what Try again plays (81)
+        # only practice matches a customer could have won: the item's lost, what Try again plays (81); a
+        # never customer only when its loss failed a safety check, a slip of the agent's own
+        if not judged["won"] and training and (run.can_buy(card) or judged["failed_check"]):
             self.lost.append({"id": match_id, "card": m["card"], "why": judged["why"], "quote": judged["quote"]})
         self.state.mkdir(parents=True, exist_ok=True)
         with open(self.state / run.MATCHES_FILE, "a", encoding="utf-8") as f:
@@ -496,7 +498,7 @@ class Practice(run.Arena):
         item.update(made_up=self.made_up, practice=True)
         rounds = self.played_rounds
         # the last round's lost practice matches, never a test match, so the tab's tiles, Correct this and
-        # Try again work on practice customers only (decisions 81 and 85)
+        # Try again work on practice customers only (decisions 81 and 85), each one it could have won (play)
         last_round = f"{self.run_id}-r{len(rounds)}-t"
         item["lost"] = [{k: x[k] for k in ("card", "why", "quote")} for x in self.lost
                         if str(x["id"]).startswith(last_round)]

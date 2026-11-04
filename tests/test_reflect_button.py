@@ -213,7 +213,8 @@ class Wording(Base):
             page = self.page()
             with self.assertRaises(mo.Refused) as e:
                 self.m.run_reflection("stock_watch")
-        self.assertEqual(mo.NO_KEY, "Reflection needs a model key. Watch a recorded reflection run instead.")
+        self.assertEqual(mo.NO_KEY, ("Reflection needs a model key. Without one, watch the recorded replay of an Arena "
+                                     "run and a Sales chat."))
         self.assertIn(f'{mo.NO_KEY} <code>python3 -I recorded/play.py</code>', page)
         self.assertNotIn(f'action="{pages.REFLECT_PATH}"', page)
         self.assertIn(mo.NO_KEY, str(e.exception))

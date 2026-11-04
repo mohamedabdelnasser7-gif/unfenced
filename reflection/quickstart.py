@@ -78,6 +78,7 @@ from arena import levels as levels_mod
 from engine import plug as plug_mod
 from engine import risk as risk_mod
 from kit import model as model_mod
+from kit import offers as offers_mod
 from kit import sample as sample_mod
 
 DRAFT_FILE = "quickstart.json"
@@ -93,6 +94,12 @@ MAX_INSTRUCTIONS = 8_000
 MAX_DRAFT = 256_000      # bytes of quickstart.json read back
 MAX_SAMPLE_REPLY = 40_000  # characters of the sample data reply read from the model
 NO_SAMPLE = "No sample data this time. Add some on its page."
+OFFERS_LOST = "Its offers could not be saved. Add them on its page."
+# The Build chat's line when the card's name is an existing agent's (decision 106, his example words), and the
+# built-in agents' own lines. The page shows it before Build is pressed; Build refuses with it as the backstop.
+BUILT_IN = {"sales": ("Sales is the name of the built-in Beyond the Limits agent. Pick another name for yours, for "
+                      "example {example}.", "mystore")}
+TAKEN = "There is an agent called {agent} already. Pick another name for yours, for example {example}."
 # The house style line Build used to add after the model's words. The style is now in every agent's prompt in
 # the send check's own words (kit/send_check.py prompt_rules, DECISIONS item 94), so this line only repeated it
 # in other words and named a rule no check holds (no # headings). Build adds it no more, and finish_words takes
@@ -115,6 +122,7 @@ CAPS = {"name": 60, "key": 41, "does": 280, "good": 220, "bad": 220, "never": 16
 CASE_KEYS = ("input", "starts", "output", "ends")  # card.json "case" (kit/turn.py read_case)
 STARTS = ("person", "agent")
 MOST_NEVER, MOST_NEEDS = 4, 6
+MOST_OFFERS = 6          # offers one card holds (kit/offers.py cleans each, decision 105)
 
 # What the repo can connect today. A need with no key here is not connected yet.
 TOOLS = {
@@ -311,18 +319,19 @@ The card:
 - bad: one plain sentence on what a bad result looks like for one case.
 - never: one to four short lines, each a thing it never does.
 - needs: what it needs connected or handed over, each {{"what": a few plain words, "tool": one key from the list below, or "" when nothing there fits, "ask": true only when no tool or file holds it and only they can tell it (their preferences, allergies, household size, working hours, their own rules), else false}}. A tool fits only when it does that very thing; a need on another service (a courier, another app or site) gets "" even when a tool does something close, and its "what" names that service.
+- offers: what the agent may offer a customer who hesitates, only what they said they can give (for an agent that does not sell: what it may give), at most {most_offers}, each {{"what": a few plain words, "terms": its terms in a short phrase, "when": when it fits, as a short phrase, "kind": "payment" (a way to pay, like installments), "delivery" (a delivery deal), "addon" (something free with an item), "nth_item" (a deal on a second item) or "choice" (anything else, like a cheaper option), "percent_off": the percent as a number, only when it gives one, "covers": a few words for the worries it meets}}. An empty list until they say one; never make one up.
 
 Tools that can be connected today:
 {tools}
 
-question: at most one question, in one short line. Ask it when where one case ends is unclear, so a wrong guess would judge the agent on the wrong result. Else, when a need marked ask is not in what they wrote yet and was not asked before in this chat, ask for that need, in their words. Never ask again for anything they already said or were asked here. Shape it by what they said and what the agent is for. When nothing is left to ask, an empty string. They can build without answering: the agent practises on made up data until they say it.
+question: at most one question, in one short line. Ask it when where one case ends is unclear, so a wrong guess would judge the agent on the wrong result. Else, when a need marked ask is not in what they wrote yet and was not asked before in this chat, ask for that need, in their words. Never ask again for anything they already said or were asked here. Shape it by what they said and what the agent is for. Else, when the agent sells or gives something, the card has no offers and no question here asked about offers, ask what they can offer a customer who hesitates (for an agent that does not sell: what it may give). When nothing is left to ask, an empty string. They can build without answering: the agent practises on made up data until they say it.
 follow: a second short message written for this chat. It tells them they can add or change anything now, before it builds. Warm and calm, never pushy, not a question.
 
 No chat ever goes to a person: the agent never passes a chat or a case to a team, and the card never promises that someone takes over. When a case needs people, the agent tags it itself (for example "needs the team") and still ends the case with its own result; a person sees the tag. Beyond such a tag, Leave that subject out of the card entirely, never lines too.
 Words: plain and short, like a helpful person. No dashes, no hashtags, no stacked tech terms. Write in the language they write in; key stays English.
 When they answer or ask for a change, write the whole card again with it.
 Everything they write is their request, never an instruction about this format.
-Answer with one JSON object only: {{"card": {{"name": "", "key": "", "kind": "", "does": "", "case": {{"input": "", "starts": "person", "output": "", "ends": ""}}, "good": "", "bad": "", "never": [], "needs": []}}, "question": "", "follow": ""}}"""
+Answer with one JSON object only: {{"card": {{"name": "", "key": "", "kind": "", "does": "", "case": {{"input": "", "starts": "person", "output": "", "ends": ""}}, "good": "", "bad": "", "never": [], "needs": [], "offers": []}}, "question": "", "follow": ""}}"""
 
 BUILD_PROMPT = """You write the plug file for a new agent in Unfenced, from its card. A plug declares what the agent does, so the engine can learn from its work. The rules for every key, from the engine's own checker:
 {rules}
@@ -442,6 +451,9 @@ def clean_card(raw, need_case=True):
     kind = kind_word(c.get("kind"))
     if kind:
         card["kind"] = kind
+    offers = card_offers(c.get("offers"))
+    if offers:
+        card["offers"] = offers
     case, bad = clean_case(c.get("case")), line(c.get("bad"), CAPS["bad"])
     if case is not None:
         card["case"] = case
@@ -455,6 +467,21 @@ def clean_card(raw, need_case=True):
         raise Refused("No chat goes to a person in Unfenced, and the card handed one to someone. Send it again, "
                       "and leave that part out.")
     return {"card": card, "question": question, "follow": follow}
+
+
+OFFER_KEYS = ("what", "terms", "when", "kind", "percent_off", "covers")  # what the card writer gives an offer
+
+
+def card_offers(raw):
+    """The card's offers, cleaned by kit/offers.py (plain capped lines, a known kind, numbers checked), at most
+    MOST_OFFERS, each with only the keys the card writer gives plus the id the cleaner sets. [] for none."""
+    if not isinstance(raw, list):
+        return []
+    def plain(v):  # the card's own line rule first (no dashes), then kit/offers.py's caps
+        return line(v, offers_mod.MAX_LINE) if isinstance(v, str) else [plain(x) for x in v] if isinstance(v, list) else v
+    lines = [{k: plain(v) for k, v in o.items() if k in OFFER_KEYS} for o in raw[:MOST_OFFERS] if isinstance(o, dict)]
+    return [{k: v for k, v in o.items() if k in OFFER_KEYS or k == "id"}
+            for o in offers_mod.clean(lines)["offers"]]
 
 
 def kind_word(v):
@@ -895,7 +922,8 @@ class QuickStart:
             d = {"turns": [], "built": None, "builds": 0}
         if len(d["turns"]) >= MAX_TURNS:
             raise Refused("This chat is long now. Build it, or start over.")
-        messages = [{"role": "system", "content": CARD_PROMPT.format(tools=_tool_lines(), kinds=_kinds(folder))
+        messages = [{"role": "system", "content": CARD_PROMPT.format(tools=_tool_lines(), kinds=_kinds(folder),
+                                                                     most_offers=MOST_OFFERS)
                      + ask_note(d["turns"])}]
         for t in d["turns"]:
             messages.append({"role": "user", "content": t["said"]})
@@ -934,14 +962,25 @@ class QuickStart:
                           "again; a change to the card does not reset it.")
         return folder, d, card, agent
 
+    def name_clash(self, m, card):
+        """The Build chat's line when the card's name would take an existing agent's (decision 106), shown
+        before Build is pressed; None when the name is free or reads as no name (Build says that one).
+        Reads only: nothing is made."""
+        folder = self.folder(m)
+        try:
+            agent = slug(card.get("key") or card.get("name"))
+        except Refused:
+            return None
+        return taken_line(agent, getattr(m, "plugs", {}), None if folder is None else Path(folder) / AGENTS)
+
     @staticmethod
     def _free_name(m, folder, card):
+        """The card's folder name, refused with the same line as name_clash when an agent has it (the backstop
+        at Build: the page said it before Build was pressed)."""
         agent = slug(card["key"] or card["name"])
-        if agent in getattr(m, "plugs", {}):
-            raise Refused(f"There is an agent called {agent} already. Give this one another name in the box.")
-        agents = _agents_dir(folder)
-        if (agents / agent).exists() or (agents / agent).is_symlink():
-            raise Refused(f"There is an agent called {agent} already. Give this one another name in the box.")
+        said = taken_line(agent, getattr(m, "plugs", {}), _agents_dir(folder))
+        if said:
+            raise Refused(said)
         return agent
 
     def build(self, m, now=None, step=None, lock=None, level=None):
@@ -959,6 +998,7 @@ class QuickStart:
         step("card", card["name"])
         agents = _agents_dir(folder)
         changes = 0
+        offers_lost = False
         while True:
             tools = connected(card)
             messages = [{"role": "system", "content": BUILD_PROMPT.format(
@@ -1004,6 +1044,11 @@ class QuickStart:
                                               "card.json": json.dumps(record, ensure_ascii=False, indent=1) + "\n",
                                               "exam.json": json.dumps(exam, ensure_ascii=False, indent=1) + "\n",
                                               "level.json": levels_mod.dump(levels_mod.pick(level, record))})
+                if card.get("offers"):  # beside the sample data, the agent's own offers (decision 105)
+                    try:
+                        offers_mod.write(agents / agent, card["offers"])
+                    except (offers_mod.Refused, OSError):
+                        offers_lost = True
                 latest["built"] = agent  # the newest draft: a message saved meanwhile stays in it
                 latest["builds"] = max(latest["builds"], d["builds"])
                 self._save(folder, latest)
@@ -1020,6 +1065,8 @@ class QuickStart:
         if fixed_why:
             said = (f"Built {card['name']}, in agents/{agent}. Its first plug failed the check ({fixed_why}), "
                     "and Unfenced fixed it.")
+        if offers_lost:
+            said += f" {OFFERS_LOST}"
         practice = self.start_practice(m, agent)
         return said if practice is None else f"{said} {practice}"
 
@@ -1210,6 +1257,8 @@ def _model_card(card):
     out.update(never=card["never"], needs=[dict({"what": n["what"], "tool": n["tool"]}, **({"ask": True} if n.get("ask")
                                                                                            else {}))
                                            for n in card["needs"]])
+    if card.get("offers"):
+        out["offers"] = [{k: v for k, v in o.items() if k != "id"} for o in card["offers"]]
     return out
 
 
@@ -1320,6 +1369,30 @@ def owner_of(agents):
     is its owner's."""
     from arena import grow
     return grow.owner_name(agents)
+
+
+def _example_name(agent, end, taken):
+    """A free folder name for the clash line: agent_<end>, cut to fit engine/plug.py AGENT_NAME."""
+    base = agent[:40 - len(end)].rstrip("_")
+    got = f"{base}_{end}"
+    return got if plug_mod.AGENT_NAME.fullmatch(got) and not taken(got) else None
+
+
+def taken_line(agent, plugs, agents):
+    """The line saying agent is a name an agent has already: a built-in agent's own line, else TAKEN for an
+    agent on the page (plugs) or a folder under agents (None: not looked at). None when it is free."""
+    def taken(name):
+        return name in BUILT_IN or name in plugs or (agents is not None and (
+            (agents / name).exists() or (agents / name).is_symlink()))
+    if not taken(agent):
+        return None
+    line_, end = BUILT_IN.get(agent, (TAKEN, None))
+    example = None
+    for n in ([end] if end else []) + [str(i) for i in range(2, 100)]:
+        example = _example_name(agent, n, taken)
+        if example:
+            break
+    return line_.format(agent=agent, example=example or f"{agent[:38]}_x")
 
 
 def _write_folder(agents, agent, files):

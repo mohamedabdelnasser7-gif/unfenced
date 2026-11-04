@@ -65,7 +65,10 @@ class PastPrompt(unittest.TestCase):
 
     def test_the_fingerprint_changed_and_both_are_known(self):
         self.assertNotEqual(match.GENERIC_SHA, OLD_SHA)
-        self.assertEqual(match.KNOWN_PROMPTS, {match.GENERIC_SHA: match.GENERIC_PROMPT, OLD_SHA: old()})
+        # the prompt before the offer line (decision 105) is known too, newest of the past ones
+        newer = match.PAST_GENERIC_PROMPTS[0]
+        self.assertEqual(match.KNOWN_PROMPTS, {match.GENERIC_SHA: match.GENERIC_PROMPT, OLD_SHA: old(),
+                                               match.prompt_sha(newer): newer})
         self.assertEqual(gate._prompt_of({"prompt_sha": OLD_SHA, "prompt_file": None}), old())
         self.assertEqual(gate._prompt_of({"prompt_sha": match.GENERIC_SHA, "prompt_file": None}), match.GENERIC_PROMPT)
         self.assertIsNone(gate._prompt_of({"prompt_sha": OLD_SHA, "prompt_file": None}, prompts={}))

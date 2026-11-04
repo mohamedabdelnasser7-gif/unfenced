@@ -123,7 +123,8 @@ ROOT = Path(__file__).resolve().parent.parent
 if __name__ == "__main__" and str(ROOT) not in sys.path:  # run by its path under -I
     sys.path.insert(0, str(ROOT))
 
-from arena import factcheck, match as match_mod, notes as notes_mod, paths, replay as replay_mod, scope, verdict  # noqa: E402
+from arena import close as close_mod, factcheck, match as match_mod, notes as notes_mod, offers as offers_mod, paths, \
+    replay as replay_mod, scope, verdict  # noqa: E402
 from kit import seal  # noqa: E402
 from kit.model import ModelError, counting  # noqa: E402
 from reflection import history as hist  # noqa: E402
@@ -515,7 +516,8 @@ class Arena:
         notes: the run's quick notes (arena/notes.py RunNotes): one written after each lost training
         match, every one of them handed in the next matches, dropped once the step between rounds has run.
         off_topic and judge_model: practice match 10 of each round is the off topic customer (arena/scope.py),
-        judged by judge_model; with either missing it is never played."""
+        judged by judge_model; with either missing it is never played. judge_model is also the close judge
+        (arena/close.py): a card no offer covers wins on a correct close (decision 105); with none its loss stands."""
         # the gate (decision 101): every card that can buy at its real share, or the named ones (held_out)
         if pool is None:
             self.train, self.held = split(cards, held_out, seed=seed)
@@ -525,6 +527,8 @@ class Arena:
             _, self.held = fixed_split(cards, held_out, seed, pool)
             self.train, self.gate_cards = grow.decks(cards, pool, {c["id"] for c in self.held},
                                                      gate={c["id"] for c in self.held} if held_out else None)
+        # covered or close, from the offers (decision 105), in code: every card the run plays, copies included
+        offers_mod.mark([*self.train, *self.held, *self.gate_cards], self.offers_data())
         self.calls = calls
         self.agent_model, self.customer_model = calls.model(agent_model), calls.model(customer_model)
         self.judge_model = None if judge_model is None else calls.model(judge_model)
@@ -589,8 +593,23 @@ class Arena:
                 return VOIDED
         else:
             judged = verdict.judge(m, facts=self.facts)
+            if judged.get("needs_close") and self.judge_model is not None:  # a close card with no sale (decision 105)
+                try:
+                    judged = self._judge_close(m, card)
+                except CapReached:
+                    self.halt = CAP
+                    return None
+                except ModelError as e:  # the close judge did not answer: dropped, never a loss
+                    self.halt, self.error = MODEL_ERROR, match_mod.plain(str(e)) or type(e).__name__
+                    return None
+                if self.calls.reached:
+                    self.halt = CAP
+                    return None
+                if judged is None:
+                    return UNJUDGED
+            judged.pop("needs_close", None)
         m.update(id=match_id, won=judged["won"], why=judged["why"], quote=judged["quote"], persona=card,
-                 prompt_sha=self.prompt_sha, prompt_file=self.prompt_file)
+                 prompt_sha=self.prompt_sha, prompt_file=self.prompt_file, close_win=bool(judged.get("close")))
         if replay is not None:
             m["replay"] = replay
         self.state.mkdir(parents=True, exist_ok=True)
@@ -619,6 +638,28 @@ class Arena:
     def scope_card(self):
         """The card the off topic writer and judge read (arena/scope.py): the Sales agent's; practice.py its own."""
         return scope.SALES_CARD
+
+    def offers_data(self):
+        """The offers the cards are marked by (arena/offers.py): the store data's; practice.py the agent's own."""
+        return offers_mod.current()
+
+    def _judge_close(self, m, card):
+        """arena/close.py judge through the counted judge model, asked once more when its answer cannot be read;
+        None when the second cannot be read either (unjudged), as _judge_off."""
+        for _ in range(2):
+            try:
+                return close_mod.judge(m, card, self.offers_data(), self.judge_model, facts=self.facts)
+            except close_mod.Unreadable:
+                continue
+        return None
+
+    @staticmethod
+    def _count(one, judged):
+        """A judged match into its round's sales and closes (decision 105)."""
+        if judged.get("close"):
+            one["closes"] = one.get("closes", 0) + 1
+        elif judged["won"]:
+            one["sales"] = one.get("sales", 0) + 1
 
     def _judge_off(self, m):
         """arena/scope.py judge, asked once more when its answer cannot be read; None when the second cannot
@@ -684,8 +725,8 @@ class Arena:
                 if self.calls.reached:  # the cap came during the night study: stop here, nothing unchecked goes on
                     self.halt = CAP
                     return self._report(rounds, CAP)
-            one ={"round": r, "training": {"played": 0, "won": 0, "cases": []},
-                   "gate": {"played": 0, "won": 0, "lost": []}}
+            one = {"round": r, "training": {"played": 0, "won": 0, "cases": []},
+                   "gate": {"played": 0, "won": 0, "lost": []}, "sales": 0, "closes": 0}
             rounds.append(one)
             for k in range(1, self.matches + 1):
                 mid = f"{self.run_id}-r{r}-t{k:02d}"
@@ -721,6 +762,7 @@ class Arena:
                 if handed:
                     one["training"]["notes_handed"] = one["training"].get("notes_handed", 0) + 1
                 one["training"]["won"] += judged["won"]
+                self._count(one, judged)
                 if off:
                     one["training"]["off_topic"] = {"card": card["id"], "about": card["about"],
                                                     "result": "won" if judged["won"] else "lost", "why": judged["why"]}
@@ -745,6 +787,7 @@ class Arena:
                 m, judged = out
                 one["gate"]["played"] += 1
                 one["gate"]["won"] += judged["won"]
+                self._count(one, judged)
                 if "failed_check" in judged:  # a built agent's verdict marks its safety checks (arena/practice.py)
                     one["gate"]["failed_checks"] = one["gate"].get("failed_checks", 0) + bool(judged["failed_check"])
                 if not judged["won"]:
@@ -793,7 +836,8 @@ class Arena:
         rep = {"agent": self.agent, "run": self.run_id, "stopped": stopped, "trust": self.trust, "fact_checks": self.facts,
                "training_cards": [c["id"] for c in self.train], "held_out_cards": [c["id"] for c in self.held],
                "gate_mix": {"cards": len(self.gate_cards), "most": self.gate_most, "of": self.trust["matches"],
-                            "line": self.gate_line},
+                            "line": self.gate_line, "team_rate": offers_mod.team_rate(self.gate_cards)},
+               "sales": sum(r.get("sales", 0) for r in rounds), "closes": sum(r.get("closes", 0) for r in rounds),
                "rounds": rounds, "calls": {"day": self.calls.day, "used": self.calls.count, "cap": self.calls.cap}}
         if self.calls.problem:
             rep["calls"]["problem"] = self.calls.problem
@@ -831,9 +875,17 @@ class Arena:
                 "rounds": len(rounds), "gate_won": last["won"], "gate_played": last["played"],
                 "needs": self.trust["wins"], "quick": self.quick, "fact_checks": self.facts, "lost": last["lost"][:3],
                 "reflection": self.reflection_rows(rounds),
+                **Arena.offer_counts(self, rounds),
                 "line": f"The Arena ran {len(rounds)} round{'' if len(rounds) == 1 else 's'} and stopped, {stopped}: "
                         f"{last['won']} of {last['played']} gate matches won in the last, {self.trust['wins']} needed."}
         return self._write_item(item)
+
+    def offer_counts(self, rounds):
+        """The item's offer fields (decision 105, read by the Arena page): sales and closes as whole counts,
+        team_rate {"won", "chats"} and its report line; the bar stays the trust level's."""
+        rate = offers_mod.team_rate(getattr(self, "gate_cards", ()))
+        return {"sales": sum(r.get("sales", 0) for r in rounds), "closes": sum(r.get("closes", 0) for r in rounds),
+                "team_rate": rate, "team_line": offers_mod.team_line(rate, self.trust.get("wins"), self.trust.get("matches"))}
 
     def stuck_item(self, rounds):
         """The stuck point as a Morning page item, written next to the database."""
@@ -841,6 +893,7 @@ class Arena:
         item = {"agent": self.agent, "kind": "arena_stuck", "at": self.now(), "run": self.run_id,
                 "rounds": len(rounds), "gate_won": last["won"], "gate_played": last["played"],
                 "needs": self.trust["wins"], "fact_checks": self.facts, "lost": last["lost"][:3],
+                **Arena.offer_counts(self, rounds),
                 "line": f"The Arena is stuck: {last['won']} of {last['played']} gate matches won after "
                         f"{len(rounds)} rounds, {self.trust['wins']} needed, no gain in the last {NO_GAIN_ROUNDS}."}
         if any("reflection" in r for r in rounds):
@@ -1164,6 +1217,11 @@ def text(rep):
                      f"chats, at most {mix['most']} of {mix['of']} matches a card group, every match new")
         if mix.get("line"):
             lines.append(f"  {mix['line']}")
+        team = offers_mod.team_line(mix.get("team_rate"), rep["trust"]["wins"], rep["trust"]["matches"])
+        if team:  # decision 105: the old rate as a report line, never the bar
+            lines.append(f"  {team}")
+    if rep.get("sales") or rep.get("closes"):
+        lines.append(f"  sales {rep.get('sales', 0)}, correct closes {rep.get('closes', 0)}")
     for r in rep["rounds"]:
         t, g = r["training"], r["gate"]
         lines.append(f"  round {r['round']}: training {t['won']} of {t['played']} won, {len(t['cases'])} cases to "

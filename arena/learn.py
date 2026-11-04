@@ -33,8 +33,9 @@ def case_id(match_id):
 
 
 def to_case(db, match, judged, match_id, *, now=None):
-    """Write one lost match into the log. Returns its case id; refuses a won match."""
-    if judged.get("won"):
+    """Write one lost match into the log. Returns its case id; refuses a won match and a correct close
+    (decision 105: a customer no offer covers, closed right, is never studied as a loss)."""
+    if judged.get("won") or judged.get("close"):
         raise ValueError("only a lost match becomes a case")
     log = Results(db)
     now = time.time() if now is None else float(now)

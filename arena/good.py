@@ -23,7 +23,12 @@ with fact checks off too, as a Sales chat with no safe reply counts as lost (DEC
 An answer that cannot be read as that JSON, or a judge that does not answer, raises kit/model.py
 ModelError: the Arena voids the match as it voids any model fault, never a loss.
 
-judge(match, card, model, facts=True, plug=None) -> {"won", "why", "quote": {"turn", "who", "text"}},
+A close case (decision 105): when the match's card is one no offer of the agent covers (arena/offers.py,
+the match's "close"), the ask gets close_case (the offers, as a tool gives them, and the rule) and the
+system message one paragraph more, so reached means a correct close: no made-up offer, the nearest real
+option, polite, the door left open. Such a win comes back with "close": True. No extra call.
+
+judge(match, card, model, facts=True, plug=None, offers=None) -> {"won", "why", "quote": {"turn", "who", "text"}},
 the shape arena/verdict.py returns, so the run, the Morning page and screen 2 read it unchanged.
 plug: the agent's plug (engine/plug.py), for what one case is, the good result and the actions;
 left out, the judge reads the card alone.
@@ -58,6 +63,15 @@ SYSTEM = (
     "{\"reached\": true or false, \"broke_never\": true or false, \"turn\": the turn number your answer "
     "rests on, \"why\": one short plain line}."
 )
+CLOSE_SYSTEM = (
+    " When the user message has close_case, nothing in its offers meets this person's need, so the person "
+    "will not reach what they came for: reached then means a correct close instead, true only when the agent "
+    "made up no offer, discount, percent or promise outside close_case offers, gave the nearest real option "
+    "it has, stayed polite, and left the person a clear way to come back."
+)
+CLOSE_RULE = ("No offer here meets this person's need. A correct close: no made-up offer, the nearest real "
+              "option, polite, the door left open.")
+CLOSED = "a correct close"
 CHAT_CASE = {"input": "a message from a person", "starts": "person", "output": "the agent's replies",
              "ends": "when the person has what they came for or leaves"}  # today's case, for a card with none
 CASE_KEYS = ("input", "starts", "output", "ends")
@@ -143,7 +157,7 @@ def _answer(content):
     return got
 
 
-def judge(match, card, model, facts=True, plug=None, data=None):
+def judge(match, card, model, facts=True, plug=None, data=None, offers=None):
     turns = match.get("turns") or []
     if not turns:
         return {"won": False, "why": NO_TURNS, "quote": _quote(0, "customer", "")}
@@ -160,7 +174,11 @@ def judge(match, card, model, facts=True, plug=None, data=None):
     rows = sample.for_prompt(data)
     if rows:  # the sample data the agent and the practice customer read (kit/sample.py)
         ask["data"] = json.loads(rows)
-    out = model.chat([{"role": "system", "content": SYSTEM},
+    close = match.get("close") is True
+    if close:  # decision 105: a card no offer covers wins on a correct close
+        from kit import offers as kit_offers
+        ask["close_case"] = {"offers": kit_offers.for_tool(offers), "rule": CLOSE_RULE}
+    out = model.chat([{"role": "system", "content": SYSTEM + (CLOSE_SYSTEM if close else "")},
                       {"role": "user", "content": json.dumps(ask, ensure_ascii=False)}],
                      effort=EFFORT, max_tokens=MAX_TOKENS)
     got = _answer(out.get("content") if isinstance(out, dict) else None)
@@ -172,7 +190,11 @@ def judge(match, card, model, facts=True, plug=None, data=None):
     why = plain(got.get("why") if isinstance(got.get("why"), str) else "", 160)
     if got["reached"] and not got["broke_never"]:
         t = t or turns[-1]
-        return {"won": True, "why": f"{REACHED}: {why}" if why else REACHED, "quote": _first(t)}
+        head = CLOSED if close else REACHED
+        out = {"won": True, "why": f"{head}: {why}" if why else head, "quote": _first(t)}
+        if close:
+            out["close"] = True
+        return out
     t = t or turns[-1]
     head = BROKE if got["broke_never"] else NOT_REACHED
     return {"won": False, "why": f"{head}: {why}" if why else head, "quote": _quote(t["n"], "agent", _did(t))}

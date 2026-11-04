@@ -142,8 +142,9 @@ def _write(db, plug, match, judged, match_id, now, won):
 
 def to_case(db, plug, match, judged, match_id, *, now=None):
     """Write one lost practice match into the log under plug. Returns its case id; refuses a won
-    match. A case already written (the same agent and match id) is left as it is."""
-    if judged.get("won"):
+    match and a correct close (decision 105). A case already written (the same agent and match id) is
+    left as it is."""
+    if judged.get("won") or judged.get("close"):
         raise ValueError("only a lost match becomes a case")
     now = time.time() if now is None else float(now)
     _write(db, plug, match, judged, match_id, now, False)
@@ -175,7 +176,9 @@ def from_folder(db, plug, folder, *, until=None):
     study needs both sides to find a pattern (engine/study.py), and a new agent has no live cases
     yet. Gate matches are left out (only training ids are read, TRAINING), and so is any match
     of another agent or played at or after until, and an off topic match the agent won (arena/scope.py):
-    it declined, so it never reached the good result a win closes with; a lost one is written. A case already written is left as it is. Returns
+    it declined, so it never reached the good result a win closes with; a lost one is written. A correct
+    close (close_win, decision 105) is written neither good nor bad: no offer met that person's need, so it
+    is no pattern of a sale and no loss. A case already written is left as it is. Returns
     {"written", "won", "lost"} counts of the cases written now."""
     from arena import run as run_mod
     out = {"written": 0, "won": 0, "lost": 0}
@@ -199,6 +202,8 @@ def from_folder(db, plug, folder, *, until=None):
                 or not isinstance(m.get("turns"), list):
             continue
         if m.get("off_scope") and m["won"]:  # an off topic win never reached the good result (arena/scope.py)
+            continue
+        if m.get("close_win") is True:  # a correct close: neither a good case nor a loss (decision 105)
             continue
         played = _run_time(m.get("id"))
         if played is None or played >= until:

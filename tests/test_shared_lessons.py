@@ -57,6 +57,11 @@ def fan(agent, **over):
     return d
 
 
+def down(messages, tools):
+    """A model step that fails, as a host that is down does."""
+    raise RuntimeError("down")
+
+
 class SharedLessons(unittest.TestCase):
     kind = "fans"
 
@@ -184,6 +189,16 @@ class SharedLessons(unittest.TestCase):
         self.assertIsNotNone(rep["shared"]["given"][0]["pattern"])
         rep = self.night(exam=passing, writer=writer_of(FILTERS), give=1)
         self.assertEqual([g["lesson"] for g in rep["shared"]["given"]], [second])
+
+    def test_a_writer_that_fails_is_asked_once_a_night(self):
+        mine = Lessons(self.db, self.new, judge=always_low)
+        for text in ("Explain the quiet setting first when the grower asks about noise twice.",
+                     "Show the filter choices before the price when the grower asks about dust."):
+            kept_lesson(mine, text, ["all"], yes_by="owner")
+        model = FakeModel(down, say(json.dumps({"pattern": GIVEN})))
+        rep = self.night(exam=passing, writer=shared.Writer(model=model))
+        self.assertEqual(len(model.calls), 1)
+        self.assertEqual([g["why"] for g in rep["shared"]["given"]], ["the writer failed (PartError)"])
 
     def test_a_lesson_from_the_pool_is_not_given_back(self):
         self.seen_at("north", "south")

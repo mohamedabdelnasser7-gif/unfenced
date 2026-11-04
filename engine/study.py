@@ -705,7 +705,7 @@ class Study:
     def _give_shared(self, rep):
         """This agent's kept lessons into the shared pool (see 6): the ones that did not come from
         it, oldest first, at most the link's give a night that reach the writer. Each is written up
-        once; what the pool drops is never kept."""
+        once; what the pool drops is never kept. A writer that fails stops the giving for the night."""
         if self.shared is None:
             return
         entry = rep.setdefault("shared", {"read": 0, "lessons": [], "given": []})
@@ -721,6 +721,8 @@ class Study:
             asked += bool(got.get("asked"))
             if got.get("why") != "given before":
                 entry["given"].append({"lesson": les["id"], "pattern": got.get("pattern"), "why": got.get("why")})
+            if got.get("failed"):  # a writer that failed once is not asked again tonight
+                break
 
     def _take(self, other, public, rec, rep, known, pulled, *, sources, source, origin, into=None,
               source_lesson_id=None, gated=False):

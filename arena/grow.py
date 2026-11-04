@@ -841,7 +841,8 @@ def grow(db, pool, *, since, until, tagger, calls=None, most=MAX_NEW, quiet_hour
                   "style": cards_mod.style_of(chat), "turns": turns}, chat_id, *last)
         n["added"] += 1
         n["lost" if lab == label_mod.LOST else "hard"] += 1
-        if lab == label_mod.LOST and shared is not None and n["patterns asked"] < shared.give_lost:
+        if lab == label_mod.LOST and shared is not None and n["patterns asked"] < shared.give_lost \
+                and not n["writer failed"]:
             # only the cleaned turns reach the writer; only a clean pattern reaches the pool. The
             # writer's calls count on the same cap (night): one refused is a pattern dropped
             try:
@@ -850,6 +851,7 @@ def grow(db, pool, *, since, until, tagger, calls=None, most=MAX_NEW, quiet_hour
                 n[f"patterns not given ({type(e).__name__})"] += 1
                 continue
             n["patterns asked"] += bool(got.get("asked"))
+            n["writer failed"] += bool(got.get("failed"))  # failed once: not asked again tonight
             n["patterns given" if got.get("pattern") else "patterns dropped" if got.get("asked") else
               "patterns skipped"] += 1
     return dict(n)

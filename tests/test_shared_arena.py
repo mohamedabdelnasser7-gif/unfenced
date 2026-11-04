@@ -45,6 +45,11 @@ def writer(*lines):
     return shared.Writer(model=model), model
 
 
+def down(messages, tools):
+    """A model step that fails, as a host that is down does."""
+    raise RuntimeError("down")
+
+
 def owner_at(test, name):
     """An owner's state folder with one sales agent under it: (owner folder, agent folder)."""
     owner = tmp(test)
@@ -174,6 +179,18 @@ class SharedPracticeCustomers(unittest.TestCase):
         two = (LOST, (LOST[0] + "-2", LOST[1]))
         _, counts, model = grow_at(self.a, "north", self.root, LINE, chats=two, give_lost=1)
         self.assertEqual((counts["patterns asked"], counts["lost"], len(model.calls)), (1, 2, 1))
+
+    def test_a_writer_that_fails_is_asked_once_a_night(self):
+        two = (LOST, (LOST[0] + "-2", LOST[1]))
+        db = Db(":memory:")
+        self.addCleanup(db.close)
+        write_chats(db, two)
+        model = FakeModel(down, say(json.dumps({"pattern": LINE})))
+        link = shared.Link("sales", shared.owner_id(self.a / "store_north"), shared.Writer(model=model), self.root)
+        counts = grow.grow(db, grow.Pool(self.a, "sales"), since=SINCE, until=NOW, shared=link,
+                           tagger=Tagger(model=ScriptedModel(recipe()), cap=50, recipe=recipe()))
+        self.assertEqual((counts["lost"], counts["patterns dropped"], len(model.calls)), (2, 1, 1))
+        self.assertEqual(shared.Pool("sales", self.root).patterns, [])
 
     def test_a_hard_chat_that_was_won_is_not_given(self):
         _, counts, model = grow_at(self.a, "north", self.root, LINE, chats=(HARD,))
@@ -367,6 +384,18 @@ class NightWiring(unittest.TestCase):
         self.assertEqual(rep.get("patterns skipped"), 1)
         self.assertNotIn("patterns given", rep)
         self.assertEqual((shared.root_for(self.db_path) / "patterns-sales.json").read_bytes(), before)
+
+    def test_the_study_writer_counts_on_the_arena_day_cap(self):
+        from reflection.study import PartError
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(night.main(["--plug", str(SALES_PLUG), "--db", str(self.db_path), "--json"]), 0)
+        writer = night.night.call_args.kwargs["shared"].writer
+        count = self.dir / run.CALLS_FILE
+        count.write_text(json.dumps({"day": run.today(), "calls": run.DEFAULT_CAP - 1}), encoding="utf-8")
+        writer(shared.LESSON, "sales", {"lesson": "x"})  # the mocked model answers; the call is counted
+        self.assertEqual(json.loads(count.read_text(encoding="utf-8"))["calls"], run.DEFAULT_CAP)
+        with self.assertRaises(PartError):
+            writer(shared.LESSON, "sales", {"lesson": "x"})
 
 
 if __name__ == "__main__":

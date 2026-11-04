@@ -633,7 +633,8 @@ def owner_id(folder):
 
 class Link:
     """One agent's way into its kind's pool. owner: the owner's id (owner_id), or "" (gives nothing).
-    writer: Writer or a test's stand in. give, give_lost: the writer's calls a night at most."""
+    writer: Writer or a test's stand in. give, give_lost: the writer's calls a night at most. A give
+    whose writer raised says failed, and the night then asks the writer nothing more."""
 
     def __init__(self, kind, owner, writer, root, give=GIVE, give_lost=GIVE_LOST):
         self.kind, self.owner, self.writer = kind, owner or "", writer
@@ -676,7 +677,7 @@ class Link:
         try:
             line = self.writer(what, self.kind, data)
         except Exception as e:  # a failing writer gives nothing tonight; asked again another night
-            return {"pattern": None, "why": f"the writer failed ({type(e).__name__})", "asked": True}
+            return {"pattern": None, "why": f"the writer failed ({type(e).__name__})", "asked": True, "failed": True}
         got, reasons = self.pool.add(what, line or "", self.owner, key, worry=worry, sources=sources)
         if got is None:
             return {"pattern": None, "why": "dropped: " + "; ".join(reasons), "asked": True}

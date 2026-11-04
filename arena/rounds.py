@@ -323,9 +323,12 @@ class Between:
         self.pending = []
         self.live, self._live = live, None
         self.scoped = None  # the exam made for this round (its source names a rewrite's earlier fails)
-        # where the study's read starts: None, the days before now as a round reads them; Run reflection on the
-        # Sales agent's page sets the oldest row of the Arena's losses (reflection/reflect_now.py run_arena)
+        # where the study's read starts: None, the days before now as a round reads them; Train on the agent's
+        # page sets the oldest row of the round's losses (reflection/reflect_now.py run_arena)
         self.since = None
+        # a person's Stop (engine/study.py Study.run stop, DECISIONS 98): None between CLI rounds; Train on the page
+        # sets its Stop check, so once pressed no new lesson starts its write and exam and the rest are queued
+        self.stop = None
 
     def learn(self, match, judged, match_id):
         """A lost training match as a case (arena/learn.py), kept for the study after its round."""
@@ -377,8 +380,9 @@ class Between:
                                   ideas=parts.Ideas(model=study_m))
         study.log = _Only(study.log, ids)
         until = float(self.now())
-        rep = study.run(self._since(until), until, now=until)
+        rep = study.run(self._since(until), until, now=until, stop=self.stop)
         out["notes"] += rep["notes"]
+        out["queued"] = len(rep.get("queued") or [])  # lessons found after a Stop, not examined: queued
         for card in rep["cards"]:
             out["lessons"].append(self._gate(lessons, examiner, card["lesson_id"], until))
         self._rewrite(study, lessons, examiner, out, until)

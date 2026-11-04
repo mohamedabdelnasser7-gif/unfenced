@@ -16,6 +16,7 @@ from reflection.results import Results
 from tests.fake_model import FakeModel, Outbox, call, clean_env, say
 from tests.test_orders import ME, order_args, tool_call
 from tests.kept import kept_lesson
+from kit import offers
 
 TONE = "Greet them warmly before anything else."
 
@@ -66,6 +67,17 @@ class OrdersKeepTheirLessons(unittest.TestCase):
         self.assertTrue(draft_order.run(order_args(), ctx)["ok"])
         self.assertEqual([(x["outcome"], x["lessons"]) for x in self.results.for_chat(self.cid)],
                          [("order_drafted", [])])
+
+
+def setUpModule():
+    """These tests read the zone fees (60, 85) as they were before decision 105: the store with no offers.
+    The offers' own paths are in tests/test_offers.py and tests/test_offers_paths.py."""
+    global _OFFERS_TOKEN
+    _OFFERS_TOKEN = offers.OFFERS.set(offers.EMPTY)
+
+
+def tearDownModule():
+    offers.OFFERS.reset(_OFFERS_TOKEN)
 
 
 if __name__ == "__main__":

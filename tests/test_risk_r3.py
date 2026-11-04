@@ -132,7 +132,7 @@ WORDS = {  # group: every word of the Sales list; each is read in word_line(word
     'payment': (
         'deposit', 'prepay', 'prepaid', 'prepayment', 'upfront', 'up front', 'in advance', 'transfer',
         'instapay', 'wallet', 'vodafone cash', 'fawry', 'meeza', 'visa', 'mastercard', 'paypal', 'iban',
-        'installment', 'instalment', 'عربون', 'تحويل', 'انستاباي', 'فيزا', 'كارت', 'محفظه', 'قسط', 'تقسيط',
+        'installment', 'valu', 'فاليو', 'ta2seet', 'instalment', 'عربون', 'تحويل', 'انستاباي', 'فيزا', 'كارت', 'محفظه', 'قسط', 'تقسيط',
         'فودافون كاش', 'mo2adam', 'mo2dam', 'mu2adam', 'mokadam', 'card details', 'card info',
     ),
     'policy': (

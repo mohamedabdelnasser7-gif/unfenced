@@ -15,6 +15,7 @@ from kit.tools import cod_risk, delivery, draft_order, find_order, store, voice_
 from reflection.lessons import Lessons
 from reflection.results import Results
 from tests.fake_model import FakeModel, Outbox, call, clean_env, say
+from kit import offers
 
 ME = "201011112222"       # the customer in these tests: a new number with no history
 A = "200000000101"        # demo/orders.json: three delivered, one shipped, Cairo
@@ -1056,6 +1057,17 @@ class LoopTest(unittest.TestCase):
         self.assertEqual(r.reply, "الاجمالي 16560 جنيه.")
         self.assertEqual([x["outcome"] for x in self.results.for_chat(self.cid)],
                          ["order_drafted", "check_failed", "replied"])
+
+
+def setUpModule():
+    """These tests read the zone fees (60, 85) as they were before decision 105: the store with no offers.
+    The offers' own paths are in tests/test_offers.py and tests/test_offers_paths.py."""
+    global _OFFERS_TOKEN
+    _OFFERS_TOKEN = offers.OFFERS.set(offers.EMPTY)
+
+
+def tearDownModule():
+    offers.OFFERS.reset(_OFFERS_TOKEN)
 
 
 if __name__ == "__main__":

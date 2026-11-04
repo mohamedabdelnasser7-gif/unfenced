@@ -6,12 +6,16 @@ fee and days come only from the zone in the delivery data, never from the model.
 
 A place that matches no governorate, or more than one, comes back with ok false and a
 note asking which governorate. Cities and districts are not in the list yet.
+
+A delivery offer in the store's offers (kit/offers.py delivery_fee, decision 105) sets the fee for
+every zone, with the offer's line as "offer"; the days stay the zone's.
 """
 import json
 import re
 from functools import lru_cache
 from pathlib import Path
 
+from kit import offers
 from kit.tools import store
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -72,8 +76,13 @@ def quote(place):
     zone = next((z for z in store.delivery().get("zones", []) if z.get("area") == gov["zone"]), None)
     if zone is None or not all(k in zone for k in ("fee", "days_min", "days_max")):
         return {"ok": False, "note": "The delivery data has no fee for this governorate."}
-    return {"ok": True, "governorate": gov["name"], "governorate_ar": gov["name_ar"], "area": zone["area"],
-            "fee": zone["fee"], "days_min": zone["days_min"], "days_max": zone["days_max"]}
+    data = offers.current()
+    out = {"ok": True, "governorate": gov["name"], "governorate_ar": gov["name_ar"], "area": zone["area"],
+           "fee": offers.delivery_fee(data, zone["fee"]), "days_min": zone["days_min"], "days_max": zone["days_max"]}
+    deal = offers.delivery_offer(data)
+    if deal is not None and out["fee"] != zone["fee"]:
+        out["offer"] = deal["what"]
+    return out
 
 
 def find(place):

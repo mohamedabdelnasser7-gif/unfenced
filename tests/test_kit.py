@@ -417,8 +417,14 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(store.size_strings(), {str(n) for n in range(39, 47)})
 
     def test_price_points(self):
-        # The tier prices, the printing (400) and the demo delivery fees (60, 85).
-        self.assertEqual(store.price_points(), {20000, 19500, 16500, 15500, 13500, 11000, 9500, 7500, 400, 60, 85})
+        # The tier prices and the printing (400); free delivery (demo/offers.json) leaves no zone fee to quote.
+        self.assertEqual(store.price_points(), {20000, 19500, 16500, 15500, 13500, 11000, 9500, 7500, 400})
+        from kit import offers
+        token = offers.OFFERS.set(offers.EMPTY)  # a store with no offers: the demo delivery fees (60, 85) too
+        try:
+            self.assertEqual(store.price_points(), {20000, 19500, 16500, 15500, 13500, 11000, 9500, 7500, 400, 60, 85})
+        finally:
+            offers.OFFERS.reset(token)
 
 
 class EnvTest(unittest.TestCase):

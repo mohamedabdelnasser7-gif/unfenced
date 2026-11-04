@@ -12,8 +12,8 @@ from kit import offers
 
 ROOT = Path(__file__).resolve().parent.parent
 
-ELITE = {"product": "Nike Phantom 6 Football Boots", "tier": "Elite", "size": "42", "price": "16500", "quantity": 1}
-PRO = {"product": "Nike Phantom 6 Football Boots", "tier": "Pro", "size": "42", "price": "11000", "quantity": 1}
+ELITE = {"product": "Nike Phantom 6", "tier": "Elite", "size": "42", "price": "16500", "quantity": 1}
+PRO = {"product": "Nike Phantom 6", "tier": "Pro", "size": "42", "price": "11000", "quantity": 1}
 PRINT = {"product": "Beyond the Limits Name Printing", "type": "Printing", "size": "", "price": "400", "quantity": 1}
 
 

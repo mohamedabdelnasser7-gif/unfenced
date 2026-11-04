@@ -34,6 +34,10 @@ writes first (a lead it follows up), and the input is saved under a frame line s
    and MAX_CALLS_PER_STEP calls a step, then the model must answer in words. A folder with sample data
    (kit/sample.py, sample-data.json: made up at Build, rows the user added) also offers the data tool
    (DATA_TOOL), and for one with the store tool and no Shopify keys the store reads its sample products.
+   A folder with offers (kit/offers.py, offers.json: what it may give a customer, decision 105) hands
+   them to its tools for the turn (offers.OFFERS): the store tool lists them, and a folder with no
+   store tool gets the data tool, which lists them even with no rows. Its system prompt then carries
+   offers.PROMPT_LINE. A folder with no offers sets none, so the store data's offers never reach it.
 4. The send check: the full check (kit/send_check.py) when the card connects whatsapp, store, orders
    or delivery (it talks to customers or quotes the store), so script, style, amounts from tools only
    and links all hold. For an agent Build made, the amounts rule reads only numbers that are prices or
@@ -76,7 +80,7 @@ from pathlib import Path
 from engine import fast as engine_fast
 from engine import plug as plug_mod
 from engine.lessons import slot
-from kit import sample as sample_mod, send_check, switch, tools
+from kit import offers as offers_mod, sample as sample_mod, send_check, switch, tools
 from kit.model import ModelError
 from kit.tools import draft_order, store
 from sales import loop
@@ -132,6 +136,7 @@ class Agent:
     data: dict | None = None  # its sample data (kit/sample.py), read by the data tool and the store tool
     priced_only: bool = False  # the full check holds only prices and fees to the data (an agent Build made)
     stock: bool = True    # the full check's stock count rule (an agent with the store tool, or written by hand)
+    offers: dict | None = None  # its offers (kit/offers.py, offers.json), listed by the store and data tools
 
 
 def _read(folder, name):
@@ -275,7 +280,10 @@ def load(folder):
         p, instructions = _fixed(folder, raw, p, instructions, text, connected)
     offered, missing = tools_of(p)
     data = sample_mod.read(folder)
+    gives = offers_mod.read(folder)
     if data is not None and DATA_TOOL not in offered:  # the rows it works from with no real connection
+        offered += (DATA_TOOL,)
+    if gives is not None and store.NAME not in offered and DATA_TOOL not in offered:  # where its offers show
         offered += (DATA_TOOL,)
     stage = Stage(p.stages[0] if p.stages else "all", card["name"], card["does"], offered, ())
     if connected is None:  # a folder written by hand: the older rule
@@ -285,7 +293,7 @@ def load(folder):
     acts = tuple(a for a in p.actions if a != REPLY_ACTION) if "case" in card else ()
     return Agent(name=p.agent, folder=folder, plug=p, instructions=instructions, card=card, tools=offered,
                  missing=missing, stage=stage, full_check=talks, acts=acts, data=data, priced_only=priced_only,
-                 stock=stock)
+                 stock=stock, offers=gives)
 
 
 def _fixed(folder, raw, p, instructions, card_text, connected):
@@ -366,8 +374,11 @@ class TurnResult:
 def system_prompt(agent, lessons=(), note=""):
     """The instructions, the rules its send check holds every reply to (_check: the full rules or the house
     style only, kit/send_check.py prompt_rules, the same words the check reads), then its lessons, then
-    the fast note for this case under its heading when it has one (last, as sales/loop.py has it)."""
+    the fast note for this case under its heading when it has one (last, as sales/loop.py has it). An agent
+    with offers gets offers.PROMPT_LINE after the rules."""
     parts = [agent.instructions, send_check.prompt_rules(agent.full_check, agent.stock)]
+    if agent.offers and agent.offers.get("offers"):
+        parts.append(offers_mod.PROMPT_LINE)
     picked = slot(agent.plug, list(lessons))
     if picked:
         parts.append(picked)
@@ -432,9 +443,11 @@ def turn(agent, text, *, chats, chat_id, model, send, customer_id, lessons=(), m
                         stages={agent.stage.name: agent.stage}, data=agent.data)
     items = sample_mod.store_items(agent.data) if store.NAME in agent.tools else []
     token = store.SAMPLE.set(items) if items else None  # its sample products when no Shopify keys are set
+    gives = offers_mod.OFFERS.set(agent.offers or offers_mod.EMPTY)  # its own offers, never the store data's
     try:
         return _turn(agent, text, ctx, history, chats, chat_id, send, customer_id, lessons, first, fast)
     finally:
+        offers_mod.OFFERS.reset(gives)
         if token is not None:
             store.SAMPLE.reset(token)
 

@@ -4,7 +4,8 @@
    (DECISIONS item 53).
 2. Pick the lessons that fit (at most 8) and call the model with the instructions, the
    rules the send check holds every reply to (kit/send_check.py prompt_rules, in the check's
-   own words, so the exam never fails a rule the agent was not shown), the lessons and only
+   own words, so the exam never fails a rule the agent was not shown), the offers line
+   (kit/offers.py PROMPT_LINE: offer only what a tool lists), the lessons and only
    this stage's tools. Tools and stage are sent fresh every step.
    When the customer's last chat ended without an order, fast reflection's note for this
    chat (reflection/fast.py) goes last in the prompt, read once a turn before the first
@@ -49,7 +50,7 @@ from pathlib import Path
 from engine.lessons import slot
 from sales import stages
 from kit import limits as limits_mod
-from kit import media, orders, send_check, switch, tools
+from kit import media, offers, orders, send_check, switch, tools
 from kit.chats import FIXED
 from kit.model import ModelError
 from kit.tools import draft_order, find_order, store
@@ -126,8 +127,9 @@ class _Turn:
 def system_prompt(stage, picked, note=""):
     """The instructions, the rules the send check holds every reply to (kit/send_check.py prompt_rules, the
     same words the check and the exam read), the stage note, the lessons in the slot the engine writes from
-    the plug, then fast reflection's note for this chat when it has one."""
-    parts = [INSTRUCTIONS, send_check.prompt_rules(), stages.note(stage)]
+    the plug, then fast reflection's note for this chat when it has one. The offers line (kit/offers.py
+    PROMPT_LINE) follows the rules."""
+    parts = [INSTRUCTIONS, send_check.prompt_rules(), offers.PROMPT_LINE, stages.note(stage)]
     lessons = slot(PLUG, picked)
     if lessons:
         parts.append(lessons)
@@ -447,6 +449,28 @@ def store_links(chats, chat_id):
         log.exception("could not read the store links in this chat")
         return set()
     return links
+
+
+def store_offers(chats, chat_id):
+    """The ids of the offers a tool gave in this chat, any turn: each offer in a store or data result that
+    ran (ok true) and each discount a draft_order result applied. The send check lets a reply name only
+    these offers (decision 105). Only a tool result counts, never the customer's text. Never raises: on an
+    error no offer is given, so every offer is refused."""
+    given = set()
+    try:
+        for s in chats.steps(chat_id):
+            if s["role"] != "tool" or s["name"] not in (store.NAME, "data", draft_order.NAME):
+                continue
+            out = json.loads(s["content"] or "null")
+            if not (isinstance(out, dict) and out.get("ok") is True):
+                continue
+            listed, key = (out.get("discounts"), "offer") if s["name"] == draft_order.NAME else (out.get("offers"), "id")
+            if isinstance(listed, list):
+                given.update(o[key] for o in listed if isinstance(o, dict) and isinstance(o.get(key), str))
+    except Exception:
+        log.exception("could not read the offers given in this chat")
+        return set()
+    return given
 
 
 def _placed(customer_text, made):

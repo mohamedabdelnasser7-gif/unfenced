@@ -22,6 +22,8 @@ from tests.fake_model import FakeModel, clean_env, say
 from tests.test_arena_grow import (HARD, LOST, NAME, NOW, PHONE, SALES_PLUG, SINCE, recipe, write_chats, write_owner,
                                    write_plug)
 from tests.test_arena_run import Agent, Customer, card
+from tests import test_arena_practice as practice_tests
+from arena import practice
 
 LINE = "Asks about delivery time twice, then goes quiet when the store does not say when."
 NEAR = "Asks about the delivery time twice, then goes quiet when the store does not say when."
@@ -271,6 +273,37 @@ class ArenaRun(unittest.TestCase):
                      agent_model=Agent(), customer_model=Customer(buyers=("size", "price")))
         rep = json.loads(out.getvalue())
         self.assertFalse(rep.get("pool", {}).get("shared_cards"))
+
+
+class BuiltAgentPractice(practice_tests.Base):
+    """A built agent practises through arena/practice.py: the shared lost patterns of its kind join its
+    training draw only, never its gate."""
+
+    def seed_pool(self, kind="stock_watch"):
+        pool = shared.Pool(kind, self.root / shared.SHARED_DIR)
+        pool.add(shared.LOST, LINE, "north", "chat:a")
+        pool.add(shared.LOST, NEAR, "south", "chat:b")
+        return shared.practice_cards(kind, self.root / shared.SHARED_DIR)[0]["id"]
+
+    def test_shared_lost_patterns_train_a_built_agent_and_never_take_its_gate(self):
+        cid = self.seed_pool()
+        code, rep = self.main("--matches", "12", "--json")
+        self.assertIn(code, (0, 1), self.err)
+        self.assertEqual(rep["shared_cards"], 1)
+        self.assertIn(cid, rep["training_cards"])
+        self.assertNotIn(cid, rep["held_out_cards"])
+        played = [m["id"] for m in self.matches() if m["persona"]["id"] == cid]
+        self.assertTrue(played)  # it was drawn and played as a practice customer
+        self.assertTrue(all("-t" in i and "-g" not in i for i in played), played)  # training matches only
+        self.assertTrue(any("-g" in m["id"] for m in self.matches()))  # the gate did play, on other cards
+        self.assertIn("1 more practice customers from the shared pool", practice.text(rep))
+
+    def test_another_kind_or_no_agents_folder_reads_no_shared_card(self):
+        self.seed_pool(kind="other_kind")
+        _, rep = self.main("--matches", "2", "--json")
+        self.assertEqual(rep["shared_cards"], 0)
+        self.assertEqual(practice.shared_cards(self.root / "elsewhere" / "stock_watch", grow.plug_mod.load(
+            self.folder / "plug.json")), [])
 
 
 class NightWiring(unittest.TestCase):

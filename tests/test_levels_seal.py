@@ -5,6 +5,7 @@ as a test match, a test line written by hand or a line given another line's seal
 training; a test-set.json edited or written by hand is rebuilt from customers that never trained; old
 lines and an old test-set.json with no seal count as training and are rebuilt. Fake models only."""
 import json
+import shutil
 
 from arena import madeup, practice, run
 from kit import seal, turn
@@ -116,7 +117,8 @@ class SealedTestSet(Base):
                 folder = self.folders[NAME]
                 for p in (folder / practice.TEST_FILE, folder / run.MATCHES_FILE, folder / practice.ROSTER_FILE):
                     p.unlink(missing_ok=True)
-                practice.keep_trained(folder)  # the roster an earlier run left
+                shutil.rmtree(folder / madeup.FOLDER, ignore_errors=True)  # a fresh agent each time
+                practice.keep_trained(folder)  # the roster an earlier run left, before any customer
                 cards, _ = madeup.for_agent(folder, NAME, turn.load(folder).card, Writer(), count=30)
                 by_id = {c["id"]: c for c in cards}
                 want = self.chosen(folder, cards)

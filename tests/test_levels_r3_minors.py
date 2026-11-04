@@ -273,6 +273,7 @@ class Filling(Base):
     def test_the_shapes_mix_holds_against_a_saved_set_of_one_kind(self):
         name = "lead_trial_booker"
         folder = self.folders[name]
+        practice.keep_trained(folder)  # the roster a first run leaves before it writes customers
         cards, _ = madeup.for_agent(folder, name, turn_mod.load(folder).card, Writer(), count=30)
         easy = [c for c in cards if c["kind"] == "easy"]
         self.assertTrue(any(int(c["id"][-2:]) > 20 for c in easy))  # some play past a medium run's 20

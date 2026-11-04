@@ -103,8 +103,9 @@ test-set.json whose seal does not hold is rebuilt, so neither file can be edited
 that trained or to choose the test customers. Since the seal is per line, a deleted training line is
 caught by a sealed roster beside them, trained.json, of every customer that ever trained (card id and
 fingerprint): each training match adds its customer before its line is saved, it never shrinks, and
-trained is the union of the roster and the matches file (keep_trained; a folder from before the
-roster has it built once from its matches file). A test-set.json, a matches file or a roster that is
+trained is the union of the roster and the matches file (keep_trained; a folder with no roster has it
+built once from its matches file and every practice customer saved in it, so deleting all three files
+never makes a customer that trained new again). A test-set.json, a matches file or a roster that is
 there but cannot be read, a line of it that cannot be read, a roster whose seal does not hold, a
 matches file deleted while test-set.json is there, or a roster deleted while a sealed line or
 test-set.json is there stops the run before any model call (fail closed); Start a new test set
@@ -848,10 +849,28 @@ def _replace(folder, name, text):
             tmp.unlink()
 
 
+def _saved_people(folder):
+    """[(card id, fingerprint)] of every practice customer saved in the folder (madeup.FOLDER), each with
+    the card it was written from, any card (_ANY) when its file cannot be read."""
+    people, cards = [], Path(folder) / madeup.FOLDER
+    if cards.is_dir() and not cards.is_symlink():
+        for p in sorted(cards.iterdir()):
+            if not madeup.CARD_FILE.fullmatch(p.name):
+                continue
+            try:
+                people.append((p.stem, _card_of(json.loads(p.read_text(encoding="utf-8")))))
+            except (OSError, ValueError, UnicodeDecodeError, RecursionError):
+                people.append((p.stem, _ANY))
+    return people
+
+
 def keep_trained(folder, people=()):
     """Adds people [(card id, fingerprint)] to the sealed roster of every customer that ever trained
-    (ROSTER_FILE, sealed as test-set.json is, never shrunk) and returns it. A folder from before the
-    roster (none, no sealed match line and no test-set.json) has it built once from its matches file.
+    (ROSTER_FILE, sealed as test-set.json is, never shrunk) and returns it. A folder with no roster (no
+    sealed match line and no test-set.json either: one from before the roster, a fresh agent, or one
+    whose three record files were all deleted) has it built once from its matches file and every
+    practice customer saved in it, as new_test_set counts them: a fresh agent has none saved yet, so a
+    customer that trained before the files went never joins a test set.
     Unrecorded when the roster does not read whole or hold its seal, or is gone while a sealed line or
     test-set.json shows it was written (trained); the roster is then left as it is."""
     folder = Path(folder)
@@ -861,6 +880,7 @@ def keep_trained(folder, people=()):
         base, sealed = _lines(folder)
         if sealed or (folder / TEST_FILE).exists() or (folder / TEST_FILE).is_symlink():
             raise _roster_gone()
+        base |= set(_saved_people(folder))  # a fresh agent has none yet; any saved may have trained
     want = (have or set()) | base | set(people)
     if have is None or want != have:
         folder.mkdir(parents=True, exist_ok=True)
@@ -929,17 +949,7 @@ def new_test_set(folder, now=time.time):
                         rows.append(m)
         except OSError:
             rows = []
-    people = []
-    cards = folder / madeup.FOLDER
-    if cards.is_dir() and not cards.is_symlink():
-        for p in sorted(cards.iterdir()):
-            if not madeup.CARD_FILE.fullmatch(p.name):
-                continue
-            try:
-                c = json.loads(p.read_text(encoding="utf-8"))
-                people.append((p.stem, _card_of(c)))
-            except (OSError, ValueError, UnicodeDecodeError, RecursionError):
-                people.append((p.stem, _ANY))
+    people = _saved_people(folder)
     test = folder / TEST_FILE
     try:
         got = json.loads(test.read_text(encoding="utf-8")).get("test") if test.is_file() and not test.is_symlink() else []

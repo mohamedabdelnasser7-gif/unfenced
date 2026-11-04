@@ -247,6 +247,7 @@ class HandEditedKinds(Base):
         for name in self.folders:
             with self.subTest(name=name):
                 folder = self.folders[name]
+                practice.keep_trained(folder)  # the roster a first run leaves before it writes customers
                 cards, _ = madeup.for_agent(folder, name, turn.load(folder).card, Writer(), count=30)
                 practice.write_test(folder, [(c["id"], c["from_card"]) for c in cards
                                              if c["kind"] in ("easy", "unsure")])  # 10/10/0, none trained

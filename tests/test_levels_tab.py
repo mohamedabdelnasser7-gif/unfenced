@@ -138,6 +138,20 @@ class TryAgainBuilt(Tab):
         self.assertTrue(played)
         self.assertFalse(set(played) & test)
 
+    def test_the_try_is_judged_by_the_third_model(self):
+        lose = World(reached=False)
+        self.m.arena_models = lambda: (lose, lose, lose)
+        self.m.arena_shape = {"matches": 1, "rounds": 1}
+        self.m.run_arena("stock_watch")
+        self.starts.pop()[0]()
+        agent, customer, judge = World(), World(), World()
+        self.m.retry_models = lambda: (agent, customer, judge)
+        self.m.retry_start = lambda work, name: work()
+        self.m.try_again("stock_watch")
+        self.assertIsNone(self.m.try_note("stock_watch"))
+        self.assertGreater(judge.calls["judge"], 0)
+        self.assertEqual((agent.calls["judge"], customer.calls["judge"]), (0, 0))
+
     def test_a_folder_that_is_gone_is_refused(self):
         import shutil
         self.item(gate_won=0, gate_played=10, gate_size=10, needs=7,

@@ -362,6 +362,22 @@ class Gate(Base):
                               judge_model=None, cap=4, customers=20, gate_size=10)  # 3 used today
         self.assertIn("10 of 20 practice customers were written and saved", str(got.exception))
 
+    def test_a_card_grown_from_real_chats_is_never_a_test_customer(self):
+        cards = [{"id": f"grown-{i:02d}", "kind": "easy", "unwinnable": False} for i in range(1, 9)]
+        cards += [{"id": f"persona-{i:02d}", "kind": "easy", "unwinnable": False} for i in range(1, 5)]
+        got = practice.test_set(cards, 3)
+        self.assertEqual(len(got), 3)
+        self.assertFalse([i for i in got if i.startswith(run.GROWN)])
+        with self.assertRaises(run.Refused):
+            practice.test_set(cards, 5)  # only 4 that are not grown
+
+    def test_a_test_set_of_every_customer_is_refused(self):
+        cards = [{"id": f"persona-{i:02d}", "kind": "easy", "unwinnable": False} for i in range(1, 6)]
+        self.assertEqual(len(practice.test_set(cards, 4)), 4)
+        with self.assertRaises(run.Refused) as got:
+            practice.test_set(cards, 5)
+        self.assertIn("leave at least one to practise on", str(got.exception))
+
     def test_too_few_or_too_many_test_customers_are_refused(self):
         cards, _ = madeup.for_agent(self.root / "y", "coffee_caption_writer", THREE["coffee_caption_writer"]["card"],
                                     Writer(), count=20)

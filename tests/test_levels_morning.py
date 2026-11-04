@@ -131,6 +131,8 @@ class ConnectOnTheAgentsLevel(Page):
         self.assertTrue(self.passed())
         self.item(run="r2", gate_won=13, gate_played=20, gate_size=20, needs=16, failed_checks=0, level="high")
         self.assertFalse(self.passed())
+        self.item(run="r3", gate_won=15, gate_played=15, gate_size=20, needs=16, failed_checks=0, level="high")
+        self.assertFalse(self.passed())  # cut short at 15 of its 20: the gate must be whole
 
     def test_a_trust_file_of_one_match_never_unlocks(self):
         for level in levels.ORDER:  # a sealed full run whose trust file asked for one match, won
@@ -148,6 +150,12 @@ class ConnectOnTheAgentsLevel(Page):
         self.assertFalse(self.passed())
         self.item(run="r3", gate_won=10, gate_played=10, gate_size=10, needs=5, failed_checks=0, signed=False)
         self.assertFalse(self.passed())
+
+    def test_a_sealed_run_that_does_not_say_it_was_full_never_counts(self):
+        levels.write(self.folder, "low")
+        self.item(gate_won=10, gate_played=10, gate_size=10, needs=5, failed_checks=0, quick=None)
+        self.assertFalse(self.passed())
+        self.assertIn("does not say it was a full run", self.m.gate("stock_watch")["said"])
 
     def test_the_tab_fields_are_read_and_checked(self):
         self.item(kind="arena_stuck", gate_won=3, gate_played=10, gate_size=10, needs=7, level="medium",

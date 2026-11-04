@@ -340,7 +340,12 @@ def no_judge(text, high_about, low_about):
 def classify(text, risk, judge=no_judge, *, sources=()):
     """(HIGH or LOW, the lines that decided it). Code check first, with no tool marks (a lesson
     that names a tool is not high for that alone), then the judge. sources: the texts of the
-    cases the lesson came from, when known."""
+    cases the lesson came from, when known.
+
+    Fail closed: a lesson the code check does not mark is LOW only when the judge answers the plain
+    string "low". An unsure, missing or unreadable answer (any other value or type) and a judge that
+    raises make it HIGH. The plug's word lists are a first net of clear money words; meaning is the
+    judge's job (engfix round 3)."""
     found = code_check(text, risk, sources, tools=False)
     if found:
         return HIGH, found
@@ -348,8 +353,8 @@ def classify(text, risk, judge=no_judge, *, sources=()):
         answer = judge(text, risk.high_about, risk.low_about)
     except Exception as e:  # a judge that fails is not sure
         return HIGH, [f"judge failed ({type(e).__name__}), counted as high"]
-    if answer == LOW:
+    if type(answer) is str and answer == LOW:
         return LOW, ["judge: low"]
-    if answer == HIGH:
+    if type(answer) is str and answer == HIGH:
         return HIGH, ["judge: high"]
     return HIGH, [f"judge: {UNSURE if answer == UNSURE else 'no clear answer'}, counted as high"]

@@ -288,7 +288,7 @@ class Lock(Base):
         self.assertTrue(self.held_by().startswith("page:stock_watch:"))
         ran = []
         sched = scheduler.Scheduler(self.db, str(self.dir / "ascent.db"), when=(3, ZoneInfo("Africa/Cairo")),
-                                    run=lambda *a: ran.append(a) or 0, find=lambda: [("sales", "x")])
+                                    run=lambda *a, **k: ran.append(a) or 0, find=lambda: [("sales", "x")])
         got = sched.once()
         self.assertTrue(got["locked"])
         self.assertEqual(ran, [])

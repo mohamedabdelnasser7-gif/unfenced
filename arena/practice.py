@@ -416,8 +416,8 @@ class Practice(run.Arena):
         judged["failed_check"] = failed_check(judged)  # counted per gate round (arena/run.py Arena.run)
         m.update(id=match_id, won=judged["won"], why=judged["why"], quote=judged["quote"], persona=card,
                  prompt_sha=self.prompt_sha, prompt_file=None)
-        if not judged["won"]:
-            self.lost.append({"card": m["card"], "why": judged["why"], "quote": judged["quote"]})
+        if not judged["won"] and training:  # only practice matches: the item's lost, what Try again plays (81)
+            self.lost.append({"id": match_id, "card": m["card"], "why": judged["why"], "quote": judged["quote"]})
         self.state.mkdir(parents=True, exist_ok=True)
         with open(self.state / run.MATCHES_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(m, ensure_ascii=False) + "\n")
@@ -492,9 +492,12 @@ class Practice(run.Arena):
 
     def _write_item(self, item):
         item.update(made_up=self.made_up, practice=True)
-        if not item.get("lost"):
-            item["lost"] = self.lost[-3:]
         rounds = self.played_rounds
+        # the last round's lost practice matches, never a test match, so the tab's tiles, Correct this and
+        # Try again work on practice customers only (decisions 81 and 85)
+        last_round = f"{self.run_id}-r{len(rounds)}-t"
+        item["lost"] = [{k: x[k] for k in ("card", "why", "quote")} for x in self.lost
+                        if str(x["id"]).startswith(last_round)]
         last = rounds[-1]["gate"] if rounds else {}
         item.setdefault("quick", self.quick)  # a stuck item too, so Morning.gate reads it the same way
         item.setdefault("stopped", run.STUCK if item.get("kind") == "arena_stuck" else None)
@@ -623,7 +626,7 @@ def write_test(folder, entries):
 
 def trained(folder):
     """{(card id, fingerprint)} of every match on record in the folder's arena-matches.jsonl that is not a
-    test match: the people that played a training match (a quick run's and Try again's too). A line
+    test match: the people that played a training match (a quick run's too). A line
     that cannot be read is skipped, as every reader of the file does; a file that is there but cannot
     be read is run.Refused (fail closed)."""
     path = Path(folder) / run.MATCHES_FILE

@@ -110,6 +110,26 @@ class TryAgainBuilt(Tab):
         self.assertGreater(calls["calls"], before)  # counted beside the database, as its practice runs are
         self.assertFalse(self.m.gate("stock_watch")["passed"])  # a try never unlocks Connect
 
+    def test_it_plays_the_last_rounds_lost_practice_matches_never_a_test_customer(self):
+        from arena import practice
+        lose = World(reached=False)  # every match lost: practice and test alike
+        self.m.arena_models = lambda: (lose, lose, lose)
+        self.m.arena_shape = {"matches": 2, "rounds": 1}
+        self.m.run_arena("stock_watch")
+        self.starts.pop()[0]()
+        test = {e["id"] for e in json.loads((self.folder / practice.TEST_FILE).read_text(encoding="utf-8"))["test"]}
+        self.assertEqual(len(test), 10)
+        item = self.m.read_arena()[0]["stock_watch"]
+        self.assertTrue(item["lost"])
+        self.assertFalse({x["card"] for x in item["lost"]} & test)
+        self.m.retry_models = lambda: (lose, lose, lose)
+        self.m.retry_start = lambda work, name: work()
+        self.m.try_again("stock_watch")
+        self.assertIsNone(self.m.try_note("stock_watch"))
+        played = [r["card"] for r in self.m.read_arena()[0]["stock_watch"]["retry"]["results"] if r["result"] != "not_played"]
+        self.assertTrue(played)
+        self.assertFalse(set(played) & test)
+
     def test_a_folder_that_is_gone_is_refused(self):
         import shutil
         self.item(gate_won=0, gate_played=10, gate_size=10, needs=7,

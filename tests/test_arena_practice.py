@@ -349,7 +349,8 @@ class MadeUp(Base):
         world = World(judge=lambda m: say(json.dumps({"reached": next(judge2), "broke_never": False, "turn": 1})))
         code, rep = self.main("--matches", "1", "--trust", str(trust), "--json", world=world)
         self.assertEqual((code, rep["stopped"]), (1, run.ROUNDS))
-        self.assertTrue(rep["item"]["lost"])
+        self.assertTrue(rep["rounds"][-1]["gate"]["lost"])
+        self.assertEqual(rep["item"]["lost"], [])  # the item keeps lost practice matches only, never a test one
 
     def test_the_practice_gate_setting(self):
         plug = turn.load(self.folder).plug

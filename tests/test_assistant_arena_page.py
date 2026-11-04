@@ -180,7 +180,7 @@ class NoConnect(Base):
         self.assertIn(case.SAID, page)
         self.assertIn(mo.ARENA_RUN_NO_CHANNEL, page)
         self.assertIn(f'action="{pages.ARENA_PATH}"', page)
-        self.assertIn(pages.STATUS_SAID["Training"], page)
+        self.assertIn(pages.STATUS_SAID["In practice"], page)
         self.assertIn(case.DATA_LINE, page)  # its demo mailbox and calendar, labelled as sample data
         self.assertNotIn(pages.OFFERS_HEAD, page)  # no offers box: it sells nothing
 

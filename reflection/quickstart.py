@@ -1095,7 +1095,9 @@ class QuickStart:
         the Arena tab's Run the Arena makes: the agent's level shape, new matches, the gate, under the day's
         cap; DECISIONS 104 item 6) in a background thread, so the page never waits. Only with the real model:
         Quick start with a model handed in (a test's) starts none and returns None. No key, or a first run
-        already going, returns its one line and starts nothing."""
+        already going, returns its one line and starts nothing. While it plays it counts as the agent's run
+        going (Morning.arena_hold, released when it ends), so the Arena tab and the console show its matches
+        as Run the Arena's."""
         if self._model is not None:
             return None
         if not model_mod.has_key():
@@ -1108,14 +1110,25 @@ class QuickStart:
                 return PRACTICE_BUSY
             self._running.add(agent)
             self._practice[agent] = PRACTISING
-        threading.Thread(target=self._practise, args=(folder / AGENTS / agent, agent, getattr(m, "db_path", None)),
-                         name=f"practice-{agent}", daemon=True).start()
+        agent_folder = folder / AGENTS / agent
+        held = m if hasattr(m, "arena_hold") and m.arena_hold(agent, agent_folder) else None
+        try:
+            threading.Thread(target=self._practise, args=(agent_folder, agent, getattr(m, "db_path", None), held),
+                             name=f"practice-{agent}", daemon=True).start()
+        except Exception:
+            if held is not None:
+                held.arena_release(agent)
+            with self._practice_lock:
+                self._running.discard(agent)
+                self._practice.pop(agent, None)
+            raise
         return PRACTISING
 
-    def _practise(self, agent_folder, agent, db_path):
+    def _practise(self, agent_folder, agent, db_path, held=None):
         """The thread's work: the first Arena run, then the agent's line says how it went. Never raises. As
         Morning.run_arena runs it full: with this page's database, each lost match becomes a case there and
-        the run studies between rounds with the night's models (none when their keys are missing: one round)."""
+        the run studies between rounds with the night's models (none when their keys are missing: one round).
+        held: the Morning that counts it as the agent's run going (arena_hold), released at the end."""
         db = None
         try:
             from arena import practice
@@ -1145,6 +1158,11 @@ class QuickStart:
             if db is not None:
                 try:
                     db.close()
+                except Exception:
+                    pass
+            if held is not None:
+                try:
+                    held.arena_release(agent)
                 except Exception:
                     pass
         with self._practice_lock:

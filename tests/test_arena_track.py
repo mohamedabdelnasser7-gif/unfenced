@@ -337,7 +337,7 @@ class Revise(unittest.TestCase):
     def test_a_version_that_fails_changes_nothing(self):
         self.result = engine_exam.Result(False, [engine_exam.Row(2, "s2", "guard", False, "tone", "too long")], calls=1)
         said = self.m.revise(self.live, "Water the grown beds at dusk.", now=self.tm.NOW + 1)
-        self.assertEqual(said, mo.REVISE_FAILED.format(line="failed the exam: situation 2, check tone", id=self.live))
+        self.assertEqual(said, mo.REVISE_FAILED.format(line="failed the exam on situation 2: too long", id=self.live))
         self.unchanged()
 
     def test_an_exam_that_cannot_run_changes_nothing(self):

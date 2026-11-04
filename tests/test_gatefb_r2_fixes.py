@@ -350,8 +350,10 @@ class CloseLineWithAFailedExam(unittest.TestCase):
         (Path(folder.name) / f"night-{self.plug.agent}-{until}.json").write_text(json.dumps(rep), encoding="utf-8")
         page = morning.render(morning.Morning(self.db, [self.plug], reports=folder.name).view(fk.NOW + fk.DAY),
                               token="t0ken")
-        why = f"It {card['exam']}. It comes {close}. Yes on this card starts it anyway."
+        # the page says the check's why, never its name (polish item 5); the night report keeps the name
+        why = f"It failed the exam on situation 2: it watered the shade. It comes {close}. Yes on this card starts it anyway."
         self.assertIn(morning.h(why), page)
+        self.assertNotIn("no_shade", page.split("</style>")[1])
 
     def test_a_pulled_line_is_named_beside_a_failed_exam_too(self):
         card = {"state": WAITING, "exam": "failed the exam: situation 2, check no_shade",

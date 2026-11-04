@@ -183,6 +183,10 @@ class Result:
         """The line a held lesson shows: "failed the exam: situation N, check X"; "" when passed."""
         return fail_line(self.first) if not self.passed else ""
 
+    def plain_line(self):
+        """line() for a page the owner reads (plain_fail_line): the failed check's why, never its name."""
+        return plain_fail_line(self.first) if not self.passed else ""
+
 
 def fail_line(row):
     if row is None or row.situation is None:
@@ -192,6 +196,16 @@ def fail_line(row):
     if row.check == ROUND:  # its number counts the practice round's matches
         return f"failed the practice round, at match {row.situation}"
     return f"failed the exam: situation {row.situation}, check {row.check}"
+
+
+def plain_fail_line(row):
+    """fail_line in plain words, for the pages the owner reads: the failed check's why in place of its
+    name ("failed the exam on situation 26: <the check's why>"). The console and
+    the reports keep fail_line, with the name."""
+    if row is None or row.situation is None or row.check in (RERUN, ROUND):
+        return fail_line(row)
+    why = _one_line(row.why or "").rstrip(".")
+    return f"failed the exam on situation {row.situation}: {why or 'it did not do what the situation asks'}"
 
 
 def could_not_run(why):
@@ -683,6 +697,16 @@ def held_line(row):
     if not row or row["passed"]:
         return ""
     return fail_line(Row(row["situation"], "", "", False, row["check_name"] or ""))
+
+
+def plain_held_line(row):
+    """held_line in plain words (plain_fail_line): the first failed check's why, never its name; "" when
+    it passed or has none."""
+    if not row or row["passed"]:
+        return ""
+    why = row.get("why") or next((f.get("why") for f in fails_of(row) if f.get("situation") == row["situation"]
+                                  and f.get("why")), "")  # the saved why is the same row's as situation's
+    return plain_fail_line(Row(row["situation"], "", "", False, row["check_name"] or "", str(why)))
 
 
 def _one_line(text):

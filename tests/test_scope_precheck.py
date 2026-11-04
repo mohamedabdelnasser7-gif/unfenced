@@ -19,6 +19,7 @@ from kit.model import ModelError
 from reflection import PLUG as SALES
 from reflection.results import Results
 from tests import plugs
+from tests import study_fakes as fk
 from tests.test_learn_built import ticket_plug
 from tests.test_off_topic import GROCER, LEAD, TUTOR, Model, fake_match, verdict
 
@@ -241,6 +242,31 @@ class TheScopeKind(unittest.TestCase):
         self.assertTrue(les["source"].startswith(study_mod.SCOPE_SOURCE.format(agent=self.plug.agent)))
         self.assertEqual(les["stages"], ["all"])
         for sample in proposer.samples:  # the proposer never reads a scope case
+            self.assertNotIn("poem", json.dumps(sample, ensure_ascii=False))
+
+    def test_the_night_counts_its_scope_cases(self):
+        """review scopeguard2 r3, item 6: the scope cases are counted in what the night read, only the decline line
+        reads them."""
+        self.write_night()
+        rep, _ = self.night(Proposer())
+        self.assertEqual(rep["read"]["cases"], 12)
+
+    def test_another_agents_study_counts_its_scope_cases_and_never_reads_them(self):
+        """review scopeguard2 r3, item 6: an agent learning from this one (_across) counts its scope cases in what
+        it read, but its proposer never sees one."""
+        self.write_night()
+        for n in range(6):  # six lost matches of its own customers, for the proposer to read
+            learn_built.to_case(self.db, self.plug, own_match(f"l{n}"), LOSS, f"20270115T10000{n}-r1-t02",
+                                now=self.now - 3600 * (n + 1))
+        fan = plugs.load(plugs.FAN, self)
+        proposer = Proposer()
+        st = study_mod.Study(self.db, fan, proposer=proposer, tagger=tagger, fit=fk.Fit(), adapter=fk.Adapter(),
+                             others=[self.plug], lessons=Lessons(self.db, fan, judge=lambda *a, **k: "low"))
+        rep = st.run(self.now - 30 * 86400, self.now + 1, now=self.now + 2)
+        entry = next(e for e in rep["across"] if e["agent"] == self.plug.agent)
+        self.assertEqual(entry["read"]["cases"], 18)
+        self.assertTrue(proposer.samples)
+        for sample in proposer.samples:
             self.assertNotIn("poem", json.dumps(sample, ensure_ascii=False))
 
     def test_the_decline_line_is_written_once(self):

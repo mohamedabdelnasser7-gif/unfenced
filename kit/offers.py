@@ -19,6 +19,12 @@ Kinds and the keys each reads:
 - choice: nothing to work out; a line the agent may offer (a cheaper option).
 A line's keys are the store lines' own keys (type, tier, size); {"has": key} means the line has that key.
 
+Pre-order (decision 108, 2026-11-04): "preorder" beside the offers, {"what", "terms", "when",
+"down_payment_percent", "days", "names", "covers"}, lets a customer order an item that is out of stock with a
+down payment share now and the rest on delivery, delivered within days (the zone's days when it gives none).
+It is a store rule, not an offer: it never takes the order's offer slot. An offers list may hold it as a line
+of kind "preorder" (a Build card's list), lifted out here. No rule, no pre-order: out of stock stays refused.
+
 Totals (apply): each qualifying offer's saving is worked out alone. A kind whose stack_counts is false always
 applies; the rest are cut to max_stack by pick (most saved first, a tie to the one listed first; or the
 listed order). With payment_takes_slot, a payment offer whose method is the order's payment takes the first
@@ -57,9 +63,16 @@ PICKS = ("most_saved", "listed")
 WHICH = ("cheaper", "dearer")
 HAS = "has"
 HIDDEN = ("names", "covers")   # never in a tool result: the words the send check reads
+PREORDER = "preorder"          # the rule's key, the kind of its line in an offers list, and its id among given ones
+# Words that talk about a pre-order when the rule names none of its own; the send check reads them.
+PREORDER_WORDS = ("pre-order", "preorder", "pre order", "pre-ordered", "down payment", "deposit", "حجز", "تحجز",
+                  "تحجزه", "تحجزها", "احجز", "نحجز", "هحجز", "مقدم", "عربون", "طلب مسبق")
 
 PROMPT_LINE = ("Offer only what a tool lists under offers, when its when line fits; never make up a discount, "
                "a percent or a payment method.")
+
+PREORDER_LINE = ("Offer a pre-order only for an item the store tool marks out, on the terms of its preorder line: "
+                 "its down payment share and its days; never make up a down payment or a pre-order time.")
 
 # The offers of the agent this turn runs (kit/turn.py sets them, EMPTY when it has none). Unset means the
 # Sales agent, whose offers are the store data's (demo/offers.json).
@@ -161,14 +174,42 @@ def _offer(raw):
     return o
 
 
+def _preorder(raw):
+    """The clean pre-order rule, or None when it has no down payment share from 1 to 100."""
+    if not isinstance(raw, dict):
+        return None
+    share = _num(raw.get("down_payment_percent"), 1, 100)
+    if share is None:
+        return None
+    rule = {"what": line(raw["what"], MAX_LINE) if isinstance(raw.get("what"), str) and line(raw["what"], MAX_LINE)
+            else "Pre-order an item that is out of stock", "down_payment_percent": share}
+    days = _num(raw.get("days"), 1, 120, whole=True)
+    if days is not None:
+        rule["days"] = days
+    for k in ("terms", "when"):
+        if isinstance(raw.get(k), str) and line(raw[k], MAX_LINE):
+            rule[k] = line(raw[k], MAX_LINE)
+    for k in ("names", "covers"):
+        words = _words(raw.get(k))
+        if words:
+            rule[k] = words
+    return rule
+
+
 def clean(raw):
     """Offers data with every field checked and capped. raw is the whole data, or a list of offer lines
-    (a Build card's), which get the defaults. Offers with no id get one from their place in the list."""
+    (a Build card's), which get the defaults. Offers with no id get one from their place in the list. A line
+    of kind preorder is lifted out as the pre-order rule (the first one; a "preorder" key wins)."""
     if isinstance(raw, list):
         raw = {"offers": raw}
     if not isinstance(raw, dict):
         raw = {}
     out = json.loads(json.dumps(EMPTY))
+    listed = raw.get("offers") if isinstance(raw.get("offers"), list) else []
+    lifted = next((o for o in listed if isinstance(o, dict) and o.get("kind") == PREORDER), None)
+    rule = _preorder(raw.get(PREORDER)) or _preorder(lifted)
+    if rule:
+        out[PREORDER] = rule
     n = _num(raw.get("max_stack"), 1, MAX_STACK, whole=True)
     if n is not None:
         out["max_stack"] = n
@@ -216,7 +257,7 @@ def read(folder_or_path):
     if not isinstance(d, (dict, list)):
         return None
     got = clean(d)
-    return got if got["offers"] or got["payment_methods"] else None
+    return got if got["offers"] or got["payment_methods"] or got.get(PREORDER) else None
 
 
 def text_of(data):
@@ -303,15 +344,53 @@ def percents(data):
 
 def for_check(data, given):
     """What the send check's offers rule reads (kit/send_check.py offer_problems): the offer ids a tool gave
-    in this chat that are in data, their percents, every offer's words and the talk words. None when data
-    has no offers, so an agent with none is not held to the rule."""
-    if not data or not data.get("offers"):
+    in this chat that are in data, their percents, every offer's words and the talk words; with a pre-order
+    rule, "preorder": whether a tool gave it in this chat, its words and its days, and its down payment share
+    among the percents once given. None when data has no offers and no pre-order rule, so an agent with
+    neither is not held to the rule."""
+    if not data or not (data.get("offers") or data.get(PREORDER)):
         return None
-    ids = {o["id"] for o in data["offers"]}
-    given = {i for i in (given or ()) if i in ids}
-    return {"given": given,
-            "percents": percents({"offers": [o for o in data["offers"] if o["id"] in given]}),
-            "words": mention_words(data), "talk": talk_words(data)}
+    offers = data.get("offers") or []
+    ids = {o["id"] for o in offers}
+    raw = set(given or ())
+    given = {i for i in raw if i in ids}
+    out = {"given": given, "percents": percents({"offers": [o for o in offers if o["id"] in given]}),
+           "words": mention_words(data), "talk": talk_words(data)}
+    rule = preorder(data)
+    if rule:
+        got = PREORDER in raw
+        out[PREORDER] = {"given": got, "words": preorder_words(data), "days": rule.get("days")}
+        if got:
+            out["percents"] = out["percents"] | {Decimal(str(rule["down_payment_percent"]))}
+    return out
+
+
+def preorder(data):
+    """The store's pre-order rule, or None when it has none."""
+    return (data or {}).get(PREORDER) or None
+
+
+def preorder_for_tool(data):
+    """The pre-order line a tool gives the model: no names or covers. None with no rule."""
+    rule = preorder(data)
+    return {k: v for k, v in rule.items() if k not in HIDDEN} if rule else None
+
+
+def preorder_words(data):
+    """The words that talk about a pre-order: the rule's names, else PREORDER_WORDS."""
+    rule = preorder(data) or {}
+    return list(dict.fromkeys(rule.get("names") or PREORDER_WORDS))
+
+
+def down_payment(total, data):
+    """(down payment now, the rest on delivery) for a pre-order of this total, as Decimals: the rule's share
+    rounded to round_to, half up, the way discounts are. None with no rule."""
+    rule = preorder(data)
+    if not rule:
+        return None
+    total = _dec(total)
+    down = min(_round(total * _dec(rule["down_payment_percent"]) / 100, data.get("round_to", 1)), total)
+    return down, total - down
 
 
 def payment_methods(data):

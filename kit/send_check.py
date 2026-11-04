@@ -58,6 +58,10 @@ Rules (from the store rules, the 27 Oct morning review and Mohamed's calls on 28
    a reply may name only an offer a tool gave in this chat (its id's words or its names), may use an
    offer talk word (discount, خصم) only once some offer was given, and may give a percent only when a
    given offer has it. The words come from the offers data, never from this code.
+   Pre-order (decision 108): with a store pre-order rule, a reply may talk about a pre-order or a down
+   payment (the rule's words) only once a tool gave the rule or a pre-order draft in this chat; its down
+   payment share then counts as a given percent, and a sentence that talks about a pre-order may give only
+   the rule's days.
 """
 import functools
 import math
@@ -668,7 +672,7 @@ def _links(reply, links):
     return out, list(dict.fromkeys(wrong))
 
 
-AMOUNT_KEYS = frozenset({"price", "fee", "total", "subtotal", "discount"})
+AMOUNT_KEYS = frozenset({"price", "fee", "total", "subtotal", "discount", "down_payment", "rest_on_delivery"})
 AMOUNT_TEXT = re.compile(r"\s*\d[\d,]*(?:\.\d+)?\s*")
 
 
@@ -1439,6 +1443,11 @@ PERCENT = re.compile(r"(?<![\d.,])(?P<a>\d+(?:[.,]\d+)?)\s*(?:%|٪|percent\b|per
 NO_OFFER = "That offer was not given by a tool in this chat: {}."
 NO_OFFER_TALK = "No tool gave an offer in this chat, so do not talk about a discount or an offer."
 NO_PERCENT = "No offer a tool gave has this percent: {}."
+NO_PREORDER = "No tool gave a pre-order in this chat, so do not offer a pre-order or a down payment."
+NO_PREORDER_DAYS = "A pre-order is delivered within {} days, as the store tool gives it: {} days is not that."
+PREORDER_RULE = "Offer a pre-order, a down payment or a pre-order delivery time only as a tool gave it in this chat."
+PRE_DAYS = re.compile(r"(?<![\d.])(\d{1,3})\s*(?:(?:-|to|or|او|أو|الى|إلى|ل)\s*(\d{1,3})\s*)?"
+                      r"(?:(?:working|business)\s+)?(?:days?|يوم|أيام|ايام|yom|youm|ayam)(?!\w)", re.IGNORECASE)
 
 
 def _offer_tokens(text):
@@ -1491,7 +1500,30 @@ def offer_problems(reply, offers):
         out.append(NO_PERCENT.format(", ".join(f"{p:f}%" for p in wrong)))
     if out:
         out.append(OFFERS_RULE)
-    return out
+    return out + preorder_problems(reply, offers.get("preorder"))
+
+
+def preorder_problems(reply, rule):
+    """The pre-order part of the offers rule, [] when it passes or the store has no pre-order rule. rule:
+    {"given": a tool gave it in this chat, "words": the words that talk about a pre-order, "days": its days or
+    None}."""
+    if not rule:
+        return []
+    words = rule.get("words") or ()
+    sentences = [s for s in re.split(r"(?<!\d)[.!?؟\n]+|[.!?؟\n]+(?!\d)", reply or "")
+                 if any(_has_words(_offer_tokens(s), w) for w in words)]
+    if not sentences:
+        return []
+    if not rule.get("given"):
+        return [NO_PREORDER, PREORDER_RULE]
+    days = rule.get("days")
+    if not days:
+        return []
+    said = sorted({int(n) for s in sentences for m in PRE_DAYS.finditer(western_digits(s)) for n in m.groups() if n}
+                  - {int(days)})
+    if said:
+        return [NO_PREORDER_DAYS.format(days, ", ".join(map(str, said))), PREORDER_RULE]
+    return []
 
 
 def style_problems(text):

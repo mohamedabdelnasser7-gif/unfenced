@@ -381,6 +381,8 @@ def system_prompt(agent, lessons=(), note=""):
                                                          offers=agent.full_check and _offers_for(agent, ()) is not None)]
     if agent.offers and agent.offers.get("offers"):
         parts.append(offers_mod.PROMPT_LINE)
+    if agent.offers and offers_mod.preorder(agent.offers):   # its pre-order rule, decision 108
+        parts.append(offers_mod.PREORDER_LINE)
     picked = slot(agent.plug, list(lessons))
     if picked:
         parts.append(picked)

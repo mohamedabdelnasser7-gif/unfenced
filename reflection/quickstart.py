@@ -319,7 +319,7 @@ The card:
 - bad: one plain sentence on what a bad result looks like for one case.
 - never: one to four short lines, each a thing it never does.
 - needs: what it needs connected or handed over, each {{"what": a few plain words, "tool": one key from the list below, or "" when nothing there fits, "ask": true only when no tool or file holds it and only they can tell it (their preferences, allergies, household size, working hours, their own rules), else false}}. A tool fits only when it does that very thing; a need on another service (a courier, another app or site) gets "" even when a tool does something close, and its "what" names that service.
-- offers: what the agent may offer a customer who hesitates, only what they said they can give (for an agent that does not sell: what it may give), at most {most_offers}, each {{"what": a few plain words, "terms": its terms in a short phrase, "when": when it fits, as a short phrase, "kind": "payment" (a way to pay, like installments), "delivery" (a delivery deal), "addon" (something free with an item), "nth_item" (a deal on a second item) or "choice" (anything else, like a cheaper option), "percent_off": the percent as a number, only when it gives one, "covers": a few words for the worries it meets}}. An empty list until they say one; never make one up.
+- offers: what the agent may offer a customer who hesitates, only what they said they can give (for an agent that does not sell: what it may give), at most {most_offers}, each {{"what": a few plain words, "terms": its terms in a short phrase, "when": when it fits, as a short phrase, "kind": "payment" (a way to pay, like installments), "delivery" (a delivery deal), "addon" (something free with an item), "nth_item" (a deal on a second item) "choice" (anything else, like a cheaper option) or "preorder" (an item that is out of stock can still be ordered with a down payment; at most one), "percent_off": the percent as a number, only when it gives one, for a preorder "down_payment_percent": the share paid now and "days": the delivery days for it, as numbers, only when they say them, "covers": a few words for the worries it meets}}. An empty list until they say one; never make one up.
 
 Tools that can be connected today:
 {tools}
@@ -471,18 +471,25 @@ def clean_card(raw, need_case=True):
 
 
 OFFER_KEYS = ("what", "terms", "when", "kind", "percent_off", "covers")  # what the card writer gives an offer
+PREORDER_KEYS = ("what", "terms", "when", "down_payment_percent", "days", "covers")  # and a pre-order line (decision 108)
 
 
 def card_offers(raw):
     """The card's offers, cleaned by kit/offers.py (plain capped lines, a known kind, numbers checked), at most
-    MOST_OFFERS, each with only the keys the card writer gives plus the id the cleaner sets. [] for none."""
+    MOST_OFFERS, each with only the keys the card writer gives plus the id the cleaner sets, and a pre-order
+    rule last as a line of kind preorder (decision 108). [] for none."""
     if not isinstance(raw, list):
         return []
     def plain(v):  # the card's own line rule first (no dashes), then kit/offers.py's caps
         return line(v, offers_mod.MAX_LINE) if isinstance(v, str) else [plain(x) for x in v] if isinstance(v, list) else v
-    lines = [{k: plain(v) for k, v in o.items() if k in OFFER_KEYS} for o in raw[:MOST_OFFERS] if isinstance(o, dict)]
-    return [{k: v for k, v in o.items() if k in OFFER_KEYS or k == "id"}
-            for o in offers_mod.clean(lines)["offers"]]
+    lines = [{k: plain(v) for k, v in o.items() if k in OFFER_KEYS or k in PREORDER_KEYS}
+             for o in raw[:MOST_OFFERS] if isinstance(o, dict)]
+    got = offers_mod.clean(lines)
+    out = [{k: v for k, v in o.items() if k in OFFER_KEYS or k == "id"} for o in got["offers"]]
+    rule = offers_mod.preorder(got)
+    if rule:  # kept as a line of kind preorder, which kit/offers.py clean lifts out again when written
+        out.append({"kind": offers_mod.PREORDER, **{k: v for k, v in rule.items() if k in PREORDER_KEYS}})
+    return out
 
 
 def kind_word(v):

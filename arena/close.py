@@ -94,6 +94,8 @@ def judge(match, card, data, model, facts=True):
     if not any(store.NAME in (t.get("tools") or []) for t in turns):
         return {"won": False, "why": f"{NOT_CLOSED}: {NO_STORE}", "quote": _quote(turns[-1]["n"], "agent", _did(turns[-1]))}
     ask = {"offers": kit_offers.for_tool(data), "customer_came_for": _need(card), "played": good._chat(match)}
+    if kit_offers.preorder_for_tool(data):   # a real option too, so offering it is never a made-up offer (decision 108)
+        ask["preorder"] = kit_offers.preorder_for_tool(data)
     out = model.chat([{"role": "system", "content": SYSTEM},
                       {"role": "user", "content": json.dumps(ask, ensure_ascii=False)}],
                      effort=EFFORT, max_tokens=MAX_TOKENS)

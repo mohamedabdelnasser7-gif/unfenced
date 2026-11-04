@@ -42,9 +42,13 @@ def check(args, ctx):
 
 def run(args, ctx):
     gives = offers.for_tool(offers.own())
+    rule = offers.preorder_for_tool(offers.own())   # its pre-order rule, decision 108
     data = getattr(ctx, "data", None)
-    if not data and gives:
-        return {"ok": True, "about": "what this agent may give", "rows": [], "offers": gives}
+    if not data and (gives or rule):
+        out = {"ok": True, "about": "what this agent may give", "rows": [], "offers": gives}
+        if rule:
+            out[offers.PREORDER] = rule
+        return out
     if not data:
         return {"ok": False, "feedback": "This agent has no data yet."}
     rows = sample.rows_of(data)
@@ -64,6 +68,8 @@ def run(args, ctx):
         out["note"] = note
     if gives:
         out["offers"] = gives
+    if rule:
+        out[offers.PREORDER] = rule
     return out
 
 

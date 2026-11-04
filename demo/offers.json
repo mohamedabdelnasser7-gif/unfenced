@@ -1,5 +1,5 @@
 {
- "source": "Beyond the Limits offers, the owner's words of 2026-11-04 (decision 105); demo store, not a real one",
+ "source": "Beyond the Limits offers, the owner's words of 2026-11-04 (decision 105) and its pre-order rule (decision 108); demo store, not a real one",
  "max_stack": 1,
  "stack_counts": {"delivery": false},
  "pick": "most_saved",
@@ -8,6 +8,12 @@
  "round_to": 1,
  "payment_methods": ["cash", "card", "valu"],
  "offer_talk": ["discount", "offer", "sale", "promo", "promotion", "coupon", "خصم", "عرض", "تخفيض", "اوكازيون", "كوبون", "5asm", "khasm", "3ard"],
+ "preorder": {"what": "Pre-order a size that is out of stock",
+  "terms": "20% down payment now, the rest on delivery, delivery within 7 days",
+  "when": "the size the customer wants is out of stock",
+  "down_payment_percent": 20, "days": 7,
+  "names": ["pre-order", "preorder", "pre order", "pre-ordered", "down payment", "deposit", "حجز", "تحجز", "تحجزه", "تحجزها", "احجز", "نحجز", "هحجز", "مقدم", "عربون", "طلب مسبق", "7a2gez", "mo2adam"],
+  "covers": ["out of stock", "sold out", "not available", "pre-order", "preorder", "خلص", "مش متوفر", "غير متوفر", "مش موجود", "نفذ", "حجز"]},
  "offers": [
   {"id": "valu_3m", "kind": "payment", "method": "valu", "months": 3,
    "what": "Pay in installments through valU", "terms": "3 months, no interest, no minimum order",

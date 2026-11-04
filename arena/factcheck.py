@@ -44,10 +44,13 @@ stock     a reply that says a named product (and size, when it gives one) is ava
           fails when the store gives no stock data for it (Arena run 20261104T143545, cause 7: an
           untracked variant has no stock field, kit/tools/store.py). Left out: an extra, a question,
           a clause about delivery or payment, and an unsure clause ("I cannot confirm stock",
-          "مش متأكد", "mesh met2aked"), so the honest answer passes.
+          "مش متأكد", "mesh met2aked"), so the honest answer passes. "Available for pre-order"
+          ("متاح للحجز") claims no stock (decision 108): "size 43 is out of stock, you can pre-order
+          it with 20% down" passes when 43 is out.
 delivery  an amount in a sentence about delivery is a delivery fee (the named governorate's
           zone fee when the reply names one); a count of days there sits inside the zones' days
-          (the named zone's when it names one). A count of days an exchange or return word governs
+          (the named zone's when it names one), or within the store's pre-order days in a sentence
+          that talks about a pre-order (decision 108). A count of days an exchange or return word governs
           (exchange_days) is the exchange window, not a delivery time. Every fee is the zone's fee
           after the store's delivery offer (kit/offers.py delivery_fee, 2026-11-04): under free
           delivery it is 0, so the zone's old fee is no fact and fails.
@@ -127,6 +130,9 @@ PAYMENT = re.compile(r"(?<!\w)(?:cash|payment|pay|cod|الدفع|كاش|دفع|�
 DELIVERY = re.compile(r"(?<!\w)(?:شحن|الشحن|توصيل|التوصيل|delivery|shipping|tawseel|sha7n|courier)(?!\w)", re.IGNORECASE)
 DAYS = re.compile(r"(?<![\d.])(\d{1,2})\s*(?:(?:-|to|او|أو|ل|الى|إلى|و|or)\s*(\d{1,2})\s*)?"
                   r"(?:(?:working|business)\s+)?(?:days?|يوم|أيام|ايام|yom|youm|ayam)(?!\w)", re.IGNORECASE)
+# An available word followed by a pre-order ("available for pre-order", "متاح للحجز") claims no stock (decision 108).
+AS_PREORDER = re.compile(r"\s*(?:(?:for|to|as|on|by)\s+)?(?:an?\s+)?(?:pre[\s-]?order)|\s*(?:لل|بال|ك)?حجز|"
+                         r"\s*(?:لل|بال)?طلب\s+(?:ال)?مسبق", re.IGNORECASE)
 TWO_DAYS = re.compile(r"(?<!\w)(?:يومين|yomein|youmein)(?!\w)", re.IGNORECASE)
 # an exchange, return or swap word: a count of days it governs is the exchange window, not a delivery time
 # ("ممكن تبدل المقاس خلال 14 يوم", Arena run 2026-10-31)
@@ -563,6 +569,10 @@ def check(reply, customer_text="", tool_results=(), orders=()):
             failed.append({"check": "delivery", "why": f"{a} is not the delivery fee for {zone or 'any zone'}"})
         low = min(z["days_min"] for z in mine)
         high = max(z["days_max"] for z in mine)
+        rule = offers.preorder(offers.current())
+        if rule and rule.get("days") and any(send_check._has_words(send_check._offer_tokens(sentence), w)
+                                             for w in offers.preorder_words(offers.current())):
+            high = max(high, rule["days"])   # a pre-order comes within the rule's days (decision 108)
         spans = [(int(m.group(1)), int(m.group(2) or m.group(1))) for m in DAYS.finditer(sentence)
                  if not exchange_days(sentence, m.start())]
         spans += [(2, 2)] * sum(1 for m in TWO_DAYS.finditer(sentence) if not exchange_days(sentence, m.start()))
@@ -589,7 +599,7 @@ def _stock_marks(sentence):
     word ("غير متوفر") is the out word only."""
     outs = [(m.start(), m.end(), "out") for m in OUT.finditer(sentence)]
     ins = [(m.start(), m.end(), "in") for rx in (AVAILABLE, FEW) for m in rx.finditer(sentence)
-           if not any(a <= m.start() < b for a, b, _ in outs)]
+           if not any(a <= m.start() < b for a, b, _ in outs) and not AS_PREORDER.match(sentence, m.end())]
     return sorted(outs + ins)
 
 
@@ -641,7 +651,8 @@ def _no_stock_data(sentence, items, named, extras, all_tiers, said):
     if UNSURE.search(sentence):
         return []
     claims = [c for c in CLAIM_CLAUSE.split(sentence)
-              if AVAILABLE.search(c) and not OUT.search(c) and not DELIVERY.search(c) and not PAYMENT.search(c)]
+              if any(not AS_PREORDER.match(c, m.end()) for m in AVAILABLE.finditer(c))
+              and not OUT.search(c) and not DELIVERY.search(c) and not PAYMENT.search(c)]
     if not claims:
         return []
     here = _boots(products_named(sentence, items) or named, extras)

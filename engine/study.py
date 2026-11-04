@@ -481,7 +481,7 @@ class Study:
         case, marked with its kind, and the first lesson it gives is written with no count and no gap test.
         rep["mistakes"] names each as {case_id, kind, why, lesson, lesson_id, verdict, cases_with}. Only the
         first MISTAKES_A_RUN distinct mistakes (on mistake_of's key) are asked; the rest are NOT_ASKED_CAP."""
-        seen = set()
+        seen, given = set(), list(given)  # a lesson written here is known to the next call (review r2, item 3)
         for c in cases:
             m = mistake_of(c)
             if m is None:
@@ -489,6 +489,9 @@ class Study:
             rec = {"case_id": c.id, "kind": m["kind"], "why": m["why"], "lesson": None, "lesson_id": None,
                    "verdict": None, "cases_with": [c.id], "mistake": True}
             rep["mistakes"].append(rec)
+            if self._halted():  # first, so a stopped study never labels a case asked or capped (review r2, item 1)
+                rec["verdict"] = NOT_ASKED
+                continue
             if m["key"] in seen:
                 rec["verdict"] = SAME_MISTAKE
                 continue
@@ -496,9 +499,6 @@ class Study:
                 rec["verdict"] = NOT_ASKED_CAP
                 continue
             seen.add(m["key"])
-            if self._halted():
-                rec["verdict"] = NOT_ASKED
-                continue
             view = _view(self.plug, c, texts, blind=False)
             view["mistake"] = m["kind"]
             try:
@@ -540,6 +540,7 @@ class Study:
                 continue
             rec["verdict"], rec["lesson_id"] = LESSON, card["lesson_id"]
             known[_norm(cand["lesson"])] = KNOWN
+            given.append(cand["lesson"])
 
     def _scope(self, scoped, known, pulled, rep, since, until):
         """The night's scope cases (see 9): from the lost ones only DECLINE is written, as one lesson through
@@ -1289,8 +1290,8 @@ def mistake_of(case):
                 why = verdict[:300]
                 if start == FAILED_FACT:
                     key = (kind, ":".join(verdict.split(":", 2)[:2]).strip())
-                elif start == FAILED_SEND:
-                    key = (kind, start)
+                elif start == FAILED_SEND:  # one check name, many problems: key on the reason, numbers masked
+                    key = (kind, re.sub(r"\d[\d,.]*", "#", why).strip())
                 else:
                     key = (kind, why)
                 return {"kind": kind, "why": why, "key": key}

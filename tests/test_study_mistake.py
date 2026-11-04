@@ -136,6 +136,20 @@ class Built(unittest.TestCase):
         self.assertEqual([m["verdict"] for m in rep["mistakes"]], [study.LESSON] + [study.SAME_MISTAKE] * 3)
         self.assertEqual(len(self.proposer.calls), 1)
 
+    def test_two_different_send_check_problems_are_asked_twice(self):
+        for n, why in enumerate(("an amount no tool gave: 1,000 EGP", "a dash in the reply")):
+            self.lose(f"{good.FAILED}: {why}", mid=f"s{n}", failed=[{"check": "send_check", "why": why}])
+        self.run_night(MISTAKE)
+        self.assertEqual(len(self.proposer.calls), 2)
+
+    def test_two_different_never_lines_are_asked_twice_and_the_second_knows_the_first(self):
+        self.lose(f"{good.BROKE}: it watered the bed twice", mid="n1")
+        self.lose(f"{good.BROKE}: it watered in the noon sun", mid="n2")
+        self.run_night(MISTAKE)
+        self.assertEqual(len(self.proposer.calls), 2)
+        self.assertNotIn(NEVER_LINE, self.proposer.calls[0]["known"])
+        self.assertIn(NEVER_LINE, self.proposer.calls[1]["known"])
+
     def test_only_the_first_lesson_of_the_answer_is_written(self):
         self.lose(f"{good.BROKE}: it watered the bed twice")
         rep = self.run_night(MISTAKE, fk.EARLY)

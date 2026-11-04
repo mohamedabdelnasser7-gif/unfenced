@@ -75,8 +75,8 @@ from engine.study import read_days
 DAY = 86400.0
 LIVE_BUSY = "not handed, live busy"  # a passed lesson the live database could not take this run
 EXAM_CAP = 60  # model calls one lesson's exam may take between rounds, the run on the kept lessons included (--exam-cap)
-FULL_CAP = 400  # model calls one lesson's full exam may take before hand_live, the run on the kept lessons included:
-# the 50 situations twice (kept lessons, then with the lesson) at up to 4 calls each (reflection/exam.py CALL_CAP), so a
+FULL_CAP = 440  # model calls one lesson's full exam may take before hand_live, the run on the kept lessons included:
+# the 53 situations twice (kept lessons, then with the lesson) at up to 4 calls each (reflection/exam.py CALL_CAP), so a
 # normal exam never reaches it and only a runaway one is held (review simplify round 3, finding 3)
 REWRITES = 2  # new tries a lesson the gate refused may take in the same round (Mohamed 2026-11-02, "Yes now")
 CAP_NOTE = "the model call cap was reached during the night study; nothing it left unchecked is handed on"

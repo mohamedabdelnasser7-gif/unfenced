@@ -51,11 +51,11 @@ SKIPPED_NOTE = ("The Arena rerun skipped 2 past wins: 1 because it failed a fact
 
 
 class Situations(unittest.TestCase):
-    def test_fifty_in_two_halves(self):
-        self.assertEqual(len(SITS), 50)
-        self.assertEqual(sum(s["part"] == "guard" for s in SITS), 25)
+    def test_fifty_three_in_two_halves(self):
+        self.assertEqual(len(SITS), 53)
+        self.assertEqual(sum(s["part"] == "guard" for s in SITS), 28)  # 25 from the language test, 3 that stay on the store
         self.assertEqual(sum(s["part"] == "real" for s in SITS), 25)
-        self.assertEqual([s["id"] for s in SITS], list(range(1, 51)))
+        self.assertEqual([s["id"] for s in SITS], list(range(1, 54)))
 
     def test_guard_half_clones_the_old_lines(self):
         names = [s["name"] for s in SITS if s["part"] == "guard"]
@@ -82,7 +82,7 @@ class PlugKey(unittest.TestCase):
         self.assertEqual(PLUG.exam.situations, Path(exam.ROOT) / "sales" / "exam" / "situations.json")
         self.assertIn("bot_line", PLUG.exam.checks)
         self.assertTrue(set(PLUG.exam.checks) <= set(exam.CHECKS))
-        self.assertEqual((PLUG.exam.checks, len(exam.CHECKS)), (tuple(exam.CHECKS), 17))  # the plug names all 17
+        self.assertEqual((PLUG.exam.checks, len(exam.CHECKS)), (tuple(exam.CHECKS), 18))  # the plug names all 18
 
     def test_no_exam_key_no_exam(self):
         d = self.base()
@@ -693,13 +693,13 @@ class Cli(unittest.TestCase):
                 code = exam.main(["--rounds", "2", "--out", d], model=Always("هسأل الفريق وأرد عليك."), db=self.db)
             self.assertEqual(code, 0)
             out = buf.getvalue()
-            self.assertRegex(out, r"round 1: guard \d+ of 25, real \d+ of 25")
+            self.assertRegex(out, r"round 1: guard \d+ of 28, real \d+ of 25")
             self.assertIn("round 2:", out)
             self.assertRegex(out, r"fail: \d+ [a-z0-9-]+, [a-z_]+, ")
             files = sorted(p.name for p in Path(d).iterdir())
             self.assertEqual(files, ["round-1.json", "round-2.json"])
             rec = json.loads((Path(d) / "round-1.json").read_text(encoding="utf-8"))
-            self.assertEqual([rec["parts"]["guard"][1], rec["parts"]["real"][1], len(rec["situations"])], [25, 25, 50])
+            self.assertEqual([rec["parts"]["guard"][1], rec["parts"]["real"][1], len(rec["situations"])], [28, 25, 53])
 
     def test_refusals(self):
         err = io.StringIO()

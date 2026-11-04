@@ -231,7 +231,7 @@ class Examiner(unittest.TestCase):
 
         r = exam.Examiner(PLUG, model=Same(), count=True)("Answer greetings warmly, then ask what they need.", ("asking",))
         eff = engine_exam.effect(r.pairs)
-        self.assertEqual((len(r.rows), len(r.pairs), eff["fixed"], eff["broke"], eff["p"]), (50, 50, 0, 0, None))
+        self.assertEqual((len(r.rows), len(r.pairs), eff["fixed"], eff["broke"], eff["p"]), (53, 53, 0, 0, None))
         self.assertTrue(r.passed)  # nothing newly fails and nothing broke (DECISIONS item 75)
         self.assertFalse(all(row.passed for row in r.rows))  # its fails are still in the rows
 

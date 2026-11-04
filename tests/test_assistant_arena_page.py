@@ -182,7 +182,7 @@ class NoConnect(Base):
         self.assertIn(f'action="{pages.ARENA_PATH}"', page)
         self.assertIn(pages.STATUS_SAID["In practice"], page)
         self.assertIn(case.DATA_LINE, page)  # its demo mailbox and calendar, labelled as sample data
-        self.assertNotIn(pages.OFFERS_HEAD, page)  # no offers box: it sells nothing
+        self.assertIn(pages.OFFERS_HEAD, page)  # existing agents get the boxes too (2026-11-05, tests/test_agentdata.py)
 
 
 class TrainAndExam(Base):

@@ -585,6 +585,11 @@ READY = "Ready to connect."
 # database (its install, assistant/case.py), so Run the Arena, Train, corrections and the exam read it as they read
 # an agent made here. With no live channel here its lines never point to Connect: a pass unlocks nothing.
 CASE_KITS = {"assistant": "assistant.case"}
+# The Sales agent's Sample data line (Morning.data_line) and its rule for added rows (Morning.add_data)
+SALES_DATA_LINE = "Its products and offers are the demo store's: {n} products, for practice until your store is connected."
+SALES_REAL_LINE = "Its products come from your Shopify store. Rows added here are read only while no store is connected."
+SALES_ROWS_ONLY = ("The Sales agent reads added rows as products, so each row needs a name and a price or stock, "
+                   "like: title, size, price, stock.")
 NO_CHANNEL_GATE = "In the Arena, no live channel here. Gate: {won} of {need} wins needed to pass."
 NO_CHANNEL_NEED = "In the Arena, no live channel here. Gate: not taken yet, {need} wins needed to pass."
 NO_CHANNEL_NONE = "In the Arena, no live channel here. Gate: not taken yet."
@@ -850,6 +855,9 @@ class Morning:
         add_built finds an agent built while the page runs; None on the sample days."""
         self.db = db
         self.db_path = None if db_path is None else str(db_path)
+        if db_path is not None:  # what the user adds for the Sales agent sits beside this database (kit/added.py)
+            from kit import added
+            added.use(db_path)
         self.judge = judge
         self.built = frozenset(built or ())
         self.modes_state = None if modes_state is None else Path(modes_state)
@@ -1882,15 +1890,60 @@ class Morning:
         kit = self.case_kit(agent)
         return getattr(kit, "SAID", None) if kit is not None else None
 
-    def sample_data(self, agent):
-        """The built agent's sample data (kit/sample.py read), or None."""
-        from kit import sample
+    def _sales_here(self, agent):
+        """True for the Sales agent on the live page (a database path): its added rows and offers go beside the
+        database (kit/added.py), since it has no agent folder."""
+        return agent == SALES.agent and agent in self.plugs and self.db_path is not None
+
+    def data_folder(self, agent, make=False):
+        """Where the rows and offers the user adds for this agent go and are read from: its agent folder
+        (agent_folder: an agent made here, an example agent, the personal assistant), or for the Sales agent its
+        folder beside the database (kit/added.py; make creates it). None for any other agent: nothing it runs
+        would read them, so the page offers no box (Marketing has no runtime that reads data)."""
         folder = self.agent_folder(agent)
+        if folder is not None or not self._sales_here(agent):
+            return folder
+        from kit import added
+        added.use(self.db_path)  # the readers' folder is this page's
+        return added.folder(added.SALES, make=make)
+
+    def takes_data(self, agent):
+        """True when the Overview shows the Add data and Add offers boxes for this agent (data_folder)."""
+        return self.agent_folder(agent) is not None or self._sales_here(agent)
+
+    def data_line(self, agent):
+        """The Overview's Sample data line for an agent with no agent folder, or None: the Sales agent's store
+        data, or a repo agent's simulated days (sim/scenarios/<agent>.json about)."""
+        from kit import sample
+        if self._sales_here(agent):
+            from kit.tools import store
+            if env.get("SHOPIFY_STORE") and env.get("SHOPIFY_TOKEN"):
+                return SALES_REAL_LINE
+            mine = sample.counts(self.sample_data(agent))[1]
+            line = SALES_DATA_LINE.format(n=len(store._from_demo(store.DEMO_CATALOGUE)))
+            return line + (f" {mine} {'row' if mine == 1 else 'rows'} added by you." if mine else "")
+        if not isinstance(agent, str) or agent not in self.plugs or not re.fullmatch(r"[a-z0-9_]{1,40}", agent):
+            return None
+        try:
+            about = json.loads((ROOT / "sim" / "scenarios" / f"{agent}.json").read_text(encoding="utf-8")).get("about")
+        except (OSError, ValueError, AttributeError):
+            return None
+        return sample.line(about, 200) or None if isinstance(about, str) else None
+
+    def sample_data(self, agent):
+        """The agent's sample data (kit/sample.py read) from data_folder: a built agent's rows, or the rows the
+        user added for the Sales agent; None when there are none."""
+        from kit import sample
+        folder = self.data_folder(agent)
         return None if folder is None else sample.read(folder)
 
     def offers(self, agent):
-        """The built agent's own offers (kit/offers.py read, decision 105), or None."""
+        """The agent's offers (kit/offers.py, decision 105): a built agent's own, or for the Sales agent the store
+        data's with any the user added (kit/offers.py demo); None for any other agent."""
         from kit import offers
+        if self.agent_folder(agent) is None and self._sales_here(agent):
+            self.data_folder(agent)
+            return offers.demo()
         folder = self.agent_folder(agent)
         return None if folder is None else offers.read(folder)
 
@@ -1900,14 +1953,16 @@ class Morning:
         capped by kit/offers.py and written whole. Refused, with nothing saved, for any other agent."""
         from kit import offers
         from reflection.quickstart import line as plain  # the card's line rule: no dashes, spaces folded
-        folder = self.agent_folder(agent)
+        folder = self.data_folder(agent, make=True)
         if folder is None or folder.is_symlink() or not folder.is_dir():
-            raise Refused("Only an agent made here takes offers.")
+            raise Refused("Only an agent made here or the Sales agent takes offers.")
         text = str(text or "")
         if len(text) > MAX_OFFERS_TEXT:
             raise Refused(f"At most {MAX_OFFERS_TEXT} characters of offers at once, please.")
         have = offers.read(folder) or offers.clean({})
-        ids = {o["id"] for o in have["offers"]}
+        # the Sales agent's added offers follow the store data's, so they count against the same cap
+        store = offers.base()["offers"] if self.agent_folder(agent) is None else []
+        ids = {o["id"] for o in have["offers"]} | {o["id"] for o in store}
         added = []
         for raw in text.replace("\r\n", "\n").split("\n"):
             parts = [plain(x, offers.MAX_LINE) for x in raw.split(";", 2)]
@@ -1927,7 +1982,7 @@ class Morning:
             added.append(o)
         if not added:
             raise Refused("Write one offer a line: what it is; its terms; when it fits.")
-        if len(have["offers"]) + len(added) > offers.MAX_OFFERS:
+        if len(store) + len(have["offers"]) + len(added) > offers.MAX_OFFERS:
             raise Refused(f"An agent keeps at most {offers.MAX_OFFERS} offers. Send fewer.")
         before = len(have["offers"])
         try:
@@ -1944,10 +1999,15 @@ class Morning:
         add): parsed in code as JSON, CSV or plain lines, never run, every value capped and plain. Its next
         practice and its tools read them. Refused, with nothing saved, for any other agent."""
         from kit import sample
-        folder = self.agent_folder(agent)
+        folder = self.data_folder(agent, make=True)
         if folder is None or folder.is_symlink() or not folder.is_dir():
-            raise Refused("Only an agent made here takes sample data.")
+            raise Refused("Only an agent made here or the Sales agent takes sample data.")
         try:
+            if self.agent_folder(agent) is None:  # the Sales agent's store tool reads added rows as products
+                raws = sample.parse(text) + (sample.parse(sample.decode(raw)) if raw else [])
+                rows = sample.clean_rows(raws, sample.USER, sample.MAX_ADD)
+                if any(not sample.store_items({"rows": [r]}) for r in rows):
+                    raise Refused(SALES_ROWS_ONLY)
             n = sample.add(folder, text, raw or b"")
         except sample.Refused as e:
             raise Refused(str(e)) from None

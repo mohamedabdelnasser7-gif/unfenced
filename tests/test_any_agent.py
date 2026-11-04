@@ -276,7 +276,7 @@ class CardShowsSampleData(PageCase):
         self.assertIn(CARD_LINE, page)
         self.assertIn(f'action="{mo.DATA_PATH}"', page)
         self.assertNotIn(f'action="{mo.DATA_PATH}"', self.p.get("/agents/stock_watcher", {}, ""))  # no token, no box
-        self.assertNotIn("Sample data", self.p.get("/agents/sales", {}, "t"))  # only an agent made here
+        self.assertIn("Sample data", self.p.get("/agents/sales", {}, "t"))  # existing agents too (tests/test_agentdata.py)
 
     def test_a_store_need_is_sample_data_with_no_keys_and_connected_with_them(self):
         page = self.built()

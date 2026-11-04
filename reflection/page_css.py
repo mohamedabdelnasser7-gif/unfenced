@@ -58,9 +58,9 @@ svg.i{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.6;
 .yes:hover{filter:brightness(1.04)}
 .yes:active{transform:scale(.97)}
 .yes svg.i{stroke-width:2}
-.no{width:52px; height:52px; border-radius:50%; display:grid; place-items:center; flex:none; background:var(--bubble); box-shadow:var(--bubble-shadow), 0 0 0 1px rgba(11,15,18,.06); font:500 15px/1 var(--font); color:var(--ink);
+button.no{width:52px; height:52px; border-radius:50%; display:grid; place-items:center; flex:none; background:var(--bubble); box-shadow:var(--bubble-shadow), 0 0 0 1px rgba(11,15,18,.06); font:500 15px/1 var(--font); color:var(--ink);
   transition:transform var(--t-press) var(--ease)}
-.no:active{transform:scale(.97)}
+button.no:active{transform:scale(.97)}
 
 /* phone tab bar: Today and Agents only, docked flat, light frosted glass */
 .isl{position:fixed; left:0; right:0; bottom:0; z-index:40; display:flex; align-items:center; gap:4px; padding:8px 24px 22px;
@@ -124,7 +124,7 @@ svg.i{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.6;
 .st.live{background:rgba(42,51,50,.09); color:var(--ink)}
 
 /* empty state */
-.calm{display:flex; align-items:center; gap:14px; padding:20px 22px; border-radius:var(--r-card); background:rgba(255,255,255,.5); box-shadow:inset 0 0 0 1px rgba(11,15,18,.08)}
+.calm.sq{display:flex; align-items:center; gap:14px; padding:20px 22px; border-radius:var(--r-card); background:rgba(255,255,255,.5); box-shadow:inset 0 0 0 1px rgba(11,15,18,.08)}
 .calm .ok{width:44px; height:44px; border-radius:50%; display:grid; place-items:center; background:#fff; box-shadow:var(--shadow-soft); flex:none}
 .calm b{display:block; font:500 17px/24px var(--font); letter-spacing:-.01em}
 .calm p{margin:2px 0 0; font:400 14px/20px var(--font); color:var(--ink-2)}
@@ -242,7 +242,7 @@ svg.i{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.6;
   .act .mod{height:56px; border-radius:28px; padding:0 20px}
   .night{padding:8px 24px}
   .today.empty{grid-template-columns:minmax(0,7fr) minmax(0,5fr)}
-  .calm{padding:28px 32px}
+  .calm.sq{padding:28px 32px}
 
   .col{max-width:760px; margin:0 auto; gap:20px}
   .colhead{max-width:760px; margin:0 auto}
@@ -519,7 +519,7 @@ textarea.typed{width:100%; border:0; background:transparent; resize:none; outlin
 .try .said{max-width:86%; margin:0; padding:8px 12px; border-radius:16px; font:400 14px/20px var(--font); white-space:pre-line; overflow-wrap:anywhere}
 .try .said.me{align-self:flex-end; border-bottom-right-radius:6px; background:#e3e9e6}
 .try .said.ag{align-self:flex-start; border-bottom-left-radius:6px; background:var(--card-3); box-shadow:inset 0 0 0 1px var(--line)}
-.try .said.no{align-self:flex-start; color:var(--ink-2); font-style:italic}
+.try .said.no{align-self:flex-start; border-bottom-left-radius:6px; background:var(--card-3); box-shadow:inset 0 0 0 1px var(--line); color:var(--ink-2); font-style:italic}
 .try .say-f form{margin:0}
 .try .over{height:44px; padding:0 14px; border:0; border-radius:22px; background:none; font:500 14px/44px var(--font); color:var(--ink-2); cursor:pointer}
 .try .used{align-self:flex-start; margin:0 4px; font:400 12px/16px var(--font); color:var(--ink-2)}

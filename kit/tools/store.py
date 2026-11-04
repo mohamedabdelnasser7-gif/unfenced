@@ -25,6 +25,9 @@ Sample stock (DECISIONS 107, 2026-11-04): the demo store tracks no variant's sto
 store connected an untracked variant's level comes from a separate sample layer, demo/sample-stock.json
 (made up per SKU, never written into the catalogue as tracked stock). Every answer built from sample
 data, that layer or a built agent's sample products (SAMPLE), carries "data": kit/sample.py LABEL.
+
+Added products (2026-11-05, kit/added.py): with no Shopify keys, the rows the user added for the Sales agent
+on its Overview that read as products join the demo catalogue, after it. Real keys always win.
 """
 import contextvars
 import html
@@ -141,7 +144,7 @@ def catalogue(fresh=False):
     if sample is not None:
         return sample
     if not fresh and _cache["items"] is not None and time.time() - _cache["at"] < CACHE_SECONDS:
-        return _cache["items"]
+        return _cache["items"] if real else _with_added(_cache["items"])
     stock = None
     if real:
         items = _from_shopify()
@@ -149,7 +152,15 @@ def catalogue(fresh=False):
         stock = sample_stock(DEMO_SAMPLE_STOCK)
         items = _from_demo(DEMO_CATALOGUE, stock)
     _cache.update(at=time.time(), items=items, sampled=bool(stock))
-    return items
+    return items if real else _with_added(items)
+
+
+def _with_added(items):
+    """The demo catalogue with the products the user added for the Sales agent on its page (kit/added.py,
+    kit/sample.py store_items), read fresh each call so the next turn has them; the list itself when none."""
+    from kit import added
+    more = sample_mod.store_items(added.rows())
+    return items + more if more else items
 
 
 def stock_level(quantity):

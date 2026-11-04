@@ -282,11 +282,24 @@ def write(folder, data):
 _demo = {"data": None}
 
 
-def demo():
-    """The store data's offers (demo/offers.json), read once."""
+def base():
+    """The demo file's offers (demo/offers.json), read once."""
     if _demo["data"] is None:
         _demo["data"] = read(DEMO) or json.loads(json.dumps(EMPTY))
     return _demo["data"]
+
+
+def demo():
+    """The store data's offers: the demo file's (base), then any the user added for the Sales agent beside the
+    database (kit/added.py), read fresh so the next turn has them. With none added, base itself."""
+    from kit import added
+    got = base()
+    more = added.offers()
+    if not more or not more["offers"]:
+        return got
+    have = {o["id"] for o in got["offers"]}
+    extra = [o for o in more["offers"] if o["id"] not in have][:max(0, MAX_OFFERS - len(got["offers"]))]
+    return dict(got, offers=got["offers"] + extra) if extra else got
 
 
 def current():

@@ -36,9 +36,13 @@ AT = 1793750400.0  # 2026-11-04, when this card was written
 TOOLS = ["calendar", "email"]
 # The line under its Run the Arena on the page (reflection/morning.py arena_said)
 SAID = "Plays practice cases against a made-up user who asks for things, on its sample mailbox and calendar."
-# Its data on its page (reflection/pages.py overview_tab), in place of a built agent's rows and offers boxes
+# Its data on its page (reflection/pages.py overview_tab): its Sample data line, above the Add data and Add offers
+# boxes a built agent has (2026-11-05: rows and offers added go to its folder, which its tools and practice read)
 DATA_HEAD = "Mailbox and calendar"
 DATA_LINE = "Its mailbox and calendar are sample data for practice, nothing connected yet."  # Quick start's keys (reflection/quickstart.py TOOLS), the kit/tools behind them
+# The Add data box's placeholder on its Overview (reflection/pages.py data_hint): rows added go to its folder's
+# sample data, which its data tool and its practice read (kit/turn.py, arena/practice.py)
+DATA_HINT = "contact, email, note"
 # The Connect step in its Arena steps (reflection/pages.py arena_track): a line, no button, until sign-in is built
 CONNECT_STEP = "Connect your email"
 CONNECT_LINE = ("Email connects through Microsoft or Google sign-in next. Until then this assistant works on a sample "

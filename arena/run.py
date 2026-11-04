@@ -116,8 +116,10 @@ import re
 import sqlite3
 import stat
 import sys
+import threading
 import time
 import zoneinfo
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -158,6 +160,98 @@ QUICK_CALLS = 80
 QUICK_STATE = ROOT / "data" / "arena-quick"
 
 
+PARALLEL_ENV = "UNFENCED_ARENA_PARALLEL"  # in env or .env (.env.example)
+
+
+def _parallel():
+    """PARALLEL_ENV from env: 1 to 3 matches at a time, 3 when it is not set or not a number."""
+    raw = os.environ.get(PARALLEL_ENV, "").strip()
+    try:
+        n = int(raw) if raw else 3
+    except ValueError:
+        n = 3
+    return min(max(n, 1), 3)
+
+
+# How many matches play at once (Arena.run): practice in groups that learn from the group before, the gate in
+# groups too; each result is folded into the round in match order, so 1 plays one by one as before. Read once,
+# on the first run (parallel), so the .env main loads first counts.
+PARALLEL = None
+WRITE_LOCK = threading.Lock()  # one writer at a time on a matches file (append_line)
+_LANE = threading.local()  # box: what a match played beside others sets, folded in by Arena.run in match order
+
+
+def parallel():
+    """PARALLEL, read from env the first time."""
+    global PARALLEL
+    if PARALLEL is None:
+        PARALLEL = _parallel()
+    return PARALLEL
+
+
+def laned():
+    """True inside a match played beside others (Arena._together)."""
+    return getattr(_LANE, "box", None) is not None
+
+
+def in_lane(key, value):
+    """Inside a lane, notes key=value on its box for Arena._settle and returns True; else False."""
+    box = getattr(_LANE, "box", None)
+    if box is None:
+        return False
+    box[key] = value
+    return True
+
+
+def later(fn, *args):
+    """fn(*args) now, or inside a lane when Arena.run folds the match in, so the matches file and every
+    list keep match order and a match after a dropped one leaves nothing."""
+    box = getattr(_LANE, "box", None)
+    if box is None:
+        return fn(*args)
+    box.setdefault("later", []).append((fn, args))
+
+
+class _Laned:
+    """An attribute a match sets (halt, error, off_error): inside a lane it goes to the lane's box, and
+    Arena._settle sets it on the run when it folds that match in."""
+
+    def __set_name__(self, owner, name):
+        self.name = name
+
+    def __get__(self, obj, owner=None):
+        if obj is None:
+            return self
+        box = getattr(_LANE, "box", None)
+        if box is not None and self.name in box:
+            return box[self.name]
+        try:
+            return obj.__dict__[self.name]
+        except KeyError:
+            raise AttributeError(self.name) from None
+
+    def __set__(self, obj, value):
+        box = getattr(_LANE, "box", None)
+        if box is None:
+            obj.__dict__[self.name] = value
+        else:
+            box[self.name] = value
+
+
+def append_line(path, line):
+    """Appends line and its newline to path in one write, under WRITE_LOCK across the run's threads and
+    the file's own lock across runs, so a reader (arena_played, the pages) only ever meets whole lines."""
+    data = memoryview((line + "\n").encode("utf-8"))
+    with WRITE_LOCK:
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o666)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            while data:
+                data = data[os.write(fd, data):]
+        finally:
+            os.close(fd)  # closing the file lets the lock go
+
+
 class Refused(ValueError):
     pass
 
@@ -190,6 +284,7 @@ the count file could not be read, when it could not; then every take() is refuse
         self.lock = self.path.with_suffix(".lock")
         self.temp = self.path.with_name(self.path.name + ".tmp")
         self.reached, self.taken, self.problem = False, 0, None
+        self.stopping = False  # Arena._together: a match before was dropped, so the others make no new call
         self.count = self._read()
 
     def _read(self):
@@ -216,6 +311,8 @@ the count file could not be read, when it could not; then every take() is refuse
         return self.cap
 
     def take(self):
+        if self.stopping:  # never the cap: the matches it stops are dropped unfolded (Arena._together)
+            raise CapReached("a match before this one was dropped")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(self.lock, os.O_RDWR | os.O_CREAT, 0o600)
         try:
@@ -505,6 +602,7 @@ def load_trust(path, agent=AGENT):
 
 class Arena:
     agent = AGENT  # the name its report and Morning page item carry; arena/practice.py sets its own
+    halt, error, off_error = _Laned(), _Laned(), _Laned()  # set by a match: per lane when matches play together
 
     def __init__(self, cards, *, agent_model, customer_model, calls, trust=None, prompt=match_mod.GENERIC_PROMPT,
                  prompt_file=None, held_out=None, matches=10, rounds=DEFAULT_ROUNDS, fact_checks=None, seed=0,
@@ -559,7 +657,7 @@ class Arena:
         replay: the replay chat's id, saved on the match. training: a training match, the only kind
         handed the run's quick notes (the live agent never gets them, so the gate and the replay
         play without)."""
-        if self.before_match is not None:
+        if self.before_match is not None and not laned():  # in a lane Arena._together called it first
             self.before_match()
         try:
             m = match_mod.play(card, agent_model=self.agent_model, customer_model=self.customer_model,
@@ -613,10 +711,13 @@ class Arena:
                  prompt_sha=self.prompt_sha, prompt_file=self.prompt_file, close_win=bool(judged.get("close")))
         if replay is not None:
             m["replay"] = replay
-        self.state.mkdir(parents=True, exist_ok=True)
-        with open(self.state / MATCHES_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(m, ensure_ascii=False) + "\n")
+        later(self._write, m)
         return m, judged
+
+    def _write(self, m):
+        """Match m, one line onto the matches file."""
+        self.state.mkdir(parents=True, exist_ok=True)
+        append_line(self.state / MATCHES_FILE, json.dumps(m, ensure_ascii=False))
 
     def pick(self, deck, r, k):
         """The card for training match k of round r from deck: a weighted draw with replacement.
@@ -729,76 +830,40 @@ class Arena:
             one = {"round": r, "training": {"played": 0, "won": 0, "cases": []},
                    "gate": {"played": 0, "won": 0, "lost": []}, "sales": 0, "closes": 0}
             rounds.append(one)
-            for k in range(1, self.matches + 1):
-                mid = f"{self.run_id}-r{r}-t{k:02d}"
-                handed = bool(self.notes is not None and getattr(self.notes, "held", None))  # this match plays with notes
-                if self.off_topic and scope.slot(k):  # practice match 10: the off topic customer (arena/scope.py)
-                    try:
-                        card = self._off_card(mid, one["training"])
-                    except CapReached:
-                        self.halt = CAP
-                        return self._report(rounds, CAP)
-                    if card is None:
-                        continue
-                    out = self.play(card, mid, opening=card["ask"], training=True)
-                else:  # levels' pick: each practice customer once a round with a fixed test set (arena/practice.py)
-                    card = self.pick(self.train, r, k)
-                    out = self.play(card, mid, training=True)
-                if out is None:
-                    return self._report(rounds, self.halt)
-                off = scope.is_off(card)
-                if out is JUDGE_FAILED:  # the off topic judge did not answer: noted, the run goes on
-                    one["training"]["off_topic"] = {"card": card["id"], "about": card["about"], "result": JUDGE_FAILED,
-                                                    "error": self.off_error}
-                    continue
-                if out is UNJUDGED or out is VOIDED:
-                    if out is UNJUDGED:
-                        one["training"]["unjudged"] = one["training"].get("unjudged", 0) + 1
-                    if off:
-                        one["training"]["off_topic"] = {"card": card["id"], "about": card["about"],
-                                                        "result": "void" if out is VOIDED else UNJUDGED}
-                    continue
-                m, judged = out
-                one["training"]["played"] += 1
-                if handed:
-                    one["training"]["notes_handed"] = one["training"].get("notes_handed", 0) + 1
-                one["training"]["won"] += judged["won"]
-                self._count(one, judged)
-                if off:
-                    one["training"]["off_topic"] = {"card": card["id"], "about": card["about"],
-                                                    "result": "won" if judged["won"] else "lost", "why": judged["why"]}
-                # a practice customer that beats the agent comes back more often; the off topic one is no group of it
-                if self.pool is not None and not off:
-                    self.pool.record(card, judged["won"])
-                if not judged["won"] and self.learn is not None:
-                    one["training"]["cases"].append(self.learn(m, judged, m["id"]))
-                # the quick note, for the next matches; never from the off topic customer, whose ask is no sale
-                if not judged["won"] and self.notes is not None and not off:
-                    one["training"].setdefault("notes", []).append(self.notes.after_loss(m, judged, m["id"]))
+            k, size = 1, parallel()
+            while k <= self.matches:  # in groups of PARALLEL: a group plays with the notes and pool as it began
+                jobs = []
+                handed = bool(self.notes is not None and getattr(self.notes, "held", None))  # this group plays with notes
+                while k <= self.matches and len(jobs) < size:
+                    mid = f"{self.run_id}-r{r}-t{k:02d}"
+                    if self.off_topic and scope.slot(k):  # practice match 10: the off topic customer (arena/scope.py)
+                        if jobs:  # it opens a group of its own, written once the matches before are folded in
+                            break
+                        try:
+                            card = self._off_card(mid, one["training"])
+                        except CapReached:
+                            self.halt = CAP
+                            return self._report(rounds, CAP)
+                        k += 1
+                        if card is None:
+                            continue
+                        jobs.append((card, mid, {"opening": card["ask"], "training": True}))
+                    else:  # levels' pick: each practice customer once a round with a fixed test set (arena/practice.py)
+                        jobs.append((self.pick(self.train, r, k), mid, {"training": True}))
+                        k += 1
+                for (card, _, _), out in zip(jobs, self._together(jobs)):
+                    if out is None:
+                        return self._report(rounds, self.halt)
+                    self._fold_practice(one, card, out, handed)
             plan = gate_plan(self.gate_cards, self.trust["matches"], self.gate_rng, self.gate_most,
                              once=getattr(self, "once", False))
-            for k in range(1, self.trust["matches"] + 1):
-                card = plan[k - 1]  # the real mix, at most gate_most of a card group, every match a new id
-                out = self.play(card, self.gate_id(r, k))
-                if out is None:
-                    return self._report(rounds, self.halt)
-                if out is UNJUDGED:
-                    one["gate"]["unjudged"] = one["gate"].get("unjudged", 0) + 1
-                    continue
-                m, judged = out
-                one["gate"]["played"] += 1
-                one["gate"]["won"] += judged["won"]
-                self._count(one, judged)
-                if "failed_check" in judged:  # a built agent's verdict marks its safety checks (arena/practice.py)
-                    one["gate"]["failed_checks"] = one["gate"].get("failed_checks", 0) + bool(judged["failed_check"])
-                if "never_broken" in judged:  # and, apart, its broken never lines, which fail every level
-                    one["gate"]["never_broken"] = one["gate"].get("never_broken", 0) + bool(judged["never_broken"])
-                if not judged["won"]:
-                    one["gate"]["lost"].append({"card": m["card"], "why": judged["why"], "quote": judged["quote"],
-                                                "match": m["id"]})
-                    if "failed_check" in judged:  # a built agent's lost test match says whether it failed one
-                        one["gate"]["lost"][-1]["failed_check"] = bool(judged["failed_check"])
-                        one["gate"]["lost"][-1]["never_broken"] = bool(judged.get("never_broken"))
+            for start in range(0, self.trust["matches"], size):  # the plan is fixed; each group's ids in order
+                jobs = [(plan[k - 1], self.gate_id(r, k), {})  # the real mix, at most gate_most of a card group
+                        for k in range(start + 1, min(start + size, self.trust["matches"]) + 1)]
+                for out in self._together(jobs):
+                    if out is None:
+                        return self._report(rounds, self.halt)
+                    self._fold_gate(one, out)
             wins = one["gate"]["won"]
             if self._passed(one):
                 return self._report(rounds, PASSED)
@@ -808,6 +873,116 @@ class Arena:
                 stopped = STUCK
                 break
         return self._report(rounds, stopped)
+
+    def _together(self, jobs):
+        """Plays jobs [(card, match_id, play keywords)] at once, one thread each (one alone plays here as
+        always), and returns their results in match order, each settled (_settle), ending at the first None:
+        the matches after a dropped one are stopped at their next model call and never folded in. Every
+        thread has ended when it returns."""
+        if len(jobs) < 2:  # none when the off topic slot ended the round skipped
+            return [self.play(card, mid, **kw) for card, mid, kw in jobs]
+        try:
+            for _ in jobs:  # Pool.refresh once a match, as play does when alone, before any thread starts
+                if self.before_match is not None:
+                    self.before_match()
+        except CapReached:
+            self.halt = CAP
+            return [None]
+        except ModelError as e:
+            self.halt, self.error = MODEL_ERROR, match_mod.plain(str(e)) or type(e).__name__
+            return [None]
+        boxes, outs = [{} for _ in jobs], []
+
+        def one(i):
+            card, mid, kw = jobs[i]
+            _LANE.box = boxes[i]
+            try:
+                return self.play(card, mid, **kw)
+            finally:
+                _LANE.box = None
+        try:
+            with ThreadPoolExecutor(max_workers=len(jobs), thread_name_prefix="arena-match") as ex:
+                futures = [ex.submit(one, i) for i in range(len(jobs))]
+                try:
+                    for f in futures:
+                        outs.append(f.result())
+                        if outs[-1] is None:
+                            self.calls.stopping = True
+                            break
+                except BaseException:
+                    self.calls.stopping = True
+                    raise
+        finally:
+            self.calls.stopping = False
+        settled = []
+        for out, box in zip(outs, boxes):
+            settled.append(self._settle(out, box))
+            if settled[-1] is None:
+                break
+        return settled
+
+    def _settle(self, out, box):
+        """A lane's match folded in: what it set on the run (halt, error, off_error) and what it left for
+        now (its line on the matches file), then its result. arena/practice.py adds its unjudged count."""
+        for name in ("halt", "error", "off_error"):
+            if name in box:
+                setattr(self, name, box[name])
+        for fn, args in box.get("later", ()):
+            fn(*args)
+        return out
+
+    def _fold_practice(self, one, card, out, handed):
+        """A practice match's result into its round, in match order: counts, pool.record, learn and the quick
+        note, so the next group plays with them. handed: the match played with notes."""
+        off = scope.is_off(card)
+        if out is JUDGE_FAILED:  # the off topic judge did not answer: noted, the run goes on
+            one["training"]["off_topic"] = {"card": card["id"], "about": card["about"], "result": JUDGE_FAILED,
+                                            "error": self.off_error}
+            return
+        if out is UNJUDGED or out is VOIDED:
+            if out is UNJUDGED:
+                one["training"]["unjudged"] = one["training"].get("unjudged", 0) + 1
+            if off:
+                one["training"]["off_topic"] = {"card": card["id"], "about": card["about"],
+                                                "result": "void" if out is VOIDED else UNJUDGED}
+            return
+        m, judged = out
+        one["training"]["played"] += 1
+        if handed:
+            one["training"]["notes_handed"] = one["training"].get("notes_handed", 0) + 1
+        one["training"]["won"] += judged["won"]
+        self._count(one, judged)
+        if off:
+            one["training"]["off_topic"] = {"card": card["id"], "about": card["about"],
+                                            "result": "won" if judged["won"] else "lost", "why": judged["why"]}
+        # a practice customer that beats the agent comes back more often; the off topic one is no group of it
+        if self.pool is not None and not off:
+            self.pool.record(card, judged["won"])
+        if not judged["won"] and self.learn is not None:
+            one["training"]["cases"].append(self.learn(m, judged, m["id"]))
+        # the quick note, for the next matches; never from the off topic customer, whose ask is no sale
+        if not judged["won"] and self.notes is not None and not off:
+            one["training"].setdefault("notes", []).append(self.notes.after_loss(m, judged, m["id"]))
+
+    def _fold_gate(self, one, out):
+        """A gate match's result into its round, in match order."""
+        if out is UNJUDGED:
+            one["gate"]["unjudged"] = one["gate"].get("unjudged", 0) + 1
+            return
+        m, judged = out
+        one["gate"]["played"] += 1
+        one["gate"]["won"] += judged["won"]
+        self._count(one, judged)
+        if "failed_check" in judged:  # a built agent's verdict marks its safety checks (arena/practice.py)
+            one["gate"]["failed_checks"] = one["gate"].get("failed_checks", 0) + bool(judged["failed_check"])
+        if "never_broken" in judged:  # and, apart, its broken never lines, which fail every level
+            one["gate"]["never_broken"] = one["gate"].get("never_broken", 0) + bool(judged["never_broken"])
+        if not judged["won"]:
+            one["gate"]["lost"].append({"card": m["card"], "why": judged["why"], "quote": judged["quote"],
+                                        "match": m["id"]})
+            if "failed_check" in judged:  # a built agent's lost test match says whether it failed one
+                one["gate"]["lost"][-1]["failed_check"] = bool(judged["failed_check"])
+                one["gate"]["lost"][-1]["never_broken"] = bool(judged.get("never_broken"))
 
     def _passed(self, one):
         """Did the round pass the gate? Its wins reach the trust level's (arena/practice.py adds its rule)."""

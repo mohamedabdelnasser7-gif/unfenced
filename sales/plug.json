@@ -120,6 +120,6 @@
     "situations": "exam/situations.json",
     "checks": ["script", "banned_words", "style", "amounts", "stock_count", "echo", "bot_line", "order",
                "days_from_tools", "tools", "amount_from_tool", "late_order", "exchange_line", "lookup_line",
-               "rule_change", "cod_unasked", "no_shop", "off_scope"]
+               "rule_change", "cod_unasked", "no_shop", "off_scope", "scope_reply", "store_declined"]
   }
 }

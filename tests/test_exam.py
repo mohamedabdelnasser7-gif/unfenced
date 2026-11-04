@@ -82,7 +82,7 @@ class PlugKey(unittest.TestCase):
         self.assertEqual(PLUG.exam.situations, Path(exam.ROOT) / "sales" / "exam" / "situations.json")
         self.assertIn("bot_line", PLUG.exam.checks)
         self.assertTrue(set(PLUG.exam.checks) <= set(exam.CHECKS))
-        self.assertEqual((PLUG.exam.checks, len(exam.CHECKS)), (tuple(exam.CHECKS), 18))  # the plug names all 18
+        self.assertEqual((PLUG.exam.checks, len(exam.CHECKS)), (tuple(exam.CHECKS), 20))  # the plug names all 20
 
     def test_no_exam_key_no_exam(self):
         d = self.base()

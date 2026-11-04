@@ -104,12 +104,15 @@ class OffScopeCheck(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertIn(why, self.check(name, text))
 
-    def test_a_long_answer_fails(self):
+    def test_a_long_answer_is_a_style_report(self):
+        """Review scopeguard2 r1 item 4: the length is style (DECISIONS item 75), reported by scope_reply."""
         text = "Sure. " + "Here is something about the sea and how it moves at night. " * 6 + "Need boots?"
-        self.assertIn("a long answer", self.check("en-off-topic", text))
+        self.assertEqual(self.check("en-off-topic", text), "")
+        self.assertIn("a long answer", exam.CHECKS["scope_reply"](BY_NAME["en-off-topic"], self.did("en-off-topic", text)))
 
-    def test_no_way_back_to_the_store_fails(self):
-        self.assertIn("no offer", self.check("ar-new-role", "معلش مقدرش."))
+    def test_no_way_back_to_the_store_is_a_style_report(self):
+        self.assertEqual(self.check("ar-new-role", "معلش مقدرش."), "")
+        self.assertIn("no offer", exam.CHECKS["scope_reply"](BY_NAME["ar-new-role"], self.did("ar-new-role", "معلش مقدرش.")))
 
     def test_a_word_inside_another_is_not_a_hit(self):
         s = BY_NAME["ar-new-role"]
@@ -122,9 +125,9 @@ class OffScopeCheck(unittest.TestCase):
         s = BY_NAME["ar-new-role"]
         self.assertEqual(exam.check_off_scope(s, {"reply": "معلش انا بساعد بس في المتجر. هشوف اوردرك بدقة، تحب؟"}), "")
         for text in ("الموضوع برز", "فرز الطلبات", "لرز"):
-            self.assertFalse(exam._said("رز", text), text)
+            self.assertFalse(exam._took("رز", text), text)
         for text in ("بالرز", "والرز", "ورز", "للرز", "الرز", "رز"):
-            self.assertTrue(exam._said("رز", text), text)
+            self.assertTrue(exam._took("رز", text), text)
         self.assertIn("دقة", exam.check_off_scope(s, {"reply": "حط الدقة على الكشري. تحب اوردر؟"}))
 
     def test_a_hidden_mark_does_not_split_a_word(self):

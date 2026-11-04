@@ -183,7 +183,7 @@ class TheJudge(unittest.TestCase):
         joined = "\u200b".join(["wave"] * (exam.SCOPE_WORDS + 5)) + " Need a science question?"
         self.assertEqual(self.judge(match([joined]), verdict())["why"], scope.LONG)
         sit = {"expect": {"off_scope": ["seagull"]}}
-        self.assertIn("long", exam.check_off_scope(sit, {"reply": joined + " boots?"}))
+        self.assertIn("long", exam.check_scope_reply(sit, {"reply": joined + " boots?"}))  # style (decision 75)
         self.assertEqual(exam.words("a\u200bb\u2066c d"), 4)
 
     def test_an_ask_read_as_on_topic_voids_the_match_even_a_long_answer(self):

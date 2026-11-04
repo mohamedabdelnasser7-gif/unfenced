@@ -368,7 +368,15 @@ class FreshTurn(Fresh):
         self.agent, self.reports, self.judge_model = agent, Path(reports), judge_model
 
     def _wins(self):
-        return [w for w in run_mod.past_wins(self.state) if w.get("agent") == self.agent.name]
+        """The agent's own practice wins, never a test match (arena/practice.py is_test: a line whose seal
+        holds with the key beside the database): the fixed test set only ever plays in the gate's test
+        matches, so a correction is never tried on it first. A line relabelled or written by hand is not a
+        test match and stays a win to rerun."""
+        from arena import practice  # here, so loading the gate never loads practice and its writer
+        from kit import seal
+        k = seal.key(practice.reports_of(self.state))  # read only: a reader never makes the key
+        return [w for w in run_mod.past_wins(self.state)
+                if w.get("agent") == self.agent.name and not practice.is_test(w, k)]
 
     def _models(self):
         if self.agent_model is None or self.customer_model is None or self.judge_model is None:

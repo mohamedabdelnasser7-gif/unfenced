@@ -15,7 +15,6 @@ from tests.fake_model import FakeModel, say
 
 CLEAN_EN = "When a customer goes quiet after hearing the cost, offer a smaller size before they leave."
 NEAR_EN = "If the customer goes quiet after hearing the cost, offer a smaller size before they leave."
-CLEAN_AR = "عندما يسأل العميل عن الشحن، اشرح المدة قبل أن تطلب العنوان."
 LOST_EN = "Asks about delivery time twice, then goes quiet when the store does not say when."
 OWNER_A, OWNER_B, OWNER_C = "north_shop", "south_shop", "east_shop"
 
@@ -63,6 +62,7 @@ LEAKS = {
     ],
     "a length": ["Too short.", "word " * 60],
     "a masked word": ["When [name] asks for the price again, answer it plainly and kindly."],
+    "Arabic script": ["عندما يسأل العميل عن الشحن، اشرح المدة قبل أن تطلب العنوان."],
 }
 
 
@@ -74,7 +74,7 @@ def fresh(test):
 
 class CleanCheck(unittest.TestCase):
     def test_clean_patterns_pass(self):
-        for text in (CLEAN_EN, NEAR_EN, CLEAN_AR, LOST_EN):
+        for text in (CLEAN_EN, NEAR_EN, LOST_EN):
             with self.subTest(text=text):
                 self.assertEqual(shared.check(text), [])
 
@@ -108,17 +108,17 @@ class CleanCheck(unittest.TestCase):
                      "العميل عايز ألف قطعة مرة واحدة وبعدين بيسكت خالص",
                      "The customer asks for hundreds of pieces and then goes quiet after the cost."):
             with self.subTest(text=text):
-                self.assertEqual(shared.check(text), ["an amount in words"])
+                self.assertIn("an amount in words", shared.check(text))
 
     def test_an_amount_glued_to_its_currency_is_an_amount(self):
         for text in ("العميل يتردد لما يسمع خمسينجنيه ويمشي من غير ما يرد",
                      "the customer hears fiftypounds and goes quiet without a reply at all."):
             with self.subTest(text=text):
-                self.assertEqual(shared.check(text), ["a currency or an amount"])
+                self.assertIn("a currency or an amount", shared.check(text))
 
     def test_a_link_spelled_out_is_a_link(self):
-        self.assertEqual(shared.check("Tell them to visit shop dot com slash sizes when they ask twice."),
-                         ["a link, phone or handle"])
+        self.assertIn("a link, phone or handle",
+                      shared.check("Tell them to visit shop dot com slash sizes when they ask twice."))
 
     def test_hidden_digits_and_styled_numbers_are_digits(self):
         for text in ("Offer the jacket at ５００ when they hesitate on the cost.",

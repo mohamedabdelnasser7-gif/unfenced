@@ -2,14 +2,20 @@
 
 A kept lesson or a lost case of any agent kind becomes one general pattern. The model writes it
 (Writer, on Muse Spark Open as the fit check and the adapter are), then code checks that it is
-clean (check): no name of a person, shop or place, no digit in any script, no amount, price or
-currency, no phone, email, link or handle, no quoted words and no run of COPY_RUN words copied
-from what it was written from (the lesson's line, the customer's turns), no line that hands a chat
-to a person, one line of MIN_CHARS to MAX_CHARS characters and MIN_WORDS to MAX_WORDS words. The
-checks reuse arena/clean.py (names, phones, emails, links, places and addresses), engine/risk.py
-(the normal form, links, phones, handles and the copy runs), kit/send_check.py (currency and spelled
-amounts) and reflection/quickstart.py names_a_person. A pattern that fails is dropped, never stored:
-only a hash of where it came from is kept, so the same lesson or chat is not written again.
+clean (check), leaning strict, since a wrong refusal only drops one pattern: one English sentence
+that starts with a listed opener (OPENERS), English letters only (no Arabic script), no capital
+letter after its first word, no name of a person, shop, brand, page or place (the listed places,
+PLACES, too, in any case), no platform or handle word (PLATFORMS), no word glued to or standing
+before a shop word that reads as a shop's name, no digit in any script, no number word in English
+or Franco (a lone "one" aside), glued forms included (a ب or b before it, a currency, k, grand,
+bucks, quid or percent after it), no amount, price or currency, no Franco word, no phone, email,
+link or handle, no quoted words and no run of COPY_RUN words copied from what it was written from
+(the lesson's line, the customer's turns), no line that hands a chat to a person, MIN_CHARS to
+MAX_CHARS characters and MIN_WORDS to MAX_WORDS words. The checks reuse arena/clean.py (names,
+phones, emails, links, places and addresses), engine/risk.py (the normal form, links, phones,
+handles and the copy runs), kit/send_check.py (currency, spelled amounts, the Franco tens and words)
+and reflection/quickstart.py names_a_person. A pattern that fails is dropped, never stored: only a
+hash of where it came from is kept, so the same lesson or chat is not written again.
 
 There is one pool per kind across owners, patterns-<kind>.json in the install's shared folder
 (root_for: the folder named "shared" beside the agents' database, inside the repo only under
@@ -88,9 +94,143 @@ CURRENCY = re.compile(r"(?<![^\W\d_])(?:" + send_check.CURRENCY + "|" + _EXTRA_M
 MAGNITUDE = re.compile(r"(?<![^\W\d_])" + send_check.MAGNITUDE_WORDS + r"(?![^\W\d_])", re.IGNORECASE)
 QUOTES = re.compile("[\"“”„‟«»‹›〝〞「」『』]|(?<![^\\W\\d_])['‘’]|['‘’](?![^\\W\\d_])")
 CAPITAL = re.compile(r"[A-Z]")
-SENTENCE = re.compile(r"(?:^|[.!?؟:;]\s+)$")
 LINE_BREAK = re.compile(r"[\r\n  ]")
 BRACKET = re.compile(r"\[[^\]]*\]")
+
+
+# English only: the writer is asked for one English sentence
+NOT_ENGLISH = re.compile(r"[^\W\d_]")
+# the first word of the one sentence a pattern is: an advice line (When, If, Offer, Ask) or how a
+# customer behaves (Customers, The customer, Asks); anything else, a shop's name first, is refused
+OPENERS = frozenset("""
+when whenever if once after before while as until unless even during instead rather only for with without
+on in at during throughout from
+a an the this that these those such each every any some most many few several all both either neither
+customers customer buyers buyer shoppers shopper clients client people someone anyone visitors visitor
+users user readers reader callers caller guests guest newcomers returning repeat new first hesitant quiet
+unsure busy price agents agent replies reply messages message questions question they it there
+offer ask tell say share give show suggest explain answer respond confirm check keep let avoid never always
+do don try mention remind thank greet follow wait stay use repeat admit apologise apologize acknowledge
+treat listen lead start end close stop help point note agree recommend describe clarify reassure send list
+compare match mirror be make put move focus slow hold skip drop add include open invite welcome accept
+frame highlight raise ease steer guide nudge prompt read look find pick choose bring return restate
+summarise summarize prefer expect double name
+asks says goes leaves wants compares hesitates writes returns comes doubts worries pushes questions stops
+expects needs insists waits refuses disappears ignores sends replies complains haggles negotiates delays
+postpones cancels changes keeps repeats tests checks rejects mentions seems sounds starts opens requests
+demands prefers likes browses looks shows threatens gets loses drops walks tends usually often sometimes
+rarely mostly gives answers argues trusts distrusts follows reads hears sees thinks feels believes
+""".split())
+# English and Franco number words (the Franco tens are kit/send_check.py FRANCO_TENS), whole words
+# only, glued forms included; "one" alone is a word ("no one", "the one"), so only "one" beside
+# another digit word counts
+_EN_NUM = (r"zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen"
+           r"|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fourty|fifty|sixty|seventy|eighty|ninety"
+           r"|hundreds?|thousands?|millions?|billions?|dozens?|half|halves|nil|nought|naught")
+_FR_UNIT = (r"wa[h7]?[ei]d|wa[h7]?da|we[h7]da|[ei]?th?n[ae]?[ei]{1,2}n|tnein|tneen|th?alath?a|ta?lata?h?|talat"
+            r"|arba[a3]?[ah]?|khamsa?h?|khamas|5amsa|s[ei]tt?a|sab[a3]a?h?|tamany?[ae]?h?|tamnya|taman|tamaneya"
+            r"|t[ei]s[a3]a?|3?ashr?a|3?ashar|nos|noss|tolt|tult")
+_FR_TEEN = (r"(?:h[ei]da?|[ei]?tn|talat|tal[a]?t|arba[a3]?|arbaat|khamas|khams|s[ei]tt?|saba[a3]?|sabaat|taman"
+            r"|t[ei]sa[a3]?|t[ei]saat)t?ashar")
+_FR_HUNDRED = (r"(?:t[ou]lt|talat|rob[3]?|arba[a3]?|kh?oms|kh?ams|5oms|5ams|sot|sett?|sob[3]?|sab[3]?|tomn|taman|tos[3]?"
+               r"|tes[3]?)?[aeiou]?(?:m[iey]{1,2}y?a|m[iey]{1,2}t[ae]?[iey]{1,2}n|m[iy]t|myt)")
+_FR_THOUSAND = (r"(?:talat|tlat|arba[a3]?|arbaat|khamas|khamast|khams|s[ei]tt|sab[a3]?|sabaat|taman|tes[a3]?|tesaat"
+                r"|ashar|3ashar)?t?(?:alaf|aalaf|alf|elf|alfein|alfeen|talaf|tlaf)|mal[ae]?y[ou]{1,2}n|milyon|melyon"
+                r"|malayeen")
+_FR_NUM = rf"(?:{_FR_UNIT}|{_FR_TEEN}|{send_check.FRANCO_TENS}|{_FR_HUNDRED}|{_FR_THOUSAND})"
+_MONEY_TAIL = (r"geneh|genih|gneh|gnih|ginih|gnyh|gineh|gineeh|geneeh|ginee|gnieh|guineh|pounds?|egp|le|dollars?|usd"
+               r"|euros?|riyals?|sar|aed|dirhams?|bucks?|quid|k|grand|percent|pct")
+MONEY_WORD = re.compile(rf"(?:{_MONEY_TAIL}|percentage|cents?|piasters?|pt|pence)")
+NUMBER_TOKEN = re.compile(rf"(?:(?:{_EN_NUM})+(?:and)?)*(?:{_EN_NUM})(?P<en_money>{_MONEY_TAIL})?"
+                          rf"|(?:b|be|bi|bel|bil|w|we|wel|el|il|l|le|lel)?(?:{_FR_NUM})+(?P<fr_money>{_MONEY_TAIL})?")
+DIGIT_WORDS = frozenset("zero oh o one two three four five six seven eight nine double triple nil nought".split())
+# Franco words a customer writes (kit/send_check.py FRANCO_WORDS, the ones that are English words too
+# aside) and more of them: unquoted, they are still the customer's words
+FRANCO = (frozenset(send_check.FRANCO_WORDS) - send_check.ENGLISH_TOO) | frozenset("""
+ghali ghaly ghalya ghalia rekhees rkhis rakhis mafeesh mafish mafesh yalla habibi habibti akhi basha ostaz ustaz
+tayeb tayyeb mashy mashi maashy inshallah insha allah wallahi walahi wallah shokran shukran afwan sabah masa
+kheir khair lessa lesa kwayes kwayyes helw helwa gamed gamda zbon zabon zboon zobon zbayen felous fulus flous
+se3r ezzay keda kda bardo bardu tab3an aked akeed sa7 ma3lesh maalesh maalish hader hadr
+""".split())
+# platforms, apps and handles: a pattern names none
+PLATFORMS = frozenset("""
+instagram insta ig gmail hotmail yahoo outlook icloud whatsapp watsapp whats wa facebook fb messenger tiktok
+snapchat telegram twitter youtube linkedin pinterest jumia amazon shopify talabat careem uber vodafone
+etisalat fawry instapay paypal valu souq olx dubizzle bosta aramex dhl fedex google username usernames
+hashtag hashtags dm dms handle handles
+""".split()) - {"handle"}  # "handle" is a verb too (handle the doubt); the shapes after a platform word catch the rest
+# places the cleaner (arena/clean.py) leaves, in any case
+PLACES = frozenset("""
+zamalek dokki mohandessin mohandeseen mohandesin agouza imbaba shubra shoubra abbasiya abbassia abbasia helwan
+mokattam moqattam katameya kattameya rehab madinaty shorouk sherouk obour maadi heliopolis tagamo tagamoa
+sahel gouna hurghada sharm dahab sokhna alamein ismailia suez mansoura tanta zagazig fayoum faiyum minya
+assiut asyut sohag luxor aswan damietta cairo giza alex alexandria egypt egyptian egyptians masr maser
+eskendereya iskandariya saudi riyadh jeddah jedda dammam mecca makkah medina madinah dubai sharjah ajman
+emirates emirati uae ksa qatar doha kuwait bahrain manama oman muscat jordan amman lebanon beirut iraq
+baghdad morocco casablanca tunisia tunis algeria libya sudan khartoum yemen syria damascus palestine gaza
+gcc nasr zayed sheikh
+""".split())
+# shop words: a word glued to one (zorvexstore) or standing right before one (zorvex sports) reads as
+# a shop's, brand's or page's name, unless it is an English word listed here
+SHOP_TAIL = re.compile(r"(?P<stem>[a-z]{3,})(?:stores?|shops?|official|online|eg|egypt|wear|sports?|fashion"
+                       r"|boutique|mall|outlet|brands?|co|inc|ltd|llc|group|market|mart)")
+GLUED_OK = frozenset("""
+bookstore bookstores drugstore drugstores superstore megastore workshop workshops barbershop coffeeshop
+sportswear footwear outerwear menswear womenswear underwear swimwear sleepwear activewear eyewear knitwear
+streetwear loungewear nightwear rainwear beachwear partywear kidswear babywear transport transports passport
+passports motorsport motorsports watersports supermarket supermarkets hypermarket aftermarket upmarket
+downmarket subgroup subgroups firebrand disco tobacco fiasco fresco alfresco nutmeg
+""".split())
+SHOP_NOUNS = frozenset("""
+store stores shop shops brand brands boutique boutiques sports wear fashion outlet outlets mall malls page pages
+account accounts company group market official
+""".split())
+SHOP_BEFORE_OK = frozenset("""
+the a an this that these those our your their its his her my same other another any every each no one online
+local physical main official new old big small large nearest nearby own rival competing competitor sports sport
+clothing clothes shoe shoes fashion retail web app chat of at from to in on into and or whole entire which what
+real actual store brand social media business product products checkout home order orders landing contact
+payment details size sizes help policy returns return shipping delivery faq price prices pricing catalogue
+catalog menu cart outdoor team water winter summer casual formal evening kids men women baby everyday daily
+grocery electronics furniture beauty gift flagship partner trusted favourite favorite usual right wrong first
+last next previous single only such shared customer customers buyer buyers seller sellers department
+convenience corner discount premium luxury cheap cheaper expensive popular known unknown original fake genuine
+authorised authorized licensed profile review reviews rating ratings user personal family who they we you i
+""".split())
+
+
+def _tokens(text):
+    """The words of a line as the number, place and shop tests read them: look alikes as letters,
+    casefolded, apostrophes splitting (don't is don, t)."""
+    return re.findall(r"[a-z]+", risk_mod.normalize(text, letters=True).casefold())
+
+
+def _numbers(toks):
+    """(money, number): a number word glued to money or a money word (fifty bucks, khamsingeneh, five
+    k), and any number word at all (see NUMBER_TOKEN)."""
+    money = number = False
+    for i, t in enumerate(toks):
+        if MONEY_WORD.fullmatch(t):
+            money = True
+        m = NUMBER_TOKEN.fullmatch(t)
+        if not m:
+            continue
+        if t == "one" and not ({toks[i - 1] if i else "", toks[i + 1] if i + 1 < len(toks) else ""} & DIGIT_WORDS):
+            continue
+        number = True
+        money = money or bool(m.group("en_money") or m.group("fr_money"))
+    return money, number
+
+
+def _shop_like(toks):
+    """A word that reads as a shop's, brand's or page's name: glued to a shop word, or right before one
+    and not an English word that goes there (see SHOP_TAIL)."""
+    for i, t in enumerate(toks):
+        if t not in GLUED_OK and SHOP_TAIL.fullmatch(t):
+            return True
+        if i and t in SHOP_NOUNS and toks[i - 1] not in SHOP_BEFORE_OK and toks[i - 1] not in SHOP_NOUNS:
+            return True
+    return False
 
 
 def check(text, sources=()):
@@ -103,16 +243,39 @@ def check(text, sources=()):
     plain = clean_mod.normalize(text).strip()  # NFKC, hidden marks out, Eastern digits as 0 to 9
     norm = risk_mod.normalize(text)    # every numeral sign as a digit, look alikes as letters
     words = re.findall(r"[^\W_]+", plain)
+    toks = _tokens(text)
     if not MIN_CHARS <= len(text.strip()) <= MAX_CHARS or not MIN_WORDS <= len(words) <= MAX_WORDS:
         out.append(f"length: {MIN_CHARS} to {MAX_CHARS} characters and {MIN_WORDS} to {MAX_WORDS} words")
     if LINE_BREAK.search(text):
         out.append("more than one line")
+    if send_check.ARABIC.search(text) or send_check.ARABIC.search(plain):
+        out.append("Arabic script: a pattern is written in English")
+    elif any(not ("a" <= ch.casefold() <= "z") for ch in NOT_ENGLISH.findall(plain)):
+        out.append("letters other than English")
+    body = re.sub(r"[.!?]\s*$", "", plain)
+    if re.search(r"[.!?;:]", body):
+        out.append("more than one sentence")
+    first = re.match(r"[A-Za-z]+", body)
+    if first is None or first.group(0).casefold() not in OPENERS:
+        out.append("does not start with a listed opener")
     if any(ch.isdigit() for ch in text) or re.search(r"\d", norm) or re.search(r"\d", plain):
         out.append("a digit")
-    if any(rx.search(t) for rx in (CURRENCY, send_check.SPELLED_AMOUNT) for t in (plain, norm)):
+    money, number = _numbers(toks)
+    if money or "%" in plain or any(rx.search(t) for rx in (CURRENCY, send_check.SPELLED_AMOUNT)
+                                    for t in (plain, norm)):
         out.append("a currency or an amount")
     elif any(MAGNITUDE.search(t) for t in (plain, norm)):
         out.append("an amount in words")
+    elif number:
+        out.append("a number in words")
+    if any(t in FRANCO for t in toks):
+        out.append("a Franco word: the customer's own words")
+    if any(t in PLATFORMS for t in toks):
+        out.append("a platform or handle word")
+    if any(t in PLACES for t in toks):
+        out.append("a place")
+    if _shop_like(toks):
+        out.append("a shop, brand or page name")
     if QUOTES.search(plain):
         out.append("quoted words")
     if BRACKET.search(plain):
@@ -136,13 +299,13 @@ def check(text, sources=()):
 
 
 def _proper(text):
-    """A Latin word with a capital letter that does not open a sentence (a name, a shop, a place,
-    a brand); I alone is a word, not a name."""
-    for m in re.finditer(r"[^\W\d_]+(?:['’][^\W\d_]+)?", text):
+    """A Latin word with a capital letter that is not the first word (a name, a shop, a place, a
+    brand), or a capital inside a word; I alone is a word, not a name."""
+    for n, m in enumerate(re.finditer(r"[^\W\d_]+(?:['’][^\W\d_]+)?", text)):
         w = m.group(0)
         if not CAPITAL.search(w) or w in ("I", "I'm", "I’m"):
             continue
-        if CAPITAL.search(w[1:]) or not SENTENCE.search(text[:m.start()]):
+        if CAPITAL.search(w[1:]) or n:
             return True
     return False
 
@@ -295,7 +458,7 @@ class Pool:
             raise Refused("a pattern is a lesson or a lost case")
         reasons = check(text, sources)
         worry = _label(worry) if what == LOST else None
-        if worry and check(worry + " is what worried the customer"):
+        if worry and check(f"The customer worries about the {worry} here."):
             worry = None
         oh, kh = self.owner_hash(owner), self.key_hash(owner, key)
         with self._locked():
@@ -363,9 +526,10 @@ def _label(v):
 
 PROMPT = """You turn one {what} of a {kind} agent into one general pattern that an agent of the same
 kind at another business could learn from. {about}
-Write one plain sentence in English. Never write a name of a person, a shop, a brand or a place, a
-number in digits or words, a price, an amount or a currency, a phone number, an email or a link, and
-never quote anyone's words. Say what happens or what to do, in general terms.
+Write one plain sentence in English that starts with When, If, Offer, Ask, Customers or Asks. Never
+write a name of a person, a shop, a brand, a page, an app or a place, a number in digits or words, a
+price, an amount or a currency, a phone number, an email or a link, and never quote anyone's words or
+use the customer's own words. Say what happens or what to do, in general terms.
 Answer with JSON only: {{"pattern": "the sentence"}}"""
 ABOUT = {LESSON: "The data holds the lesson the agent kept after its trial.",
          LOST: "The data holds a practice chat the agent lost, cleaned, and the customer's worry; write how "

@@ -997,11 +997,11 @@ def overview_tab(m, view, a, agent, st, ctx):
                     f'{body}</div></section>')
         if tok:
             left.append(offers_form(ctx, agent))
-        if agent not in m.read_arena()[0]:  # no saved run yet: Run the Arena here too, polled the same way
-            go = run_arena(m, agent, ctx, ctx["path"] + ctx["q"])
-            if go:
-                left.append(f'<section class="grp sq" aria-labelledby="ra-h"{arena_live(m, agent)}><h3 id="ra-h">'
-                            f'The Arena</h3><small class="quiet">No practice run saved yet.</small>{go}</section>')
+    if (folder is not None or agent == mo.ASSISTANT) and agent not in m.read_arena()[0]:
+        go = run_arena(m, agent, ctx, ctx["path"] + ctx["q"])  # no saved run yet: Run the Arena here too, polled
+        if go:
+            left.append(f'<section class="grp sq" aria-labelledby="ra-h"{arena_live(m, agent)}><h3 id="ra-h">'
+                        f'The Arena</h3><small class="quiet">No practice run saved yet.</small>{go}</section>')
     learn = run_reflection(m, a, agent, ctx, ctx["path"] + ctx["q"])
     if learn:  # Run reflection beside it, for any agent on the page
         left.append(f'<section class="grp sq" aria-labelledby="rf-h"{reflect_live(m, agent)}><h3 id="rf-h">'
@@ -1056,12 +1056,13 @@ def arena_tab(m, view, a, agent, st, ctx):
 
 
 def arena_able(m, agent):
-    """True when Run the Arena is for this agent here: an agent made here, or the Sales agent with the
-    database folder (Morning.run_arena)."""
+    """True when Run the Arena is for this agent here: an agent made here, or the Sales agent or the personal
+    assistant with the database folder (Morning.run_arena)."""
     if not hasattr(m, "run_arena"):
         return False
     sales = agent == mo.SALES.agent and agent in m.plugs and getattr(m, "db_path", None) is not None
-    return m.agent_folder(agent) is not None or sales
+    mine = agent == mo.ASSISTANT and hasattr(m, "_assistant") and m._assistant(agent)
+    return m.agent_folder(agent) is not None or sales or mine
 
 
 def arena_track(m, agent, ctx):
@@ -1071,9 +1072,11 @@ def arena_track(m, agent, ctx):
     status = m.arena_status(agent) if hasattr(m, "arena_status") else None
     if status is None:
         return ""
-    steps = []
+    steps, shown = [], status.get("steps") or ("arena", "train", "connect")  # the assistant: Run the Arena only
     for key, word, done in (("arena", mo.ARENA_BUTTON, status["ran"]), ("train", mo.TRAIN_BUTTON, status["trained"]),
                             ("connect", mo.CONNECT_WORD, False)):
+        if key not in shown:
+            continue
         cls = "next" if status["next"] == key else "done" if done else ""
         tick = f'<small>{mo.DONE_WORD}</small>' if cls == "done" else ""
         steps.append(f'<li class="{cls}">{h(word)}{tick}</li>' if cls else f"<li>{h(word)}{tick}</li>")
@@ -1124,7 +1127,9 @@ def train_card(m, a, agent, ctx):
         done = m.trained(agent) if hasattr(m, "trained") else None
         if done is not None:
             inner.append(trained_html(done))
-        if summary is not None and summary["lost"] and ctx["token"]:  # Train only on a run that lost matches
+        if summary is not None and summary["lost"] and agent == mo.ASSISTANT:  # Train is not built for it yet
+            inner.append(f'<p class="quiet">{h(mo.TRAIN_NOT_YET)}</p>')
+        elif summary is not None and summary["lost"] and ctx["token"]:  # Train only on a run that lost matches
             nxt = (m.arena_status(agent) or {}).get("next") if hasattr(m, "arena_status") else None
             inner.append('<div class="act">' + _post(ctx, mo.TRAIN_PATH[1:], f'{icon("flask")}{mo.TRAIN_BUTTON}',
                                                      "yes" if nxt == "train" else "gb", agent=agent,
@@ -1226,7 +1231,7 @@ def run_arena(m, agent, ctx, back):
     Empty for any other agent."""
     if not arena_able(m, agent):
         return ""
-    sales = agent == mo.SALES.agent
+    sales, mine = agent == mo.SALES.agent, agent == mo.ASSISTANT
     if m.arena_running(agent):
         n = m.arena_played(agent)
         said = (f"Running the Arena: {n} practice {'match' if n == 1 else 'matches'} played so far." if n
@@ -1242,10 +1247,11 @@ def run_arena(m, agent, ctx, back):
     if ctx["token"] and not training:
         status = (m.arena_status(agent) if hasattr(m, "arena_status") else None) or {}
         word = mo.ARENA_AGAIN if status.get("ran") and not status.get("ready") else mo.ARENA_BUTTON
-        out.append(("" if sales else f'<p class="quiet">{ARENA_SAID}</p>')  # the Sales agent has no sample data
+        said = mo.ASSISTANT_SAID if mine else ARENA_SAID
+        out.append(("" if sales else f'<p class="quiet">{h(said)}</p>')  # the Sales agent has no sample data
                    + _post(ctx, ARENA_PATH[1:], f'{icon("flask")}{h(word)}',
                            "yes" if status.get("next", "arena") == "arena" else "gb", agent=agent, back=back)
-                   + f'<p class="quiet">{h(mo.ARENA_RUN_SAID)}</p>')
+                   + f'<p class="quiet">{h(mo.ASSISTANT_RUN_SAID if mine else mo.ARENA_RUN_SAID)}</p>')
     return f'<div class="act">{"".join(out)}</div>' if out else ""
 
 
@@ -1903,9 +1909,10 @@ def arena_parts(m, agent, ctx, back=None, fix_ctx=None):
         tiles.append('<div class="ghost"><span class="pav" aria-hidden="true"></span>No saved practice run yet.</div>')
     retry = try_again(m, agent, run, ctx, back) if (run or {}).get("lost") else ""
     when = f'Newest run, {mo._when(run["at"])}.' if run else "No saved run yet."
+    end = "Passed the gate" if agent == mo.ASSISTANT else "Ready to go live"  # the assistant has no live channel
     glow = ('<section class="a-climb" aria-label="How close it is"><article class="glow sq">'
             '<div class="glow-h"><span class="gchip">In the Arena</span><span class="gsub">practising on made-up '
-            f'cases</span></div>{CLIMB}<div class="climb-l"><span>Started</span><span>Ready to go live</span></div>'
+            f'cases</span></div>{CLIMB}<div class="climb-l"><span>Started</span><span>{end}</span></div>'
             f'<p class="calm">{h(when)} Nothing to do here while it practises.</p></article></section>')
     return glow, "".join(tiles), retry
 

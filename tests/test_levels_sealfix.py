@@ -2,14 +2,16 @@
 files were all deleted, or left with none by a crash inside Start a new test set, counts every saved
 practice customer as trained, so none of them joins the next test set; a correction's practice round
 never plays a saved test customer; the refusal when too few customers are left names lowering the
-level, and Start a new test set warns when the 99 customer cap leaves too few at the agent's level.
-Fake models only."""
+level, and Start a new test set warns when the 99 customer cap leaves too few at the agent's level;
+the seal check on a test line with no roster, the record check on a quick run and keep_trained's
+refusal when the roster is gone are pinned. Fake models only."""
 import json
 import os
+import shutil
 from unittest import mock
 
 from arena import gate, levels, madeup, practice, run
-from kit import turn
+from kit import seal, turn
 from reflection import morning as mo
 from tests import test_levels_tab
 from tests import test_levels_testset as testset  # the module, so its tests are not run twice
@@ -172,6 +174,44 @@ class CapPage(test_levels_tab.Tab):
 
     def test_the_reset_says_nothing_more_while_there_is_room(self):
         self.assertEqual(self.reset(levels.MEDIUM, 85), mo.NEW_TEST_SET)
+
+
+
+class Gaps(Base):
+    """Item 4: the cases the seal check found untested."""
+    practise = testset.Kept.practise
+
+    def test_an_unsealed_test_line_in_a_folder_with_no_roster_counts_as_training(self):
+        folder = self.folders[NAME]
+        seal.sign({}, practice.reports_of(folder))  # the key is there, so only the line's own seal decides
+        line = {"id": "old-r1-g01", "card": "persona-05", practice.TEST_KEY: True,
+                "persona": {"id": "persona-05", "from_card": "F"}}
+        (folder / run.MATCHES_FILE).write_text(json.dumps(line) + "\n", encoding="utf-8")
+        self.assertFalse((folder / practice.ROSTER_FILE).exists())
+        self.assertIn(("persona-05", "F"), practice.trained(folder))
+        self.assertIn(("persona-05", "F"), practice.keep_trained(folder))  # and on the roster built from it
+
+    def test_a_quick_run_on_a_torn_roster_stops_before_the_writer(self):
+        folder = self.folders[NAME]
+        self.practise(NAME, quick=True)
+        (folder / practice.ROSTER_FILE).write_text('{"trained": [', encoding="utf-8")
+        shutil.rmtree(folder / madeup.FOLDER)  # so a run past the check would ask the writer first
+        writer, played = Writer(), []
+        with mock.patch.object(practice.Practice, "play", testset.recorded_play(played)), \
+                self.assertRaises(practice.Unrecorded) as got:
+            practice.practise(folder, agent_model=None, customer_model=writer, judge_model=None, quick=True)
+        self.assertEqual(got.exception.file, practice.ROSTER_FILE)
+        self.assertEqual((writer.asks, played), ([], []))
+
+    def test_keep_trained_refuses_when_the_roster_is_gone_beside_sealed_lines(self):
+        folder = self.folders[NAME]
+        self.practise(NAME, quick=True)  # sealed training lines and no test-set.json
+        self.assertFalse((folder / practice.TEST_FILE).exists())
+        (folder / practice.ROSTER_FILE).unlink()
+        with self.assertRaises(practice.Unrecorded) as got:
+            practice.keep_trained(folder, [("persona-01", "F")])
+        self.assertEqual(got.exception.file, practice.ROSTER_FILE)
+        self.assertFalse((folder / practice.ROSTER_FILE).exists())  # left as it is, never rebuilt
 
 
 if __name__ == "__main__":

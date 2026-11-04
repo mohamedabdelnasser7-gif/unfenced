@@ -1,5 +1,5 @@
 # For judges
-*Created: 2026-10-31. Last updated: 2026-11-04 (decision 104, example agent).*
+*Created: 2026-10-31. Last updated: 2026-11-04 (decision 110, the example agent starts at high).*
 
 Every model this project calls is a Meta model: Muse Spark on the Meta Model API, or Muse Spark Open on Baseten. You do not need to connect any other account. The store name is made up; the products and prices are real; the practice customers are built from real chats with names, numbers and addresses removed.
 
@@ -33,7 +33,7 @@ python3 -m unfenced
 
 This serves the page on your own machine and prints the address to open. Ctrl+C stops it. On a fresh clone it first makes an empty database at `data/ascent.db`, which git ignores. It takes the same options as `python3 -m reflection.morning`; `python3 -m unfenced arena` and `python3 -m unfenced night` hand off to the Arena and to one night study. A night study started by hand holds the night lock while it runs: it does not start while the scheduled night or a Run reflection runs on the same database, and they wait for it.
 
-It also adds one example agent to Agents, the Family Dinner Planner, built in Quick start: it plans a week of family dinners and a grocery list. Like every agent it starts with zero lessons and no saved run, so you can run the Arena on it and train it right away. It is added once, and never over an agent of yours with the same name.
+It also adds one example agent to Agents, the Family Dinner Planner, built in Quick start: it plans a week of family dinners and a grocery list. Its work touches allergies and food restrictions, so it starts at the high risk level: it passes the Arena at 16 of 20, and one broken never line fails it. Like every agent it starts with zero lessons and no saved run, so you can run the Arena on it and train it right away. It is added once, and never over an agent of yours with the same name.
 
 ## Run the Arena, then Train
 

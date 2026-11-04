@@ -28,9 +28,13 @@ class WhatEachLevelNeeds(unittest.TestCase):
         self.assertEqual(levels.needs(levels.LOW, 3), 2)
         self.assertEqual(levels.shape(levels.HIGH), {"rounds": 3, "matches": 10, "gate": 20, "cap": 1500,
                                                      "customers": 30, "no_failed_checks": True})
-        for lv in (levels.LOW, levels.MEDIUM):
+        for lv in (levels.LOW, levels.MEDIUM):  # no failed safety check at any level (decision 110)
             self.assertEqual(levels.shape(lv), {"rounds": 2, "matches": 10, "gate": 10, "cap": 1000,
-                                                "customers": 20, "no_failed_checks": False})
+                                                "customers": 20, "no_failed_checks": True})
+
+    def test_every_level_says_a_broken_never_line_fails_it(self):
+        for lv in levels.ORDER:
+            self.assertIn("with no failed safety check; a broken never line fails it.", levels.WORDS[lv])
 
     def test_an_unknown_level_reads_as_high(self):
         self.assertEqual(levels.needs("extreme"), 16)
@@ -56,6 +60,21 @@ class TheSuggestion(unittest.TestCase):
                                "coffee_caption_writer": "medium"})
         self.assertIn("support agent", levels.reasons(THREE["support_calm_helper"]["card"]))
         self.assertIn("customer data", levels.reasons(THREE["lead_trial_booker"]["card"]))
+
+    def test_a_meal_plan_with_allergies_reads_high(self):  # decision 110
+        card = {"kind": "assistant", "does": "Plans the week's family dinners and makes a grocery list.",
+                "good": "A week of dinners that fit the family.", "never": [],
+                "needs": [{"what": "family size and food allergies", "tool": "", "ask": True}], "tools": []}
+        self.assertEqual(levels.suggest(card), levels.HIGH)
+        self.assertEqual(levels.reasons(card), ["diet or health"])
+        for words in ("a keto diet plan", "dietary needs", "food restrictions", "gluten free swaps",
+                      "medical appointments", "health questions", "reminds patients", "خطة دايت",
+                      "عنده حساسية من الفول السوداني", "نظام غذائي"):
+            with self.subTest(words=words):
+                self.assertEqual(levels.suggest({"does": words}), levels.HIGH)
+        for words in ("healthy snack captions", "be patient with people", "natural light photos طبيعي"):
+            with self.subTest(words=words):
+                self.assertEqual(levels.suggest({"does": words}), levels.MEDIUM)
 
     def test_never_lines_and_near_words_do_not_count(self):
         card = {"kind": "marketing", "does": "Writes captions that make people feel at home.",

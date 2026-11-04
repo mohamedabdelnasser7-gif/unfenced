@@ -34,7 +34,7 @@ class LevelCard(Tab):
                   lost=[{"card": "c1", "why": "it gave no answer", "quote": {"turn": 1, "who": "agent", "text": "Hi"}}])
         page = self.tab()
         self.assertIn("Risk level: Medium", page)
-        self.assertIn("<b>6 of 10</b>, your level needs 7</p>", page)
+        self.assertIn("<b>6 of 10</b>, your level needs 7 with no failed safety check; a broken never line fails it</p>", page)
         self.assertIn("<li><span>Round 1</span><b>4 of 10</b></li><li><span>Round 2</span><b>6 of 10</b></li>", page)
         self.assertIn("What holds it back", page)
         self.assertIn(EXAM, page)
@@ -48,7 +48,7 @@ class LevelCard(Tab):
         levels.write(self.folder, "high")
         self.item(gate_won=17, gate_played=20, gate_size=20, needs=16, failed_checks=0, scores=[9, 17], level="high")
         page = self.tab()
-        self.assertIn("<b>17 of 20</b>, your level needs 16 with no failed safety check</p>", page)
+        self.assertIn("<b>17 of 20</b>, your level needs 16 with no failed safety check; a broken never line fails it</p>", page)
         self.assertIn("passed the gate for its high level", page)
         self.assertNotIn("What holds it back", page)
         self.assertNotIn(pages.LEVEL_HELP, page)
@@ -58,7 +58,7 @@ class LevelCard(Tab):
         self.item(gate_won=6, gate_played=10, gate_size=10, needs=7, failed_checks=0, scores=[6], level="medium")
         mo.TWO_TAB_ACTIONS[mo.LEVEL_PATH](self.m, {"agent": ["stock_watch"], "level": ["low"]})
         page = self.tab()
-        self.assertIn("<b>6 of 10</b>, your level needs 5</p>", page)
+        self.assertIn("<b>6 of 10</b>, your level needs 5 with no failed safety check; a broken never line fails it</p>", page)
         self.assertIn("passed the gate for its low level", page)
         self.assertEqual([f[0] for f in self.level_forms(page)], ["low", "medium"])
 
@@ -66,14 +66,14 @@ class LevelCard(Tab):
         self.item(gate_won=8, gate_played=10, gate_size=10, needs=7, failed_checks=0, scores=[8], level="medium")
         levels.write(self.folder, "high")
         page = self.tab()
-        self.assertIn("<b>8 of 10</b>, your level needs 16 of 20 with no failed safety check</p>", page)
+        self.assertIn("<b>8 of 10</b>, your level needs 16 of 20 with no failed safety check; a broken never line fails it</p>", page)
         self.assertIn("asks for a run of 20, so run the Arena again", page)
 
     def test_a_round_cut_short_shows_what_was_played(self):
         self.item(gate_won=6, gate_played=7, gate_size=10, needs=7, failed_checks=0, scores=[5, 6], stopped="cap",
                   level="medium")
         page = self.tab()
-        self.assertIn("<b>6 won of 7 played</b> (the run stopped before all 10), your level needs 7</p>", page)
+        self.assertIn("<b>6 won of 7 played</b> (the run stopped before all 10), your level needs 7 with no failed safety check; a broken never line fails it</p>", page)
         self.assertIn("<li><span>Round 1</span><b>5 of 10</b></li><li><span>Round 2</span><b>6 of 7</b></li>", page)
         self.assertNotIn("<b>6 of 10</b>", page)
 

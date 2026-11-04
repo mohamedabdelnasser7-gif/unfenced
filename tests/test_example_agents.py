@@ -127,6 +127,8 @@ class Shipped(unittest.TestCase):
     def test_its_level_is_the_one_quick_start_sets_from_the_card(self):
         card = json.loads((SHIPPED / "card.json").read_text(encoding="utf-8"))
         self.assertEqual(levels.read(SHIPPED), levels.pick(None, card))
+        self.assertEqual(levels.read(SHIPPED), levels.HIGH)  # its work touches allergies (decision 110)
+        self.assertIn("diet or health", levels.reasons(card))
 
     def test_its_exam_and_practice_customers_are_from_this_card_and_made_up(self):
         card = json.loads((SHIPPED / "card.json").read_text(encoding="utf-8"))

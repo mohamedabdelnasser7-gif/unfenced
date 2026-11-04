@@ -793,6 +793,8 @@ class Arena:
                 if not judged["won"]:
                     one["gate"]["lost"].append({"card": m["card"], "why": judged["why"], "quote": judged["quote"],
                                                 "match": m["id"]})
+                    if "failed_check" in judged:  # a built agent's lost test match says whether it failed one
+                        one["gate"]["lost"][-1]["failed_check"] = bool(judged["failed_check"])
             wins = one["gate"]["won"]
             if self._passed(one):
                 return self._report(rounds, PASSED)

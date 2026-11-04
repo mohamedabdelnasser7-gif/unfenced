@@ -1178,7 +1178,7 @@ def level_card(m, agent, run, ctx, back):
         need = levels_mod.needs(level, size)
         if size < rule["gate"]:  # a smaller run than the level's gate: the level asks for a new run (Morning.gate)
             need = f'{levels_mod.needs(level)} of {rule["gate"]}'
-        safe = " with no failed safety check" if rule["no_failed_checks"] else ""
+        safe = " with no failed safety check; a broken never line fails it" if rule["no_failed_checks"] else ""
         played = run.get("gate_played")
         short = played is not None and played < size  # cut short (the cap, or a match left unjudged)
         unjudged = run.get("unjudged") or 0  # the last round's test matches the judge could not read

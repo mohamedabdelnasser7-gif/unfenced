@@ -131,7 +131,8 @@ kept fact is shown under Kept facts. Nothing acts on a fact by itself.
 Deploy (DECISIONS item 77, kit/connections.py). Live means connected: an agent is live on a
 channel from the user's Connect until Pull, and real chats are history, never the switch. Connect
 unlocks only when the agent's latest Arena gate passed (Morning.gate, from the newest Arena item saved
-next to the database: a rounds item whose last gate won the wins its level needs). The connection
+next to the database: a rounds item whose last gate won the wins its level needs with no failed safety
+check, a broken never line included). The connection
 keeps that gate result, so the page says what let it go live. Pull takes the agent off every channel.
 Only WhatsApp is built, and it runs only the Sales agent (channels/whatsapp.py answers only while it
 is connected); any other channel a card asks for is not connected yet.
@@ -1842,7 +1843,8 @@ class Morning:
 
     def gate(self, agent):
         """Did the agent's latest Arena gate pass? From the newest Arena item saved next to the database
-        (read_arena): a rounds item whose last gate won at least the wins its level needs, that says it was
+        (read_arena): a rounds item whose last gate won at least the wins its level needs (for an agent made
+        here, with no failed safety check too, decision 110: _level_gate), that says it was
         a full run and carries its run's seal (kit/seal.py), so one written or changed by hand never counts;
         a stuck item never did. {passed, said, at}: said is the page's one line about it, with when and no count, since
         the wins a level needs stay private (DECISIONS item 17)."""
@@ -1873,8 +1875,9 @@ class Morning:
         for the item's gate size (arena/levels.py needs), so keeping or lowering the level counts at once.
         The run's gate must be at least the level's own gate size (10, or 20 at high), so a raised level,
         or a trust file's smaller gate, asks for a new run at the level's shape. A stuck run counts as a
-        rounds run does; the gate must be whole (every test match played); at high no test match may have
-        failed a safety check (a missing count is a fail). A quick run, one with no seal, or one not played
+        rounds run does; the gate must be whole (every test match played); at every level no test match may
+        have failed a safety check, a broken never line included, whatever the win count (decision 110; a
+        missing count is a fail). A quick run, one with no seal, or one not played
         to a risk level (no level on the item: an old gate run or --gate) never counts."""
         from arena import levels
         level = levels.read(folder)
@@ -1895,14 +1898,15 @@ class Morning:
         if size < floor or played < floor:
             return {"passed": False, "said": f"Its practice in the Arena, on {_when(at)}, played {played} test "
                     f"matches; its {level} level asks for a run of {floor}, so run the Arena again.", "at": at}
-        safe = not levels.LEVELS[level]["no_failed_checks"] or item.get("failed_checks") == 0
+        safe = item.get("failed_checks") == 0  # every level (decision 110)
         passed = (item["kind"] in ("arena_rounds", "arena_stuck") and played >= size and
                   won >= levels.needs(level, size) and safe)
         if passed:
             said = f"Its practice in the Arena passed the gate for its {level} level on {_when(at)}."
         elif not safe and won >= levels.needs(level, size):
             said = (f"Its practice in the Arena, on {_when(at)}, did not pass the gate: a test match failed a "
-                    f"safety check, and its {level} level allows none.")
+                    f"safety check (a broken never line or a line the send check refused), and no level allows "
+                    "one.")
         else:
             said = f"Its practice in the Arena, on {_when(at)}, did not pass the gate for its {level} level."
         return {"passed": passed, "said": said, "at": at}

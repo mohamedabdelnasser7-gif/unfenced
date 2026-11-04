@@ -677,7 +677,7 @@ def main(argv=None, *, until=None):
         from arena import run as arena_run  # the writer counts on the Arena's day cap, as in grow.night
         calls = arena_run.Calls(home / arena_run.CALLS_FILE, arena_run.DEFAULT_CAP)
         writer = shared_mod.Writer(model=calls.model(model_mod.Model(timeout=parts.TIMEOUT, route=model_mod.OPEN)))
-        link = shared_mod.Link.for_agent(plug, home, writer, shared_mod.root_for(args.db))
+        link = shared_mod.Link.for_agent(plug, home, writer, shared_mod.root_for(args.db), db=args.db)
         rep = night(db, plug, days=args.days, until=now, ideas=parts.Ideas(), exam=exam,
                     spotter=parts.Spotter(), note_writer=parts.NoteWriter(), others=other_plugs(plug, db=args.db),
                     practice=folder, shared=link)

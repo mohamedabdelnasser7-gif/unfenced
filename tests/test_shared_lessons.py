@@ -337,3 +337,38 @@ class AnyKind(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RemintedOwnerId(unittest.TestCase):
+    """Red team crossowner round 2, item 2: deleting an owner's owner-id file makes a new id. What was
+    given is kept by the lesson's own id, so the same lesson is not given again, and the owner's name
+    with its new id gives nothing until the operator clears the name."""
+
+    def setUp(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.root = Path(d.name) / "shared"
+        self.plug, self.folder = plugs.owned(fan("fan_a", kind="fans", owner="demo"), self)
+
+    def link(self, *lines):
+        return shared.Link.for_agent(self.plug, self.folder, writer_of(*lines), self.root)
+
+    def test_a_deleted_owner_id_neither_gives_a_lesson_again_nor_counts_as_a_second_owner(self):
+        first = self.link(PATTERN)
+        self.assertIsNotNone(first.give_lesson("fan_a", {"id": 7, "text": GIVEN})["pattern"])
+        (self.folder.parent / shared.OWNER_ID_FILE).unlink()
+        asked = []
+        again = shared.Link.for_agent(self.plug, self.folder, lambda *a: asked.append(a) or NEAR, self.root)
+        self.assertNotEqual(again.owner, first.owner)
+        self.assertEqual(again.give_lesson("fan_a", {"id": 7, "text": GIVEN})["why"], "given before")
+        held = again.give_lesson("fan_a", {"id": 8, "text": FILTERS})
+        self.assertEqual(held["why"], shared.HELD)
+        self.assertFalse(held.get("asked"))
+        self.assertEqual(asked, [])  # held before the writer is asked
+        self.assertEqual(shared.Pool("fans", self.root).shared(shared.LESSON), [])
+        # the same name and id through add() itself is held too (two nights at once)
+        got, why = again.pool.add(shared.LESSON, NEAR, again.owner, "lesson:9", name="demo")
+        self.assertEqual((got, why), (None, [shared.HELD]))
+        self.assertEqual(shared.clear_owner(self.root, "demo"), ["fans"])
+        cleared = self.link(NEAR).give_lesson("fan_a", {"id": 8, "text": FILTERS})
+        self.assertEqual(cleared["owners"], 2)

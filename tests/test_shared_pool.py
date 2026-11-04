@@ -296,7 +296,7 @@ class PoolTest(unittest.TestCase):
                 self.assertNotIn(owner.encode(), raw)
                 self.assertNotIn(hashlib.sha256(owner.encode()).hexdigest()[:32].encode(), raw)  # keyed, not bare
         data = json.loads((self.root / "patterns-support.json").read_text())
-        self.assertEqual(set(data), {"kind", "patterns", "keys"})
+        self.assertEqual(set(data), {"kind", "patterns", "keys", "names"})
         for o in data["patterns"][0]["owners"]:
             self.assertRegex(o, r"^[0-9a-f]{48}$")  # the keyed hash, then its seal
         self.assertEqual(oct((self.root / "patterns-support.json").stat().st_mode & 0o777), "0o600")
@@ -314,7 +314,7 @@ class PoolTest(unittest.TestCase):
         raw = (self.root / "patterns-support.json").read_text()
         self.assertNotIn("Ahmed", raw)
         self.assertEqual(json.loads(raw)["patterns"], [])
-        self.assertTrue(self.pool.given(OWNER_A, "lesson:a:9"))  # only its hash: not asked again
+        self.assertTrue(self.pool.given("lesson:a:9"))  # only its hash: not asked again
 
     def test_a_hand_edited_dirty_pattern_is_not_read(self):
         self.pool.add(shared.LESSON, CLEAN_EN, OWNER_A, "k1")

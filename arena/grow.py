@@ -894,7 +894,7 @@ def night(db_path, plug, recipe_path, since, until, folder=None, own=True, share
         from reflection import shared as shared_mod
         try:
             link = shared_mod.Link.for_agent(plug, folder, shared_mod.Writer(model=calls.model(tag_model())),
-                                             shared_root)
+                                             shared_root, db=db_path)
             link.pool  # opened now, so a refused folder is said once
             pool.shared = shared_mod.practice_cards(pool.kind, shared_root, but=link.owner or None)
         except shared_mod.Refused as e:

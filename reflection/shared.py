@@ -37,6 +37,11 @@ least SAME. A pattern is shared only once it is seen at MIN_OWNERS (2) distinct 
 whose owner.json does not name the owner its plug names gives nothing (its folder alone never says
 who the owner is, as in arena/grow.py); it still reads the pool. Within one install, whoever can
 make owner folders can still make owners; the id only stops one owner counting twice by a new name.
+What was given is kept by the lesson's or chat's own id and its database (key_hash, Link db), never
+by the owner, so a lesson is written up once whatever id its owner has. Each pool also keeps, sealed,
+which owner id each owner name (owner.json) gave under: a known name with a new id (its owner-id file
+deleted and made again) gives nothing until the operator clears that name (clear_owner, or
+python3 -m reflection.shared clear-owner --db <the agents' database> <owner name>).
 
 Where the patterns go, each through the paths siblings already take:
   lessons  engine/study.py step 6 reads the shared lesson patterns of its kind beside its siblings,
@@ -91,6 +96,8 @@ POOL_AGENT = "shared_pool"  # the name the study's notes and links give the pool
 MAX_FILE = 32_000_000  # MAX_PATTERNS rows of MAX_OWNERS sealed owners (48 hex) and MAX_KEYS keys fit
 HASH = re.compile(r"[0-9a-f]{32}")
 SEALED = re.compile(r"([0-9a-f]{32})([0-9a-f]{16})")  # an owner in the file: its hash, then its seal
+NAMED = re.compile(r"([0-9a-f]{32})([0-9a-f]{32})([0-9a-f]{16})")  # an owner name, its owner, the seal
+HELD = "the owner's id changed since its name last gave; nothing is given until the operator clears the name"
 PID = re.compile(r"[0-9a-f]{12}")
 LABEL = re.compile(r"[a-z]+(?: [a-z]+){0,3}")
 
@@ -593,10 +600,24 @@ class Pool:
         raw = "\x00".join([self.kind, p["id"], p["what"], p["text"], p.get("worry") or "", oh]).encode("utf-8")
         return hmac.new(self._secret(), b"seal\x00" + raw, hashlib.sha256).hexdigest()[:16]
 
-    def key_hash(self, owner, key):
-        """Where a pattern came from (an owner's agent and lesson, or chat and step), as a keyed hash."""
-        raw = f"{owner}\x00{key}".encode("utf-8")
-        return hmac.new(self._secret(), b"from\x00" + raw, hashlib.sha256).hexdigest()[:32]
+    def key_hash(self, key):
+        """Where a pattern came from (a lesson's or a chat's own id in the install's database, the same
+        whichever owner id gave it), as a keyed hash."""
+        return hmac.new(self._secret(), b"from\x00" + key.encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+
+    def name_hash(self, name):
+        return hmac.new(self._secret(), b"name\x00" + name.encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+
+    def name_seal(self, nh, oh):
+        raw = "\x00".join([self.kind, nh, oh]).encode("utf-8")
+        return hmac.new(self._secret(), b"named\x00" + raw, hashlib.sha256).hexdigest()[:16]
+
+    def held(self, name, owner):
+        """True when the owner name gave before under another owner id (see the module lines)."""
+        if not name:
+            return False
+        nh = self.name_hash(name)
+        return nh in self.names and self.names[nh] != self.owner_hash(owner)
 
     # reading and writing
 
@@ -625,6 +646,12 @@ class Pool:
         keys = data.get("keys")
         self.keys = [k for k in keys if isinstance(k, str) and HASH.fullmatch(k)][-MAX_KEYS:] \
             if isinstance(keys, list) else []
+        named = data.get("names")
+        named = [m for m in (NAMED.fullmatch(n) for n in named[:MAX_KEYS] if isinstance(n, str)) if m] \
+            if isinstance(named, list) else []
+        self.names = {m.group(1): m.group(2) for m in named
+                      if key and hmac.compare_digest(m.group(3), self.name_seal(m.group(1), m.group(2)))}
+        self.broken = self.broken or bool(named) and not self.names
 
     def _unsealed(self, p):
         """The row with its owners as hashes, or None when any owner's seal fails (_pattern_ok has
@@ -654,29 +681,47 @@ class Pool:
             os.chmod(self.root, 0o700)
         kept = [dict({k: p[k] for k in ("id", "what", "text", "worry", "at")},
                      owners=[oh + self.seal(p, oh) for oh in p["owners"]]) for p in self.patterns]
-        _write(self.path, json.dumps({"kind": self.kind, "patterns": kept, "keys": self.keys[-MAX_KEYS:]},
-                                     ensure_ascii=False).encode("utf-8"))
+        names = [nh + oh + self.name_seal(nh, oh) for nh, oh in self.names.items()]
+        _write(self.path, json.dumps({"kind": self.kind, "patterns": kept, "keys": self.keys[-MAX_KEYS:],
+                                      "names": names[-MAX_KEYS:]}, ensure_ascii=False).encode("utf-8"))
 
-    def given(self, owner, key):
-        """True when this owner's lesson or chat was written up before (kept or dropped)."""
-        return self.key_hash(owner, key) in self.keys
+    def given(self, key):
+        """True when this lesson or chat (its own id in the install's database) was written up before,
+        kept or dropped, by any owner id."""
+        return self.key_hash(key) in self.keys
 
-    def add(self, what, text, owner, key, *, worry=None, sources=(), now=None):
+    def clear(self, name):
+        """The operator's step after an owner's id was made again: the name may give under its new id."""
+        with self._locked():
+            self._read()
+            if self.broken:
+                raise Refused("the pool file could not be read; nothing is written")
+            if self.names.pop(self.name_hash(name), None) is not None:
+                self._save()
+                return True
+        return False
+
+    def add(self, what, text, owner, key, *, worry=None, sources=(), now=None, name=None):
         """One owner's pattern into the pool: (the pattern, []) when it was added or joined a near
         equal one, (None, reasons) when the clean check dropped it. Either way only a hash of the
-        owner and of where it came from is written; a dropped pattern's words never are."""
+        owner and of where it came from is written; a dropped pattern's words never are. name: the
+        owner's name (owner.json); one that gave under another owner id gives nothing (HELD)."""
         if what not in WHATS:
             raise Refused("a pattern is a lesson or a lost case")
         reasons = check(text, sources)
         worry = _label(worry) if what == LOST else None
         if worry and check(f"The customer worries about the {worry} here."):
             worry = None
-        oh, kh = self.owner_hash(owner), self.key_hash(owner, key)
+        oh, kh = self.owner_hash(owner), self.key_hash(key)
         with self._locked():
             self._read()
             if self.broken:
                 raise Refused("the pool file could not be read, or none of its patterns was sealed by the shared "
                               "folder's key; nothing is written")
+            if name:
+                if self.held(name, owner):
+                    return None, [HELD]
+                self.names[self.name_hash(name)] = oh
             if kh not in self.keys:
                 self.keys.append(kh)
             if reasons:
@@ -803,16 +848,25 @@ class Link:
     writer: Writer or a test's stand in. give, give_lost: the writer's calls a night at most. A give
     whose writer raised says failed, and the night then asks the writer nothing more."""
 
-    def __init__(self, kind, owner, writer, root, give=GIVE, give_lost=GIVE_LOST):
-        self.kind, self.owner, self.writer = kind, owner or "", writer
+    def __init__(self, kind, owner, writer, root, give=GIVE, give_lost=GIVE_LOST, name=None, db=None):
+        self.kind, self.owner, self.writer, self.name = kind, owner or "", writer, name or None
+        # the database the lesson and chat ids are of: two databases beside one shared folder never
+        # share an id
+        self.db = str(Path(db).expanduser().resolve()) if db is not None and str(db) != ":memory:" else ""
         self.root, self.give, self.give_lost = root, int(give), int(give_lost)
         self._pool = None
 
     @classmethod
     def for_agent(cls, plug, folder, writer, root, **kw):
         """The link of the agent whose plug sits in folder: its kind, and its owner's id (owner_id)
-        when owner.json names the owner its plug names, else no owner."""
-        return cls(getattr(plug, "kind", "") or plug.agent, owner_id(folder), writer, root, **kw)
+        and name when owner.json names the owner its plug names, else no owner. db (in kw): the
+        agents' database its lesson and chat ids are of."""
+        oid = owner_id(folder)
+        name = None
+        if oid:
+            from arena import grow  # late, as in owner_id
+            name = grow.owner_name(grow.owner_of(folder))
+        return cls(getattr(plug, "kind", "") or plug.agent, oid, writer, root, name=name, **kw)
 
     @property
     def pool(self):
@@ -839,26 +893,30 @@ class Link:
     def _give(self, what, key, data, sources, worry=None):
         if not self.owner:
             return {"pattern": None, "why": "this agent names no owner, so it gives nothing"}
-        if self.pool.given(self.owner, key):
+        if self.pool.given(key):
             return {"pattern": None, "why": "given before"}
+        if self.pool.held(self.name, self.owner):
+            return {"pattern": None, "why": HELD}
         try:
             line = self.writer(what, self.kind, data)
         except Exception as e:  # a failing writer gives nothing tonight; asked again another night
             return {"pattern": None, "why": f"the writer failed ({type(e).__name__})", "asked": True, "failed": True}
-        got, reasons = self.pool.add(what, line or "", self.owner, key, worry=worry, sources=sources)
+        got, reasons = self.pool.add(what, line or "", self.owner, key, worry=worry, sources=sources, name=self.name)
         if got is None:
             return {"pattern": None, "why": "dropped: " + "; ".join(reasons), "asked": True}
         return {"pattern": got["id"], "owners": len(set(got["owners"])), "why": None, "asked": True}
 
     def give_lesson(self, agent, lesson):
-        """One kept lesson ({id, text}) of this owner's agent into the pool, once."""
-        return self._give(LESSON, f"lesson:{agent}:{lesson['id']}", {"lesson": lesson["text"]}, [lesson["text"]])
+        """One kept lesson ({id, text}) of this owner's agent into the pool, once: kept by the lesson's
+        own id in the install's database, whichever agent or owner id gives it."""
+        return self._give(LESSON, f"{self.db}\x00lesson:{lesson['id']}", {"lesson": lesson["text"]},
+                          [lesson["text"]])
 
     def give_chat(self, chat_key, turns, worry):
         """One lost chat, already cleaned (arena/grow.py), into the pool, once. Its customer turns are
         the copy check's sources."""
         said = [t.get("text", "") for t in turns if isinstance(t, dict) and isinstance(t.get("text"), str)]
-        return self._give(LOST, f"chat:{chat_key}", {"lost case": turns, "worry": _label(worry) or "other"},
+        return self._give(LOST, f"{self.db}\x00chat:{chat_key}", {"lost case": turns, "worry": _label(worry) or "other"},
                           said, worry=worry)
 
 
@@ -905,3 +963,38 @@ def owners_in(source):
 def pattern_in(source):
     m = SOURCE.match(source) if isinstance(source, str) else None
     return m.group(1) if m else None
+
+
+def clear_owner(root, name):
+    """Lets an owner name give again under its owner's new id, in every kind's pool of the shared
+    folder: the operator's step once they know the owner-id file was made again on purpose. The
+    kinds whose pool held the name."""
+    root = check_root(root)
+    out = []
+    for path in sorted(root.glob(POOL_FILE.format(kind="*"))):
+        kind = path.name[len("patterns-"):-len(".json")]
+        if AGENT_NAME.fullmatch(kind) and Pool(kind, root).clear(name):
+            out.append(kind)
+    return out
+
+
+def main(argv=None):
+    import argparse
+    import sys
+    ap = argparse.ArgumentParser(description="The shared pool's operator steps.")
+    sub = ap.add_subparsers(dest="step", required=True)
+    c = sub.add_parser("clear-owner", help="let an owner name give again after its owner id was made again")
+    c.add_argument("--db", required=True, help="the agents' database; its shared folder sits beside it")
+    c.add_argument("name", help="the owner's name as its owner.json gives it")
+    args = ap.parse_args(argv)
+    try:
+        kinds = clear_owner(root_for(args.db), args.name)
+    except Refused as e:
+        print(f"Not cleared: {e}.", file=sys.stderr)
+        return 2
+    print("cleared in: " + ", ".join(kinds) if kinds else "the name was not held in any pool")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

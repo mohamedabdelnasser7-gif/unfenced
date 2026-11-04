@@ -4,7 +4,10 @@ practice customer as trained, so none of them joins the next test set; a correct
 never plays a saved test customer; the refusal when too few customers are left names lowering the
 level, and Start a new test set warns when the 99 customer cap leaves too few at the agent's level;
 the seal check on a test line with no roster, the record check on a quick run and keep_trained's
-refusal when the roster is gone are pinned. Fake models only."""
+refusal when the roster is gone are pinned; the command line starts a new test set with --new-test-set,
+and its refusal on a torn record names it. Fake models only."""
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -212,6 +215,63 @@ class Gaps(Base):
             practice.keep_trained(folder, [("persona-01", "F")])
         self.assertEqual(got.exception.file, practice.ROSTER_FILE)
         self.assertFalse((folder / practice.ROSTER_FILE).exists())  # left as it is, never rebuilt
+
+
+
+class CommandLine(Base):
+    """Item 5: arena/practice.py --new-test-set, the way on from the command line."""
+    practise = testset.Kept.practise
+
+    def main(self, *argv, models=False):
+        out, err = io.StringIO(), io.StringIO()
+        given = dict(agent_model=Writer(), customer_model=Writer(), judge_model=Writer()) if models else {}
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = practice.main(["--agent", str(self.folders[NAME]), *argv], **given)
+        return code, out.getvalue(), err.getvalue()
+
+    def test_a_torn_record_names_the_flag_and_the_flag_gets_past_it(self):
+        folder = self.folders[NAME]
+        self.practise(NAME, 20, 10)
+        before = {c for c, _ in practice.trained(folder)}
+        (folder / practice.ROSTER_FILE).write_text('{"trained": [', encoding="utf-8")
+        with mock.patch.object(practice.Practice, "play", testset.recorded_play([])):
+            code, _, err = self.main("--quick", models=True)
+        self.assertEqual(code, 2)
+        self.assertIn(practice.ROSTER_FILE, err)
+        self.assertIn("arena/practice.py --agent", err)
+        self.assertIn("--new-test-set", err)
+        code, out, err = self.main("--new-test-set")  # no model and no key needed
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("A new test set is ready", out)
+        self.assertIn("trained-before-", out)
+        self.assertIsNone(practice.broken_record(folder))
+        self.assertLessEqual(before, {c for c, _ in practice.trained(folder)})
+        again = self.practise(NAME, 20, 10)
+        self.assertFalse(set(again["held_out_cards"]) & before)
+
+    def test_the_flag_refuses_a_whole_record_and_a_folder_that_is_not_an_agents(self):
+        self.practise(NAME, 20, 10)
+        code, out, err = self.main("--new-test-set")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("read whole", err)
+        self.assertEqual(list(self.folders[NAME].glob("*-before-*")), [])
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = practice.main(["--agent", str(self.root), "--new-test-set"])
+        self.assertEqual(code, 2)
+        self.assertIn("not an agent's folder", err.getvalue())
+
+    def test_the_flag_says_when_the_cap_leaves_too_few(self):
+        folder = self.folders[NAME]
+        levels.write(folder, levels.HIGH)
+        (folder / run.MATCHES_FILE).write_text("torn\n", encoding="utf-8")  # 85 saved customers, a torn record
+        cards = folder / madeup.FOLDER
+        cards.mkdir()
+        for n in range(1, 86):
+            (cards / f"persona-{n:02d}.json").write_text("{}", encoding="utf-8")
+        code, out, _ = self.main("--new-test-set")
+        self.assertEqual(code, 0)
+        self.assertIn("85 of the 99 customers", out)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 
     python3 -I arena/practice.py --agent DIR [--level low|medium|high] [--matches 10] [--rounds 2]
         [--cards DIR] [--trust FILE] [--cap 1000] [--gate W/N] [--seed 0] [--json] [--quick]
+    python3 -I arena/practice.py --agent DIR --new-test-set
 
 DIR is the agent's folder, <db folder>/agents/<name>/, with plug.json, instructions.md and card.json
 (kit/turn.py load). The Sales agent practises through arena/run.py, never here.
@@ -125,6 +126,7 @@ import math
 import os
 import re
 import secrets
+import shlex
 import string
 import sys
 import time
@@ -1207,6 +1209,33 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
     return arena.run()
 
 
+NEW_TEST_SET = ("A new test set is ready: the old files are kept beside it ({aside}), every customer before counts as "
+                "trained, and the agent's next run writes new customers for the test set. Nothing was started.")
+
+
+def _new_test_set_main(agent):
+    """--new-test-set: new_test_set on the agent's folder, no model and no key needed. 0 when done, 2 when
+    refused (not an agent folder, a link, or a record that reads whole)."""
+    raw = Path(agent).expanduser()
+    if raw.is_symlink() or not raw.is_dir() or not (raw / "card.json").is_file():
+        print("Not run: --agent is not an agent's folder, so nothing was changed", file=sys.stderr)
+        return 2
+    folder = raw.resolve()
+    try:
+        aside = new_test_set(folder)
+    except run.Refused as e:
+        print(f"Not run: {e}", file=sys.stderr)
+        return 2
+    except OSError as e:
+        print(f"Not run: the files could not all be renamed ({type(e).__name__}); run it again", file=sys.stderr)
+        return 2
+    print(NEW_TEST_SET.format(aside=", ".join(aside) or "none"))
+    warn = room_warning(folder)
+    if warn:
+        print(warn)
+    return 0
+
+
 def main(argv=None, *, agent_model=None, customer_model=None, judge_model=None):
     ap = argparse.ArgumentParser(prog="arena/practice.py", description="Arena practice for an agent made by Quick start.")
     ap.add_argument("--agent", required=True, help="the agent's folder, <db folder>/agents/<name>/")
@@ -1222,7 +1251,12 @@ def main(argv=None, *, agent_model=None, customer_model=None, judge_model=None):
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--quick", action="store_true", help="one training match, a gate of one match, at most "
                     f"{run.QUICK_CALLS} model calls")
+    ap.add_argument("--new-test-set", action="store_true", help="the way on when the agent's saved matches, "
+                    f"{TEST_FILE} or {ROSTER_FILE} is torn, changed or gone: sets them aside, counts every customer "
+                    "before as trained and starts no run (Start a new test set on the Arena tab)")
     args = ap.parse_args(argv)
+    if args.new_test_set:
+        return _new_test_set_main(args.agent)
     try:
         gate = None if args.gate is None else read_gate(args.gate)
     except ValueError as e:
@@ -1244,6 +1278,9 @@ def main(argv=None, *, agent_model=None, customer_model=None, judge_model=None):
                        seed=args.seed, quick=args.quick, gate=gate, level=args.level)
     except NOT_RUN as e:
         print(f"Not run: {e}", file=sys.stderr)
+        if isinstance(e, Unrecorded):  # a torn, changed or missing record: its one way on
+            print(f"To go on, start a new test set: python3 -I arena/practice.py --agent {shlex.quote(args.agent)} "
+                  "--new-test-set", file=sys.stderr)
         return 2
     print(json.dumps(rep, ensure_ascii=False, indent=1) if args.json else text(rep))
     return 0 if rep["stopped"] == run.PASSED else 1

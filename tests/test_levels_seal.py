@@ -79,8 +79,12 @@ class Sealed(Base):
         self.rewrite(copied)
         self.assert_still_trained()
 
-    def test_a_key_that_is_gone_makes_every_line_training(self):
+    def test_a_key_that_is_gone_stops_the_run_until_a_new_test_set_then_every_line_is_training(self):
         (practice.reports_of(self.folder) / seal.KEY_FILE).unlink()
+        with self.assertRaises(practice.Unrecorded) as got:  # the roster's seal cannot hold
+            practice.trained(self.folder)
+        self.assertEqual(got.exception.file, practice.ROSTER_FILE)
+        practice.new_test_set(self.folder)
         done = {c for c, _ in practice.trained(self.folder)}
         self.assertLessEqual(set(self.first["held_out_cards"]), done)
 
@@ -110,8 +114,9 @@ class SealedTestSet(Base):
         for how in ("hand written", "edited, the old seal kept", "old format"):
             with self.subTest(how=how):
                 folder = self.folders[NAME]
-                for p in (folder / practice.TEST_FILE, folder / run.MATCHES_FILE):
+                for p in (folder / practice.TEST_FILE, folder / run.MATCHES_FILE, folder / practice.ROSTER_FILE):
                     p.unlink(missing_ok=True)
+                practice.keep_trained(folder)  # the roster an earlier run left
                 cards, _ = madeup.for_agent(folder, NAME, turn.load(folder).card, Writer(), count=30)
                 by_id = {c["id"]: c for c in cards}
                 want = self.chosen(folder, cards)

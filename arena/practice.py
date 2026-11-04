@@ -100,9 +100,15 @@ kinds always follow the shape's mix (easy, unsure and hard as test_set draws the
 trained, never trusted. Each match line and test-set.json carry the run's seal (kit/seal.py, the key
 beside the gate item's, reports_of): a line counts as a test match only while its seal holds, and a
 test-set.json whose seal does not hold is rebuilt, so neither file can be edited to hide a customer
-that trained or to choose the test customers. A test-set.json or a matches file that is there but
-cannot be read, a line of it that cannot be read, or a matches file deleted while test-set.json is
-there stops the run (fail closed).
+that trained or to choose the test customers. Since the seal is per line, a deleted training line is
+caught by a sealed roster beside them, trained.json, of every customer that ever trained (card id and
+fingerprint): each training match adds its customer before its line is saved, it never shrinks, and
+trained is the union of the roster and the matches file (keep_trained; a folder from before the
+roster has it built once from its matches file). A test-set.json, a matches file or a roster that is
+there but cannot be read, a line of it that cannot be read, a roster whose seal does not hold, a
+matches file deleted while test-set.json is there, or a roster deleted while a sealed line or
+test-set.json is there stops the run before any model call (fail closed); Start a new test set
+(new_test_set) is the one way on.
 
 The shared pool across owners (reflection/shared.py, DECISIONS item 83). An agent in an agents/
 folder practises against the lost patterns of its kind seen at 2 or more owners too, as the Sales
@@ -455,8 +461,14 @@ class Practice(run.Arena):
     def save(self, m):
         """Appends match m to the agent's matches file with the run's seal on the line (kit/seal.py, the
         key beside the gate item's, reports_of), so trained reads its test_match field only on a line the
-        run wrote; m itself is left as it is."""
+        run wrote; m itself is left as it is. A match that is not a test match adds its customer to the
+        sealed roster first (keep_trained), so the roster is beside every sealed line and deleting the
+        line later never hides that the customer trained."""
         self.state.mkdir(parents=True, exist_ok=True)
+        test = m.get(TEST_KEY) is True and isinstance(m.get("id"), str) and bool(_TEST_MATCH.search(m["id"]))
+        who = m.get("persona")
+        keep_trained(self.state, () if test else
+                     [(m["card"], who.get("from_card", _ANY) if isinstance(who, dict) else _ANY)])
         line = seal.sign(dict(m), reports_of(self.state))
         with open(self.state / run.MATCHES_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(line, ensure_ascii=False) + "\n")
@@ -615,6 +627,9 @@ TEST_FILE = "test-set.json"
 MAX_TEST_FILE = 64 * 1024
 _TEST_MATCH = re.compile(r"-r\d+-g\d+$")  # a test match's id ends -r<round>-g<k> (arena/run.py Arena.run)
 TEST_KEY = "test_match"  # on every match Practice saves: true for a test match, false for a training match
+ROSTER_FILE = "trained.json"  # the sealed roster of every customer that ever trained (keep_trained)
+ROSTER_KEY = "trained"
+MAX_ROSTER_FILE = 1024 * 1024
 _ANY = object()  # a training match whose saved person names no card fingerprint: the id counts whatever it is
 
 
@@ -652,9 +667,9 @@ def shape_mix(count):
 
 
 class Unrecorded(run.Refused):
-    """read_test or trained refused: the agent's record of its test set (file: test-set.json) or of who
-    trained (file: arena-matches.jsonl) is torn, cannot be read or is gone. Only new_test_set gets past
-    it, never a skipped line."""
+    """read_test, trained or keep_trained refused: the agent's record of its test set (file:
+    test-set.json) or of who trained (file: arena-matches.jsonl or trained.json) is torn, cannot be read,
+    no longer holds its seal or is gone. Only new_test_set gets past it, never a skipped line."""
 
     def __init__(self, line, file):
         super().__init__(line)
@@ -706,6 +721,7 @@ def write_test(folder, entries):
         raise run.Refused("the agent's saved matches are a link")
     if not matches.exists():
         os.close(os.open(matches, os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0), 0o644))
+    keep_trained(folder)  # the roster is there before the test set, so a deleted one is told (trained)
     tmp = folder / f".{TEST_FILE}.{secrets.token_hex(4)}.tmp"
     try:
         with open(tmp, "x", encoding="utf-8") as f:
@@ -725,15 +741,12 @@ def is_test(m, k):
             and bool(_TEST_MATCH.search(m["id"])) and seal.holds(m, k))
 
 
-def trained(folder):
-    """{(card id, fingerprint)} of every match on record in the folder's arena-matches.jsonl that is not a
-    test match: the people that played a training match (a quick run's too). A test match is one whose
-    line says so (TEST_KEY true, written with each match), whose id is a test match's and whose seal
-    holds (is_test; Practice.save seals each line); any other line, one written before TEST_KEY or the
-    seal, relabelled or written by hand too, counts as training, so no line can hide a training match.
-    run.Refused (fail closed, before any model call) when the file is a link or not a plain file, cannot
-    be read or holds a line that is not a match (never skipped), and when it is gone while test-set.json
-    is there (write_test makes it with the test set, so it was deleted)."""
+def _lines(folder):
+    """({(card id, fingerprint)} of the training lines in the folder's arena-matches.jsonl, True when a line
+    holds the run's seal): every line that is not a test match (is_test) counts as training, one written
+    before TEST_KEY or the seal, relabelled or written by hand too. Unrecorded (fail closed) when the file
+    is a link or not a plain file, cannot be read or holds a line that is not a match (never skipped), and
+    when it is gone while test-set.json is there (write_test makes it with the test set)."""
     folder = Path(folder)
     path = folder / run.MATCHES_FILE
     if not path.exists() and not path.is_symlink():
@@ -741,12 +754,12 @@ def trained(folder):
             raise Unrecorded(f"the agent's saved matches are gone while its {TEST_FILE} is there, so the run did "
                              "not start; they say which customers trained, and a test customer never has",
                              run.MATCHES_FILE)
-        return set()
+        return set(), False
     bad = Unrecorded("the agent's saved matches cannot be read, so the run did not start; they say "
                      "which customers trained, and a test customer never has", run.MATCHES_FILE)
     if path.is_symlink() or not path.is_file():
         raise bad
-    out, k = set(), seal.key(reports_of(folder))  # read only: a reader never makes the key
+    out, sealed, k = set(), False, seal.key(reports_of(folder))  # read only: a reader never makes the key
     try:
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         with open(fd, encoding="utf-8") as f:
@@ -759,13 +772,115 @@ def trained(folder):
                     raise bad from None
                 if not isinstance(m, dict) or not isinstance(m.get("card"), str):
                     raise bad
+                sealed = sealed or seal.holds(m, k)
                 if is_test(m, k):
                     continue
                 who = m.get("persona")
                 out.add((m["card"], who.get("from_card", _ANY) if isinstance(who, dict) else _ANY))
     except (OSError, UnicodeDecodeError):
         raise bad from None
+    return out, sealed
+
+
+def _roster_gone():
+    return Unrecorded(f"the agent's {ROSTER_FILE} is gone while its saved matches carry the run's seal or its "
+                      f"{TEST_FILE} is there, so the run did not start; it keeps every customer that ever trained, "
+                      "and a test customer never has", ROSTER_FILE)
+
+
+def _read_roster(folder):
+    """The sealed roster (ROSTER_FILE) as {(card id, fingerprint)}, None when there is none. Unrecorded
+    (fail closed) when it is a link or not a plain file, too big, cannot be read, is not a list of
+    customers each with a card id (and a from_card text or null, or none for any card), names another
+    agent's folder (one copied from a sibling under the same key), or its seal does not hold with the key
+    of reports_of the folder (edited, written by hand or sealed elsewhere)."""
+    path = Path(folder) / ROSTER_FILE
+    if not path.exists() and not path.is_symlink():
+        return None
+    bad = Unrecorded(f"the agent's {ROSTER_FILE} cannot be read or was changed after the run wrote it, so the run "
+                     "did not start; it keeps every customer that ever trained, and a test customer never has",
+                     ROSTER_FILE)
+    try:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_ROSTER_FILE:
+            raise bad
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        got = doc.get(ROSTER_KEY)
+    except (OSError, ValueError, AttributeError, RecursionError):
+        raise bad from None
+    if not isinstance(got, list) or doc.get("agent") != Path(folder).name:
+        raise bad
+    out = set()
+    for e in got:
+        if not isinstance(e, dict) or not isinstance(e.get("card"), str) or \
+                not isinstance(e.get("from_card"), (str, type(None))):
+            raise bad
+        out.add((e["card"], e["from_card"] if "from_card" in e else _ANY))
+    if not seal.holds(doc, seal.key(reports_of(folder))):
+        raise bad
     return out
+
+
+def _roster_entry(p):
+    cid, f = p
+    return {"card": cid} if f is _ANY else {"card": cid, "from_card": f}
+
+
+def _roster_text(folder, people):
+    """The roster file's text for people, sealed with the key of reports_of the folder (made if none)."""
+    order = sorted(people, key=lambda p: (p[0], 0 if p[1] is _ANY else 1 if p[1] is None else 2,
+                                          p[1] if isinstance(p[1], str) else ""))
+    doc = seal.sign({"agent": Path(folder).name, ROSTER_KEY: [_roster_entry(p) for p in order]}, reports_of(folder))
+    return json.dumps(doc, ensure_ascii=False) + "\n"
+
+
+def _replace(folder, name, text):
+    """Writes folder/name whole: a hidden file renamed into place; refuses a link."""
+    path = Path(folder) / name
+    if path.is_symlink():
+        raise run.Refused(f"the agent's {name} is a link")
+    tmp = Path(folder) / f".{name}.{secrets.token_hex(4)}.tmp"
+    try:
+        with open(tmp, "x", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
+def keep_trained(folder, people=()):
+    """Adds people [(card id, fingerprint)] to the sealed roster of every customer that ever trained
+    (ROSTER_FILE, sealed as test-set.json is, never shrunk) and returns it. A folder from before the
+    roster (none, no sealed match line and no test-set.json) has it built once from its matches file.
+    Unrecorded when the roster does not read whole or hold its seal, or is gone while a sealed line or
+    test-set.json shows it was written (trained); the roster is then left as it is."""
+    folder = Path(folder)
+    have = _read_roster(folder)
+    base = set()
+    if have is None:
+        base, sealed = _lines(folder)
+        if sealed or (folder / TEST_FILE).exists() or (folder / TEST_FILE).is_symlink():
+            raise _roster_gone()
+    want = (have or set()) | base | set(people)
+    if have is None or want != have:
+        folder.mkdir(parents=True, exist_ok=True)
+        _replace(folder, ROSTER_FILE, _roster_text(folder, want))
+    return want
+
+
+def trained(folder):
+    """{(card id, fingerprint)} of every customer that trained: the training lines of the folder's
+    arena-matches.jsonl (_lines: any line that is not a sealed test match, a quick run's too) and the
+    sealed roster (keep_trained), so a training line deleted from the matches file still counts. Read
+    only. Unrecorded (fail closed, before any model call) when either does not read whole (_lines,
+    _read_roster), and when the roster is gone while a line holds the run's seal or test-set.json is
+    there (both are only written with the roster beside them)."""
+    folder = Path(folder)
+    lines, sealed = _lines(folder)
+    roster = _read_roster(folder)
+    if roster is None and (sealed or (folder / TEST_FILE).exists() or (folder / TEST_FILE).is_symlink()):
+        raise _roster_gone()
+    return lines | (roster or set())
 
 
 def broken_record(folder):
@@ -788,13 +903,14 @@ RESET = "reset"  # the id of a reset line starts with it, and every reset line c
 
 
 def new_test_set(folder, now=time.time):
-    """The way past a torn or missing record (Unrecorded): the old matches file and test-set.json are
-    renamed aside, never deleted or read past a bad line, and a new matches file holds the old file's
-    lines that read whole, then one training line (RESET) for every practice customer saved in the
-    folder and every one the old test-set.json names, with the card it was written from (any card when
-    that cannot be read). So the next run counts every old customer as trained and its test set is made
-    from new customers the writer writes. Returns what was renamed aside. run.Refused when the record
-    reads whole (nothing to reset)."""
+    """The way past a torn, changed or missing record (Unrecorded): the old matches file, test-set.json and
+    trained.json are renamed aside, never deleted or read past a bad line, and a new matches file holds
+    the old file's lines that read whole, then one training line (RESET) for every practice customer
+    saved in the folder and every one the old test-set.json names, with the card it was written from
+    (any card when that cannot be read). A new sealed roster (keep_trained) holds every customer of
+    those training lines and every one the old roster names, its seal held or not. So the next run
+    counts every old customer as trained and its test set is made from new customers the writer
+    writes. Returns what was renamed aside. run.Refused when the record reads whole (nothing to reset)."""
     folder = Path(folder)
     if broken_record(folder) is None:
         raise run.Refused("the agent's saved matches and test set read whole, so nothing was changed")
@@ -833,15 +949,26 @@ def new_test_set(folder, now=time.time):
     for n, (cid, f) in enumerate(dict.fromkeys(people), 1):
         rows.append({"id": f"{RESET}-{stamp}-t{n:03d}", "card": cid, RESET: True, TEST_KEY: False,
                      "persona": {"id": cid, "from_card": f} if f is not _ANY else "a customer before the reset"})
+    roster, k = folder / ROSTER_FILE, seal.key(reports_of(folder))
+    everyone = {(m["card"], _card_of(m.get("persona"))) for m in rows if not is_test(m, k)}
+    try:  # the old roster's names count too, its seal held or not: more trained is never less safe
+        if roster.is_file() and not roster.is_symlink() and roster.stat().st_size <= MAX_ROSTER_FILE:
+            got = json.loads(roster.read_text(encoding="utf-8")).get(ROSTER_KEY)
+            everyone |= {(e["card"], _card_of(e)) for e in got
+                         if isinstance(e, dict) and isinstance(e.get("card"), str)}
+    except (OSError, ValueError, UnicodeDecodeError, RecursionError, AttributeError, TypeError):
+        pass
     tmp = folder / f".{run.MATCHES_FILE}.{secrets.token_hex(4)}.tmp"
     aside = []
     try:
         with open(tmp, "x", encoding="utf-8") as f:
             f.write("".join(json.dumps(m, ensure_ascii=False) + "\n" for m in rows))
-        for path, name in ((old, f"arena-matches-before-{stamp}.jsonl"), (test, f"test-set-before-{stamp}.json")):
+        for path, name in ((old, f"arena-matches-before-{stamp}.jsonl"), (test, f"test-set-before-{stamp}.json"),
+                           (roster, f"trained-before-{stamp}.json")):
             if path.exists() or path.is_symlink():
                 os.replace(path, folder / name)  # a link is renamed, never followed
                 aside.append(name)
+        _replace(folder, ROSTER_FILE, _roster_text(folder, everyone))  # before the sealed lines come back
         os.replace(tmp, old)
     finally:
         if tmp.exists():
@@ -964,9 +1091,10 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
         raise run.Refused("the Sales agent practises through arena/run.py")
     calls = run.Calls(reports / run.CALLS_FILE, cap, limit=run.QUICK_CALLS if quick else None)
     held, base = None, customers  # base: the shape's customers, before any top up
-    if gate_size is not None:  # the saved test set and the training on record, read before any model call
+    if gate_size is not None:  # the saved test set, read before any model call
         _whole(gate_size)
-        saved, done = read_test(folder), trained(folder)
+        saved = read_test(folder)
+    done = keep_trained(folder, trained(folder))  # every run: who trained, read whole before any model call
     for _ in range(MAX_TOP_UPS + 1):
         if cards:
             played = run.load_cards(check_cards(cards, folder))

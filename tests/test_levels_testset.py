@@ -119,7 +119,9 @@ class TrainedOnRecord(Base):
         self.dir.mkdir()
 
     def lines(self, *rows):
-        """Each row sealed with the folder's key as Practice.save seals it; a str row as it is."""
+        """Each row sealed with the folder's key as Practice.save seals it, the roster beside them as
+        Practice.save keeps it; a str row as it is."""
+        practice.keep_trained(self.dir)
         (self.dir / run.MATCHES_FILE).write_text("".join(
             (r if isinstance(r, str) else json.dumps(seal.sign(dict(r), self.dir))) + "\n" for r in rows),
             encoding="utf-8")
@@ -281,6 +283,7 @@ class Gaps(Base):
     def test_read_test_refuses_a_dangling_link_a_big_file_and_a_bad_from_card(self):
         d = self.root / "one"
         d.mkdir()
+        practice.keep_trained(d)  # the roster an earlier run left
         path = d / practice.TEST_FILE
         os.symlink(d / "gone.json", path)  # points nowhere
         with self.assertRaises(run.Refused):

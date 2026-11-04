@@ -849,14 +849,14 @@ class Morning:
             return self._arena_note.get(agent)
 
     def arena_record(self, agent):
-        """The file (test-set.json or arena-matches.jsonl) the agent's last run found torn, unreadable or
-        gone (arena/practice.py Unrecorded), so the Arena tab offers Start a new test set; else None."""
+        """The file (test-set.json, arena-matches.jsonl or trained.json) the agent's last run found torn,
+        unreadable, changed or gone (arena/practice.py Unrecorded), so the Arena tab offers Start a new test set; else None."""
         with self._arena_lock:
             return self._arena_record.get(agent)
 
     def new_test_set(self, agent, now=None):
         """Start a new test set on the Arena tab (arena/practice.py new_test_set): the way on when the
-        agent's matches file or test-set.json is torn or gone. The old files are renamed aside, every
+        agent's matches file, test-set.json or trained.json is torn, changed or gone. The old files are renamed aside, every
         customer before counts as trained, and the next run's test set is written new. Never starts a
         run. Refused for any other agent, while a run goes, and when the record reads whole."""
         from arena import practice, run as run_mod
@@ -3258,7 +3258,7 @@ TWO_TAB_ACTIONS = {**{k: v for k, v in ACTIONS.items() if k not in A3_ONLY},
                    "/tryagain": lambda m, f, now=None: m.try_again(_field(f, "agent"), now=now),
                    # keep, lower or raise a built agent's risk level on the Arena screen (decision 84)
                    LEVEL_PATH: lambda m, f, now=None: m.set_risk_level(_field(f, "agent"), _field(f, "level"), now=now),
-                   # a new test set when the agent's matches file or test-set.json is torn or gone (Unrecorded)
+                   # a new test set when the agent's matches, test set or roster is torn, changed or gone (Unrecorded)
                    NEW_TEST_PATH: lambda m, f, now=None: m.new_test_set(_field(f, "agent"), now=now),
                    # rows or a file the user adds to a built agent's sample data (kit/sample.py)
                    DATA_PATH: lambda m, f, now=None: m.add_data(_field(f, "agent"), _field(f, "text"),

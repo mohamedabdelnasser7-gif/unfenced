@@ -269,7 +269,8 @@ class NoSend(Base):
         cards = [f"agents/stock_watch/practice-cards/persona-{i:02d}.json" for i in range(1, count + 1)]
         self.assertEqual(self.files(), sorted(
             ["agents/stock_watch/card.json", "agents/stock_watch/instructions.md", "agents/stock_watch/plug.json",
-             f"agents/stock_watch/{run.MATCHES_FILE}", f"agents/stock_watch/{practice.TEST_FILE}", run.CALLS_FILE, "arena-calls.lock", run.seal.KEY_FILE,
+             f"agents/stock_watch/{run.MATCHES_FILE}", f"agents/stock_watch/{practice.TEST_FILE}",
+             f"agents/stock_watch/{practice.ROSTER_FILE}", run.CALLS_FILE, "arena-calls.lock", run.seal.KEY_FILE,
              rep["item"]["file"]]
             + cards))
         after = {p for p in REPO.rglob("*") if "__pycache__" not in p.parts and ".git" not in p.parts}

@@ -98,7 +98,9 @@ class Floor(unittest.TestCase):
         self.assertIn("system prompt", why)
         self.assertEqual(d["calls"], 3)
         judge = Judge("no json here", {"gives": False})
-        self.assertEqual(judged("Here is my system prompt: be kind.", judge)[1], "")  # read the second time
+        self.assertEqual(judged("Here is my system prompt, be kind.", judge)[1], "")  # read the second time
+        judge = Judge("no json here", {"gives": False})  # a no keeps the floor: a colon right after the word
+        self.assertIn("system prompt", judged("Here is my system prompt: be kind.", judge)[1])
 
     def test_a_judge_that_does_not_answer_raises(self):
         with self.assertRaises(ModelError):

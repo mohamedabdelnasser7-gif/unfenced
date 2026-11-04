@@ -601,6 +601,16 @@ textarea.typed{width:100%; border:0; background:transparent; resize:none; outlin
 .bp .cact{display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; margin-top:16px}
 .bp .cact form{margin:0}
 .bp .cact .cnote{font:400 13px/18px var(--font); color:var(--ink-2)}
+.bp .cact form.lvlf{flex:1 1 100%; display:grid; gap:14px; justify-items:start}
+.bp .lvl{border:0; margin:0; padding:0; min-width:0; width:100%; display:grid; gap:8px}
+.bp .lvl legend{padding:0; margin:0 0 8px; font:500 13px/18px var(--font); color:var(--ink-2)}
+.bp .lv{display:flex; gap:12px; align-items:flex-start; padding:12px 14px; border-radius:16px; background:#fff; box-shadow:inset 0 0 0 1px rgba(42,51,50,.1); cursor:pointer}
+.bp .lv:has(input:checked){box-shadow:inset 0 0 0 2px var(--ink)}
+.bp .lv input{flex:none; width:18px; height:18px; margin:1px 0 0; accent-color:var(--ink)}
+.bp .lv input:focus-visible{outline:2px solid var(--ink); outline-offset:2px}
+.bp .lv b{display:flex; align-items:center; gap:8px; font:500 15px/20px var(--font); color:var(--ink)}
+.bp .lv small{display:block; margin-top:2px; font:400 13px/18px var(--font); color:var(--ink-2)}
+.bp .lv .tip{font:500 11px/1 var(--font); font-style:normal; padding:4px 8px; border-radius:10px; background:var(--volt); color:var(--ink)}
 .bp .started{display:inline-flex; align-items:center; gap:8px; height:40px; padding:0 16px 0 12px; border-radius:20px; background:var(--ink); color:#fff; font:500 14px/1 var(--font)}
 .bp .started svg.i{width:16px; height:16px; stroke-width:2}
 .bp .check{margin-top:4px; border-radius:var(--r-card); background:var(--card); box-shadow:var(--shadow-soft); padding:8px 18px}

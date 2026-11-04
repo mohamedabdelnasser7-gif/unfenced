@@ -45,6 +45,7 @@ import threading
 import time
 import urllib.parse
 
+from arena import levels as levels_mod
 from engine import lessons as lessons_mod
 from kit import sample as sample_mod
 from reflection import console as console_mod
@@ -128,6 +129,7 @@ class BuildRun:
         self.join_note = None         # the line when the built agent could not join the running page
         self.base = 0                 # the chat's turns when Build was pressed; later ones came in during it
         self.ended = None
+        self.level = None             # the risk level picked on the card (arena/levels.py), None: its suggestion
 
     def step(self, name, detail=""):
         if name == "again":  # the card changed meanwhile: its plug and exam are written again
@@ -221,7 +223,7 @@ class Pages:
         self.try_sales = try_mod.TrySales(try_model)  # its own database in memory, never the page's
         # the page's own answers, taken by the server next to morning.TWO_TAB_ACTIONS
         self.actions = {"/quickstart": lambda m, f, now=None: self._say(m, mo._field(f, "text"), now),
-                        "/quickstart/build": lambda m, f, now=None: self._build(m, now),
+                        "/quickstart/build": lambda m, f, now=None: self._build(m, now, _level(f)),
                         "/quickstart/clear": lambda m, f, now=None: self._clear(m, now),
                         # Try Sales on the Sales agent's page (reflection/try_sales.py): the demo store, never counts
                         "/try/sales": lambda m, f, now=None: self._try(self.try_sales.say, m, now, mo._field(f, "text")),
@@ -300,7 +302,7 @@ class Pages:
         except try_mod.Refused as e:
             raise mo.Refused(str(e)) from None
 
-    def _build(self, m, now):
+    def _build(self, m, now, level=None):
         """Build (LOCKS "App pages", 2A): the cheap refusals at once, then the build in a thread whose
         steps the thread on /new ticks off; inline with a test's model, returning the flash as before.
         The new agent joins the running page (Morning.add_built) on the server's thread (settle)."""
@@ -309,6 +311,7 @@ class Pages:
             raise mo.Refused("It is building already. The steps tick off below.")
         self._quick(lambda mm, now=None: self.quick.check_build(mm), m, now)
         run = self.run = BuildRun(m)
+        run.level = level
         run.base = len(self.quick.draft(m)["turns"])
         if self.background:
             threading.Thread(target=self._work, args=(run, now), name="quick-build", daemon=True).start()
@@ -322,7 +325,7 @@ class Pages:
     def _work(self, run, now):
         """The build thread's work. Never raises: what went wrong becomes the run's error line."""
         try:
-            run.said = self.quick.build(run.m, now, step=run.step, lock=run.lock)
+            run.said = self.quick.build(run.m, now, step=run.step, lock=run.lock, level=run.level)
         except qs_mod.Refused as e:
             run.error = str(e)
         except Exception as e:
@@ -537,9 +540,33 @@ def _hidden(ctx, **kv):
     return "".join(f'<input type="hidden" name="{h(k)}" value="{h(v)}">' for k, v in kv.items())
 
 
+def _level(form):
+    """The risk level a form posted: None when it sent none, else one of the three (any other is refused)."""
+    if "level" not in form:
+        return None
+    level = mo._field(form, "level")
+    if not levels_mod.valid(level):
+        raise mo.Refused("Pick low, medium or high.")
+    return level
+
+
 def _post(ctx, action, button, cls, **kv):
     return (f'<form method="post" action="/{action}">{_hidden(ctx, **kv)}'
             f'<button class="{cls}" type="submit">{button}</button></form>')
+
+
+def level_picker(ctx, card):
+    """The Build form with the risk level picker (decision 84): three choices, one plain line each, the
+    level the card suggests picked and marked. Build posts the choice; level.json keeps it."""
+    tip = levels_mod.suggest(card)
+    rows = []
+    for lv in levels_mod.ORDER:
+        mark = '<i class="tip">Suggested</i>' if lv == tip else ""
+        rows.append(f'<label class="lv"><input type="radio" name="level" value="{lv}"{" checked" if lv == tip else ""}>'
+                    f'<span><b>{levels_mod.NAMES[lv]}{mark}</b><small>{h(levels_mod.WORDS[lv])}</small></span></label>')
+    return (f'<form method="post" action="/quickstart/build" class="lvlf">{_hidden(ctx)}<fieldset class="lvl">'
+            f'<legend>Risk level: how careful it must be before it goes live</legend>{"".join(rows)}</fieldset>'
+            f'<button class="yes" type="submit">Build{icon("arrow")}</button></form>')
 
 
 def _yc_head(agent, small, risk=""):
@@ -1213,7 +1240,7 @@ def new_agent(m, quick, ctx, run=None):
         if built or building or run is not None and run.error is None:
             card.append(f'<div class="cact"><span class="started">{icon("check")}Build started</span></div>')
         elif tok:
-            card.append('<div class="cact">' + _post(ctx, "quickstart/build", f'Build{icon("arrow")}', "yes")
+            card.append('<div class="cact">' + level_picker(ctx, t["card"])
                         + '<span class="cnote">You can keep typing while it builds.</span></div>')
         out.append("".join(card) + "</div></div>")
     if run is not None or built:

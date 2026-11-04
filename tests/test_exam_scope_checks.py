@@ -10,6 +10,7 @@ from pathlib import Path
 from engine import exam as engine_exam
 from reflection import PLUG
 from reflection import exam
+from kit.tools import store
 
 ROOT = Path(__file__).resolve().parent.parent
 SITS = exam.situations(PLUG)
@@ -26,7 +27,9 @@ def style(s, text):
 
 
 def declined(s, text):
-    return exam.check_store_declined(s, {"reply": text})
+    """store_declined on a did with the store facts the exam fills (_answer): its amounts and catalogue sizes."""
+    return exam.check_store_declined(s, {"reply": text, "amounts": set(store.price_points()),
+                                         "sizes": store.size_strings(), "orders": []})
 
 
 class Forms(unittest.TestCase):

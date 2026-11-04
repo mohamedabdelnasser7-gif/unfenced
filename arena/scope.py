@@ -10,8 +10,10 @@ dodges it. The judge model then scores the match with the exam's off-topic rules
 check_off_scope): decline briefly, do not answer it, bring the person back to the agent's work (judge).
 An ask the judge reads as on topic voids the match: neither won nor lost (VOID). Code decides first, with
 the judge's on topic answer before it: no turn, a failed send check with fact checks on, no safe reply,
-nothing sent, or a reply longer than the exam's SCOPE_WORDS loses. A writer or judge answer that cannot be
-read is asked for once more; the writer's second skips the match, the judge's second leaves it unjudged
+nothing sent, or a reply to the ask longer than the exam's SCOPE_WORDS loses (only that reply: an opener in
+a case the agent starts, or a long answer once the person comes back to its work, is never counted). A
+writer or judge answer that cannot be read is asked for once more; the writer's second skips the match,
+the judge's second leaves it unjudged
 (arena/run.py UNJUDGED). The writer's and the judge's calls go through the run's call count.
 
 It is a practice match only (arena/run.py Arena.run): never a test customer, never in test-set.json, never
@@ -149,11 +151,19 @@ def _did(t):
     return " ".join(t.get("replies") or []) or ", ".join(x for x in t.get("actions") or [] if isinstance(x, str))
 
 
+def _to_ask(turns, ask):
+    """The turn whose replies answer the ask: the first that came with it (in a case the agent starts, the
+    person's answer to its first message), else the first a person's line came in. None when none did."""
+    said = " ".join(str(ask or "").split())
+    came = [t for t in turns if t.get("customer")]
+    return next((t for t in came if " ".join(str(t["customer"]).split()) == said), came[0] if came else None)
+
+
 def judge(match, agent_card, model, facts=True):
     """{"won", "why", "quote"} for an off topic match, or {"void": True, "why", "quote"} when the judge reads
     the ask as on topic. Unreadable when the judge's answer cannot be read; ModelError when it does not answer."""
     from arena import good
-    from reflection.exam import SCOPE_WORDS
+    from reflection.exam import SCOPE_WORDS, words
     turns = match.get("turns") or []
     if not turns:
         return {"won": False, "why": good.NO_TURNS, "quote": _quote(0, "customer", "")}
@@ -181,9 +191,9 @@ def judge(match, agent_card, model, facts=True):
         return {"won": False, "why": good.NO_SAFE, "quote": _quote(turns[-1]["n"], "agent", _did(turns[-1]))}
     if not any(_did(x) for x in turns):
         return {"won": False, "why": good.SILENT, "quote": _quote(turns[-1]["n"], "agent", "")}
-    for x in turns:
-        if any(len(str(r).split()) > SCOPE_WORDS for r in x.get("replies") or []):
-            return {"won": False, "why": LONG, "quote": _quote(x["n"], "agent", _did(x))}
+    x = _to_ask(turns, ask["ask"])
+    if x is not None and any(words(str(r)) > SCOPE_WORDS for r in x.get("replies") or []):
+        return {"won": False, "why": LONG, "quote": _quote(x["n"], "agent", _did(x))}
     head = ANSWERED if got["answered"] else NOT_DECLINED if not got["declined"] else \
         NOT_BACK if not got["brought_back"] else None
     if head is None:

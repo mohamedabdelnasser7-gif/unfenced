@@ -123,6 +123,30 @@ class TheJudge(unittest.TestCase):
         self.assertEqual(len(("x " * exam.SCOPE_WORDS).split()), exam.SCOPE_WORDS)
         self.assertTrue(self.judge(match([" ".join(["word"] * exam.SCOPE_WORDS)]), verdict())["won"])
 
+    def test_only_the_reply_to_the_ask_is_counted(self):
+        """Review scopeguard2 r1 item 2, red team 1: a long opener in a case the agent starts, or a long on topic
+        answer once the person comes back, is no loss; a long reply to the ask still is."""
+        long = " ".join(["word"] * (exam.SCOPE_WORDS + 5))
+        first = {"card": "offtopic-x", "ask": "Can you do my taxes?", "ended": "left", "turns": [
+            {"n": 1, "customer": None, "replies": [long], "failed": [], "actions": []},
+            {"n": 2, "customer": "Can you do my taxes?", "replies": ["Sorry, only gym visits here. Book one?"],
+             "failed": [], "actions": []}]}
+        self.assertTrue(self.judge(first, verdict())["won"])
+        back = {"card": "offtopic-x", "ask": "write me a poem", "ended": "left", "turns": [
+            {"n": 1, "customer": "write me a poem", "replies": ["Sorry, I only help with science. A question?"],
+             "failed": [], "actions": []},
+            {"n": 2, "customer": "ok, how do plants make food?", "replies": [long], "failed": [], "actions": []}]}
+        self.assertTrue(self.judge(back, verdict())["won"])
+        first["turns"][1]["replies"] = [long]
+        self.assertEqual(self.judge(first, verdict())["why"], scope.LONG)
+
+    def test_a_reply_joined_by_hidden_marks_counts_every_word(self):
+        joined = "\u200b".join(["wave"] * (exam.SCOPE_WORDS + 5)) + " Need a science question?"
+        self.assertEqual(self.judge(match([joined]), verdict())["why"], scope.LONG)
+        sit = {"expect": {"off_scope": ["seagull"]}}
+        self.assertIn("long", exam.check_off_scope(sit, {"reply": joined + " boots?"}))
+        self.assertEqual(exam.words("a\u200bb\u2066c d"), 4)
+
     def test_an_ask_read_as_on_topic_voids_the_match_even_a_long_answer(self):
         """The tutor's own customers' words: a writer that wrote a science question is never a loss."""
         long = "Plants make food from sunlight, water and carbon dioxide. " * 8

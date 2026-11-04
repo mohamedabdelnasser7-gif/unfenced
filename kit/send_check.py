@@ -317,7 +317,9 @@ PHONE = re.compile(
     r"|(?<![\w+.,])0(?:2(?:[ -]?\d){8}|3(?:[ -]?\d){7}|[4-9]\d(?:[ -]?\d){7})(?!\d)"
     r"|(?<![\w+])\+\s?[1-9](?:[ -]?\d){7,14}(?!\d)")
 
-SEP = r"(?:-|to|and|or|/|,|،|و|او|أو|لـ|ل|l|w|aw|le)"
+# "to" in a range: Arabic الى, إلى, لحد, لغاية and حتى too, so "التوصيل خلال 1 الى 2 يوم" is a time, not
+# the amount 1 (the Arena run 20261104T120239: the delivery days of an order summary were refused).
+SEP = r"(?:-|to|and|or|/|,|،|الى|إلى|لحد|لغاية|لغايه|حتى|و|او|أو|لـ|ل|l|w|aw|le)"
 UNITS = (r"(?:days?|yom|youm|ayam|ayyam|أيام|ايام|يومين|يوم|hours?|hrs?|ساعات|ساعة|ساعه|sa3a|sa3at|weeks?"
          r"|اسبوع|أسبوع|اسابيع|أسابيع|months?|شهور|شهر|minutes?|mins?|دقيقة|دقيقه|دقايق|pairs?|pieces?|pcs"
          r"|items?|قطعة|قطعه|قطع|7etta|7etat|colou?rs?|ألوان|الوان|لون|sizes?|مقاسات|cm|mm|سم|mb|ميجا|mega"
@@ -603,7 +605,9 @@ def without_model_numbers(text, titles):
 # passes a goz line that names the order), an offer ("Buy 2 pairs") and a description ("2 pairs of laces")
 # are not (review handoff round 3, finding 1). A code is not a count: "BO-2936845 is in stock". After a count
 # word, is or are may come before in stock or available ("Only 3 pairs are in stock"); with no count word
-# they may not, so "UK 8 is in stock" still names a size (review handoff2 round 1, finding 5).
+# they may not, so "UK 8 is in stock" still names a size (review handoff2 round 1, finding 5). الكمية alone is
+# the quantity of an order ("الكمية 1" in an order summary, the Arena run 20261104T120239); it is a stock
+# count only with an availability word ("الكمية المتاحة 3") or بس after the number ("الكمية 2 بس").
 GOZ = r"(?:جوز|goz|gozat|أجواز|اجواز)"
 STOCK_COUNT = re.compile(
     rf"(?<![\w-])\d+\s+(?:(?:pairs?|pieces?|pcs|pc|items?|units?|more)\s+(?:(?:are|is)\s+)?)?(?:(?:{COUNT_BRIDGE}\s+){{0,2}}"
@@ -615,7 +619,9 @@ STOCK_COUNT = re.compile(
     + rf"|(?:عندنا|عندي|3andena|3ndena|3andi)\s+(?:\S+\s+){{0,3}}?\d+\s*(?:{GOZ}|pairs?|pieces?|pcs|pc)"
     + NO_LETTER_AFTER
     + r"|" + LETTER_BEFORE + r"stock\s*(?:of|is|:|=)?\s*\d+"
-    + r"|(?:فاضل|فاضلين|فاضله|فاضلة|باقي|باقى|باقيين|متبقي|متبقى|المتبقي|المتاح|المخزون|الكمية|الكميه|ستوك"
+    + r"|(?:الكمية|الكميه)\s*(?:المتاحة|المتاحه|المتوفرة|المتوفره|الموجودة|الموجوده|الباقية|الباقيه|في المخزن)"
+      r"\s*(?:منه|منها|منهم|بس)?\s*\d+|(?:الكمية|الكميه)\s*\d+\s*(?:بس|فقط)" + NO_LETTER_AFTER
+    + r"|(?:فاضل|فاضلين|فاضله|فاضلة|باقي|باقى|باقيين|متبقي|متبقى|المتبقي|المتاح|المخزون|ستوك"
       r"|متوفرين|متوفرة|متوفره|متوفر|fadel|fadl|fadlin|fadleen|ba2y|ba2i|ba2yin|motba2y)"
       r"\s*(?:منه|منها|منهم|بس|meno|menha|menhom|bs)?\s*\d+"
     + rf"|\d+\s*(?:(?:قطعة|قطعه|قطع|حتة|حتت|7etta|7etat|جوز|goz|{COUNT_BRIDGE})\s*){{0,2}}"
@@ -848,9 +854,84 @@ def _number(raw):
 
 def _unit_after(text, m):
     """True when a unit follows the number in m (2 days), or a range up to a bigger number and
-    a unit (2 to 3 days). "Shipping 70 to 3 days" is a fee, then a time."""
+    a unit (2 to 3 days). "Shipping 70 to 3 days" is a fee, then a time. A range of small numbers
+    with no unit after it is a time too when a time word leads it on the same line ("Delivery days:
+    1-2", "مدة التوصيل: 2-3"; _duration_range)."""
     u = UNIT_AFTER.match(text, m.end())
-    return bool(u) and (u.group("to") is None or _number(m.group("n")) <= Decimal(u.group("to")))
+    if u and (u.group("to") is None or _number(m.group("n")) <= Decimal(u.group("to"))):
+        return True
+    return _duration_range(text, m)
+
+
+# A range of 1 or 2 digit numbers, the first no bigger than the second ("1-2", "2 الى 3"), read as a time
+# when a time word stands earlier on its line (an order summary's "Delivery days: 1-2"). A single number
+# after a time word stays an amount ("Delivery time: 60" is still checked), as does a range that runs down.
+MAX_RANGE_DAYS = 30  # "Delivery time: 60-70" is no run of days, so it stays checked as amounts
+RANGE_AFTER = re.compile(rf"\s*{SEP}\s*(?P<to>\d{{1,2}})(?![\d.,]?\d)", re.IGNORECASE)
+TIME_WORD = re.compile(LETTER_BEFORE + r"(?:days?|time|duration|ايام|أيام|الايام|الأيام|يوم|مدة|مده|المدة|المده"
+                       r"|وقت|ayam|ayyam|youm|yom|modet|moddet)" + NO_LETTER_AFTER, re.IGNORECASE)
+
+
+# A time unit then "or" or "to" right before a 1 or 2 digit number: "يوم أو 2", "a day or 2" is a time.
+TIME_UNIT_THEN = re.compile(r"(?:days?|day|يوم|ايام|أيام|hours?|ساعة|ساعه|ساعات|weeks?|اسبوع|أسبوع|yom|youm|ayam)"
+                            r"[^\S\n]*(?:or|to|-|او|أو|الى|إلى|لحد|aw|w|و)[^\S\n]*$", re.IGNORECASE)
+
+
+def _duration_range(text, m):
+    """True when the 1 or 2 digit number in m is part of a time: a range with a time word earlier on
+    its line (RANGE_AFTER, TIME_WORD), or the far end of "a day or 2" (TIME_UNIT_THEN)."""
+    raw = m.group("n")
+    if not raw.isdigit() or len(raw) > 2:
+        return False
+    if TIME_UNIT_THEN.search(text[max(0, m.start("n") - 24):m.start("n")]):
+        return True
+    r = RANGE_AFTER.match(text, m.end())
+    if r is None or not int(raw) <= int(r.group("to")) <= MAX_RANGE_DAYS:
+        return False
+    line_start = text.rfind("\n", 0, m.start("n")) + 1
+    return TIME_WORD.search(text, line_start, m.start("n")) is not None
+
+
+# A single digit after a weak cue (is, for, in after is, ب), then a word that names what it counts, is a
+# count, never an amount: "available in 3 tiers", "400 EGP for 2 stickers" (the Arena run 20261104T120239).
+# No price is one digit, and a word that can follow an amount (only, each, extra, a thousands word) keeps
+# it an amount: "Delivery is 9 only" is still checked.
+NOT_A_COUNT_WORD = re.compile(
+    r"(?:only|just|flat|extra|more|plus|each|per|total|here|there|to|and|or|for|in|at|on|with|from|by|now|today"
+    r"|k|thousands?|hundreds?|alf|alaf|elf|bs|bas|bass|bes|fa2at|bass|بس|فقط|زيادة|زياده|كمان|بالظبط|بالضبط|الف|ألف"
+    r"|آلاف|الاف|مية|ميه|مائة|و|او|أو|في|من|على|لكل|كل)" + NO_LETTER_AFTER, re.IGNORECASE)
+COUNT_WORD_NEXT = re.compile(r"[^\S\n]+(?=[^\W\d_])")
+
+
+def _counted_thing(text, m):
+    """True when the cue match m is a weak cue, then a single digit, then a word that is not
+    NOT_A_COUNT_WORD (a count of tiers, stickers or colours)."""
+    raw = m.group("n")
+    if not (WEAK_CUE.fullmatch(m.group("cue")) and len(raw) == 1 and raw != "0"):
+        return False
+    gap = COUNT_WORD_NEXT.match(text, m.end())
+    return gap is not None and NOT_A_COUNT_WORD.match(text, gap.end()) is None
+
+
+# A numbered list: line openers "1." or "2)" in order from 1, at least two of them. Only such a run is
+# masked, so a lone "60." at a line start, or a list that does not start at 1, stays readable as an amount.
+LIST_MARKER = re.compile(r"(?m)^([^\S\n]*)(\d{1,2})([.)])(?=[^\S\n]+\S)")
+
+
+def _list_mask(text):
+    """The numbers of a numbered list ("1. Nike ...", "2. Name printing ...") replaced by MASK, when
+    the line openers run 1, 2, 3 and so on, at least two, in the order they stand."""
+    found = list(LIST_MARKER.finditer(text))
+    run, want = [], 1
+    for m in found:
+        if int(m.group(2)) == want:
+            run.append(m)
+            want += 1
+    if len(run) < 2:
+        return text
+    for m in reversed(run):
+        text = text[:m.start(2)] + MASK + text[m.end(2):]
+    return text
 
 
 def _sentence_ends(text, start, end, any_next=False):
@@ -917,14 +998,29 @@ def _money_sentence(text, pos):
             or PRICE.search(text, start, end) is not None)
 
 
-def _given_orders_mask(text, orders):
+def _given_orders_mask(text, orders, said_orders=()):
     """Each order name in orders (#1001, given by a tool this turn) replaced by MASK where it
-    stands whole: #1001 hides neither #10012 nor an amount with a currency (1001 جنيه)."""
+    stands whole: #1001 hides neither #10012 nor an amount with a currency (1001 جنيه). The same
+    number with no # right after an order word ("your order 1001", "طلبك رقم 1001") is masked too, and
+    so is an order number the customer wrote with a # (said_orders, "cancel my order #7015"), but that
+    one only right after an order word, so a number the customer typed never hides an amount elsewhere."""
     for name in orders or ():
         m = GIVEN_ORDER_NAME.fullmatch(str(name).translate(EASTERN_DIGITS).strip())
         if m:
             text = re.sub(r"#\s*" + re.escape(m.group(1)) + r"(?![\d.,]?\d)", MASK, text, flags=re.IGNORECASE)
+    digits = {re.sub(r"\D", "", str(n).translate(EASTERN_DIGITS)) for n in (*(orders or ()), *(said_orders or ()))}
+    for d in sorted(digits - {""}, key=len, reverse=True):
+        text = re.sub(r"(?<![\w.,#])#?\s*" + re.escape(d) + r"(?![\d.,]?\d)",
+                      lambda m: MASK if ORDER_WORD_BEFORE.search(text, 0, m.start()) else m.group(0), text)
     return text
+
+
+SAID_ORDER = re.compile(r"#\s*(\d{1,12})(?![\d.,]?\d)")
+
+
+def said_orders(customer_text):
+    """Order numbers the customer wrote with a # ("my order #7015"), for _given_orders_mask."""
+    return tuple(SAID_ORDER.findall(western_digits(customer_text or "")))
 
 
 def _order_mask(text):
@@ -1009,11 +1105,11 @@ def _weak_size(text, m, size_numbers):
     return PRICE_WORD.search(text, start, m.start("n")) is None
 
 
-def _mask(text, sizes=(), orders=()):
+def _mask(text, sizes=(), orders=(), said=()):
     """The text with phone numbers, sizes, dates, address numbers, order numbers and years
     with a year word replaced by MASK, so no rule reads them as amounts. An address label reads
     as its address word (ADDRESS_LABEL). orders: order names a tool gave this turn."""
-    text = _given_orders_mask(text, orders)
+    text = _list_mask(_given_orders_mask(text, orders, said))
     text = ADDRESS_LABEL.sub(lambda m: m.group("ar") or m.group("fr") or m.group("en"), text)
     text = PHONE.sub(_mask_phone, text)
     for s in _size_strings(sizes):
@@ -1037,7 +1133,7 @@ def _mask_year(m):
     return m.group(0)[:m.start(g) - m.start()] + MASK + m.group(0)[m.end(g) - m.start():]
 
 
-def prices_in(reply, sizes=(), orders=(), names=(), priced_only=False):
+def prices_in(reply, sizes=(), orders=(), names=(), priced_only=False, said=()):
     """Every number in the reply that reads as an amount: ints, or Decimals for fractions.
 
     priced_only (any agent but Sales, kit/turn.py): only a number that reads as a price or a fee, next
@@ -1062,11 +1158,11 @@ def prices_in(reply, sizes=(), orders=(), names=(), priced_only=False):
     """
     text = LE_RANGE.sub(r"\1to", without_model_numbers(reply, names))
     out = [_number(m.group(1) or m.group(2)) for m in PRICE.finditer(text)]
-    masked = _mask(PRICE.sub(MONEY, text), sizes, orders)
+    masked = _mask(PRICE.sub(MONEY, text), sizes, orders, said)
     size_numbers = _size_numbers(sizes)
     counted = set()
     for m in CUE_AMOUNT.finditer(masked):
-        if _unit_after(masked, m) or _weak_size(masked, m, size_numbers):
+        if _unit_after(masked, m) or _weak_size(masked, m, size_numbers) or _counted_thing(masked, m):
             continue
         if priced_only and WEAK_CUE.fullmatch(m.group("cue")):
             continue
@@ -1232,7 +1328,8 @@ def named_problems(reply, customer_text="", amounts=(), vocabulary=frozenset(), 
             problems.append(("sympathy", f'Remove the sympathy line ("{line}"). {NO_SYMPATHY}'))
             break
     allowed = {n for n in (amount(a) for a in amounts) if n is not None}
-    wrong = sorted({p for p in prices_in(reply, sizes, orders, names, priced_only) if p not in allowed})
+    wrong = sorted({p for p in prices_in(reply, sizes, orders, names, priced_only, said_orders(customer_text))
+                    if p not in allowed})
     if wrong:
         nums = ", ".join(s if len(s) <= MAX_INT_DIGITS else s[:MAX_INT_DIGITS] + "..." for s in map(str, wrong))
         problems.append(("amounts", f"These amounts are not in the store or delivery data: {nums}. {FROM_TOOLS} "

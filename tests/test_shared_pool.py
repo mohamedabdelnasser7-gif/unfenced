@@ -5,6 +5,7 @@ pattern is never stored, and lost patterns become practice customers holding not
 The writer runs on the fake model; no key, no network."""
 import hashlib
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -101,6 +102,23 @@ class CleanCheck(unittest.TestCase):
         self.assertEqual(shared.check(line), [])
         self.assertIn("quoted words: a run of words copied from what it was written from",
                       shared.check(line, [said]))
+
+    def test_amounts_in_words_with_no_currency_are_amounts(self):
+        for text in ("Offer a discount when they want a thousand pieces at once from the store.",
+                     "العميل عايز ألف قطعة مرة واحدة وبعدين بيسكت خالص",
+                     "The customer asks for hundreds of pieces and then goes quiet after the cost."):
+            with self.subTest(text=text):
+                self.assertEqual(shared.check(text), ["an amount in words"])
+
+    def test_an_amount_glued_to_its_currency_is_an_amount(self):
+        for text in ("العميل يتردد لما يسمع خمسينجنيه ويمشي من غير ما يرد",
+                     "the customer hears fiftypounds and goes quiet without a reply at all."):
+            with self.subTest(text=text):
+                self.assertEqual(shared.check(text), ["a currency or an amount"])
+
+    def test_a_link_spelled_out_is_a_link(self):
+        self.assertEqual(shared.check("Tell them to visit shop dot com slash sizes when they ask twice."),
+                         ["a link, phone or handle"])
 
     def test_hidden_digits_and_styled_numbers_are_digits(self):
         for text in ("Offer the jacket at ５００ when they hesitate on the cost.",
@@ -201,6 +219,24 @@ class PoolTest(unittest.TestCase):
         (self.root / "patterns-sales.json").write_text((self.root / "patterns-support.json").read_text())
         with self.assertRaises(shared.Refused):
             shared.Pool("sales", self.root)
+
+    def test_links_are_refused(self):
+        self.pool.add(shared.LESSON, CLEAN_EN, OWNER_A, "k1")
+        other = self.root.parent / "elsewhere"
+        other.mkdir()
+        os.symlink(self.root, self.root.parent / "linked")
+        with self.assertRaises(shared.Refused):  # the shared folder itself a link
+            shared.Pool("support", self.root.parent / "linked")
+        (other / "patterns-billing.json").write_text((self.root / "patterns-support.json").read_text()
+                                                     .replace('"support"', '"billing"'))
+        os.symlink(other / "patterns-billing.json", self.root / "patterns-billing.json")
+        with self.assertRaises(shared.Refused):  # the pool file a link
+            shared.Pool("billing", self.root)
+        (other / "owner-key").write_bytes((self.root / "owner-key").read_bytes())
+        (self.root / "owner-key").unlink()
+        os.symlink(other / "owner-key", self.root / "owner-key")
+        with self.assertRaises(shared.Refused):  # the key a link
+            shared.Pool("support", self.root).owner_hash(OWNER_A)
 
 
 def writer_of(*lines):

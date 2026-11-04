@@ -32,6 +32,7 @@ SIB_MINE = "Spin this house's fans slowly at first."
 FAR = "Post entries in date sequence."
 FAR_MINE = "Spin the fans in house sequence."
 GIVEN = "When the grower asks twice about noise, explain the quiet setting before anything else."
+FILTERS = "When the grower asks about dust, show the filter choices before anything else."
 
 
 def always_low(text, high_about, low_about):
@@ -76,10 +77,10 @@ class SharedLessons(unittest.TestCase):
             self.pool.add(shared.LESSON, text if n == 0 else NEAR, o, f"lesson:x:{n}")
         return self.pool.shared(shared.LESSON)[0]["id"] if len(set(owners)) >= 2 else None
 
-    def night(self, exam=None, others=(), writer=None, fit=None):
+    def night(self, exam=None, others=(), writer=None, fit=None, give=shared.GIVE):
         self.mine = Lessons(self.db, self.new, judge=always_low, exam=exam)
         self.fit = fit or fk.Fit({PATTERN: "fully", SIB: "fully", FAR: "partly"})
-        self.link = shared.Link.for_plug(self.new, writer or writer_of(), self.root)
+        self.link = shared.Link.for_plug(self.new, writer or writer_of(), self.root, give=give)
         s = Study(self.db, self.new, proposer=fk.Proposer(), tagger=fk.Tagger(), fit=self.fit,
                   adapter=fk.Adapter({PATTERN: MINE, SIB: SIB_MINE, FAR: FAR_MINE}), others=list(others),
                   lessons=self.mine, shared=self.link)
@@ -171,6 +172,18 @@ class SharedLessons(unittest.TestCase):
         self.assertNotIn("demo", raw)
         rep = self.night(exam=passing)  # the fake writer has no script left: nothing is asked again
         self.assertEqual(rep["shared"]["given"], [])
+
+    def test_at_most_give_kept_lessons_reach_the_writer_a_night_oldest_first(self):
+        mine = Lessons(self.db, self.new, judge=always_low)
+        first = kept_lesson(mine, "Explain the quiet setting first when the grower asks about noise twice.", ["all"],
+                            yes_by="owner")
+        second = kept_lesson(mine, "Show the filter choices before the price when the grower asks about dust.",
+                             ["all"], yes_by="owner")
+        rep = self.night(exam=passing, writer=writer_of(GIVEN), give=1)
+        self.assertEqual([g["lesson"] for g in rep["shared"]["given"]], [first])
+        self.assertIsNotNone(rep["shared"]["given"][0]["pattern"])
+        rep = self.night(exam=passing, writer=writer_of(FILTERS), give=1)
+        self.assertEqual([g["lesson"] for g in rep["shared"]["given"]], [second])
 
     def test_a_lesson_from_the_pool_is_not_given_back(self):
         self.seen_at("north", "south")

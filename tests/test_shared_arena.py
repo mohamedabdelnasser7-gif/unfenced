@@ -19,7 +19,7 @@ from kit.db import Db
 from reflection import night
 from reflection import shared
 from tests.fake_model import FakeModel, clean_env, say
-from tests.test_arena_grow import (LOST, NAME, NOW, PHONE, SALES_PLUG, SINCE, recipe, write_chats, write_owner,
+from tests.test_arena_grow import (HARD, LOST, NAME, NOW, PHONE, SALES_PLUG, SINCE, recipe, write_chats, write_owner,
                                    write_plug)
 from tests.test_arena_run import Agent, Customer, card
 
@@ -51,7 +51,7 @@ def owner_at(test, name):
     return owner, owner / f"store_{name}"
 
 
-def grow_at(owner, name, root, *lines, chats=(LOST,), give_lost=shared.GIVE_LOST):
+def grow_at(owner, name, root, *lines, chats=(LOST,), give_lost=shared.GIVE_LOST, calls=None):
     """One night of an owner's agent on made-up chats, giving its lost chats to the shared pool:
     (the owner's pool, the counts, the writer's fake model)."""
     db = Db(":memory:")
@@ -60,8 +60,9 @@ def grow_at(owner, name, root, *lines, chats=(LOST,), give_lost=shared.GIVE_LOST
         pool = grow.Pool(owner, "sales")
         w, model = writer(*lines)
         link = shared.Link("sales", name, w, root, give_lost=give_lost)
-        counts = grow.grow(db, pool, since=SINCE, until=NOW,
-                           tagger=Tagger(model=ScriptedModel(recipe()), cap=50, recipe=recipe()), shared=link)
+        tag = ScriptedModel(recipe()) if calls is None else calls.model(ScriptedModel(recipe()))
+        counts = grow.grow(db, pool, since=SINCE, until=NOW, tagger=Tagger(model=tag, cap=50, recipe=recipe()),
+                           calls=calls, shared=link)
     finally:
         db.close()
     pool.rebuild(recipe())
@@ -170,6 +171,44 @@ class SharedPracticeCustomers(unittest.TestCase):
         _, counts, model = grow_at(self.a, "north", self.root, LINE, chats=two, give_lost=1)
         self.assertEqual((counts["patterns asked"], counts["lost"], len(model.calls)), (1, 2, 1))
 
+    def test_a_hard_chat_that_was_won_is_not_given(self):
+        _, counts, model = grow_at(self.a, "north", self.root, LINE, chats=(HARD,))
+        self.assertEqual(counts["hard"], 1)
+        self.assertEqual(model.calls, [])
+        self.assertFalse(any(k.startswith("patterns") for k in counts), counts)
+
+    def night_at(self, agent):
+        """grow.night for an owner's agent on owner A's lost chat, the tagger and the writer stood in."""
+        from arena import recipe as recipe_mod
+        from engine import plug as plug_mod
+        db = Db(str(agent / "ascent.db"))
+        write_chats(db, [LOST])
+        db.close()
+        w = FakeModel(say(json.dumps({"pattern": LINE})))
+        with mock.patch.object(grow, "tag_model", side_effect=[ScriptedModel(recipe()), w]):
+            rep = grow.night(agent / "ascent.db", plug_mod.load(agent / "plug.json"), recipe_mod.EXAMPLE, SINCE, NOW,
+                             folder=agent, own=True, shared_root=self.root)
+        return rep, w, json.loads((agent / run.CALLS_FILE).read_text(encoding="utf-8"))["calls"]
+
+    def test_the_writer_counts_on_the_arena_call_cap(self):
+        _, a_agent = owner_at(self, "west")
+        rep, w, count = self.night_at(a_agent)
+        self.assertEqual((rep.get("patterns given"), len(w.calls), count), (1, 1, 2))
+        self.assertIn("1 lost chats given to the shared pool", grow.line(rep))
+        with mock.patch.object(run, "DEFAULT_CAP", 1):
+            rep, w, count = self.night_at(self.b_agent)
+        self.assertEqual((rep.get("patterns dropped"), len(w.calls), count), (1, 0, 1))
+        self.assertEqual(rep["stopped"], "the Arena's call cap")
+        self.assertEqual([len(p["owners"]) for p in shared.Pool("sales", self.root).patterns], [1])
+
+    def test_lesson_patterns_make_no_practice_customer(self):
+        pool = shared.Pool("sales", self.root)
+        pool.add(shared.LESSON, LINE, "north", "lesson:a:1")
+        pool.add(shared.LESSON, NEAR, "south", "lesson:b:1")
+        self.assertEqual(len(shared.Pool("sales", self.root).shared(shared.LESSON)), 1)
+        self.assertEqual(shared.practice_cards("sales", self.root), [])
+        self.assertEqual(grow.for_state(self.c_agent, shared_root=self.root).shared, [])
+
     def test_an_agent_that_names_no_owner_gives_nothing(self):
         db = Db(":memory:")
         self.addCleanup(db.close)
@@ -265,8 +304,8 @@ class NightWiring(unittest.TestCase):
                                "--recipe", str(recipe_mod.EXAMPLE)])
         self.assertEqual(code, 0, err.getvalue())
         rep = json.loads(sorted(self.dir.glob("night-sales-*.json"))[0].read_text(encoding="utf-8"))["practice"]
-        self.assertEqual(rep["shared_cards"], 1)
-        self.assertEqual(rep["patterns skipped"], 1)
+        self.assertEqual(rep.get("shared_cards"), 1)
+        self.assertEqual(rep.get("patterns skipped"), 1)
         self.assertNotIn("patterns given", rep)
         self.assertEqual((shared.root_for(self.db_path) / "patterns-sales.json").read_bytes(), before)
 

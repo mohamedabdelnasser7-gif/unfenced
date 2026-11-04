@@ -1161,9 +1161,14 @@ def arena_tab(m, view, a, agent, st, ctx):
     swaps each part marked data-live; the correction box sits outside them, so typing is never lost. Answers
     come back to this tab."""
     c = tab_ctx(ctx, agent, "arena")
-    glow, tiles, retry = arena_parts(m, agent if agent in m.plugs else None, c, back=c["path"] + c["q"],
-                                     fix_ctx=c)
     able = arena_able(m, agent)
+    running = able and m.arena_running(agent)
+    so = m.arena_so_far(agent) if running and hasattr(m, "arena_so_far") else None
+    now = None
+    if running:  # the dark card says the run is going, never "No saved run yet" while it plays
+        now = so if so is not None else {"played": m.arena_played(agent), "won": 0}
+    glow, tiles, retry = arena_parts(m, agent if agent in m.plugs else None, c, back=c["path"] + c["q"],
+                                     fix_ctx=c, so_far=now)
     go = run_arena(m, agent, c, c["path"] + c["q"]) if able else ""
     track = arena_track(m, agent, c) if able else ""
     learn = ""
@@ -1177,13 +1182,17 @@ def arena_tab(m, view, a, agent, st, ctx):
     card = train_card(m, a, agent, c) if able else ""
     top = arena_live(m, agent) if able else ""
     low = arena_live(m, agent, "tiles") if able else ""
+    side = arena_live(m, agent, "side") if able else ""
     sub = "Where it slipped"
-    if able and m.arena_running(agent) and hasattr(m, "arena_so_far"):  # the matches as they land, polled
-        tiles, retry, sub = so_far_tiles(m.arena_so_far(agent)), "", SO_FAR_SUB
-    return (f'<div class="qs arq"><div{top}>{track}{go}{learn}</div>{card}<div{low}><div class="ar"><section class="ar-l" '
+    if running and hasattr(m, "arena_so_far"):  # the matches as they land, polled
+        tiles, retry, sub = so_far_tiles(so), "", SO_FAR_SUB
+    # one grid (page_css .arg): the correction box and the practice matches in the main column, the risk level
+    # and the dark card in the side column, both from the same top line; one column on a phone
+    return (f'<div class="qs arq"><div{top}>{track}{go}{learn}</div><div class="arg"><div class="arg-c">{card}</div>'
+            f'<div class="arg-m"{low}><section class="ar-l" '
             f'aria-labelledby="m-h"><div class="sec-h"><h2 id="m-h">Practice matches</h2><small>{sub}'
-            f'</small></div><div class="tiles">{tiles}</div>{retry}</section><div class="ar-r">{level}{glow}</div>'
-            f'</div></div></div>')
+            f'</small></div><div class="tiles">{tiles}</div>{retry}</section></div>'
+            f'<div class="arg-s"{side}>{level}{glow}</div></div></div>')
 
 
 def arena_able(m, agent):
@@ -1216,7 +1225,7 @@ def arena_track(m, agent, ctx):
     out = [f'<p class="stl" role="status">{h(status["line"])}</p>',
            f'<ol class="trk" aria-label="Arena steps">{"".join(steps)}</ol>']
     if connect:
-        out.append(f'<p class="trkc"><b>{h(connect)}.</b> {h(kit.CONNECT_LINE)} <a class="lk" '
+        out.append(f'<p class="trkc"><b>{h(connect)}.</b> {h(kit.CONNECT_LINE)}</p><p class="trkl"><a class="lk" '
                    f'href="{tab_href(ctx, agent, "live")}">Open the chat</a></p>')
     if status["ready"] and agent in m.plugs:
         conns = m.connection_view(agent)
@@ -1276,10 +1285,10 @@ def train_card(m, a, agent, ctx):
             inner.append(trained_html(done))
         if summary is not None and summary["lost"] and ctx["token"]:  # Train only on a run that lost matches
             nxt = (m.arena_status(agent) or {}).get("next") if hasattr(m, "arena_status") else None
-            inner.append('<div class="act">' + _post(ctx, mo.TRAIN_PATH[1:], f'{icon("flask")}{mo.TRAIN_BUTTON}',
+            inner.append('<div class="act stk">' + _post(ctx, mo.TRAIN_PATH[1:], f'{icon("flask")}{mo.TRAIN_BUTTON}',
                                                      "yes" if nxt == "train" else "gb", agent=agent,
                                                      back=ctx["path"] + ctx["q"])
-                         + f'<p class="quiet">{h(mo.TRAIN_SAID)}</p></div>')
+                         + f'<p class="quiet nt">{h(mo.TRAIN_SAID)}</p></div>')
     part = f'<div{arena_live(m, agent, "train")}>{"".join(inner)}</div>'
     box = ""
     if ctx["token"]:
@@ -1299,7 +1308,7 @@ def train_card(m, a, agent, ctx):
                     f'<p class="quiet">{h(mo.REVISE_SAID)}</p></div></details></div>')
     edits = (f'<section class="grp sq" aria-labelledby="ed-h"><h3 id="ed-h">{mo.EDITS_HEAD}</h3>{"".join(rows)}</section>'
              if rows else "")
-    return (f'<div class="ar"><section class="say sq" aria-label="Send an idea or a correction">{part}{box}</section>'
+    return (f'<div class="trc"><section class="say sq" aria-label="Send an idea or a correction">{part}{box}</section>'
             f'{edits}</div>')
 
 
@@ -1401,8 +1410,8 @@ def run_arena(m, agent, ctx, back):
         out.append(("" if sales else f'<p class="quiet">{h(said)}</p>')  # the Sales agent has no sample data
                    + _post(ctx, ARENA_PATH[1:], f'{icon("flask")}{h(word)}',
                            "yes" if status.get("next", "arena") == "arena" else "gb", agent=agent, back=back)
-                   + f'<p class="quiet">{h(mo.ARENA_RUN_NO_CHANNEL if quiet else mo.ARENA_RUN_SAID)}</p>')
-    return f'<div class="act">{"".join(out)}</div>' if out else ""
+                   + f'<p class="quiet nt">{h(mo.ARENA_RUN_NO_CHANNEL if quiet else mo.ARENA_RUN_SAID)}</p>')
+    return f'<div class="act stk">{"".join(out)}</div>' if out else ""
 
 
 def running_pill(said):
@@ -1554,16 +1563,16 @@ def run_reflection(m, a, agent, ctx, back):
         out.append(f'<p class="no-yet" role="status">{h(note)}</p>')
     if ctx["token"]:
         why = mo.REFLECT_ARENA if m.arena_running(agent) else m.reflect_ready(agent)
+        out.append(f'<p class="quiet">{h(mo.REFLECT_SAID)}</p>')
         if why is None:
             out.append(_post(ctx, REFLECT_PATH[1:], f'{icon("loop")}{mo.REFLECT_BUTTON}', "yes", agent=agent, back=back))
         else:
             out.append(f'<button class="yes" type="button" disabled>{icon("loop")}{mo.REFLECT_BUTTON}</button>')
-        out.append(f'<p class="quiet">{h(mo.REFLECT_SAID)}</p>')
         if why == mo.NO_KEY:
             out.append(f'<p class="no-yet" role="status">{h(why)} <code>{h(mo.REPLAY)}</code></p>')
         elif why is not None:
             out.append(f'<p class="no-yet" role="status">{h(why)}</p>')
-    return f'<div class="act">{"".join(out)}</div>' if out else ""
+    return f'<div class="act stk">{"".join(out)}</div>' if out else ""
 
 
 def live_tab(m, view, a, agent, st, ctx):
@@ -2064,11 +2073,12 @@ def correct_this(ctx, agent, fix_ctx=None):
             f'<button class="send" type="submit">Send{icon("arrow")}</button></div></form></details>')
 
 
-def arena_parts(m, agent, ctx, back=None, fix_ctx=None):
+def arena_parts(m, agent, ctx, back=None, fix_ctx=None, so_far=None):
     """The newest Arena run saved next to the database for this agent, as (the climb card, the match
     tiles, Try again). The matches it lost are tiles with why; no total of won and lost (the trust
     level stays private, DECISIONS item 17). back: where Try again returns; fix_ctx: the ctx Correct
-    this sends from (its answer shows there)."""
+    this sends from (its answer shows there); so_far: a running run's {"played", "won"} (Morning.arena_so_far),
+    which the climb card's line says instead of the saved run's."""
     arena, _ = m.read_arena()
     run = arena.get(agent) if agent else None
     tok = ctx["token"] if agent and agent in m.lessons else None
@@ -2095,11 +2105,22 @@ def arena_parts(m, agent, ctx, back=None, fix_ctx=None):
     retry = try_again(m, agent, run, ctx, back) if (run or {}).get("lost") else ""
     when = f'Newest run, {mo._when(run["at"])}.' if run else "No saved run yet."
     end = "Passed the gate" if getattr(m, "no_channel", lambda a: False)(agent) else "Ready to go live"
+    calm = f"{h(when)} Nothing to do here while it practises."
+    if so_far is not None:
+        calm = h(practising_line(so_far))
     glow = ('<section class="a-climb" aria-label="How close it is"><article class="glow sq">'
             '<div class="glow-h"><span class="gchip">In the Arena</span><span class="gsub">practising on made-up '
             f'cases</span></div>{CLIMB}<div class="climb-l"><span>Started</span><span>{end}</span></div>'
-            f'<p class="calm">{h(when)} Nothing to do here while it practises.</p></article></section>')
+            f'<p class="calm">{calm}</p></article></section>')
     return glow, "".join(tiles), retry
+
+
+def practising_line(so):
+    """The dark card's line while Run the Arena plays: how many matches it played and won so far."""
+    n, won = int((so or {}).get("played") or 0), int((so or {}).get("won") or 0)
+    if not n:
+        return "Practising now: its first matches are starting."
+    return f"Practising now: {n} played, {won} won so far."
 
 
 def build(m, agent, ctx):

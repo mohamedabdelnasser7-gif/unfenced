@@ -587,6 +587,45 @@ textarea.typed{width:100%; border:0; background:transparent; resize:none; outlin
   .lstab{max-width:880px}
 }
 
+/* the agent page layout (2026-11-05): room under the sticky bar, the Arena tab's two column grid, the track's
+   equal steps and the stacked action rows (the line, the button, the note under it) */
+html{scroll-padding-top:16px}
+.ahead{scroll-margin-top:16px}
+.arg{display:grid; grid-template-columns:minmax(0,1fr); grid-template-areas:"c" "s" "m"; gap:16px; align-items:start}
+.arg-c{grid-area:c; min-width:0}
+.arg-m{grid-area:m; min-width:0}
+.arg-s{grid-area:s; min-width:0; display:flex; flex-direction:column; gap:16px}
+.arg-c:empty,.arg-c:has(> div[data-live]:only-child:empty){display:none}
+.arg:has(> .arg-c:empty),.arg:has(> .arg-c > div[data-live]:only-child:empty){grid-template-areas:"s" "m"}
+.trc{display:flex; flex-direction:column; gap:16px; min-width:0}
+.arg .sec-h{justify-content:flex-start; flex-wrap:wrap; gap:2px 12px}
+.arg .sec-h small{color:var(--ink-2)}
+.arg .tiles > .ghost{grid-column:1 / -1}
+.trk{gap:10px 12px}
+.trk li,.trk li.next,.trk li.done,.trk li.soon{gap:8px; margin:0; padding:0; border-radius:0; background:none; box-shadow:none; font:400 14px/20px var(--font)}
+.trk li.next{font-weight:600; color:var(--ink)}
+.trk li + li::before{width:28px; margin:0 4px 0 0}
+.trkc{max-width:65ch; font:400 14px/21px var(--font); text-wrap:pretty}
+.trkl{margin:6px 0 0}
+.trkl .lk{font:500 14px/20px var(--font); color:var(--ink); text-decoration:underline; text-underline-offset:3px}
+.act.stk{display:flex; flex-direction:column; flex-wrap:nowrap; align-items:flex-start; gap:12px; max-width:65ch}
+.act.stk > *{flex:none; max-width:100%}
+.act.stk p{flex:none; margin:0}
+.act.stk .yes{flex:none; width:auto}
+.act.stk .nt,.act.stk > button.yes + .no-yet{margin:0; padding:0; border-radius:0; background:none; font:400 13px/19px var(--font); color:var(--ink-2); overflow-wrap:anywhere}
+@media (max-width: 599px){
+  .trk{display:grid; grid-auto-flow:column; grid-auto-columns:minmax(0,1fr); gap:0; align-items:start}
+  .trk li,.trk li.next,.trk li.done,.trk li.soon{position:relative; flex-direction:column; align-items:center; gap:6px; padding:0 4px; text-align:center}
+  .trk li + li::before{position:absolute; top:11px; left:calc(-50% + 19px); right:calc(50% + 19px); width:auto; margin:0}
+}
+@media (min-width: 1024px){
+  html{scroll-padding-top:104px}
+  .ahead{scroll-margin-top:104px}
+  .arg{grid-template-columns:minmax(0,8fr) minmax(0,4fr); grid-template-rows:auto 1fr; grid-template-areas:"c s" "m s"; gap:24px 32px}
+  .arg:has(> .arg-c:empty),.arg:has(> .arg-c > div[data-live]:only-child:empty){grid-template-rows:auto; grid-template-areas:"m s"}
+  .arg-s{gap:20px}
+}
+
 /* the build page (design/boards/pages-r2/build-a.html): a centred thread, the box pinned at the bottom */
 .bp{display:flex; flex-direction:column}
 .bp .hero{min-height:calc(100vh - 260px); display:flex; flex-direction:column; justify-content:center; padding:24px 4px 0}

@@ -248,6 +248,9 @@ CLEAN = [
     "If the device won't turn on, ask whether the charger works with another device.",
     "If the device won’t charge, ask whether the cable is damaged before anything else.",
     "Customers who say the price is too high and the wait too long want reassurance first.",
+    # review crossowner round 3, item 6 (C16): a contraction and a possessive are words
+    "When a customer says they don't trust online payment, offer cash on delivery plainly.",
+    "If the customer's order is late, apologise and share the tracking first.",
 ]
 
 
@@ -363,6 +366,23 @@ class CleanTable(unittest.TestCase):
             with self.subTest(line=line):
                 self.assertIn(reason, shared.check(line))
         self.assertNotIn("a number in words", shared.check("When the customer writes too, then tu, answer calmly."))
+
+    def test_with_no_word_list_a_word_outside_the_openers_and_safe_is_refused(self):
+        # review crossowner round 3, item 6 (C07): an empty list refuses, never passes
+        from pathlib import Path
+        from unittest import mock
+        line = "When a customer goes quiet after hearing the cost, offer a smaller size before they leave."
+        self.assertEqual(shared.check(line), [])
+        with mock.patch.object(shared, "WORDS_FILE", Path(__file__).with_name("no_such_words.xz")):
+            self.assertEqual(shared.english(), frozenset())
+            self.assertIn("a word not in the English word list", shared.check(line))
+
+    def test_a_franco_word_split_by_a_mark_is_read_joined(self):
+        # review crossowner round 3, item 6 (C06): ma-fish is mafish, though ma and fish are words
+        for line in ("When the customer says ma-fish, explain the stock calmly.",
+                     "When the customer says ma'fish, explain the stock calmly."):
+            with self.subTest(line=line):
+                self.assertIn("a Franco word: the customer's own words", shared.check(line))
 
     def test_the_word_list_file_holds_no_letter_names(self):
         import lzma

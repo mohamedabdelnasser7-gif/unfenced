@@ -415,6 +415,39 @@ class RemintedOwnerId(unittest.TestCase):
         new = pool.owner_hash("owner-id:new")
         self.assertEqual([p["owners"] for p in shared.Pool("fans", self.root).patterns], [[new], [new], [new]])
 
+    def given_under(self, owner):
+        pool = shared.Pool("fans", self.root)
+        pool.add(shared.LESSON, PATTERN, owner, "k1", name="demo")
+        return self.root / "patterns-fans.json"
+
+    def test_a_name_row_moved_to_another_owner_hash_reads_broken(self):
+        # review crossowner round 3, item 6 (R-B9): the name's seal is checked, so a name moved by hand
+        # to a new owner id's hash (to give under it without the operator) breaks the read
+        path = self.given_under("owner-id:old")
+        data = json.loads(path.read_text())
+        new = shared.Pool("fans", self.root).owner_hash("owner-id:new")
+        row = data["names"][0]
+        data["names"] = [row[:32] + new + row[64:]]
+        path.write_text(json.dumps(data))
+        pool = shared.Pool("fans", self.root)
+        self.assertTrue(pool.broken)
+        self.assertEqual(pool.ready("k2", "owner-id:new", "demo"), shared.BROKEN)
+
+    def test_clear_on_a_broken_pool_is_refused_and_writes_nothing(self):
+        # review crossowner round 3, item 6 (R-B12): rows that fail their seals, names still good
+        path = self.given_under("owner-id:old")
+        data = json.loads(path.read_text())
+        data["patterns"][0]["owners"] = [o[:32] + "0" * 16 for o in data["patterns"][0]["owners"]]
+        path.write_text(json.dumps(data))
+        before = path.read_bytes()
+        with self.assertRaises(shared.Refused):
+            shared.clear_owner(self.root, "demo")
+        self.assertEqual(path.read_bytes(), before)
+        path.write_text("{cut short", encoding="utf-8")
+        with self.assertRaises(shared.Refused):
+            shared.clear_owner(self.root, "demo")
+        self.assertEqual(path.read_text(encoding="utf-8"), "{cut short")
+
     def test_a_cleared_row_whose_seal_fails_reads_broken(self):
         shared.Pool("fans", self.root).add(shared.LESSON, PATTERN, "owner-id:old", "k1", name="demo")
         shared.clear_owner(self.root, "demo")

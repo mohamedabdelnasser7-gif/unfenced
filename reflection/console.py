@@ -3,15 +3,18 @@ the technical view of one agent's loop, read only from what the engine already w
 changes a lesson; the one answer it takes (an operator correction) goes through Morning.correct.
 
     the bar      the loop as tabs (ALL STAGES, ARENA, DEPLOYMENT, REFLECTION), the running stage marked:
-                 the stage of the newest record of the last RECENT seconds, or the Arena while a Try
-                 again runs (Morning.trying)
-    the cards    Arena win rate of the newest run's matches, the newest exam with its safety and
+                 the Arena while a Run the Arena, a Train or a Try again runs (Morning.arena_running,
+                 training, trying), else the stage of the newest record of the last RECENT seconds
+    the cards    Arena win rate of the newest run's matches (while a Run the Arena goes, what it played
+                 and won so far, Morning.arena_so_far), the newest exam with its safety and
                  "hidden from the agent", lessons kept and on trial, model calls against the caps
     the views    ALL STAGES: one timeline of every record, tagged by stage, newest last. ARENA: the
-                 newest run's matches, or the lesson exams with their failed situations. DEPLOYMENT:
+                 newest run's matches, or the lesson exams with their failed situations; while a Run
+                 the Arena goes, its matches so far on top of both, marked running. DEPLOYMENT:
                  the live turns from the chats store, its lessons in play from the trace. REFLECTION:
                  the night reports, exams and lessons as a log, beside the lessons table.
-    writes.json  the same records as JSON as they were saved, on every tab
+    writes.json  the same records as JSON as they were saved, on every tab, folded under "Raw records
+                 (writes.json)" (details, so it opens with no script and stays open across the poll)
     Corrections  every correction, tagged user or operator, with its status and exam
     From         a lesson taken from the shared pool across owners says "learned from N owners", in
                  the lessons table and its side panel, read off its source line (reflection/shared.py)
@@ -82,6 +85,7 @@ def collect(m, agent, now=None):
            "corrections": [], "problems": []}
     rec = _Records(out["records"])
     _arena(m, agent, out, rec)
+    _so_far(m, agent, out, rec)
     _db(m, agent, out, rec)
     _nights(m, agent, rec)
     out["calls"] = _calls(m, now)
@@ -103,10 +107,14 @@ class _Records:
 
 
 def running(m, agent, records, now):
-    """The stage running now: the Arena while a Try again runs, else the stage of the newest record of
-    the last RECENT seconds, else None."""
-    trying = getattr(m, "trying", None)
-    if trying is not None and trying(agent):
+    """The stage running now: the Arena while a Run the Arena, a Train or a Try again runs, else the stage
+    of the newest record of the last RECENT seconds, else None."""
+    for going in ("arena_running", "trying"):
+        f = getattr(m, going, None)
+        if f is not None and f(agent):
+            return "A"
+    training = getattr(m, "training", None)
+    if training is not None and training(agent) is not None:
         return "A"
     fresh = [r for r in records if r["at"] is not None and 0 <= now - r["at"] <= RECENT]
     return max(fresh, key=lambda r: (r["at"], r["seq"]))["stage"] if fresh else None
@@ -133,6 +141,24 @@ def _arena(m, agent, out, rec):
     if retry:
         said = ", ".join(f"{r['card']} {r['result'].replace('_', ' ')}" for r in retry.get("results") or [])
         rec.add("A", retry.get("at"), f"Try again saved: {said or 'nothing played'}", retry)
+
+
+def _so_far(m, agent, out, rec):
+    """The matches of a Run the Arena still going (Morning.arena_so_far, the lines its matches file gained
+    since it started): out["so_far"] {played, won} and out["live"] their match rows, newest first, each on
+    the timeline. For the screen only: never in the saved run's win rate, and the gate never reads them."""
+    got = m.arena_so_far(agent) if hasattr(m, "arena_so_far") else None
+    out["so_far"] = None if got is None else {"played": got["played"], "won": got["won"]}
+    out["live"] = []
+    for x in (got or {}).get("rows") or []:
+        run = re.match(r"\d{8}T\d{6}", str(x.get("id") or ""))
+        if run is None:
+            continue
+        row = _match_row(x, run.group(0))
+        out["live"].append(row)
+    for x in reversed(out["live"]):  # the timeline is oldest first
+        rec.add("A", None, f"running: match {x['id']} {'won' if x['won'] else 'lost'}" + (f": {x['why']}" if x["why"] else ""),
+                x["raw"], row=f"m.{x['id']}", sort=_run_start(x["id"][:15]))
 
 
 def _sales():
@@ -489,6 +515,11 @@ tr.sub td.sit{padding-left:26px}
 .badge.ok{background:var(--greenbg);color:var(--green)}.badge.bad{background:var(--redbg);color:var(--red)}.badge.run{background:var(--bluebg);color:var(--blue)}
 td.act a{color:var(--blue)}td.act.fix a{color:var(--red)}
 .json{font-size:12px;line-height:1.5;padding:8px 14px;height:260px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+details.raw>summary{cursor:pointer;list-style:none}
+details.raw>summary::-webkit-details-marker{display:none}
+details.raw>summary::before{content:"+";width:12px;color:var(--dim);font-family:ui-monospace,Menlo,monospace}
+details.raw[open]>summary::before{content:"-"}
+details.raw:not([open])>summary{border-bottom:0}
 .json .k{color:var(--blue)}.json .s{color:var(--green)}.json .n{color:var(--amber)}.json .c{color:var(--dim)}
 .log{font-size:12px;padding:8px 14px;max-height:380px;overflow:auto}
 .log div{white-space:pre-wrap;word-break:break-word}
@@ -644,9 +675,9 @@ def render(data, st, *, token=None, flash=None, day=None, name=None, flash_html=
         '<div class="shell"><div class="main">',
         f'<div class="cards" data-live="cards">{cards_html(data)}</div>',
         f'<section class="panel" data-live="view">{view_html(data, st, day)}</section>',
-        '<section class="panel"><div class="ph"><h2 class="mono">writes.json</h2><span class="n">what the engine '
-        'wrote, as it saved it, on every tab</span></div>'
-        f'<div data-live="writes"><div class="json scroll">{writes_html(data)}</div></div></section>',
+        '<section class="panel"><details class="raw"><summary class="ph"><h2 class="mono">Raw records (writes.json)'
+        '</h2><span class="n">what the engine wrote, as it saved it, on every tab</span></summary>'
+        f'<div data-live="writes"><div class="json scroll">{writes_html(data)}</div></div></details></section>',
         f'</div><aside class="panel" aria-label="Corrections" data-live="corr">{corrections_html(data)}</aside></div>',
         drawer, f"<script>{SCRIPT}</script></body></html>"])
 
@@ -672,7 +703,10 @@ def cards_html(data):
     out = []
     matches = data["matches"]
     item = data.get("arena")
-    if matches:
+    so_far = data.get("so_far")
+    if so_far is not None:  # a Run the Arena going: what it played so far, never the saved run's rate
+        big, sub = "running", f"running: {so_far['played']} played, {so_far['won']} won so far"
+    elif matches:
         won = sum(1 for x in matches if x["won"])
         pct = round(won * 100 / len(matches))
         big, sub = f"{pct}%", f"{won} won of {len(matches)} practice matches, run {item['run']}"
@@ -788,6 +822,9 @@ def _keep(ok, f):
 def arena_html(data, st, day):
     item = data.get("arena")
     n = f"run {item['run']}" if item else "no saved run"
+    so_far = data.get("so_far")
+    if so_far is not None:
+        n = f"running: {so_far['played']} played so far | saved: {n}"
     exam_n = len(_situations_count(data))
     seg = _seg(st, day, "sub", (("m", "Matches"), ("e", f"Exam ({exam_n})" if exam_n else "Exam")))
     filt = _seg(st, day, "f", (("all", "All"), ("bad", "Failed"), ("ok", "Passed")))
@@ -816,14 +853,18 @@ def arena_html(data, st, day):
         empty = "No exam has run yet."
     else:
         head = "<tr><th>Match</th><th>Customer</th><th>Kind</th><th>Check</th><th>Result</th><th></th></tr>"
-        for x in reversed(data["matches"]):
+        live = data.get("live") or []
+        running = {x["id"] for x in live}
+        for x in live + list(reversed(data["matches"])):  # a running run's matches first, newest first
             if not _keep(x["won"], st["f"]):
                 continue
             key = f"m.{x['id']}"
             check = f'<span class="cat">{h(x["check"])}</span>' if x["check"] else ""
+            why = f'<small class="why">{h(x["why"])}</small>' if x["id"] in running and x["why"] else ""
+            kind = f'{x["kind"]}, running' if x["id"] in running else x["kind"]
             rows.append(f'<tr class="{"sel" if st["row"] == key else ""}"><td class="mono">{h(x["id"])}</td>'
-                        f'<td class="sit">{h(x["persona"])}{" | " + h(x["worry"]) if x["worry"] else ""}</td>'
-                        f'<td class="dim">{x["kind"]}</td><td>{check}</td>'
+                        f'<td class="sit">{h(x["persona"])}{" | " + h(x["worry"]) if x["worry"] else ""}{why}</td>'
+                        f'<td class="dim">{h(kind)}</td><td>{check}</td>'
                         f'<td>{_badge(x["won"], "WON", "LOST")}</td>{_act(st, day, key, not x["won"])}</tr>')
         empty = "No match of this run is saved." if item else "No saved Arena run yet."
     body = (f'<div class="tbl"><table><thead>{head}</thead><tbody>{"".join(rows)}</tbody></table></div>' if rows
@@ -960,7 +1001,7 @@ def find(data, key):
     """(kind, the row) for a side panel key, or (None, None)."""
     kind = key[:1]
     if kind == "m":
-        return kind, next((x for x in data["matches"] if f"m.{x['id']}" == key), None)
+        return kind, next((x for x in data["matches"] + (data.get("live") or []) if f"m.{x['id']}" == key), None)
     if kind == "t":
         return kind, next((t for t in data["turns"] if t["key"] == key), None)
     if kind == "l":

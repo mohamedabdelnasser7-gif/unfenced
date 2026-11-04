@@ -9,7 +9,7 @@ Morning methods only, so no engine rule lives here.
                    result and a sheet upload (reflection/morning.py, Late results; DECISIONS 66).
     /agents        the agents (the plugs in the repo and the agents in the database) and New agent.
                    An agent shows Live while the user has it connected on a channel (Morning._live,
-                   DECISIONS item 77), else Training; real chats are history, never the switch.
+                   DECISIONS item 77), else In practice; real chats are history, never the switch.
     /agents/<name> one agent: its status with Pull and Roll back, then Connections: each channel it
                    asks for with one line, and Connect to WhatsApp, greyed out with the reason until
                    its latest Arena gate passed (Morning.gate). Pull takes a live agent off its
@@ -914,14 +914,14 @@ def night_line(a, now, answered=0):
 
 
 def status_of(m, agent):
-    """Paused while its pause switch is on (Morning.paused), else Live or Training."""
+    """Paused while its pause switch is on (Morning.paused), else Live or In practice."""
     if m.paused(agent):
         return "Paused"
-    return "Live" if agent in m._live() else "Training"
+    return "Live" if agent in m._live() else "In practice"
 
 
 # The line under the status on an agent's page.
-STATUS_SAID = {"Live": "Working on real cases", "Training": "Practising in the Arena",
+STATUS_SAID = {"Live": "Working on real cases", "In practice": "Practising in the Arena",
                "Paused": "Paused: it sends nothing until you press Resume"}
 
 
@@ -1077,7 +1077,7 @@ def overview_tab(m, view, a, agent, st, ctx):
     """Overview: the status with Roll back and Pull (or Resume), the channels and Connect, the box for an
     idea or a correction; beside them since yesterday and the newest lessons."""
     states = "".join(f'<span class="on"><i></i>{s}</span>' if s == st else f"<span>{s}</span>"
-                     for s in ("Training", "Live", "Paused"))
+                     for s in ("In practice", "Live", "Paused"))
     tok = ctx["token"] if a["buttons"] else None
     roll = ""
     plan = m.rollback_plan(agent, ctx.get("now")) if a["buttons"] else None
@@ -1177,8 +1177,11 @@ def arena_tab(m, view, a, agent, st, ctx):
     card = train_card(m, a, agent, c) if able else ""
     top = arena_live(m, agent) if able else ""
     low = arena_live(m, agent, "tiles") if able else ""
-    return (f'<div class="qs"><div{top}>{track}{go}{learn}</div>{card}<div{low}><div class="ar"><section class="ar-l" '
-            f'aria-labelledby="m-h"><div class="sec-h"><h2 id="m-h">Practice matches</h2><small>Where it slipped'
+    sub = "Where it slipped"
+    if able and m.arena_running(agent) and hasattr(m, "arena_so_far"):  # the matches as they land, polled
+        tiles, retry, sub = so_far_tiles(m.arena_so_far(agent)), "", SO_FAR_SUB
+    return (f'<div class="qs arq"><div{top}>{track}{go}{learn}</div>{card}<div{low}><div class="ar"><section class="ar-l" '
+            f'aria-labelledby="m-h"><div class="sec-h"><h2 id="m-h">Practice matches</h2><small>{sub}'
             f'</small></div><div class="tiles">{tiles}</div>{retry}</section><div class="ar-r">{level}{glow}</div>'
             f'</div></div></div>')
 
@@ -1205,12 +1208,11 @@ def arena_track(m, agent, ctx):
         if key not in shown:
             continue
         cls = "next" if status["next"] == key else "done" if done else ""
-        tick = f'<small>{mo.DONE_WORD}</small>' if cls == "done" else ""
-        steps.append(f'<li class="{cls}">{h(word)}{tick}</li>' if cls else f"<li>{h(word)}{tick}</li>")
+        steps.append(track_step(len(steps) + 1, word, cls))
     kit = m.case_kit(agent) if hasattr(m, "case_kit") else None
     connect = getattr(kit, "CONNECT_STEP", None)
     if connect:  # a repo agent on the built path whose channel is next (the assistant's email): a step, no button
-        steps.append(f'<li class="soon">{h(connect)}</li>')  # next to build, so never lit as the next step
+        steps.append(track_step(len(steps) + 1, connect, "soon"))  # next to build, so never lit as the next step
     out = [f'<p class="stl" role="status">{h(status["line"])}</p>',
            f'<ol class="trk" aria-label="Arena steps">{"".join(steps)}</ol>']
     if connect:
@@ -1221,6 +1223,17 @@ def arena_track(m, agent, ctx):
         if conns:
             out.append(connections_html(agent, conns, ctx, ctx["token"]))
     return f'<div class="trkw">{"".join(out)}</div>'
+
+
+def track_step(n, word, cls=""):
+    """One step of the track, read as a step and never as a button: its number in a small circle (a tick when
+    done), its word, and Next or Done in words for a screen reader; the line between steps is the style's."""
+    mark = icon("check") if cls == "done" else str(n)
+    said = {"next": "Next", "done": mo.DONE_WORD, "soon": "Later"}.get(cls)
+    tail = f'<small class="vh">, {said}</small>' if said else ""
+    attr = f' class="{cls}"' if cls else ""
+    return (f'<li{attr}><span class="n" aria-hidden="true">{mark}</span>'
+            f'<span class="w">{h(word)}</span>{tail}</li>')
 
 
 def summary_html(s):
@@ -1372,7 +1385,7 @@ def run_arena(m, agent, ctx, back):
         n = m.arena_played(agent)
         said = (f"Running the Arena: {n} practice {'match' if n == 1 else 'matches'} played so far." if n
                 else "Running the Arena: its first matches are starting.")
-        return f'<div class="act"><p class="no-yet" role="status">{h(said)}</p></div>'
+        return running_pill(said)
     out = []
     note = m.arena_note(agent)
     if note:
@@ -1390,6 +1403,31 @@ def run_arena(m, agent, ctx, back):
                            "yes" if status.get("next", "arena") == "arena" else "gb", agent=agent, back=back)
                    + f'<p class="quiet">{h(mo.ARENA_RUN_NO_CHANNEL if quiet else mo.ARENA_RUN_SAID)}</p>')
     return f'<div class="act">{"".join(out)}</div>' if out else ""
+
+
+def running_pill(said):
+    """A run going, where its button was: a greyed pill with a small turning ring and what it has done so far."""
+    return (f'<div class="act"><span class="runp"><span class="spin" aria-hidden="true"></span><span role="status">'
+            f'{h(said)}</span></span></div>')
+
+
+SO_FAR_SUB = "Played so far, newest first"
+
+
+def so_far_tiles(so):
+    """The running Run the Arena's matches so far (Morning.arena_so_far), newest first, in the saved run's tile
+    markup: won or lost and its one line why, with no Correct this while it runs. For the screen only: the gate
+    reads the saved run, never these."""
+    tiles = []
+    for x in (so or {}).get("rows") or []:
+        why = x.get("why") if isinstance(x.get("why"), str) else ""
+        res, cls = ("Won", "won") if x["won"] else ("Lost", "lost")
+        line = f'<p class="persona" dir="auto">{h(_cap(" ".join(why.split())[:200]))}.</p>' if why.strip() else ""
+        tiles.append(f'<article class="tile {cls}"><div class="t-h"><span class="pav">{icon("chat")}</span><div>'
+                     f'<b>Practice case</b><small>Made up for the Arena</small></div><span class="res">{res}</span>'
+                     f'</div>{line}</article>')
+    return "".join(tiles) or ('<div class="ghost"><span class="pav" aria-hidden="true"></span>Its first matches are '
+                              'starting.</div>')
 
 
 def trained_html(done):
@@ -1472,7 +1510,7 @@ def reflect_result(a, done, no_lost=mo.NO_LOST):
             continue
         cls, chip, small = _chip(i, a)
         exam = REFLECT_EXAM.get(i.get("exam_result"), REFLECT_EXAM[None])
-        held = i.get("exam") or ""
+        held = i.get("exam_plain") or i.get("exam") or ""  # the check's why, never its name
         rows.append(f'<div class="lr"><b dir="auto">{h(i["text"])}</b><span class="vchip {cls}">{chip}</span>'
                     f'<small>{h(small)}</small><small>{h(exam)}{" " + h(_cap(held)) + "." if held else ""}</small></div>')
     if rows:
@@ -1832,6 +1870,8 @@ def case_value(label, value):
 USING_SAMPLE = "This agent is using sample data, since nothing is connected yet."  # DECISIONS 107
 SAMPLE_STATE = "Sample data for now"            # a need with no real connection, read from the sample data
 STORE_SAMPLE = "Sample data until the store is connected"  # the store need with no Shopify keys
+# the WhatsApp need with its keys set: a built agent does not run on WhatsApp yet (README, Deployment), so no tick
+WHATSAPP_KEYS_SET = "WhatsApp keys are set. Running an agent made in Quick start on WhatsApp comes next."
 # A step the case's end needs (reflection/quickstart.py steps) whose need is not connected: the card says,
 # before Build, that the agent records it and the user does that part until it is connected.
 STEP_WAIT = "Until it is connected, it records the {thing} as {done} and you do that part."
@@ -1920,12 +1960,16 @@ def need_keys(tool):
 
 
 def need_state(n, data):
-    """(words, connected) for one need on the card: Connected only with a real connection, so the store and
-    WhatsApp only with their keys set. The store with no keys, or a need with no tool while the agent has
-    sample data, says sample data; WhatsApp with no keys is not connected yet."""
+    """(words, connected) for one need on the card: Connected only with a real connection, so the store only
+    with its keys set. WhatsApp is never Connected here: an agent made here does not run on it yet, so with its
+    keys set it says they are set and that running on WhatsApp comes next (the Sales agent's own connection is
+    on its page, connections_html). The store with no keys, or a need with no tool while the agent has sample
+    data, says sample data; WhatsApp with no keys is not connected yet."""
     from kit import env
     if n["connected"] and not all(env.get(k) for k in need_keys(n["tool"])):
         return (STORE_SAMPLE, False) if n["tool"] == "store" else ("Not connected yet", False)
+    if n["connected"] and n["tool"] == "whatsapp":
+        return WHATSAPP_KEYS_SET, False
     if n["connected"]:
         return f'Connected: {qs_mod.TOOLS.get(n["tool"], "").split(":")[0]}', True
     return (SAMPLE_STATE if data else "Not connected yet"), False
@@ -1951,6 +1995,8 @@ def need_tile(n, said, on, waits, sheet):
             f'<small class="mcp" aria-disabled="true">{MCP_NEXT}</small></div>')
     if on:
         return f'<div class="file on"><span class="fi">{icon("check")}</span>{text}<span></span></div>'
+    if said == WHATSAPP_KEYS_SET:  # keys set, nothing left to connect here: no tick, no how to connect
+        return f'<div class="file"><span class="fi">{icon("loop")}</span>{text}<span></span></div>'
     use = (f'<a href="#{DATA_ID}">{SHEET}</a>{SHEET_NOW}' if sheet else f"<b>{SHEET}</b>{SHEET_LATER}")
     return (f'<details class="need"><summary class="file">'
             f'<span class="fi">{icon("plus")}</span>{text}</summary><div class="how"><p>{h(how_to_connect(n))}</p>'

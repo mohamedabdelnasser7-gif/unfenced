@@ -599,13 +599,13 @@ class MorningGate(unittest.TestCase):
     def test_a_failed_idea_waits_with_its_line_and_yes_starts_it(self):
         page = self.page(fail(9, "no_shop"))
         said = page.idea("waterer", self.LINE, "seedling", now=fk.NOW)
-        self.assertEqual(said, "Your idea is lesson 1. It waits for a yes: it failed the exam: situation 9, check "
-                               "no_shop. Yes on its card starts it anyway.")
+        self.assertEqual(said, "Your idea is lesson 1. It waits for a yes: it failed the exam on situation 9: why. "
+                               "Yes on its card starts it anyway.")  # the check's why, never its name
         self.assertEqual(self.seen, [(self.LINE, ("seedling",))])
         view = page.view(now=fk.NOW)
         card, = view["cards"]
         self.assertEqual((card["status"], card["why"]), (
-            "waits for a yes", "It failed the exam: situation 9, check no_shop. Yes on this card starts it anyway."))
+            "waits for a yes", "It failed the exam on situation 9: why. Yes on this card starts it anyway."))
         self.assertIn("Yes on this card starts it anyway.", page_mod.render(view, token="t"))
         self.assertEqual(page.yes(card["id"], now=fk.NOW), "Lesson 1: yes. It is on trial.")
         les = page.lessons["waterer"].get(1)

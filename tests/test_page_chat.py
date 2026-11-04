@@ -441,7 +441,8 @@ class EveryBuiltAgent(unittest.TestCase):
 class ConnectStep(Base):
     def test_the_assistant_says_how_email_connects_with_no_button(self):
         page = self.p.get("/agents/assistant", {"tab": ["arena"]}, "tok")
-        self.assertIn(f'<li class="soon">{case.CONNECT_STEP}</li>', page)
+        self.assertIn(f'<li class="soon"><span class="n" aria-hidden="true">3</span><span class="w">{case.CONNECT_STEP}'
+                      '</span><small class="vh">, Later</small></li>', page)
         self.assertIn("Email connects through Microsoft or Google sign-in next. Until then this assistant works on a "
                       "sample mailbox.", page)
         self.assertNotIn(f"<button class=\"yes\" type=\"submit\">{case.CONNECT_STEP}", page)

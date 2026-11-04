@@ -547,7 +547,8 @@ class CorrectionOnTheAgentPage(Base):
         page = self.page(World(agent=agent))
         said = page.correct("stock_watch", line)
         self.assertIn("waits for your yes on Today", said)
-        self.assertIn("situation 3, check tools_called", said)
+        self.assertIn("situation 3: it did not call store", said)  # the check's why, never its name
+        self.assertNotIn("tools_called", said)
         les = page.lessons["stock_watch"].mine()[-1]
         self.assertNotEqual(les["state"], engine_lessons.TRYING)
 
@@ -566,7 +567,8 @@ class CorrectionOnTheAgentPage(Base):
         self.assertFalse(run.past_wins(self.folder))
         said = page.correct("stock_watch", UNHELPFUL)
         self.assertIn("waits for your yes on Today", said)
-        self.assertIn("situation 1, check good_model_judged", said)
+        self.assertIn("situation 1: the good result was reached without the new line and not with it", said)
+        self.assertNotIn("good_model_judged", said)
         les = page.lessons["stock_watch"].mine()[-1]
         self.assertNotEqual(les["state"], engine_lessons.TRYING)
 

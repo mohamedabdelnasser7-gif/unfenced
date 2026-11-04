@@ -286,7 +286,7 @@ class CardShowsSampleData(PageCase):
             need = self.get().split("Your store&#x27;s stock")[1].split("</small>")[0]
         self.assertIn("Connected: Store", need)
 
-    def test_a_whatsapp_need_is_connected_only_with_its_keys(self):
+    def test_a_whatsapp_need_is_never_connected_and_says_when_its_keys_are_set(self):
         self.page(card_reply(needs=[{"what": "Customer chats", "tool": "whatsapp"}]))
         self.send("an agent for my customer chats")
 
@@ -298,8 +298,13 @@ class CardShowsSampleData(PageCase):
         one_missing[whatsapp.REQUIRED_ENV[0]] = ""
         with mock.patch.dict(os.environ, one_missing):
             self.assertNotIn("Connected: WhatsApp", need())
-        with mock.patch.dict(os.environ, WA_SET):
-            self.assertIn("Connected: WhatsApp", need())
+        with mock.patch.dict(os.environ, WA_SET):  # a built agent does not run on WhatsApp yet: no tick
+            self.assertIn(pages.WHATSAPP_KEYS_SET, need())
+            self.assertNotIn("Connected", need())
+            page = self.get()
+            tile = page[:page.index("Customer chats")].rsplit('<div class="file', 1)[1]
+            self.assertFalse(tile.startswith(" on"))
+            self.assertNotIn(pages.icon("check"), tile)
 
 
 class AddData(unittest.TestCase):

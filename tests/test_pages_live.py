@@ -46,7 +46,7 @@ class LiveDatabase(unittest.TestCase):
         connections.connect(self.db, "sales", "whatsapp", why="The gate passed.", by=mo.BY)
 
     def status(self, page, agent):
-        return re.search(rf'<b>{re.escape(pages.name(agent))}</b><span class="st(?: live)?">(\w+)</span>', page).group(1)
+        return re.search(rf'<b>{re.escape(pages.name(agent))}</b><span class="st(?: live)?">([\w ]+)</span>', page).group(1)
 
     def last_night(self):
         return self.p.get("/", {}, "t").split('aria-label="Last night"')[1]
@@ -89,22 +89,22 @@ class LiveDatabase(unittest.TestCase):
         self.assertNotIn("No agents yet", today)
         self.assertEqual(today.count("No night yet."), len(self.m.plugs))
 
-    # 3. Live while connected on a channel; real chats alone stay Training
+    # 3. Live while connected on a channel; real chats alone stay In practice
 
     def test_connected_shows_live_on_both_tabs_and_the_agent_page(self):
         self.chat()
-        self.assertEqual(self.status(self.p.get("/agents", {}, "t"), "sales"), "Training")  # chats are history
-        self.assertIn('aria-label="Status: Training"', self.p.get("/agents/sales", {}, "t"))
+        self.assertEqual(self.status(self.p.get("/agents", {}, "t"), "sales"), "In practice")  # chats are history
+        self.assertIn('aria-label="Status: In practice"', self.p.get("/agents/sales", {}, "t"))
         self.connect()
         self.assertEqual(self.status(self.p.get("/agents", {}, "t"), "sales"), "Live")
         self.assertIn(f'<b>{pages.name("sales")} <span class="st live">Live</span>', self.last_night())
         page = self.p.get("/agents/sales", {}, "t")
         self.assertIn('aria-label="Status: Live"', page)
         self.assertIn("Working on real cases", page)
-        self.assertEqual(self.status(self.p.get("/agents", {}, "t"), "marketing"), "Training")
+        self.assertEqual(self.status(self.p.get("/agents", {}, "t"), "marketing"), "In practice")
 
     def test_no_chats_or_history_chats_only_stay_training(self):
-        self.assertEqual(self.status(self.p.get("/agents", {}, "t"), "sales"), "Training")
+        self.assertEqual(self.status(self.p.get("/agents", {}, "t"), "sales"), "In practice")
         self.chat(channel="history:whatsapp")
         self.trace("sales", {"history": True, "import_key": "k1"})
         self.assertEqual(self.m._live(), set())

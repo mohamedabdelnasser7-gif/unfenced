@@ -163,6 +163,7 @@ Not built yet (Mohamed's open calls): cards for a person's fixes.
 """
 import argparse
 import base64
+import collections
 import csv
 import io
 import hashlib
@@ -682,6 +683,32 @@ def _lines(folder):
 
 
 MATCHES_TAIL = 10_000_000  # bytes of the matches file last_run reads, from its end, where the newest run sits
+SO_FAR_TAIL = 1_000_000  # bytes of the newest gained lines arena_so_far keeps, on every poll
+SO_FAR_ROWS = 60  # matches arena_so_far gives at most, the newest
+
+
+def _gained(folder, start):
+    """The lines an agent's matches file gained past its first start lines, as (lines, how many it gained), in
+    one pass over the file (the count _lines gives): only the newest SO_FAR_TAIL bytes of them are kept, so lines
+    may be fewer than the count. ([], 0) with no file, a link or a file that cannot be read."""
+    from arena import run as run_mod
+    if folder is None:
+        return [], 0
+    path = Path(folder) / run_mod.MATCHES_FILE
+    out, kept, n = collections.deque(), 0, 0
+    try:
+        if path.is_symlink() or not path.is_file():
+            return [], 0
+        with open(path, "rb") as f:
+            for n, line in enumerate(f, 1):
+                if n > start:
+                    out.append(line)
+                    kept += len(line)
+                    while kept > SO_FAR_TAIL:
+                        kept -= len(out.popleft())
+    except OSError:
+        return [], 0
+    return list(out), max(0, n - start)
 
 
 def _run_start(run):
@@ -848,6 +875,7 @@ class Morning:
         # a test hands (agent, customer, judge) fakes), how it starts, and the practice's shape (a test's)
         self._arenas, self._arena_note, self._arena_from, self._arena_lock = set(), {}, {}, threading.Lock()
         self._arena_record = {}  # agent: the file its last run found torn or gone (new_test_set is the way on)
+        self._arena_where = {}  # agent: the folder of a run held from outside (arena_hold), else _arena_dir
         self.arena_models = None
         self.arena_start = lambda work, name: threading.Thread(target=work, name=name, daemon=True).start()
         self.arena_shape = {}
@@ -953,7 +981,7 @@ class Morning:
             return (f"Your correction is lesson {new_id}. It passed the exam and runs now as a hotfix in half the cases. "
                     f"Reflection checks it tonight.{note}")
         if not result.passed:
-            return f"Your correction is lesson {new_id}. It waits for your yes on Today: it {result.line()}.{note}"
+            return f"Your correction is lesson {new_id}. It waits for your yes on Today: it {_plain(result)}.{note}"
         if held:
             return (f"Your correction is lesson {new_id}. It passed the exam but is high risk, so it waits for your yes "
                     f"on Today.{note}")
@@ -1096,14 +1124,64 @@ class Morning:
             return run_mod.state_dir(self.db_path)
         return folder
 
+    def arena_hold(self, agent, folder):
+        """Count a run started outside this page's Run the Arena as one, for as long as it plays: the first
+        Arena run Build starts (QuickStart.start_practice), playing in folder. It joins the agents with a run
+        going and its start is the matches file's length now, as run_arena's, so the Arena tab, the console
+        and every refusal that waits on a run see it. False, holding nothing, when a run, a Train or a Run
+        reflection goes for the agent already; arena_release ends it."""
+        with self._arena_lock:
+            if agent in self._arenas or agent in self._train or agent in self._reflecting:
+                return False
+            self._arenas.add(agent)
+            self._arena_from[agent] = _lines(folder)
+            self._arena_where[agent] = folder
+        return True
+
+    def arena_release(self, agent):
+        """End a run arena_hold counted: the agent has no run going."""
+        with self._arena_lock:
+            self._arenas.discard(agent)
+            self._arena_from.pop(agent, None)
+            self._arena_where.pop(agent, None)
+
+    def arena_run(self, agent):
+        """The run going for the agent, as (the folder its matches file is in, the file's length when it
+        started), or None when none goes: a Run the Arena's (in _arena_dir) or one arena_hold counted (in
+        its own folder). The one answer arena_played and arena_so_far read."""
+        with self._arena_lock:
+            if agent not in self._arenas or agent not in self._arena_from:
+                return None
+            start, folder = self._arena_from[agent], self._arena_where.get(agent)
+        return (self._arena_dir(agent) if folder is None else folder), start
+
     def arena_played(self, agent):
         """The practice matches the running Run the Arena played so far: the lines its matches file gained
-        since it started (arena/run.py MATCHES_FILE, in _arena_dir); 0 when none runs."""
-        with self._arena_lock:
-            start = self._arena_from.get(agent) if agent in self._arenas else None
-        if start is None:
+        since it started (arena/run.py MATCHES_FILE, in arena_run's folder); 0 when none runs."""
+        run = self.arena_run(agent)
+        if run is None:
             return 0
-        return max(0, _lines(self._arena_dir(agent)) - start)
+        return max(0, _lines(run[0]) - run[1])
+
+    def arena_so_far(self, agent):
+        """The running Run the Arena's matches so far, for the screen only (the gate never reads this): the lines
+        its matches file gained since it started (the start arena_played uses; _gained keeps the newest
+        SO_FAR_TAIL bytes of them). {"played": the lines gained, "won": the gained lines read that say won, "rows": each
+        gained line read that holds a judged match (a dict with won true or false), newest first, at most
+        SO_FAR_ROWS}; None when no run goes (arena_run)."""
+        run = self.arena_run(agent)
+        if run is None:
+            return None
+        lines, played = _gained(*run)
+        got = []
+        for line in lines:
+            try:
+                x = json.loads(line)
+            except (ValueError, RecursionError):
+                continue
+            if isinstance(x, dict) and isinstance(x.get("won"), bool):
+                got.append(x)
+        return {"played": played, "won": sum(1 for x in got if x["won"]), "rows": got[::-1][:SO_FAR_ROWS]}
 
     def _arena_checks(self, agent, locked):
         """The refusals Run the Arena and Train share: (sales, folder). Refused for any other agent, for the Sales
@@ -2041,7 +2119,7 @@ class Morning:
             held = new["state"] == WAITING and new["yes_at"] is None and lessons.waits_for(new_id, now) is None
         where = "It is on trial." if new["state"] == TRYING else "It waits its turn."
         if exam is not None and not exam.passed and new["state"] == WAITING:
-            where = f"It waits for a yes: it {exam.line()}."
+            where = f"It waits for a yes: it {_plain(exam)}."
         elif held:
             where = "It is high risk, so it waits for your yes on its card."
         return f"Lesson {les['id']} edited: the new line is lesson {new_id}. {where}"
@@ -2067,7 +2145,7 @@ class Morning:
         if live is not None:
             live.add(text, result, kind="correction")
         if not result.passed:
-            return REVISE_FAILED.format(line=result.line(), id=les["id"])
+            return REVISE_FAILED.format(line=_plain(result), id=les["id"])
         rated = lessons.rate(text)  # the judge is a model call: never inside the write lock
         return self.edit(lesson_id, text, now=now, exam=result, rated=rated)
 
@@ -2195,7 +2273,7 @@ class Morning:
         note = "" if result is None else gate.skipped_note(result)
         note = f" {note}" if note else ""
         if result is not None and not result.passed and state == WAITING:
-            return (f"Your idea is lesson {new_id}. It waits for a yes: it {result.line()}. Yes on its card starts it "
+            return (f"Your idea is lesson {new_id}. It waits for a yes: it {_plain(result)}. Yes on its card starts it "
                     f"anyway.{note}")
         where = "It is on trial." if state == TRYING else "It waits its turn."
         return f"Your idea is lesson {new_id}. {where}{note}"
@@ -2667,7 +2745,7 @@ class Morning:
         held = _held(les, k)
         card = les["id"] in k.wanting and not queued
         report = k.cards.get(les["id"]) or {}
-        item = dict(les, card=card, exam=held, queued=queued, ahead=ahead or [], numbers=_numbers(report),
+        item = dict(les, card=card, exam=held, exam_plain=_held(les, k, plain=True), queued=queued, ahead=ahead or [], numbers=_numbers(report),
                     gate=exam_mod.effect_of(k.exams.get(les["id"])),  # fixed and broke in the gate, or None
                     exam_result=_exam_result(k.exams.get(les["id"])),
                     accept_high=None if t is None else t["accept_by"],
@@ -2884,12 +2962,19 @@ def _exam_result(row):
     return "not run" if row.get("check_name") == exam_mod.NOT_RUN else "failed"
 
 
-def _held(les, k):
+def _held(les, k, plain=False):
     """The line of a waiting lesson its exam held and no trial row has since: "failed the exam:
-    situation N, check X"; "" for every other lesson."""
+    situation N, check X"; plain: the check's why in its place, for the pages (exam_mod.plain_held_line);
+    "" for every other lesson."""
     if les["state"] != WAITING or les["id"] in k.trials:
         return ""
-    return exam_mod.held_line(k.exams.get(les["id"]))
+    return (exam_mod.plain_held_line if plain else exam_mod.held_line)(k.exams.get(les["id"]))
+
+
+def _plain(result):
+    """An exam result's held line for a page: the failed check's why, never its name (Result.plain_line);
+    line() for a result with no plain line."""
+    return getattr(result, "plain_line", result.line)()
 
 
 def _status(les, item, k, report):
@@ -2933,7 +3018,7 @@ def _status(les, item, k, report):
         return "waits its turn", f"One trial runs on a stage at a time; it waits behind {ahead}.{yes}"
     close = _close_sentence(report)
     if item.get("exam"):  # the close sentence stays when the exam fails too (review gatefb round 2, finding 4)
-        return "waits for a yes", (f"It {item['exam']}." + (f" {close}" if close else "")
+        return "waits for a yes", (f"It {item.get('exam_plain') or item['exam']}." + (f" {close}" if close else "")
                                   + " Yes on this card starts it anyway.")
     if item["replaces"]:
         names = ", ".join(f'lesson {r["id"]}' for r in item["replaces"])

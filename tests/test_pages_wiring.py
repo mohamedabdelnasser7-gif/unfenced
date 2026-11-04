@@ -176,7 +176,7 @@ class OverTheServer(Base):
         status, page = self.post("/resume", [("agent", "sales")])
         self.assertFalse(switch.is_paused("sales", db=self.db))
         self.assertNotIn('action="/resume"', page)
-        self.assertIn('aria-label="Status: Training"', page)
+        self.assertIn('aria-label="Status: In practice"', page)
 
     def test_no_origin_a_wrong_host_or_a_wrong_token_changes_nothing(self):
         self.assertEqual(self.post("/pause", [("agent", "sales")], origin=False)[0], 403)

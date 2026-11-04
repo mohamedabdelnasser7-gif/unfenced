@@ -120,7 +120,7 @@ svg.i{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.6;
 .nl .av{background:var(--card-3)}
 .nl b{display:flex; align-items:center; gap:8px; font:500 15px/20px var(--font)}
 .nl p{margin:2px 0 0; font:400 14px/20px var(--font); color:var(--ink-2); text-wrap:pretty}
-.st{font:500 11px/14px var(--font); padding:3px 8px; border-radius:999px; background:var(--chip); color:var(--ink-2)}
+.st{font:500 11px/14px var(--font); padding:3px 8px; border-radius:999px; background:var(--chip); color:var(--ink-2); white-space:nowrap}
 .st.live{background:rgba(42,51,50,.09); color:var(--ink)}
 
 /* empty state */
@@ -144,7 +144,7 @@ svg.i{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.6;
   display:flex; flex-wrap:wrap; align-items:center; gap:12px 16px}
 .st-l{flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:8px}
 .states{display:inline-flex; align-self:flex-start; padding:3px; border-radius:999px; background:rgba(11,15,18,.3)}
-.states span{display:inline-flex; align-items:center; gap:7px; padding:5px 11px; border-radius:999px; font:500 12px/16px var(--font); color:rgba(255,255,255,.62)}
+.states span{display:inline-flex; align-items:center; gap:7px; padding:5px 11px; border-radius:999px; font:500 12px/16px var(--font); color:rgba(255,255,255,.62); white-space:nowrap}
 .states .on{background:rgba(255,255,255,.94); color:var(--ink)}
 .states .on i{width:7px; height:7px; border-radius:50%; background:#3d8f5a}
 .st-l small{font:400 13px/18px var(--font); color:rgba(255,255,255,.86)}
@@ -180,11 +180,25 @@ svg.i{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.6;
 .vchip.trial{background:rgba(42,51,50,.12)}
 .nr{padding:13px 0; border-top:1px solid var(--line)}
 .stl{margin:0; font:500 15px/21px var(--font); text-wrap:pretty}
-.trk{display:flex; flex-wrap:wrap; gap:8px; list-style:none; margin:12px 0 0; padding:0}
-.trk li{display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border-radius:999px; background:var(--chip); font:500 13px/18px var(--font); color:var(--ink)}
-.trk li.next{background:var(--volt)}
-.trk li.done{background:rgba(42,51,50,.12)}
-.trk li small{font:400 12px/16px var(--font); color:var(--ink-2)}
+/* the Arena track reads as steps, never as buttons: a numbered circle, the word, a line to the next step */
+.trk{display:flex; flex-wrap:wrap; align-items:center; gap:8px 0; list-style:none; margin:14px 0 0; padding:0}
+.trk li{display:flex; align-items:center; gap:8px; font:400 14px/20px var(--font); color:var(--ink-2); cursor:default}
+.trk li + li::before{content:""; flex:none; width:24px; height:1px; margin-right:4px; background:rgba(11,15,18,.18)}
+.trk .n{flex:none; width:22px; height:22px; border-radius:50%; display:grid; place-items:center; font:500 12px/1 var(--font); color:var(--ink-2); box-shadow:inset 0 0 0 1px rgba(11,15,18,.22)}
+.trk .n svg.i{width:13px; height:13px; stroke-width:2.4}
+.trk .w{display:block}
+.trk li.next{color:var(--ink); font-weight:500}
+.trk li.next .n{background:var(--ink); color:#fff; box-shadow:none}
+.trk li.done .n{background:rgba(42,51,50,.12); color:var(--ink); box-shadow:none}
+.trk li.soon{color:var(--ink-3)}
+.trk li.soon .n{color:var(--ink-3); box-shadow:inset 0 0 0 1px rgba(11,15,18,.12)}
+.vh{position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap}
+/* a run going, where its button was: a greyed pill with a turning ring */
+.runp{display:inline-flex; align-items:center; gap:10px; min-height:52px; padding:10px 22px 10px 18px; border-radius:26px; background:var(--chip); color:var(--ink-2); font:500 15px/21px var(--font); box-shadow:inset 0 0 0 1px rgba(11,15,18,.08); cursor:default; text-wrap:pretty}
+.runp .spin{flex:none; width:16px; height:16px; border-radius:50%; border:2px solid rgba(11,15,18,.16); border-top-color:var(--ink-2); animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.arq > * + *{margin-top:24px}
+.arq > div[data-live]:first-child:empty + *{margin-top:0}
 .rsn{list-style:none; margin:8px 0 0; padding:0}
 .rsn li{padding:7px 0; border-top:1px solid var(--line); font:400 15px/21px var(--font)}
 .rsn li:first-child{border-top:0}
@@ -701,5 +715,6 @@ textarea.typed{width:100%; border:0; background:transparent; resize:none; outlin
   .bp .step{padding:12px 0}
   .bp .dock{bottom:0; padding:28px 0 28px}
 }
+@media (prefers-reduced-motion: reduce){ .runp .spin{animation:none} }
 
 """

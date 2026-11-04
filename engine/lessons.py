@@ -775,7 +775,7 @@ class Lessons:
              origin=AGENT, kind=PATTERN, exam_given=None, skip_exam=False, hold_high=False, hotfix=False, rated=None,
              now=None):
         text = (text or "").strip()
-        if not text or "\n" in text or "\r" in text:
+        if not text or len(text.splitlines()) != 1:
             raise ValueError("a lesson is one line of text")
         if len(text) > MAX_LEN:
             raise ValueError(f"a lesson is {MAX_LEN} characters at most")

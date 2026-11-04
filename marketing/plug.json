@@ -44,7 +44,7 @@
   "decides": {"good": "sold", "bad": ["no_sale"]},
   "risk": {
     "high": {
-      "about": "High risk on the page: any number (a price, a discount, pieces left), any promise (a delivery date, a refund, a gift), the store's policy, words about other brands, a buyer's personal data, and anything that spends money (ads, a boost, a paid partner).",
+      "about": "High risk on the page: any number (a price, a discount, pieces left), any promise (a delivery date, a refund, a gift), the store's policy, words about other brands, a buyer's personal data, anything that spends money (ads, a boost, a paid partner), and posting or publishing anything without the owner's yes, in any wording.",
       "words": {
         "number": [
           "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",

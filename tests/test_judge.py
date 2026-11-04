@@ -223,7 +223,8 @@ class FailClosed(unittest.TestCase):
     def test_the_prompt_names_money_promises_payment_and_data_in_any_wording(self):
         _, fake = ask(say("low"))
         self.assertIn("Also always high, in any language or wording: anything that changes what the customer "
-                      "pays, gets for free, is promised, how they pay, or what happens to their data.",
+                      "pays, gets for free, is promised, how they pay, or what happens to their data, and anything sent "
+                      "or published to a customer or the public with no yes.",
                       fake.calls[0]["messages"][0]["content"])
 
 

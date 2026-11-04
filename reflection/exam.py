@@ -100,7 +100,7 @@ class ExamModel:
             raise Graded()
         self.calls += 1
         try:
-            out = self.model.chat(messages, tools=tools, effort=EFFORT, max_tokens=MAX_TOKENS)
+            out = self.model.chat(messages, tools=tools, effort=EFFORT, max_tokens=MAX_TOKENS, whole=True)
         except Exception as e:
             self.error = e
             raise

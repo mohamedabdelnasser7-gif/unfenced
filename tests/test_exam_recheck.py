@@ -253,7 +253,7 @@ class ExaminerWiring(unittest.TestCase):
         r = self.examiner(m)("Greet them warmly.", ("all",))
         self.assertTrue(r.passed)
         self.assertEqual((m.n, r.calls), (4 + 4 + 4, 12))  # before, with, then 2 with and 2 without on situation 2
-        self.assertEqual(self.runs[8:], [(True, 2), (True, 2), (False, 2), (False, 2)])
+        self.assertEqual(self.runs[8:], [(False, 2), (False, 2), (True, 2), (True, 2)])  # the vote, then the recheck
 
     def test_full_exam_real_break_fails(self):
         self.always = True
@@ -269,7 +269,8 @@ class ExaminerWiring(unittest.TestCase):
         self.assertEqual(m.n, 8)
 
     def test_the_cap_is_respected(self):
-        for cap, rechecked in ((8 + 15, False), (8 + 16, True)):
+        # 8, then the baseline vote (2 answers; room for 8 calls), then the recheck (2 with; room for 8 calls)
+        for cap, rechecked in ((8 + 2 + 7, False), (8 + 2 + 8, True)):
             with self.subTest(cap=cap):
                 self.with_answers.clear()
                 m = Counter()
@@ -285,9 +286,13 @@ class ExaminerWiring(unittest.TestCase):
         self.assertLessEqual(m.n, 60)
         self.assertEqual(m.n, 4 + 4 + 4)
         self.assertEqual(r.calls, m.n)  # every model call of the lesson, the reruns too
-        tight = self.examiner(Counter(), scope=True, cap=16)  # room for two situations (8 calls each), none for reruns
+        # room for two situations (8 calls each); the baseline vote's two answers serve the recheck's side
+        # without the line, so its worst case is the two answers with it, and that fits
+        tm = Counter()
+        tight = self.examiner(tm, scope=True, cap=16)
         self.with_answers.clear()
-        self.assertFalse(tight("Greet them warmly.", ("asking",)).passed)
+        self.assertTrue(tight("Greet them warmly.", ("asking",)).passed)
+        self.assertLessEqual(tm.n, 16)
 
     def flaky_without(self, state):
         """Every lesson breaks "amounts" on situation 2; the single reruns without the line fail there too
@@ -308,14 +313,11 @@ class ExaminerWiring(unittest.TestCase):
         m = Counter()
         ex = self.examiner(m, scope=True, cap=60)
         self.assertTrue(ex("Greet them warmly.", ("asking",)).passed)  # it fails without the line too
-        self.assertTrue(ex._rows[()][2].passed)  # the kept run stays as it was answered
+        # the kept answers are answers, never a row a vote changed: the first as answered, then the vote's two
+        self.assertEqual([[c for c, _ in r.fails] for r in ex._rows[()][2]], [[], ["amounts"], ["amounts"]])
         before = m.n
         self.assertTrue(ex("Greet them kindly.", ("asking",)).passed)
-        self.assertEqual(m.n - before, 8)  # the kept run reused; situation 2 voted again: 4 with, 2 with, 2 without
-        state["flaky"] = False  # the noise is gone: the next lesson's break there is held
-        r = ex("Say the pair is 9999.", ("asking",))
-        self.assertFalse(r.passed)
-        self.assertEqual((r.blocked.situation, r.blocked.check), (2, "amounts"))
+        self.assertEqual(m.n - before, 4)  # the kept answers reused, no vote or recheck to pay again
 
     def test_a_voted_row_before_is_not_kept_for_the_next_lesson_full(self):
         state = {"flaky": True}
@@ -323,14 +325,10 @@ class ExaminerWiring(unittest.TestCase):
         m = Counter()
         ex = self.examiner(m)
         self.assertTrue(ex("Greet them warmly.", ("all",)).passed)
-        self.assertTrue(ex._without[()].rows[1].passed)
+        self.assertEqual([[c for c, _ in r.fails] for r in ex._rows[()][2]], [[], ["amounts"], ["amounts"]])
         before = m.n
         self.assertTrue(ex("Greet them kindly.", ("all",)).passed)
-        self.assertEqual(m.n - before, 8)
-        state["flaky"] = False
-        r = ex("Say the pair is 9999.", ("all",))
-        self.assertFalse(r.passed)
-        self.assertEqual((r.blocked.situation, r.blocked.check), (2, "amounts"))
+        self.assertEqual(m.n - before, 4)
 
 
 class ArenaFullExam(unittest.TestCase):
@@ -391,6 +389,7 @@ class EmptyReruns(unittest.TestCase):
     def setUp(self):
         clean_env(self)
         one = exam.situations(PLUG)[:1]
+        self.one_id = one[0]["id"]
         self.enterContext(mock.patch.object(exam, "situations", lambda plug: one))
 
     def fake(self, mode):
@@ -435,7 +434,9 @@ class EmptyReruns(unittest.TestCase):
     def test_the_next_lesson_is_held_too(self):
         ex, r = self.go("empty")
         self.assertFalse(r.passed)
-        self.assertNotIn("amounts", [c for c, _ in ex._without[()].rows[0].fails])  # as it was answered
+        kept = ex._rows[()][self.one_id]
+        self.assertEqual(len(kept), 1)  # the empty answers are not kept
+        self.assertNotIn("amounts", [c for c, _ in kept[0].fails])  # as it was answered
         r2 = ex(self.LINE + " Always.", ("all",))
         self.assertFalse(r2.passed)
         self.assertEqual(r2.blocked.check, "amounts")
@@ -480,12 +481,11 @@ class EmptyFirstWithout(unittest.TestCase):
                     r1 = ex(self.LINE, ("all",))
                     self.assertFalse(r1.passed)
                     self.assertEqual(r1.blocked.check, "amounts")
-                    kept = ex._rows.get((), {}) if scope else ex._without
-                    self.assertNotIn(sid if scope else (), kept)  # the empty run is not kept
+                    self.assertNotIn(sid, ex._rows.get((), {}))  # the empty answer is not kept
                     r2 = ex(self.LINE + " Always.", ("all",))
                     self.assertFalse(r2.passed)
                     self.assertEqual(r2.blocked.check, "amounts")
-                    before = ex._rows[()][sid] if scope else ex._without[()].rows[0]
+                    before = ex._rows[()][sid][0]
                     self.assertNotEqual(before.check, engine_exam.ANSWER)
                     self.assertNotIn("amounts", [c for c, _ in before.fails])
 

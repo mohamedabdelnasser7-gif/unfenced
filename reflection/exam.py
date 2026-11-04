@@ -836,8 +836,14 @@ class Examiner:
     (engine/exam.py Pair, DECISIONS item 27) and passes by the rule with a run before (DECISIONS item
     75): the exam runs every situation with the new line and pairs each with a run of the same
     situations with the kept lessons only; the lesson passes when no safety check newly fails and it
-    fixed at least as many situations as it broke. That run is made once for each set of kept
-    lessons and reused for the next lessons it examines; its model calls count on the exam that made it.
+    fixed at least as many situations as it broke, counted on the safety checks alone. That run is made
+    once for each set of kept lessons and reused for the next lessons it examines; its model calls count
+    on the exam that made it. The baseline vote (engine/exam.py vote, Arena run 20261104T143545, cause 2):
+    each situation keeps up to BASE_VOTES answers on the kept lessons; where a safety check fails on either
+    side differently (a check blocks on one side and not the other), the situation is answered again on the kept lessons until it has BASE_VOTES (while two more
+    answers fit the calls left, counted on the lesson that asks them) and judge() reads their vote. The
+    answers are kept for the next lessons on the same kept lessons, and the recheck's answers without the
+    line take them first, so a vote is paid once.
 
     scope=True (the Arena between rounds, arena/rounds.py; DECISIONS item 75): with count=True, a
     lesson takes only the situations of its own stages (every one for a lesson for all stages) and
@@ -864,8 +870,7 @@ class Examiner:
         self.plug, self.kept, self.model, self.count = plug, kept, model, count
         self.judge_model = judge_model  # the reveal judge's model (reveal_judge), None for the word check alone
         self.scope, self.cap, self.source = scope, cap, ()
-        self._without = {}  # {the kept lesson ids: the exam run without a new line}
-        self._rows = {}  # scope: {the kept lesson ids: {situation id: its row without a new line}}
+        self._rows = {}  # {the kept lesson ids: {situation id: [its answers without a new line]}}
         self._judge = None  # this lesson's reveal judge, counted on its calls (__call__)
 
     def __call__(self, text, tags):
@@ -882,35 +887,91 @@ class Examiner:
         self._judge = None if self.judge_model is None else _Counted(self.judge_model, parent=model)
         if self.scope:
             return self._scoped(sits, lesson, safety, model)
-        key = self._kept_ids()
-        without, made = self._without.get(key), 0
-        if without is None:
-            # empty_raises: an empty reply here reads as a raised answer, not as failing the checks, so a
-            # lesson that breaks a check there is still new (review engfix round 2, finding 1). A run with a
-            # raised answer is not kept: the next lesson asks again, as the scoped run does.
-            without = self._run(self.plug, model, kept=self.kept, lesson=None, sits=sits, empty_raises=True)
-            made = int(without.calls)
-            if not any(r.check == engine_exam.ANSWER for r in without.rows):
-                self._without[key] = without
-        got = self._run(self.plug, model, kept=self.kept, lesson=lesson, sits=sits)
-        after, before, extra = self._recheck(got.rows, without.rows, sits, lesson, safety, model)
-        return engine_exam.judge(after, before, len(sits), safety, calls=int(got.calls) + made + extra["calls"])
+        return self._exam(sits, lesson, safety, model)
 
-    def _recheck(self, after, before, sits, lesson, safety, model):
-        """engine/exam.py recheck on these rows, the reruns on model (one situation each). Returns (after,
+    def _exam(self, sits, lesson, safety, model):
+        """The counted exam on sits: the run on the kept lessons (made only where no answer is kept), the
+        run with the line, the baseline vote, the recheck, then judge()."""
+        cache = self._rows.setdefault(self._kept_ids(), {})
+        need = [s for s in sits if s["id"] not in cache]
+        made, raised = 0, {}
+        if need:
+            # empty_raises: an empty reply here reads as a raised answer, not as failing the checks, so a
+            # lesson that breaks a check there is still new (review engfix round 2, finding 1). An answer that
+            # raised is not kept: the next lesson asks again.
+            res = self._run(self.plug, model, kept=self.kept, lesson=None, sits=need, empty_raises=True)
+            made = int(res.calls)
+            for r in res.rows:
+                if r.check == engine_exam.ANSWER:
+                    raised[r.situation] = r
+                else:
+                    cache[r.situation] = [r]
+        got = self._run(self.plug, model, kept=self.kept, lesson=lesson, sits=sits)
+        start = model.calls
+        before = self._voted(got.rows, sits, cache, raised, safety, model)
+        voted = model.calls - start
+        after, before, extra = self._recheck(got.rows, before, sits, lesson, safety, model, cache)
+        return engine_exam.judge(after, before, len(sits), safety,
+                                 calls=int(got.calls) + made + voted + extra["calls"])
+
+    def _per(self):
+        return CALL_CAP + (0 if self.judge_model is None else JUDGE_CALLS)  # the most one answer takes
+
+    def _left(self, model):
+        return None if self.cap is None else self.cap - model.calls
+
+    def _voted(self, after, sits, cache, raised, safety, model):
+        """The rows before, one a situation of sits that has one: the vote of its kept answers (engine/exam.py
+        vote), each topped up to BASE_VOTES where the checks that block differ between the two sides (a break
+        or a fix; a situation wrong the same way on both sides costs nothing) and the answers still
+        missing fit the calls left; a situation whose only answer raised this time keeps that row."""
+        a_by = {r.situation: r for r in after}
+        out = []
+        for s in sits:
+            sid = s["id"]
+            kept = cache.get(sid)
+            if not kept:
+                if sid in raised:
+                    out.append(raised[sid])
+                continue
+            a = a_by.get(sid)
+            want = engine_exam.BASE_VOTES - len(kept)
+            if want > 0 and a is not None and a.check not in (engine_exam.ANSWER, engine_exam.NOT_RUN) and \
+                    engine_exam.blocking_checks(engine_exam.vote(kept), safety) != engine_exam.blocking_checks(a, safety):
+                room = self._left(model)
+                if room is None or room >= want * self._per():
+                    for _ in range(want):
+                        res = self._run(self.plug, model, kept=self.kept, lesson=None, sits=[s], empty_raises=True)
+                        r = next((x for x in res.rows if x.situation == sid), None)
+                        if r is not None and r.check != engine_exam.ANSWER:
+                            kept.append(r)
+            out.append(engine_exam.vote(kept))
+        return out
+
+    def _recheck(self, after, before, sits, lesson, safety, model, cache=None):
+        """engine/exam.py recheck on these rows, the reruns on model (one situation each). An answer without
+        the line takes a kept answer past the first first (the baseline vote's, cache), so a vote is paid
+        once; a fresh one that did not raise is kept for the next lessons, up to BASE_VOTES. Returns (after,
         before, {"calls": the reruns' model calls, "changed": {situation id: the voted row before}})."""
         by_id = {s["id"]: s for s in sits}
         start = model.calls
+        cache = {} if cache is None else cache
+        pool = {sid: list(rows[1:]) for sid, rows in cache.items()}
 
         def again(sid, with_line):  # no row for sid: raises, so it counts against the lesson
+            if not with_line and pool.get(sid):
+                return pool[sid].pop(0)
             res = self._run(self.plug, model, kept=self.kept, lesson=lesson if with_line else None, sits=[by_id[sid]],
                       empty_raises=True)
-            return next(r for r in res.rows if r.situation == sid)
+            got = next(r for r in res.rows if r.situation == sid)
+            kept = cache.get(sid)
+            if not with_line and kept is not None and got.check != engine_exam.ANSWER and \
+                    len(kept) < engine_exam.BASE_VOTES:
+                kept.append(got)
+            return got
 
-        def left():
-            return None if self.cap is None else self.cap - model.calls
-        per = CALL_CAP + (0 if self.judge_model is None else JUDGE_CALLS)  # the most one answer takes
-        after, before, changed = engine_exam.recheck(after, before, safety, again, left=left, per=per)
+        after, before, changed = engine_exam.recheck(after, before, safety, again, left=lambda: self._left(model),
+                                                     per=self._per(), free=lambda sid: len(pool.get(sid) or ()))
         return after, before, {"calls": model.calls - start, "changed": changed}
 
     def pick(self, sits, tags, have=()):
@@ -933,24 +994,11 @@ class Examiner:
         return out
 
     def _scoped(self, sits, lesson, safety, model):
-        key = self._kept_ids()
-        cache = self._rows.setdefault(key, {})
+        cache = self._rows.setdefault(self._kept_ids(), {})
         picked = self.pick(sits, lesson[1], have=set(cache))
         if not picked:
             return engine_exam.could_not_run("no exam situation of its stages fits the exam cap")
-        need = [s for s in picked if s["id"] not in cache]
-        made, before = 0, {}
-        if need:
-            res = self._run(self.plug, model, kept=self.kept, lesson=None, sits=need, empty_raises=True)
-            made = int(res.calls)
-            for r in res.rows:
-                before[r.situation] = r
-                if r.check != engine_exam.ANSWER:
-                    cache[r.situation] = r
-        before = [before.get(s["id"]) or cache[s["id"]] for s in picked if s["id"] in before or s["id"] in cache]
-        got = self._run(self.plug, model, kept=self.kept, lesson=lesson, sits=picked)
-        after, before, extra = self._recheck(got.rows, before, picked, lesson, safety, model)
-        return engine_exam.judge(after, before, len(picked), safety, calls=int(got.calls) + made + extra["calls"])
+        return self._exam(picked, lesson, safety, model)
 
     def _run(self, *args, **kw):
         """run with this lesson's reveal judge (reveal_judge), when there is one; the judge is left out of the

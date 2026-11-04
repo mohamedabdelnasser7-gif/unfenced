@@ -100,7 +100,8 @@ MAX_FILE = 32_000_000  # MAX_PATTERNS rows of MAX_OWNERS sealed owners (48 hex) 
 HASH = re.compile(r"[0-9a-f]{32}")
 SEALED = re.compile(r"([0-9a-f]{32})([0-9a-f]{16})")  # an owner in the file: its hash, then its seal
 NAMED = re.compile(r"([0-9a-f]{32})([0-9a-f]{32})([0-9a-f]{16})")  # an owner name, its owner, the seal
-BROKEN = "the pool file could not be read, or none of its patterns was sealed by the shared folder's key"
+BROKEN = ("the pool file could not be read, or none of its patterns was sealed by the shared folder's key, or the "
+          "English word list could not be read")
 HELD = "the owner's id changed since its name last gave; nothing is given until the operator clears the name"
 PID = re.compile(r"[0-9a-f]{12}")
 LABEL = re.compile(r"[a-z]+(?: [a-z]+){0,3}")
@@ -289,22 +290,34 @@ ALWAYS_SOUNDS = frozenset({"fife", "sicks", "siks", "fiv", "sevn", "nein", "nyne
 TOKEN = re.compile(r"[a-z]+(?:['’-][a-z]+)*")
 
 
-@functools.lru_cache(maxsize=1)
+_READ = {}  # the word list as last read, with the file's inode, size and change time
+
+
 def english():
     """The bundled English words (WORDS_FILE), less the first names the cleaner knows (but NAME_WORDS)
     and NUMBERISH. A list that cannot be read is empty, so every word outside the openers and SAFE
-    is refused."""
+    is refused, and the pool reads as broken (Pool.ready, Pool.add). The list is kept as read only
+    while the file is the same one: a file moved away, put back or mended is read again."""
+    try:
+        st = WORDS_FILE.stat()
+    except OSError:
+        return frozenset()
+    at = (st.st_ino, st.st_size, st.st_mtime_ns)
+    if _READ.get("at") == at:
+        return _READ["words"]
     try:
         raw = lzma.decompress(WORDS_FILE.read_bytes()).decode("ascii")
     except (OSError, lzma.LZMAError, UnicodeDecodeError):
-        return frozenset()
+        raw = ""
     out, prev = set(), ""
     for line in raw.split("\n"):
         if not line or line.startswith("#") or not line[0].isdigit():
             continue
         prev = prev[:int(line[0])] + line[1:]
         out.add(prev)
-    return frozenset(out - (first_names() - NAME_WORDS) - NUMBERISH)
+    words = frozenset(out - (first_names() - NAME_WORDS) - NUMBERISH) if out else frozenset()
+    _READ.update(at=at, words=words)  # an empty list stays only while this same file is there
+    return words
 
 
 @functools.lru_cache(maxsize=1)
@@ -723,7 +736,7 @@ class Pool:
         owner's lesson or chat is not to be written up, None when it is. Makes no key."""
         with self._locked():
             self._read()
-            if self.broken:
+            if self.broken or not english():  # no word list: every line would be refused
                 return BROKEN
             if self._secret(make=False) is None:  # a fresh pool: nothing given, no name known
                 return None
@@ -779,7 +792,7 @@ class Pool:
             worry = None
         with self._locked():
             self._read()  # read under the lock before any key is made: a broken pool makes none
-            if self.broken:
+            if self.broken or not english():
                 raise Refused(BROKEN + "; nothing is written")
             oh, kh = self.owner_hash(owner), self.key_hash(key)
             if name:

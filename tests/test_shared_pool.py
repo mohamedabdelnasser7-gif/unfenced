@@ -622,6 +622,31 @@ class RefusePath(unittest.TestCase):
         self.assertEqual(len(self.asked), 3)
         self.assertEqual((counts.get("writer failed", 0), counts.get("patterns given")), (0, 2))
 
+    def test_a_word_list_moved_away_reads_broken_and_no_writer_is_asked(self):
+        # review crossowner round 3, item 3: with no word list every line would be refused, so the pool
+        # reads broken: no writer call, no key; and the list is read again once it is back
+        import shutil
+        words = self.root.parent / "words_en.xz"
+        away = self.root.parent / "moved_away.xz"
+        shutil.copyfile(shared.WORDS_FILE, words)
+        with mock.patch.object(shared, "WORDS_FILE", words):
+            self.assertTrue(shared.english())
+            words.rename(away)
+            self.assertEqual(shared.english(), frozenset())
+            link = shared.Link("support", OWNER_A, self.writer(CLEAN_EN), self.root)
+            got = link.give_lesson("a", {"id": 5, "text": "Spin the fans slowly."})
+            self.assertEqual((got["why"], got["failed"], got.get("asked")), (shared.BROKEN, True, None))
+            self.assertEqual(self.asked, [])
+            with self.assertRaises(shared.Refused):
+                shared.Pool("support", self.root).add(shared.LESSON, CLEAN_EN, OWNER_A, "k5")
+            self.assertFalse((self.root / shared.KEY_FILE).exists())
+            self.assertFalse((self.root / "patterns-support.json").exists())
+            away.rename(words)  # back: read again, not the empty list from before
+            self.assertTrue(shared.english())
+            got = shared.Link("support", OWNER_A, self.writer(CLEAN_EN), self.root).give_lesson(
+                "a", {"id": 5, "text": "Spin the fans slowly."})
+            self.assertIsNotNone(got["pattern"])
+
     def test_a_pool_that_breaks_after_it_was_read_is_failed(self):
         link = shared.Link("support", OWNER_A, self.writer(CLEAN_EN), self.root)
         with mock.patch.object(shared.Pool, "ready", return_value=None):

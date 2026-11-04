@@ -14,7 +14,7 @@ from pathlib import Path
 from unittest import mock
 
 from arena import good, levels, madeup, practice, run
-from kit import turn
+from kit import send_check, turn
 from kit.chats import Chats
 from kit.db import Db
 from kit.model import ModelError
@@ -178,12 +178,14 @@ class EndToEnd(Base):
         world = World()
         self.main("--quick", world=world)
         agent = turn.load(self.folder)
-        # the agent's first call: its instructions alone (no lesson slot), then the customer's line
+        # the agent's first call: its instructions and the rules its send check holds it to, no lesson slot
+        # (DECISIONS item 94), then the customer's line
         rec = Recorder(world)
         card = madeup.read(self.folder / madeup.FOLDER, agent.name, agent.card)[0]
         practice.play(agent, card, agent_model=rec, customer_model=world)
         system = rec.seen[0][0]
-        self.assertEqual(system, {"role": "system", "content": agent.instructions})
+        rules = send_check.prompt_rules(agent.full_check, agent.stock)
+        self.assertEqual(system, {"role": "system", "content": agent.instructions + "\n\n" + rules})
         self.assertNotIn(agent.plug.slot, system["content"])
         self.assertEqual(rec.seen[0][-1], {"role": "user", "content": OPENING})
 

@@ -2,8 +2,10 @@
 
 1. Load the chat and its stage. The agent always keeps the chat: no person takes it over
    (DECISIONS item 53).
-2. Pick the lessons that fit (at most 8) and call the model with the instructions,
-   the lessons and only this stage's tools. Tools and stage are sent fresh every step.
+2. Pick the lessons that fit (at most 8) and call the model with the instructions, the
+   rules the send check holds every reply to (kit/send_check.py prompt_rules, in the check's
+   own words, so the exam never fails a rule the agent was not shown), the lessons and only
+   this stage's tools. Tools and stage are sent fresh every step.
    When the customer's last chat ended without an order, fast reflection's note for this
    chat (reflection/fast.py) goes last in the prompt, read once a turn before the first
    model call; it is not a lesson and its id never joins the lesson ids a row keeps.
@@ -122,9 +124,10 @@ class _Turn:
 
 
 def system_prompt(stage, picked, note=""):
-    """The instructions, the stage note, the lessons in the slot the engine writes from the plug,
-    then fast reflection's note for this chat when it has one."""
-    parts = [INSTRUCTIONS, stages.note(stage)]
+    """The instructions, the rules the send check holds every reply to (kit/send_check.py prompt_rules, the
+    same words the check and the exam read), the stage note, the lessons in the slot the engine writes from
+    the plug, then fast reflection's note for this chat when it has one."""
+    parts = [INSTRUCTIONS, send_check.prompt_rules(), stages.note(stage)]
     lessons = slot(PLUG, picked)
     if lessons:
         parts.append(lessons)

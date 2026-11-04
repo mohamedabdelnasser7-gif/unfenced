@@ -164,6 +164,66 @@ MARKDOWN_BOLD = re.compile(r"\*\*")
 # A hyphen with spaces on both sides. Between two digits it is a range (42 - 45), not a dash.
 SPACED_HYPHEN = re.compile(r"(?<=(\S))[ \t]+-[ \t]+(?=(\S))")
 
+# The words of the rules a reply is held to, in one home: the feedback below and the prompt (prompt_rules) both
+# read them, so what an agent is told and what it is checked for never drift apart (DECISIONS item 94). The
+# banned words' fixes (BANNED above) are read by both too.
+NO_DASHES = "Never use em dashes or en dashes. Use a comma or a full stop."
+NO_SPACED_HYPHEN = "Never use a hyphen with spaces as a dash. Use a comma or a full stop."
+NO_EMOJI = "No emoji."
+NO_MARKDOWN = "No markdown."
+ON_WHATSAPP = "WhatsApp shows the ** as they are."  # said in the prompt only to an agent with the full check
+NO_SYMPATHY = "No sympathy lines; just answer."
+SYMPATHY_SHOWN = ("sorry to hear", "\u0645\u0642\u062f\u0631 \u0625\u0646")  # two of SYMPATHY, as the prompt's examples
+ONLY_STORE_LINKS = ("Share only a product's image link from the store tool in this chat, exactly as it gave it. "
+                    "No other links.")
+NO_STOCK_COUNT = ("Never give the exact stock count. If the store says few left, say only a few are left; "
+                  "otherwise say it is in stock or out of stock.")
+REPLY_IN = {"arabic": "Reply in Egyptian Arabic, in Arabic letters",
+            "franco": "Reply in Franco, in Latin letters and numbers, no Arabic letters",
+            "english": "Reply in English, no Arabic letters"}
+NOT_FRANCO = "Reply in plain English, not Franco."
+CURRENCY_SAID = {"arabic": "جنيه", "english": "EGP", "franco": "geneh"}
+EXAMPLE_AMOUNT = "16,500"
+FROM_TOOLS = "Use only prices and fees from tool results, or say you do not have that number."
+RULES_HEAD = "Every reply is checked before it goes out, and a reply that breaks one of these rules is not sent:"
+
+
+def amount_form(script):
+    """How the script rule's feedback says to write an amount in English or Franco."""
+    cur = CURRENCY_SAID[script]
+    return f"Write amounts as the number then {cur}, for example {EXAMPLE_AMOUNT} {cur}."
+
+
+def digits_rule():
+    """The digits rule's words: every amount in digits, then the currency in the customer's script."""
+    cur = CURRENCY_SAID
+    return ("Write every amount in digits, the number then the currency in the customer's script "
+            f"({cur['arabic']} in Arabic, {cur['english']} in English, {cur['franco']} in Franco), so it can be checked.")
+
+
+def prompt_rules(full=True, stock=True):
+    """The rules the send check holds a reply to, as short lines for the agent's own prompt (sales/loop.py
+    and kit/turn.py system_prompt), read from the same words its feedback gives. Every agent: the house
+    style (banned words, dashes, emoji, markdown). full: the full check on top (why WhatsApp shows **, no
+    sympathy lines, links, script, amount format, prices and fees from tools only). stock: with full, the
+    stock count rule too, for an agent whose check holds it (check stock)."""
+    markdown = f"{NO_MARKDOWN} {ON_WHATSAPP}" if full else NO_MARKDOWN
+    lines = [RULES_HEAD, " ".join(fix for _, fix in BANNED),
+             " ".join((NO_DASHES, NO_SPACED_HYPHEN, NO_EMOJI, markdown))]
+    if full:
+        lines += [f'{NO_SYMPATHY} Never write "{SYMPATHY_SHOWN[0]}" or "{SYMPATHY_SHOWN[1]}".', ONLY_STORE_LINKS,
+                  "Reply in the script the customer wrote in.",
+                  f"If they wrote in Arabic letters: {REPLY_IN['arabic']}.",
+                  f"If they wrote in Franco: {REPLY_IN['franco']}.",
+                  f"If they wrote in English: {REPLY_IN['english']}. {NOT_FRANCO}",
+                  digits_rule() + " For example " + ", ".join(
+                      f"{EXAMPLE_AMOUNT} {CURRENCY_SAID[s]} in {s.capitalize()}" for s in ("english", "franco", "arabic"))
+                  + ".",
+                  FROM_TOOLS]
+        if stock:
+            lines.append(NO_STOCK_COUNT)
+    return "\n".join(lines)
+
 LETTER_BEFORE = r"(?<![^\W\d_])"
 NO_LETTER_AFTER = r"(?![^\W\d_])"
 MASK = chr(1)  # stands in for a number that is not an amount (a size, a date, an order number)
@@ -684,21 +744,22 @@ def _script_feedback(reply, customer_text, vocabulary, names=()):
         latin = sum(1 for w in words if LATIN.search(w) and not ARABIC.search(w)
                     and w.lower() not in vocabulary and not re.fullmatch(r"[A-Z]{2,}\d+", w))
         if ar == 0 or latin > ar / 4:
-            return "The customer wrote in Arabic letters. Reply in Egyptian Arabic, in Arabic letters."
+            return f"The customer wrote in Arabic letters. {REPLY_IN['arabic']}."
     elif want == "franco":
         if ARABIC.search(reply):
-            return ("The customer wrote in Franco. Reply in Franco, in Latin letters and numbers, no Arabic letters"
-                    + _arabic_found(reply) + " Write amounts as the number then geneh, for example 16,500 geneh.")
+            return (f"The customer wrote in Franco. {REPLY_IN['franco']}" + _arabic_found(reply) + " "
+                    + amount_form("franco"))
     elif want == "english":
         if ARABIC.search(reply):
-            return ("The customer wrote in English. Reply in English, no Arabic letters" + _arabic_found(reply)
-                    + " Write amounts as the number then EGP, for example 16,500 EGP.")
+            return (f"The customer wrote in English. {REPLY_IN['english']}" + _arabic_found(reply) + " "
+                    + amount_form("english"))
         if looks_franco(reply, skip, True, pairs):
-            return "The customer wrote in English. Reply in plain English, not Franco."
+            return f"The customer wrote in English. {NOT_FRANCO}"
     elif want == "latin":
         if ARABIC.search(reply):
             return ("The customer wrote in Latin letters. Reply in English or Franco, no Arabic letters"
-                    + _arabic_found(reply) + " Write amounts as the number then EGP in English or geneh in Franco.")
+                    + _arabic_found(reply) + f" Write amounts as the number then {CURRENCY_SAID['english']} in "
+                    f"English or {CURRENCY_SAID['franco']} in Franco.")
     return None
 
 
@@ -1117,14 +1178,14 @@ def named_style(text):
         if pattern.search(low):
             problems.append(("banned", fix))
     if DASHES.search(text or ""):
-        problems.append(("dashes", "Never use em dashes or en dashes. Use a comma or a full stop."))
+        problems.append(("dashes", NO_DASHES))
     if any(not (a.isdigit() and b.isdigit()) for a, b in
            ((m.group(1), m.group(2)) for m in SPACED_HYPHEN.finditer(text or ""))):
-        problems.append(("dashes", "Never use a hyphen with spaces as a dash. Use a comma or a full stop."))
+        problems.append(("dashes", NO_SPACED_HYPHEN))
     if EMOJI.search(text or ""):
-        problems.append(("emoji", "No emoji."))
+        problems.append(("emoji", NO_EMOJI))
     if MARKDOWN_BOLD.search(text or ""):
-        problems.append(("markdown", "No markdown. WhatsApp shows the ** as they are."))
+        problems.append(("markdown", f"{NO_MARKDOWN} {ON_WHATSAPP}"))
     return problems
 
 
@@ -1160,8 +1221,7 @@ def named_problems(reply, customer_text="", amounts=(), vocabulary=frozenset(), 
     problems = []
     reply, wrong_links = _links(reply, links)
     if wrong_links:
-        problems.append(("links", "Share only a product's image link from the store tool in this chat, exactly as "
-                         "it gave it. No other links."))
+        problems.append(("links", ONLY_STORE_LINKS))
     fb = _script_feedback(reply, customer_text, vocabulary, names)
     if fb:
         problems.append(("script", fb))
@@ -1169,21 +1229,18 @@ def named_problems(reply, customer_text="", amounts=(), vocabulary=frozenset(), 
     low = reply.lower()
     for line in SYMPATHY:
         if line in low:
-            problems.append(("sympathy", f'Remove the sympathy line ("{line}"). No sympathy lines; just answer.'))
+            problems.append(("sympathy", f'Remove the sympathy line ("{line}"). {NO_SYMPATHY}'))
             break
     allowed = {n for n in (amount(a) for a in amounts) if n is not None}
     wrong = sorted({p for p in prices_in(reply, sizes, orders, names, priced_only) if p not in allowed})
     if wrong:
         nums = ", ".join(s if len(s) <= MAX_INT_DIGITS else s[:MAX_INT_DIGITS] + "..." for s in map(str, wrong))
-        problems.append(("amounts", f"These amounts are not in the store or delivery data: {nums}. "
-                         "Use only prices and fees from tool results, or say you do not have that number. "
+        problems.append(("amounts", f"These amounts are not in the store or delivery data: {nums}. {FROM_TOOLS} "
                          "If a number is not a price, say what it is: size 43, 2 days, order #1234, model 2026."))
     digits = _plain(reply)
     if (SPELLED_AMOUNT.search(digits) or SHORT_AMOUNT.search(digits) or amount_in_words(digits)
             or model_thousands(digits, names) or store_word_thousands(digits, vocabulary, names)):
-        problems.append(("digits", "Write every amount in digits, the number then the currency in the customer's "
-                         "script (جنيه in Arabic, EGP in English, geneh in Franco), so it can be checked."))
+        problems.append(("digits", digits_rule()))
     if stock and stock_counts(reply, sizes, orders, names):
-        problems.append(("stock", "Never give the exact stock count. If the store says few left, say only a few are "
-                         "left; otherwise say it is in stock or out of stock."))
+        problems.append(("stock", NO_STOCK_COUNT))
     return problems

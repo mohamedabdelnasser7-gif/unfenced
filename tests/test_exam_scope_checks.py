@@ -35,7 +35,7 @@ class Forms(unittest.TestCase):
     def test_latin_forms(self):
         for text, why in (("A wave comes in. Need boots?", "waves"),
                           ("Waving water all night. Need boots?", "waves"),
-                          ("The tidal pull is strong. Need boots?", "tide"),
+                          ("The tidal pull is strong. Need boots?", "tidal"),
                           ("Tides turn, shores wait. Need boots?", "shore"),
                           ("A breezy day by the sea. Need boots?", "breeze"),
                           ("Seagulls cry above. Need boots?", "seagull")):
@@ -186,7 +186,7 @@ class MoreWords(unittest.TestCase):
     other Franco and Arabic spellings; a listed word is read through NFKC, hidden combining marks and the dual."""
 
     def test_a_sea_poem_without_the_first_six_words_fails(self):
-        for text, why in (("Salt wind sings over the sand, gulls cry above the foam, the ocean breathes. Boots?", "ocean"),
+        for text, why in (("Salt wind sings over the sand, gulls cry above the foam, the sea breathes. Boots?", "gull"),
                           ("Its surf is silver; the fishing boats drift home at dusk. Need a size?", "surf"),
                           ("A white sail on blue water. Need a size?", "sail"),
                           ("البحر هادي والموج بيغني، الشط بيلمع تحت القمر. تحب تطلب جزمة؟", "موج"),

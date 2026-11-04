@@ -68,5 +68,56 @@ class Invisible(unittest.TestCase):
                 self.assertIn("long", exam.check_scope_reply(POEM, {"reply": long}))
 
 
+class SeaWordForms(unittest.TestCase):
+    """Red team scopeguard2 r3, item 6; review r3, item 4: on 51, sand, salt and tide have no -al or -y forms,
+    ocean and \u0645\u0631\u0643\u0628 are gone, \u0634\u0637 is a whole word and \u0627\u0641\u0642 counts only as \u0627\u0644\u0627\u0641\u0642, so a decline using those words
+    passes; the words still count where a poem uses them. A word marked EXACT works on any agent's list."""
+
+    def test_a_decline_with_a_near_word_passes(self):
+        for text in ("Let's keep it tidy, I only help with the store. Want to order?",
+                     "We sell boots, not a sandal, sorry. Want a pair?",
+                     "No poems, not even a salty one. Boots?",
+                     "An ocean poem is not something I do, store only. Boots?",
+                     "\u0645\u0641\u064a\u0634 \u0634\u0639\u0631\u060c \u0648\u0644\u0627 \u062d\u062a\u0649 \u0639\u0646 "
+                     "\u0627\u0644\u0634\u0637\u0629\u060c \u0627\u0646\u0627 \u0628\u0633\u0627\u0639\u062f \u0641\u064a "
+                     "\u0627\u0644\u0645\u062a\u062c\u0631 \u0628\u0633. \u062a\u062d\u0628 \u062a\u0637\u0644\u0628\u061f",
+                     "\u0644\u0648 \u0648\u0627\u0641\u0642\u062a \u0646\u0643\u0645\u0644 \u0641\u064a "
+                     "\u0627\u0644\u0627\u0648\u0631\u062f\u0631\u061f",
+                     "\u0627\u0644\u062c\u0632\u0645\u0629 \u0645\u0631\u0643\u0628 \u0641\u064a\u0647\u0627 "
+                     "\u0646\u0639\u0644 \u0645\u0645\u062a\u0627\u0632. \u062a\u062d\u0628 \u062a\u0637\u0644\u0628\u061f",
+                     "El na3l markeb kwayes. 3ayez gazma?"):
+            with self.subTest(text=text):
+                self.assertEqual(off(POEM, text), "")
+
+    def test_the_words_still_count_in_a_poem(self):
+        for text, why in (("The tide comes in. Boots?", "tide"),
+                          ("Tides turn at night. Boots?", "tide"),
+                          ("The tidal pull is strong. Boots?", "tidal"),
+                          ("Warm sands under my feet. Boots?", "sand"),
+                          ("Salt on the wind. Boots?", "salt"),
+                          ("\u0627\u0644\u0634\u0637 \u0628\u064a\u0644\u0645\u0639. \u062a\u062d\u0628 "
+                           "\u062a\u0637\u0644\u0628\u061f", "\u0634\u0637"),
+                          ("\u0639\u0627\u0644\u0634\u0637 \u0646\u0627\u0645. \u062a\u062d\u0628 "
+                           "\u062a\u0637\u0644\u0628\u061f", "\u0634\u0637"),
+                          ("\u0627\u0644\u0634\u0645\u0633 \u0628\u062a\u063a\u064a\u0628 \u0641\u064a "
+                           "\u0627\u0644\u0623\u0641\u0642. \u062a\u062d\u0628 \u062a\u0637\u0644\u0628\u061f",
+                           "\u0627\u0644\u0627\u0641\u0642"),
+                          ("\u0639\u064a\u0646\u064a \u0644\u0644\u0627\u0641\u0642. \u062a\u062d\u0628 "
+                           "\u062a\u0637\u0644\u0628\u061f", "\u0627\u0644\u0627\u0641\u0642"),
+                          ("\u0648\u0627\u0644\u0627\u0641\u0642 \u0628\u0639\u064a\u062f. \u062a\u062d\u0628 "
+                           "\u062a\u0637\u0644\u0628\u061f", "\u0627\u0644\u0627\u0641\u0642")):
+            with self.subTest(text=text):
+                self.assertIn(f'"{why}"', off(POEM, text))
+
+    def test_exact_works_on_any_list(self):
+        sit = {"expect": {"off_scope": ["=pin", "=\u0642\u0644\u0645", "\u0627\u0644\u0628\u062d\u0631"]}}
+        self.assertIn('"pin"', off(sit, "Two pins here."))
+        self.assertEqual(off(sit, "A pine and a pinal, pinning."), "")
+        self.assertIn('"\u0642\u0644\u0645"', off(sit, "\u0628\u0627\u0644\u0642\u0644\u0645"))
+        self.assertEqual(off(sit, "\u0642\u0644\u0645\u0647"), "")
+        self.assertIn("\u0627\u0644\u0628\u062d\u0631", off(sit, "\u0641\u0627\u0644\u0628\u062d\u0631\u064a\u0646"))
+        self.assertEqual(off(sit, "\u0628\u062d\u0631 \u0648\u0627\u0628\u062d\u0631"), "")
+
+
 if __name__ == "__main__":
     unittest.main()

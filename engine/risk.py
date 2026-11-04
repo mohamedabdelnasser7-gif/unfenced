@@ -44,9 +44,10 @@ script becomes 0 to 9; every dash becomes "-"; Arabic letter forms are joined, P
 yeh, keheh and heh forms included; a blank letter (a Hangul filler, a blank Braille cell)
 counts as hidden. Every text is read in four forms: hidden characters dropped or read as
 spaces, and numeral signs read as digits or as the letters they look like (a small Roman
-one is an i, a Roman fifty an l), so a numeral sign inside a word cannot hide it either.
-A word in Latin letters matches as a
-whole word, with an English ending (s, es, ed, d, ing, ly; a final l or p may double before
+one is an i, a Roman fifty an l), so a numeral sign inside a word cannot hide it either;
+each of those is read again with a spaced run of single letters joined ("f r e e" as free).
+A word in Latin letters matches as a whole word, bounded by letters only (a digit or an
+underscore glued to it does not hide it), with an English ending (s, es, ed, d, ing, ly; a final l or p may double before
 ed or ing, as in cancelled and swapped); a word in another script
 matches anywhere, since letters join on to it there. The plug's words take the same
 form, so a look alike in the list matches the plain word too. Patterns are regular
@@ -230,11 +231,29 @@ def normalize(text, hidden="", letters=False):
     return "".join(out).translate(_JOINED)
 
 
+# A run of three or more single letters, each apart from the next by one space, dot, dash or
+# apostrophe: "f r e e", "d.i.s.c.o.u.n.t", "خ ص م" (red team engfix round 2, finding 1).
+_SPACED = re.compile(r"(?<![a-z])(?:[a-z][\s.'\u2019-]){2,}[a-z](?![a-z])"
+                     r"|(?<![\u0621-\u064a])(?:[\u0621-\u064a][\s.'\u2019-]){2,}[\u0621-\u064a](?![\u0621-\u064a])")
+_SPACER = re.compile(r"[\s.'\u2019-]")
+
+
+def _joined(text, first_apart=False):
+    """The text with every spaced run of single letters (_SPACED) read as one word. first_apart:
+    a run of four or more keeps its first letter as a word of its own, since a one letter word
+    often stands before the spaced one ("a f r e e pair", "و خ ص م")."""
+    def join(m):
+        letters = _SPACER.sub("", m.group())
+        return letters[0] + " " + letters[1:] if first_apart and len(letters) >= 4 else letters
+    return _SPACED.sub(join, text)
+
+
 def _forms(text):
-    """The four forms of a text every check reads: hidden characters dropped or read as
-    spaces, numeral signs read as digits or as letters. Equal forms are read once."""
-    return tuple(dict.fromkeys(normalize(text, hidden, letters)
-                               for letters in (False, True) for hidden in ("", " ")))
+    """The forms of a text every check reads: hidden characters dropped or read as spaces,
+    numeral signs read as digits or as letters, and each of those four with its spaced runs
+    of single letters joined (_joined). Equal forms are read once."""
+    four = [normalize(text, hidden, letters) for letters in (False, True) for hidden in ("", " ")]
+    return tuple(dict.fromkeys(four + [_joined(t, apart) for apart in (False, True) for t in four]))
 
 
 @functools.lru_cache(maxsize=4096)
@@ -244,7 +263,9 @@ def _word(word):
         body = r"\s+".join(re.escape(part) for part in w.split())
         # a final l or p doubles before ed and ing: cancelled, swapped (red team round 2, R2-4)
         ending = _ENDING if not w.endswith(("l", "p")) else r"(?:" + w[-1] + r"(?:ed|ing)|s|es|ed|d|ing|ly)?"
-        return re.compile(r"(?<![a-z0-9_])" + body + ending + r"(?![a-z0-9_])")
+        # bounded by letters only, as the patterns are: a digit or an underscore glued to a word does
+        # not hide it ("discount_", "refund3"; red team engfix round 2, finding 1)
+        return re.compile(r"(?<![a-z])" + body + ending + r"(?![a-z])")
     return re.compile(re.escape(w))
 
 
@@ -313,8 +334,9 @@ def code_check(text, risk, sources=(), tools=True):
     """The high risk marks found in the text, as "group: mark" lines; [] when none. The core
     marks come first, then the plug's list. sources: the texts of the cases the lesson came
     from. tools: the plug's tool names are marks too; classify (a lesson's risk) leaves them out.
-    The text is read in its four forms (_forms), so a hidden character inside a word or
-    between two words, or a numeral sign standing in for a letter, cannot hide either."""
+    The text is read in all its forms (_forms), so a hidden character inside a word or
+    between two words, a numeral sign standing in for a letter, or letters spaced apart
+    cannot hide either."""
     sources = _texts(sources)
     forms = _forms(text)
 

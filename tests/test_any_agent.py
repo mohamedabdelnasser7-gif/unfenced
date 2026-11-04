@@ -518,7 +518,9 @@ class RunTheArena(unittest.TestCase):
         self.assertIn("No model key", str(e.exception))
         self.assertEqual(self.starts, [])
         self.assertFalse(self.m.arena_running("stock_watch"))
-        self.assertIn("Run the Arena", self.p.get("/agents/sales", ARENA_TAB, "t"))  # Sales too (decision 96)
+        sales = self.p.get("/agents/sales", ARENA_TAB, "t")  # Sales too (decisions 96 and 102): Train, Take the gate
+        self.assertIn(f'action="{mo.TRAIN_PATH}"', sales)
+        self.assertIn(f"{mo.GATE_BUTTON}</button>", sales)
 
     def test_a_run_that_fails_says_why_and_the_button_comes_back(self):
         self.m.arena_models = lambda: (tap.raises, tap.raises, tap.raises)

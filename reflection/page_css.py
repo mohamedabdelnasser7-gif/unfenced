@@ -179,6 +179,12 @@ svg.i{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.6;
 .vchip.hot{background:var(--ink); color:#fff}
 .vchip.trial{background:rgba(42,51,50,.12)}
 .nr{padding:13px 0; border-top:1px solid var(--line)}
+.stl{margin:0; font:500 15px/21px var(--font); text-wrap:pretty}
+.trk{display:flex; flex-wrap:wrap; gap:8px; list-style:none; margin:12px 0 0; padding:0}
+.trk li{display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border-radius:999px; background:var(--chip); font:500 13px/18px var(--font); color:var(--ink)}
+.trk li.next{background:var(--volt)}
+.trk li.done{background:rgba(42,51,50,.12)}
+.trk li small{font:400 12px/16px var(--font); color:var(--ink-2)}
 .nr:first-of-type{border-top:0}
 .nr .to{display:flex; align-items:center; gap:8px; font:500 12px/16px var(--font); color:var(--ink-3)}
 .nr .to svg.i{width:14px; height:14px}

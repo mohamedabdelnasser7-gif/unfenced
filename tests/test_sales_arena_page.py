@@ -1,8 +1,9 @@
-"""Run the Arena on the page for the Sales agent, the short run and Full run, and the stuck card's next step
-(DECISIONS 96; reflection/morning.py run_arena, lost_count, next_step; reflection/reflect_now.py run_arena;
-pages.py run_arena). The Sales agent practises on its copy <db>.arena; its Run reflection studies the chats
-it lost there, and only a lesson that passed the gate and the full exam reaches the live database. Fake
-models only: no model call, no network; the cards are made here, never read from arena/real/."""
+"""Train and Take the gate on the page for the Sales agent, and the stuck card's next step (DECISIONS 96 and
+102; reflection/morning.py run_arena, run_train, trained, next_step; reflection/reflect_now.py run_arena;
+pages.py run_arena). The Sales agent practises on its copy <db>.arena; Train studies the chats it lost there at
+once, and only a lesson that passed the gate and the full exam reaches the live database. Run reflection reads
+real customer chats only. Fake models only: no model call, no network; the cards are made here, never read from
+arena/real/."""
 import json
 import tempfile
 import time
@@ -88,9 +89,9 @@ class Base(unittest.TestCase):
         return self.p.get(f"/agents/{agent}", query, token).split("</style>")[1].split("<script>")[0]
 
 
-class SalesShortRun(Base):
-    def test_its_losses_land_where_its_run_reflection_reads_them_and_only_a_passed_lesson_goes_live(self):
-        self.assertEqual(self.m.run_arena("sales"), mo.ARENA_STARTED)
+class SalesTrain(Base):
+    def test_train_plays_a_short_round_then_studies_its_losses_at_once_and_only_a_passed_lesson_goes_live(self):
+        self.assertEqual(self.m.run_train("sales"), mo.TRAIN_STARTED)
         self.assertIsNone(self.m.arena_note("sales"))
         saved = self.m.read_arena()[0]["sales"]
         self.assertIs(saved["quick"], True)  # the short run's item, saved although it did not pass
@@ -99,34 +100,43 @@ class SalesShortRun(Base):
         self.assertEqual(len(losses), mo.SHORT_MATCHES)  # each lost practice match, a case in the copy
         self.assertTrue(reflect_now.arena_path(self.path).is_file())
         self.assertEqual(self.live_arena_cases(), [])  # never in the live log
-        self.assertEqual(self.m.lost_count("sales"), mo.SHORT_MATCHES)
-        self.assertIsNone(self.m.reflect_ready("sales"))  # Run reflection can start: it has lost chats now
-        self.assertEqual(self.m.run_reflection("sales"), mo.REFLECT_STARTED)
-        self.assertIsNone(self.m.reflect_note("sales"))
-        done = self.m.reflected("sales")
+        done = self.m.trained("sales")
         self.assertEqual(done["lost"], mo.SHORT_MATCHES)
         live = self.live_lessons()
         self.assertIn(GOOD, live)  # passed the gate and the full exam: in the live database
         self.assertEqual(done["cards"], [live[GOOD]["id"]])
+        self.assertEqual((done["written"], done["passed"]), (1, 1))
         self.assertEqual(self.exams.seen, [GOOD])
         self.assertEqual(self.full.seen, [GOOD])  # the full exam before live
-        self.assertIn(GOOD, self.page())  # its lesson row on the page
+        self.assertEqual([(x["text"], x["exam"]) for x in done["seen"]], [(GOOD, reflect_now.PASSED)])
+        self.assertIsNone(self.m.training("sales"))
+        page = self.page()
+        self.assertIn(GOOD, page)  # the lesson it showed, with its exam word
+        self.assertIn(mo.LIVE_EXAM[reflect_now.PASSED], page)
+        self.assertIn(f"{mo.SHORT_MATCHES} lost matches studied, 1 lesson written, 1 passed the exam.", page)
 
-    def test_it_still_reads_them_days_after_the_run(self):
-        self.m.run_arena("sales")
-        self.m.run_reflection("sales", now=time.time() + 5 * 86400)
-        self.assertEqual(self.m.reflected("sales")["lost"], mo.SHORT_MATCHES)
-        self.assertIn(GOOD, self.live_lessons())
+    def test_run_reflection_never_reads_the_arena_losses(self):
+        # DECISIONS 102: the Sales agent's Arena losses are Train's to study; Run reflection reads real chats only
+        self.play(ideas=())
+        self.m.run_train("sales")
+        self.assertEqual(len(self.m.arena_losses("sales")), mo.SHORT_MATCHES)
+        self.assertEqual(self.m.lost_count("sales"), 0)
+        self.assertEqual(self.m.reflect_ready("sales"), mo.NO_LOST)
+        with self.assertRaises(mo.Refused) as e:
+            self.m.run_reflection("sales")
+        self.assertEqual(str(e.exception), mo.NO_LOST)
+        self.assertIsNone(self.m.reflected("sales"))
 
     def refused(self, refuse=(), full_refuse=()):
         self.play(refuse=refuse, full_refuse=full_refuse)
-        self.m.run_arena("sales")
-        self.m.run_reflection("sales")
+        self.m.run_train("sales")
         self.assertNotIn(GOOD, self.live_lessons())
-        done = self.m.reflected("sales")
-        self.assertEqual((done["cards"], done["written"]), ([], 1))
-        self.assertIn("It wrote 1 lesson from them; none passed the exam, so none reaches a real customer.",
-                      self.page())
+        done = self.m.trained("sales")
+        self.assertEqual((done["cards"], done["written"], done["passed"]), ([], 1, 0))
+        self.assertEqual([(x["text"], x["exam"]) for x in done["seen"]], [(GOOD, reflect_now.FAILED)])
+        page = self.page()
+        self.assertIn(f"{mo.SHORT_MATCHES} lost matches studied, 1 lesson written, 0 passed the exam.", page)
+        self.assertIn(mo.LIVE_EXAM[reflect_now.FAILED], page)
 
     def test_a_lesson_the_exam_refuses_never_reaches_the_live_database(self):
         self.refused(refuse=(GOOD,))
@@ -143,22 +153,28 @@ class SalesShortRun(Base):
             self.m.run_reflection("sales")
         self.assertEqual(str(e.exception), mo.NO_LOST)
 
-    def test_the_sales_page_has_both_buttons_and_the_line_that_the_short_run_never_unlocks_connect(self):
+    def test_the_sales_page_has_train_and_take_the_gate_and_the_line_that_training_never_unlocks_connect(self):
         page = self.page()
+        train = page.split(f'action="{mo.TRAIN_PATH}"')
+        self.assertEqual(len(train), 2)
+        self.assertNotIn('name="full"', train[1].split("</form>")[0])
+        self.assertIn(f"{mo.TRAIN_BUTTON}</button>", train[1].split("</form>")[0])
         forms = page.split(f'action="{pages.ARENA_PATH}"')
-        self.assertEqual(len(forms), 3)  # Run the Arena and Full run
-        self.assertNotIn('name="full"', forms[1].split("</form>")[0])
-        self.assertIn('name="full" value="yes"', forms[2].split("</form>")[0])
-        self.assertIn(f"{mo.ARENA_FULL_BUTTON}</button>", forms[2])
-        self.assertIn(mo.ARENA_SHORT_SAID, page)
-        self.assertIn("A short run never unlocks Connect.", page)
-        self.assertIn(mo.ARENA_FULL_SAID, page)
+        self.assertEqual(len(forms), 2)  # Take the gate only: the short run has no button of its own now
+        self.assertIn('name="full" value="yes"', forms[1].split("</form>")[0])
+        self.assertIn(f"{mo.GATE_BUTTON}</button>", forms[1])
+        self.assertIn(mo.TRAIN_SAID, page)
+        self.assertIn("Training never unlocks Connect.", page)
+        self.assertIn(mo.GATE_SAID, page)
+        self.assertLess(page.index(mo.TRAIN_SAID), page.index(mo.GATE_SAID))  # Train, then Take the gate
+        self.assertEqual((mo.TRAIN_BUTTON, mo.GATE_BUTTON), ("Train", "Take the gate"))
 
     def test_the_sales_agent_needs_the_database_folder(self):
         self.m.db_path = None
-        with self.assertRaises(mo.Refused) as e:
-            self.m.run_arena("sales")
-        self.assertEqual(str(e.exception), mo.ARENA_NO_DB)
+        for go in (self.m.run_arena, self.m.run_train):
+            with self.subTest(go=go.__name__), self.assertRaises(mo.Refused) as e:
+                go("sales")
+            self.assertEqual(str(e.exception), mo.ARENA_NO_DB)
 
 
 class FullAndShort(Base):
@@ -206,48 +222,46 @@ class FullAndShort(Base):
 
 
 class StuckCard(Base):
-    def lost_in_copy(self, n):
-        """n lost Arena chats in the Sales agent's copy, as its Arena's learner writes them."""
-        copy = Db(str(reflect_now.arena_path(self.path)))
-        try:
-            for i in range(n):
-                learn.to_case(copy, {"id": f"r1-t{i:02d}", "card": "persona-01", "turns": [
-                    {"customer": "How much?", "replies": ["Let me check."], "outcome": "replied"}]},
-                    {"won": False, "why": "no price", "quote": {"turn": 1, "who": "agent", "text": "Let me check."}},
-                    f"r1-t{i:02d}")
-        finally:
-            copy.close()
+    """next_step reads the newest gate run (a full run, quick=False) and the page's last Train (DECISIONS 102)."""
 
-    def test_after_a_run_with_losses_it_names_run_reflection_on_them(self):
-        item(self.dir, "sales", "r1", 1000.0, 0, 1)
-        self.lost_in_copy(2)
-        self.assertEqual(self.m.next_step("sales"), {"kind": "reflect", "n": 2, "lower": False})
-        self.assertIn("Run reflection to learn from these 2 lost chats.", self.page())
-        self.assertIn("Run reflection to learn from these 2 lost chats.", mo.render(self.m.view()))
+    def gate_run(self, run, at, won, played, stopped="rounds"):
+        item(self.dir, "sales", run, at, won, played, stopped=stopped, quick=False)
 
-    def test_one_lost_chat_reads_as_one(self):
-        item(self.dir, "sales", "r1", 1000.0, 0, 1)
-        self.lost_in_copy(1)
-        self.assertIn(mo.NEXT_REFLECT_ONE, self.page())
+    def trained(self, at, cards):
+        self.m._trained["sales"] = {"at": at, "cards": cards, "lost": 2, "written": len(cards), "passed": len(cards),
+                                    "notes": [], "queued": 0, "seen": []}
 
-    def test_after_a_reflection_that_wrote_a_lesson_it_says_run_the_arena_again(self):
-        item(self.dir, "sales", "r1", 1000.0, 0, 1)
-        self.lost_in_copy(2)
-        self.m._reflected["sales"] = {"at": 2000.0, "cards": [7], "lost": 2, "read": 2, "candidates": 1, "notes": []}
+    def test_after_a_gate_run_that_did_not_pass_it_names_train(self):
+        self.gate_run("r1", 1000.0, 0, 1)
+        self.assertEqual(self.m.next_step("sales"), {"kind": "train", "n": 0, "lower": False})
+        self.assertIn(mo.NEXT_TRAIN, self.page())
+        self.assertIn(mo.NEXT_TRAIN, mo.render(self.m.view()))
+        self.assertEqual(mo.NEXT_TRAIN, "Train to learn from what it lost, then take the gate again.")
+
+    def test_a_short_run_is_never_a_gate_run(self):
+        item(self.dir, "sales", "r1", 1000.0, 0, 1)  # quick: a Train's round, not the gate
+        self.assertIsNone(self.m.next_step("sales"))
+        self.gate_run("r0", 500.0, 0, 1)
+        item(self.dir, "sales", "r2", 2000.0, 1, 1, stopped="passed")  # a quick pass newer than it changes nothing
+        self.assertEqual(self.m.next_step("sales")["kind"], "train")
+
+    def test_after_a_train_that_wrote_a_lesson_it_says_take_the_gate_again(self):
+        self.gate_run("r1", 1000.0, 0, 1)
+        self.trained(2000.0, [7])
         self.assertEqual(self.m.next_step("sales")["kind"], "again")
-        self.assertIn(mo.NEXT_AGAIN, self.page())
-        self.assertNotIn("Run reflection to learn from", self.page())
+        page = self.page()
+        self.assertIn(mo.NEXT_AGAIN, page)
+        self.assertNotIn(mo.NEXT_TRAIN, page)
+        self.assertEqual(mo.NEXT_AGAIN, "Take the gate again to see if it helped.")
 
-    def test_a_reflection_before_the_newest_run_does_not_count(self):
-        item(self.dir, "sales", "r1", 3000.0, 0, 1)
-        self.lost_in_copy(2)
-        self.m._reflected["sales"] = {"at": 2000.0, "cards": [7], "lost": 2, "read": 2, "candidates": 1, "notes": []}
-        self.assertEqual(self.m.next_step("sales")["kind"], "reflect")
+    def test_a_train_before_the_newest_gate_run_does_not_count(self):
+        self.gate_run("r1", 3000.0, 0, 1)
+        self.trained(2000.0, [7])
+        self.assertEqual(self.m.next_step("sales")["kind"], "train")
 
-    def test_after_two_runs_with_no_gain_it_links_the_correction_and_for_the_sales_agent_no_risk_level(self):
-        item(self.dir, "sales", "r1", 1000.0, 1, 2)
-        item(self.dir, "sales", "r2", 2000.0, 1, 2)
-        self.lost_in_copy(2)
+    def test_after_two_gate_runs_with_no_gain_it_links_the_correction_and_for_the_sales_agent_no_risk_level(self):
+        self.gate_run("r1", 1000.0, 1, 2)
+        self.gate_run("r2", 2000.0, 1, 2)
         self.assertEqual(self.m.next_step("sales"), {"kind": "no_gain", "n": 0, "lower": False})
         page = self.page()
         self.assertIn('Two runs without a gain. <a href="/agents/sales#say">Send a correction on this page</a>.', page)
@@ -255,23 +269,22 @@ class StuckCard(Base):
         self.assertIn('id="say"', self.page(query={}))  # the correction box it links to, on the Overview
 
     def test_a_gain_or_a_passed_run_before_is_no_two_runs_without_a_gain(self):
-        item(self.dir, "sales", "r1", 1000.0, 0, 2)
-        item(self.dir, "sales", "r2", 2000.0, 1, 2)
-        self.lost_in_copy(2)
-        self.assertEqual(self.m.next_step("sales")["kind"], "reflect")
-        item(self.dir, "sales", "r0", 500.0, 1, 1)  # older than both: not the run before the newest
-        self.assertEqual(self.m.next_step("sales")["kind"], "reflect")
-        item(self.dir, "sales", "r3", 3000.0, 1, 2)  # 1 of 2 again after 1 of 2: no gain
+        self.gate_run("r1", 1000.0, 0, 2)
+        self.gate_run("r2", 2000.0, 1, 2)
+        self.assertEqual(self.m.next_step("sales")["kind"], "train")
+        self.gate_run("r0", 500.0, 1, 1)  # older than both: not the run before the newest
+        self.assertEqual(self.m.next_step("sales")["kind"], "train")
+        self.gate_run("r3", 3000.0, 1, 2)  # 1 of 2 again after 1 of 2: no gain
         self.assertEqual(self.m.next_step("sales")["kind"], "no_gain")
-        item(self.dir, "sales", "r4", 4000.0, 2, 2, stopped="passed")  # the newest passed: no step
+        self.gate_run("r4", 4000.0, 2, 2, stopped="passed")  # the newest passed: no step
         self.assertIsNone(self.m.next_step("sales"))
 
-    def test_a_reflection_that_found_no_lesson_points_to_the_correction(self):
-        item(self.dir, "sales", "r1", 1000.0, 0, 1)
-        self.lost_in_copy(2)
-        self.m._reflected["sales"] = {"at": 2000.0, "cards": [], "lost": 2, "read": 2, "candidates": 0, "notes": []}
+    def test_a_train_that_found_no_lesson_points_to_the_correction(self):
+        self.gate_run("r1", 1000.0, 0, 1)
+        self.trained(2000.0, [])
         self.assertEqual(self.m.next_step("sales")["kind"], "no_lesson")
-        self.assertIn("Reflection found no lesson in these chats.", self.page())
+        self.assertIn('Training found no lesson in what it lost. <a href="/agents/sales#say">Send a correction on '
+                      'this page</a>.', self.page())
 
     def test_a_built_agent_gets_the_risk_level_link_too(self):
         step = {"kind": "no_gain", "n": 0, "lower": True}
@@ -286,21 +299,17 @@ class StuckCard(Base):
         base.setUp()
         self.addCleanup(base.doCleanups)
         base.lose(2)
-        item(base.dir, "stock_watch", "r1", time.time() - 60, 0, 1)
+        item(base.dir, "stock_watch", "r1", time.time() - 60, 0, 1, quick=False)
         step = base.m.next_step("stock_watch")
-        self.assertEqual((step["kind"], step["lower"]), ("reflect", True))
-        self.assertGreater(step["n"], 0)
-        self.assertIn("Run reflection to learn from", base.page(query=ARENA_TAB))
+        self.assertEqual((step["kind"], step["lower"]), ("train", True))
+        self.assertIn(mo.NEXT_TRAIN, base.page(query=ARENA_TAB))
 
 
 class Cap(Base):
-    def test_the_short_run_and_the_reflection_count_every_call_on_the_days_count(self):
-        self.m.run_arena("sales")
-        self.assertEqual(self.count(), self.fakes())  # every Arena call, on the one count file
-        before_count, before_fakes = self.count(), self.fakes()
-        self.m.run_reflection("sales")
-        self.assertGreater(self.night.calls + self.exam_model.calls, 0)
-        self.assertEqual(self.count() - before_count, self.fakes() - before_fakes)  # the study's and exams' too
+    def test_train_counts_every_call_of_its_round_and_its_reflection_on_the_days_count(self):
+        self.m.run_train("sales")
+        self.assertGreater(self.night.calls + self.exam_model.calls, 0)  # it reflected
+        self.assertEqual(self.count(), self.fakes())  # every Arena, study and exam call, on the one count file
 
     def test_the_short_run_stops_at_its_own_limit(self):
         with mock.patch.object(mo, "SHORT_CALLS", 5):

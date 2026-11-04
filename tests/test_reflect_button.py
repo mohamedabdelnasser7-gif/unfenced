@@ -108,26 +108,28 @@ class Base(unittest.TestCase):
 
 
 class TheButton(Base):
-    def test_beside_run_the_arena_with_the_owners_words_under_it(self):
+    def test_on_the_overview_with_the_owners_words_under_it_and_not_on_the_arena_tab(self):
+        # DECISIONS 102: Run reflection stays for real customer chats, on the Overview; the Arena tab has Train
         self.lose()
-        for query in (ARENA_TAB, {}):
-            with self.subTest(query=query):
-                page = self.page(query=query)
-                form = page.split(f'action="{pages.REFLECT_PATH}"')[1].split("</form>")[0]
-                self.assertIn(f"{mo.REFLECT_BUTTON}</button>", form)
-                self.assertIn('name="agent" value="stock_watch"', form)
-                after = page.split(f'action="{pages.REFLECT_PATH}"')[1].split("</form>", 1)[1]
-                self.assertTrue(after.startswith(f'<p class="quiet">{mo.REFLECT_SAID}</p>'))  # the line under it
-                self.assertIn('data-live="reflect"', page)
+        page = self.page()
+        form = page.split(f'action="{pages.REFLECT_PATH}"')[1].split("</form>")[0]
+        self.assertIn(f"{mo.REFLECT_BUTTON}</button>", form)
+        self.assertIn('name="agent" value="stock_watch"', form)
+        after = page.split(f'action="{pages.REFLECT_PATH}"')[1].split("</form>", 1)[1]
+        self.assertTrue(after.startswith(f'<p class="quiet">{mo.REFLECT_SAID}</p>'))  # the line under it
+        self.assertIn('data-live="reflect"', page)
         arena = self.page(query=ARENA_TAB)
-        self.assertLess(arena.index(f'action="{pages.ARENA_PATH}"'), arena.index(f'action="{pages.REFLECT_PATH}"'))
+        self.assertNotIn(f'action="{pages.REFLECT_PATH}"', arena)
+        self.assertNotIn(mo.REFLECT_SAID, arena)
+        self.assertIn(f'action="{mo.TRAIN_PATH}"', arena)
         self.assertEqual(mo.REFLECT_BUTTON, "Run reflection")
-        self.assertEqual(mo.REFLECT_SAID, "This is the learning step. The agent reads the chats it lost, writes one "
-                         "lesson from them, and tests that lesson on a full exam before it can reach a real customer. "
-                         "Uses your model key.")
+        self.assertEqual(mo.REFLECT_SAID, "This is the learning step. The agent reads the chats it lost, writes every "
+                         "lesson it finds in them, and tests each one on a full exam before it can reach a real "
+                         "customer. It is slow on purpose: it takes as long as it needs to get it right. Uses your "
+                         "model key.")
 
     def test_the_sales_agent_has_it_too_from_its_own_plug(self):
-        page = self.page("sales", ARENA_TAB)
+        page = self.page("sales")
         self.assertIn(f"{mo.REFLECT_BUTTON}", page)
         self.assertIn(mo.NO_LOST, page)  # its database has no lost chat
         self.assertEqual(self.p.csp_for("/agents/sales"), pages.AGENT_CSP)
@@ -161,8 +163,9 @@ class TheButton(Base):
 
 class Wording(Base):
     def test_no_lost_chats(self):
-        page = self.page(query=ARENA_TAB)
-        self.assertEqual(mo.NO_LOST, "No lost chats yet. Run the Arena first so the agent has something to learn from.")
+        page = self.page()
+        self.assertEqual(mo.NO_LOST, "No lost chats to learn from yet. In the Arena, Train practises and learns from what it "
+                                    "loses.")
         self.assertIn(f'<p class="no-yet" role="status">{mo.NO_LOST}</p>', page)
         self.assertNotIn(f'action="{pages.REFLECT_PATH}"', page)
         self.assertIn(f'disabled>{pages.icon("loop")}{mo.REFLECT_BUTTON}</button>', page)
@@ -175,7 +178,7 @@ class Wording(Base):
         self.lose()
         self.m.reflection_models = None
         with mock.patch.object(night, "missing_keys", return_value=[night.MODEL_KEYS]):
-            page = self.page(query=ARENA_TAB)
+            page = self.page()
             with self.assertRaises(mo.Refused) as e:
                 self.m.run_reflection("stock_watch")
         self.assertEqual(mo.NO_KEY, "Reflection needs a model key. Watch a recorded reflection run instead.")
@@ -190,7 +193,7 @@ class Wording(Base):
         self.lose()
         self.assertEqual(self.m.run_reflection("stock_watch"), mo.REFLECT_STARTED)
         self.assertEqual(mo.REFLECT_RUNNING, "Reflecting: reading lost chats, then writing a lesson, then the exam")
-        page = self.page(query=ARENA_TAB)
+        page = self.page()
         self.assertIn('data-live="reflect" data-running', page)
         self.assertIn('Reflecting: <b aria-current="step">reading lost chats</b>, then writing a lesson, then the exam',
                       page)
@@ -198,13 +201,13 @@ class Wording(Base):
         steps = self.m._reflecting["stock_watch"]
         steps.mark(reflect_now.LESSON)
         self.assertIn('reading lost chats, then <b aria-current="step">writing a lesson</b>, then the exam',
-                      self.page(query=ARENA_TAB))
+                      self.page())
         steps.mark(reflect_now.EXAM)
         steps.mark(reflect_now.READ)  # never back
         self.assertIn('then writing a lesson, then <b aria-current="step">the exam</b>', self.page())
         self.starts[0][0]()
         self.assertIsNone(self.m.reflecting("stock_watch"))
-        self.assertNotIn("data-running", self.page(query=ARENA_TAB))
+        self.assertNotIn("data-running", self.page())
 
     def test_the_steps_follow_the_proposer_and_the_exam(self):
         steps = reflect_now.Steps()
@@ -241,7 +244,7 @@ class Refusals(Base):
         with self.assertRaises(mo.Refused) as e:
             self.m.run_reflection("stock_watch")
         self.assertEqual(str(e.exception), mo.REFLECT_ARENA)
-        self.assertIn(mo.REFLECT_ARENA, self.page(query=ARENA_TAB))
+        self.assertIn(mo.REFLECT_ARENA, self.page())
         self.m._arenas.discard("stock_watch")
         self.assertIsNone(self.held_by())  # a refusal holds no lock
         self.m.run_reflection("stock_watch")
@@ -352,7 +355,7 @@ class Afterwards(Base):
         rep = json.loads((self.dir / done["file"]).read_text())
         self.assertEqual((rep["agent"], rep["by"]), ("stock_watch", "Run reflection"))
         self.assertEqual(done["lost"], 2)
-        page = self.page(query=ARENA_TAB)
+        page = self.page()
         self.assertIn("Last reflection, ", page)
         self.assertIn("Reflection read 2 lost chats.", page)
         self.assertIn("No lesson this time.", page)
@@ -379,7 +382,7 @@ class Afterwards(Base):
         self.m.reflection_models = lambda: (_ for _ in ()).throw(RuntimeError("the study route is down"))
         self.m.run_reflection("stock_watch")
         self.starts[0][0]()
-        self.assertIn("The last reflection could not finish (the study route is down).", self.page(query=ARENA_TAB))
+        self.assertIn("The last reflection could not finish (the study route is down).", self.page())
         self.assertIsNone(self.held_by())
         self.assertIsNone(self.m.reflecting("stock_watch"))
 

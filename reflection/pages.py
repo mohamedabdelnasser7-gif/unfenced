@@ -51,6 +51,7 @@ from kit import sample as sample_mod
 from reflection import console as console_mod
 from reflection import morning as mo
 from reflection import quickstart as qs_mod
+from reflection import reflect_now
 from reflection import snapshots
 from reflection import try_sales as try_mod
 from reflection.page_css import CSS
@@ -238,7 +239,14 @@ class Pages:
                         # Run the Arena on an agent's page (Morning.run_arena), refused while it builds
                         ARENA_PATH: lambda m, f, now=None: self._arena(m, mo._field(f, "agent"), now,
                                                                         full=mo._field(f, "full") == "yes"),
-                        # Run reflection beside it (Morning.run_reflection), with the same refusals
+                        # Train on the Arena tab (Morning.run_train, DECISIONS 102), refused as Run the Arena is
+                        mo.TRAIN_PATH: lambda m, f, now=None: self._arena(m, mo._field(f, "agent"), now, train=True),
+                        # Stop a running Train or Run reflection (Morning.stop_run, DECISIONS 98)
+                        mo.STOP_PATH: lambda m, f, now=None: m.stop_run(mo._field(f, "agent"), now=now),
+                        # Edit an existing lesson as a new version that replaces it only on a pass (DECISIONS 100)
+                        mo.REVISE_PATH: lambda m, f, now=None: m.revise(mo._field(f, "lesson"), mo._field(f, "line"),
+                                                                       now=now),
+                        # Run reflection on the Overview (Morning.run_reflection), with the same refusals
                         REFLECT_PATH: lambda m, f, now=None: self._reflect(m, mo._field(f, "agent"), now)}
 
     def back(self, value):
@@ -363,8 +371,8 @@ class Pages:
         except Exception as e:
             run.join_note = f"It could not join this page ({e}). Restart the page to see it."
 
-    def _arena(self, m, agent, now, full=False):
-        """Run the Arena (Morning.run_arena), refused while a build on this page may be writing the agent
+    def _arena(self, m, agent, now, full=False, train=False):
+        """Take the gate or Train (Morning.run_arena), refused while a build on this page may be writing the agent
         and while the short practice Build started for it still runs."""
         run = self.run
         if run is not None and run.m is m and run.running and run.agent in (None, agent):
@@ -373,6 +381,8 @@ class Pages:
             raise mo.Refused("Its first short practice is still running. Run the Arena once it ends.")
         if not hasattr(m, "run_arena"):
             raise mo.Refused(mo.ARENA_NOT_HERE)
+        if train:
+            return m.run_train(agent, now=now)
         return m.run_arena(agent, now=now, full=full)
 
     def _reflect(self, m, agent, now):
@@ -991,21 +1001,70 @@ def overview_tab(m, view, a, agent, st, ctx):
 
 
 def arena_tab(m, view, a, agent, st, ctx):
-    """Arena: the practice matches of its newest run, a lost one with Correct this (into the exam), and
-    Try again, beside the climb. Answers come back to this tab."""
+    """Arena: the status line with the gate's progress and the track, Train then Take the gate, with one next
+    button lit, or Ready to connect with Connect (DECISIONS 99 and 102); while Train runs, each lesson as it takes
+    its exam, with Stop; the stuck card's next step; the practice matches of its newest run, a lost one with
+    Correct this (into the exam), and Try again, beside the climb. Below, outside the part the page refreshes,
+    the correction box and its lessons with Edit (DECISIONS 100). Answers come back to this tab."""
     c = tab_ctx(ctx, agent, "arena")
     glow, tiles, retry = arena_parts(m, agent if agent in m.plugs else None, c, back=c["path"] + c["q"],
                                      fix_ctx=c)
     go = run_arena(m, agent, c, c["path"] + c["q"])
     live = arena_live(m, agent) if go else ""
-    learn = run_reflection(m, a, agent, c, c["path"] + c["q"])
-    learn = f'<div{reflect_live(m, agent)}>{learn}</div>' if learn else ""  # beside Run the Arena
-    if agent in m.plugs and hasattr(m, "next_step"):  # the one next step under a run that did not pass (decision 96)
-        learn += mo.next_step_html(m.next_step(agent), agent)
+    track = arena_track(m, agent, c) if go else ""
+    learn = ""
+    if agent in m.plugs and hasattr(m, "next_step") and not (hasattr(m, "training") and m.training(agent)):
+        learn = mo.next_step_html(m.next_step(agent), agent)  # the one next step under a gate that did not pass
     level = level_card(m, agent, m.read_arena()[0].get(agent), c, c["path"] + c["q"])
-    return (f'<div class="qs"{live}><div class="ar"><section class="ar-l" aria-labelledby="m-h"><div class="sec-h"><h2 id="m-h">Practice '
-            f'matches</h2><small>Where it slipped</small></div><div class="tiles">{tiles}</div>{retry}{go}{learn}</section>'
-            f'<div class="ar-r">{level}{glow}</div></div></div>')
+    fix = arena_fix(m, a, agent, c) if go else ""
+    return (f'<div class="qs"{live}><div class="ar"><section class="ar-l" aria-labelledby="m-h">{track}{go}{learn}'
+            f'<div class="sec-h"><h2 id="m-h">Practice matches</h2><small>Where it slipped</small></div>'
+            f'<div class="tiles">{tiles}</div>{retry}</section>'
+            f'<div class="ar-r">{level}{glow}</div></div></div>{fix}')
+
+
+def arena_track(m, agent, ctx):
+    """The status line and the track (Morning.arena_status): Train, then Take the gate, each ticked when done,
+    with Ready to connect and Connect lit on a pass. Empty once the agent is live, or with no status."""
+    status = m.arena_status(agent) if hasattr(m, "arena_status") else None
+    if status is None:
+        return ""
+    steps = []
+    for key, word, done in (("train", mo.TRAIN_BUTTON, status["trained"]), ("gate", mo.GATE_BUTTON, status["ready"])):
+        cls = "done" if done else "next" if status["next"] == key else ""
+        tick = f'<small>{mo.DONE_WORD}</small>' if done else ""
+        steps.append(f'<li class="{cls}">{h(word)}{tick}</li>' if cls else f"<li>{h(word)}{tick}</li>")
+    out = [f'<p class="stl" role="status">{h(status["line"])}</p>',
+           f'<ol class="trk" aria-label="Arena steps">{"".join(steps)}</ol>']
+    if status["ready"] and agent in m.plugs:
+        conns = m.connection_view(agent)
+        if conns:
+            out.append(connections_html(agent, conns, ctx, ctx["token"]))
+    return f'<div class="trkw">{"".join(out)}</div>'
+
+
+def arena_fix(m, a, agent, ctx):
+    """Beside the live view, outside the part the page refreshes so typing is never lost (DECISIONS 100): the
+    correction box (Morning.correct, the hotfix with its exam first) and the agent's live lessons, each with Edit
+    (Morning.revise: a new version that replaces it only if it passes the exam). Empty with no token."""
+    if not ctx["token"] or agent not in m.plugs:
+        return ""
+    box = (f'<section class="say sq" aria-label="Send an idea or a correction"><form method="post" action="/correct">'
+           f'{_hidden(ctx, agent=agent)}<span class="lab">Send an idea or a correction</span><div class="box">'
+           f'<textarea name="line" aria-label="Your idea or correction" maxlength="{mo.MAX_LEN}" dir="auto" required>'
+           f'</textarea></div><div class="say-f"><p class="quiet">{icon("loop")}{SAY_NOTE}</p><button class="send" '
+           f'type="submit">Send{icon("arrow")}</button></div></form></section>')
+    rows = []
+    for i in a.get("live") or []:
+        rows.append(f'<div class="lr"><b dir="auto">{h(i["text"])}</b><details class="mx"><summary class="mod">'
+                    f'{icon("pen")}{mo.REVISE_BUTTON}</summary><div class="edit"><form method="post" '
+                    f'action="{mo.REVISE_PATH}">{_hidden(ctx, lesson=i["id"])}<textarea name="line" '
+                    f'aria-label="{mo.REVISE_FIELD}" maxlength="{mo.MAX_LEN}" dir="auto" required>{h(i["text"])}'
+                    f'</textarea><button class="yes" type="submit">{mo.REVISE_SAVE}</button></form>'
+                    f'<p class="quiet">{h(mo.REVISE_SAID)}</p></div></details></div>')
+    edits = (f'<section class="grp sq" aria-labelledby="ed-h"><h3 id="ed-h">{mo.EDITS_HEAD}</h3>{"".join(rows)}</section>'
+             if rows else "")
+    return f'<div class="ar">{box}{edits}</div>'
 
 
 LEVEL_HELP = "Correct a lost reply and press Try again, add sample data on the Overview, or lower the level."
@@ -1072,33 +1131,100 @@ def arena_live(m, agent):
 
 
 def run_arena(m, agent, ctx, back):
-    """Run the Arena (Morning.run_arena) for an agent made here or the Sales agent with the database folder:
-    the short run's button and Full run beside it, each with its line, while no run goes and the page has a
-    token; how many matches it played while one runs; and a line when the last one could not finish. Empty for
-    any other agent."""
+    """Train and Take the gate (Morning.run_train, run_arena full) for an agent made here or the Sales agent with
+    the database folder: each button with its line, the next one lit (Morning.arena_status), while no run goes and
+    the page has a token; while Train runs, its practice round's count, then the Reflecting line with each lesson
+    as it takes its exam and Stop (live_view); while the gate runs, how many matches it played; what the last
+    Train did; and a line when the last run could not finish. Empty for any other agent."""
     if not hasattr(m, "run_arena"):
         return ""
     sales = agent == mo.SALES.agent and agent in m.plugs and getattr(m, "db_path", None) is not None
     if m.agent_folder(agent) is None and not sales:
         return ""
+    step = m.training(agent) if hasattr(m, "training") else None
+    if step is not None:
+        if step == reflect_now.PLAY:
+            n = m.arena_played(agent)
+            said = (f"Training: {n} practice {'match' if n == 1 else 'matches'} played so far." if n
+                    else "Training: its first matches are starting.")
+            head = f'<p class="no-yet" role="status">{h(said)}</p>'
+        else:
+            head = reflect_running(step)
+        return f'<div class="act">{head}</div>{live_view(m, agent, ctx)}'
     if m.arena_running(agent):
         n = m.arena_played(agent)
         said = (f"Running the Arena: {n} practice {'match' if n == 1 else 'matches'} played so far." if n
                 else "Running the Arena: its first matches are starting.")
         return f'<div class="act"><p class="no-yet" role="status">{h(said)}</p></div>'
     out = []
+    done = m.trained(agent) if hasattr(m, "trained") else None
+    if done is not None:
+        out.append(trained_html(done))
     note = m.arena_note(agent)
     if note:
         out.append(f'<p class="no-yet" role="status">{h(note)}</p>')
     if note and ctx["token"] and getattr(m, "arena_record", lambda a: None)(agent):  # torn or gone: the one step
         out.append(_post(ctx, mo.NEW_TEST_PATH[1:], "Start a new test set", "yes", agent=agent, back=back))
     if ctx["token"]:
+        status = m.arena_status(agent) if hasattr(m, "arena_status") else None
+        nxt = (status or {}).get("next", "train")
         out.append(("" if sales else f'<p class="quiet">{ARENA_SAID}</p>')  # the Sales agent has no sample data
-                   + _post(ctx, ARENA_PATH[1:], f'{icon("flask")}Run the Arena', "yes", agent=agent, back=back)
-                   + f'<p class="quiet">{h(mo.ARENA_SHORT_SAID)}</p>'
-                   + _post(ctx, ARENA_PATH[1:], h(mo.ARENA_FULL_BUTTON), "gb", agent=agent, back=back, full="yes")
-                   + f'<p class="quiet">{h(mo.ARENA_FULL_SAID)}</p>')
+                   + _post(ctx, mo.TRAIN_PATH[1:], f'{icon("flask")}{mo.TRAIN_BUTTON}',
+                           "yes" if nxt == "train" else "gb", agent=agent, back=back)
+                   + f'<p class="quiet">{h(mo.TRAIN_SAID)}</p>'
+                   + _post(ctx, ARENA_PATH[1:], h(mo.GATE_BUTTON), "yes" if nxt == "gate" else "gb", agent=agent,
+                           back=back, full="yes")
+                   + f'<p class="quiet">{h(mo.GATE_SAID)}</p>')
     return f'<div class="act">{"".join(out)}</div>' if out else ""
+
+
+def trained_html(done):
+    """What the last Train did (Morning.trained), in one line, with the lessons it showed and what waits."""
+    when = mo._when(done["at"])
+    if done.get("stopped"):
+        line = mo.TRAIN_STOPPED.format(when=when)
+    elif not done.get("lost"):
+        line = mo.TRAIN_NO_LOSS.format(when=when)
+    else:
+        n = done["lost"]
+        line = mo.TRAINED.format(when=when, lost=f"{n} lost {'match' if n == 1 else 'matches'}",
+                                 written=_plural(done.get("written") or 0, "lesson"), passed=done.get("passed") or 0)
+    out = [f'<div class="nr"><p>{h(line)}</p></div>']
+    out += seen_rows(done.get("seen") or [])
+    if done.get("queued"):
+        out.append(f'<p class="quiet">{h(waiting_line(done["queued"]))}</p>')
+    return "".join(out)
+
+
+def waiting_line(n):
+    """N lessons wait for tonight (DECISIONS 98)."""
+    return mo.WAIT_ONE if n == 1 else mo.WAIT_MANY.format(n=n)
+
+
+def seen_rows(seen):
+    """Each lesson as it took its exam (reflect_now Steps.seen): its words, then the exam's word."""
+    rows = []
+    for x in seen:
+        who = f"{mo.LIVE_YOURS}. " if x.get("kind") == "correction" else ""
+        rows.append(f'<div class="lr"><b dir="auto">{h(x["text"])}</b><small>{h(who)}'
+                    f'{h(mo.LIVE_EXAM.get(x.get("exam"), mo.LIVE_EXAM["in exam"]))}</small></div>')
+    return rows
+
+
+def live_view(m, agent, ctx):
+    """The live view while Train or Run reflection runs (DECISIONS 99 and 100): each lesson as it is written and
+    takes its exam, then the exam's word, refreshed by the page's poll; Stop with its line (Morning.stop_run); and
+    how many lessons wait for tonight (Morning.queued)."""
+    rows = seen_rows(m.live_seen(agent)) or [f'<div class="nr"><p>{mo.LIVE_NONE}</p></div>']
+    out = [f'<span class="lab">{mo.LIVE_HEAD}</span>', *rows]
+    if ctx["token"]:
+        out.append('<div class="act">' + _post(ctx, mo.STOP_PATH[1:], mo.STOP_BUTTON, "gb", agent=agent,
+                                               back=ctx["path"] + ctx["q"])
+                   + f'<p class="quiet">{h(mo.STOP_SAID)}</p></div>')
+    n = m.queued(agent) if hasattr(m, "queued") else 0
+    if n:
+        out.append(f'<p class="quiet">{h(waiting_line(n))}</p>')
+    return f'<div class="live">{"".join(out)}</div>'
 
 
 REFLECT_PATH = "/reflect/run"
@@ -1165,11 +1291,14 @@ def run_reflection(m, a, agent, ctx, back):
         return ""
     step = m.reflecting(agent)
     if step is not None:
-        return f'<div class="act">{reflect_running(step)}</div>'
+        return f'<div class="act">{reflect_running(step)}</div>{live_view(m, agent, ctx)}'
     out = []
     done = m.reflected(agent)
     if done is not None:
         out.append(reflect_result(a, done))
+    n = m.queued(agent) if hasattr(m, "queued") else 0
+    if n:
+        out.append(f'<p class="quiet">{h(waiting_line(n))}</p>')
     note = m.reflect_note(agent)
     if note:
         out.append(f'<p class="no-yet" role="status">{h(note)}</p>')

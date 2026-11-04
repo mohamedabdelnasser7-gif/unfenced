@@ -70,9 +70,10 @@ PROMPT_GONE = "the customer prompt it was played with is not available (moved, c
 
 def _prompt_of(win, prompts=None):
     """The customer prompt a win was played with, or None when it cannot be had again. prompts: {sha:
-    prompt} known by fingerprint alone (the generic one when None)."""
+    prompt} known by fingerprint alone (when None the generic one and the generic ones played before it,
+    arena/match.py KNOWN_PROMPTS)."""
     sha = win.get("prompt_sha")
-    known = {match_mod.GENERIC_SHA: match_mod.GENERIC_PROMPT} if prompts is None else prompts
+    known = match_mod.KNOWN_PROMPTS if prompts is None else prompts
     if sha in known:
         return known[sha]
     path = win.get("prompt_file")

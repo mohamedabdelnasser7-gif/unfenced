@@ -172,7 +172,7 @@ class Tabs(Base):
             self.assertIn("Arena win rate", page)
             self.assertIn("hidden from the agent", page)
             self.assertIn("1 kept", page)
-            self.assertIn("full exam cap 400 a lesson", page)
+            self.assertIn("full exam cap 440 a lesson", page)  # arena/rounds.py FULL_CAP, never a copy (review scopeguard2 r1, item 5)
             self.assertIn("Offer the size chart before asking for a size.", page.split('data-live="corr"')[1])
             self.assertIn('<span class="src">user</span>', page)
 

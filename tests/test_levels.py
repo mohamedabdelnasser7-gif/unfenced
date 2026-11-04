@@ -88,7 +88,8 @@ class TheSuggestion(unittest.TestCase):
             with self.subTest(words=words):
                 self.assertEqual(levels.suggest({"does": words}), levels.HIGH)
         for words in ("healthy snack captions", "be patient with people", "natural light photos طبيعي",
-                      "صحة الطلب", "the diet coke order", "diet sodas", "intolerance of rudeness"):
+                      "صحة الطلب", "the diet coke order", "diet sodas", "intolerance of rudeness",
+                      "تأكد من صحته", "صحتين وعافية", "زيت نباتي"):
             with self.subTest(words=words):
                 self.assertEqual(levels.suggest({"does": words}), levels.MEDIUM)
 

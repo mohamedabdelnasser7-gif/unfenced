@@ -65,15 +65,16 @@ _DATA = re.compile(
 # diets, allergies, food restrictions, health or medical work (decision 110). Whole words only, so "healthy"
 # and "be patient" are no health words, "diet coke" is a drink and "intolerance" alone is a manner. In Arabic
 # only words that are not part of a common other word: "طبي" is in "طبيعي", and bare "صحة" often means
-# correct ("صحة الطلب"), so only "الصحة" and its suffixed forms ("صحتك"); "حساسيت" for "حساسيتها".
+# correct ("صحة الطلب"), so only "الصحة" and its suffixed forms ("صحتك"), never "صحته" ("check it is
+# correct") or "صحتين" (enjoy your meal); "حساسيت" for "حساسيتها"; "زيت نباتي" is vegetable oil.
 _HEALTH = re.compile(
     r"(?<![a-z])(?:dietary|dieting|diet(?:s|(?!\s+(?:coke|cola|sodas?|pepsi|sprite|drinks?)(?![a-z])))|"
     r"allerg(?:y|ies|ic|ens?)|food (?:restrictions?|needs)|restrictions? on food|"
     r"(?:food|lactose|gluten) intolerances?|gluten|lactose|celiac|coeliac|nutrition|nutritional|health|"
     r"medical|medicines?|medications?|symptoms?|patients|patient records?|clinics?|pharmac(?:y|ies|ists?)|"
     r"doctors?|vegans?|vegetarians?|peanuts?|keto|calories)(?![a-z])"
-    r"|حساسية|حساسيت|دايت|رجيم|نظام غذائي|جلوتين|الصحة|صحت(?:ك|ه|ها|هم|كم|ي|نا)|طبية|كشف طبي|تأمين طبي|دواء|أدوية"
-    r"|عيادة|عيادات|صيدلية|صيدليات|دكتور|دكاترة|مريض|مرضى|نباتي")
+    r"|حساسية|حساسيت|دايت|رجيم|نظام غذائي|جلوتين|الصحة|صحت(?:ك|هم|كم|ي(?!ن)|نا)|طبية|كشف طبي|تأمين طبي|دواء|أدوية"
+    r"|عيادة|عيادات|صيدلية|صيدليات|دكتور|دكاترة|مريض|مرضى|(?<!زيت )نباتي")
 # tools that hold money or customer data
 DATA_TOOLS = frozenset(("orders", "store", "shopify", "payments", "payment", "crm", "customers", "bosta"))
 

@@ -239,5 +239,95 @@ class RoundTwoGuards(unittest.TestCase):
                 self.assertTrue(any("400" in w for w in prices(reply)), prices(reply))
 
 
+class RoundThreeGuards(unittest.TestCase):
+    """Review pricectx round 3: the extra's own price before the join word still joins (finding 1), a
+    delivery word after the boot keeps the free offer and وشحن or وتوصيل is delivery too (finding 2),
+    and a Franco w before the boot word still opens the clause (finding 3)."""
+
+    def setUp(self):
+        clean_env(self)
+
+    def test_a_boot_priced_at_the_extras_amount_before_the_join_fails(self):
+        for reply in ("Boot at 400 EGP with printing.",
+                      "Your boot is 400 EGP with printing.",
+                      "The boot comes to 400 EGP including printing.",
+                      "The pair is 400 EGP with name printing.",
+                      "The boot is 400 EGP plus printing.",
+                      "الجزمة بـ 400 جنيه مع الطباعة.",
+                      "الجزمة بـ 400 جنيه بالطباعة.",
+                      "الجزمة بـ 400 جنيه والطباعة.",
+                      "El gazma b 400 EGP m3 el tba3a.",
+                      "El gazma b 400 EGP ma3 el tba3a."):
+            with self.subTest(reply=reply):
+                self.assertTrue(any("400" in w for w in prices(reply)), prices(reply))
+
+    def test_a_boot_price_or_the_extra_named_first_still_passes(self):
+        for reply in ("The boot is 16,500 EGP with printing at 400 EGP.",
+                      "الجزمة بـ 16500 جنيه مع الطباعة بـ 400 جنيه.",
+                      "The boot printing is 400 EGP with any name.",
+                      "Boots get printing at 400 EGP with any name you want.",
+                      "الجزمة الطباعة عليها بـ 400 جنيه مع اسمك.",
+                      "The boot is 16,500 EGP, printing 400 EGP with your name.",
+                      "Your boot can take name printing for 400 EGP plus delivery.",
+                      "Every boot ships with a box and printing costs 400 EGP.",
+                      "Any boot works with printing for 400 EGP.",
+                      "اختار الجزمة اللي تعجبك مع طباعة اسمك بـ 400 جنيه.",
+                      "Ekhtar el gazma elly te3gebak m3 tba3et esmak b 400 EGP.",
+                      "Send me your boot size with the name you want and printing is 400 EGP."):
+            with self.subTest(reply=reply):
+                self.assertEqual(prices(reply), [])
+
+    def test_delivery_after_the_boot_keeps_the_free_offer(self):
+        for reply in ("Printing is available. It is 400 EGP, free with an Elite and free delivery too.",
+                      "Printing is available. It is 400 EGP, free with any Elite and delivery is free as well.",
+                      "Printing is available. It is 400 EGP, free with an Elite plus free shipping.",
+                      "Printing is available. It costs 400 EGP, but it is free with an Elite and ships in 2 days.",
+                      "Printing is available. It is 400 EGP, free with an Elite and cash on delivery works.",
+                      "طباعة الاسم متاحة. سعرها 400 جنيه" + AC + " ومجانية مع أي Elite والتوصيل مجاني كمان.",
+                      "طباعة الاسم متاحة. سعرها 400 جنيه" + AC + " ومجانية مع أي Elite والشحن علينا.",
+                      "Tba3et el esm available. B 400 EGP, w free m3 ay Elite w el delivery bbalash.",
+                      "Tba3et el esm available. B 400 EGP, w free m3 ay Elite w el sha7n 3alena."):
+            with self.subTest(reply=reply):
+                self.assertEqual(prices(reply), [])
+
+    def test_free_delivery_as_the_boots_offer_fails(self):
+        for reply in ("طباعة الاسم متاحة. الإجمالي 400 جنيه" + AC + " وشحن مجاني مع الـ Elite.",
+                      "طباعة الاسم متاحة. الإجمالي 400 جنيه" + AC + " وتوصيل مجاني مع الـ Elite.",
+                      "طباعة الاسم متاحة. سعرها 400 جنيه" + AC + " وشحن مجاني مع الـ Elite.",
+                      "طباعة الاسم متاحة. سعرها 400 جنيه" + AC + " فالتوصيل مجاني مع الـ Elite.",
+                      "Printing is available. It is 400 EGP, with free delivery on the Elite.",
+                      "Printing is available. It is 400 EGP, free home delivery with the Elite.",
+                      "Printing is available. It is 400 EGP, free courier delivery with the Elite.",
+                      "Printing is available. It is 400 EGP, delivery is free with the Elite.",
+                      "Tba3et el esm available. B 400 EGP, tawseel bbalash m3 el Elite.",
+                      "Tba3et el esm available. B 400 EGP, el sha7n free m3 el Elite."):
+            with self.subTest(reply=reply):
+                self.assertTrue(any("400" in w for w in prices(reply)), prices(reply))
+
+    def test_the_opening_boot_word_after_a_franco_w_fails(self):
+        for reply in ("Tba3et el esm available. W el gazma b 400 EGP, w free m3 ay Elite.",
+                      "Tba3et el esm available. Wa el gazma b 400 EGP, w free m3 ay Elite.",
+                      "W el gazma m3 el tba3a b 400 EGP.",
+                      "Printing is available. Your boots are 400 EGP, free printing with an Elite.",
+                      "Printing is available. \"The boot\" is 400 EGP, free with an Elite.",
+                      "Printing is available. The cleats cost 400 EGP, free with an Elite.",
+                      "طباعة الاسم متاحة. والجزمة بـ 400 جنيه" + AC + " ومجانية مع أي Elite.",
+                      "طباعة الاسم متاحة. الكوتشي بـ 400 جنيه" + AC + " ومجانية مع أي Elite.",
+                      "Printing is available. So the pair is 400 EGP, free with an Elite."):
+            with self.subTest(reply=reply):
+                self.assertTrue(any("400" in w for w in prices(reply)), prices(reply))
+
+    def test_a_clause_that_does_not_open_with_a_boot_word_passes(self):
+        for reply in ("Printing is available. Each boot is 400 EGP extra, free with an Elite.",
+                      "Printing is available. \"Per pair\" it is 400 EGP, free with an Elite.",
+                      "Printing is available. The boot size does not matter, it is 400 EGP, free with an Elite.",
+                      "طباعة الاسم متاحة. على الجزمة بـ 400 جنيه" + AC + " ومجانية مع أي Elite.",
+                      "طباعة الاسم متاحة. للجزمة الواحدة 400 جنيه" + AC + " ومجانية مع أي Elite.",
+                      "Tba3et el esm available. 3al gazma b 400 EGP, w free m3 ay Elite.",
+                      "Tba3et el esm available. Wait, it is 400 EGP, free m3 ay Elite."):
+            with self.subTest(reply=reply):
+                self.assertEqual(prices(reply), [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -459,5 +459,84 @@ class SampleDataInTheConsole(PageCase):
         self.assertNotIn('class="sline', sales)
 
 
+
+# The meal planner as the real model wrote its card on 2026-11-04: two needs only the user can tell, and
+# no question at all (the prompt let it ask only about where a case ends).
+MEAL = {"name": "Weekly Dinner Planner", "key": "weekly_dinner_planner", "kind": "meal_planning",
+        "does": "It creates a balanced seven day dinner plan and a clear grocery list for you.",
+        "case": {"input": "a request for next weeks dinners", "starts": "person",
+                 "output": "a seven day dinner menu and its grocery list", "ends": "when the plan and list are sent"},
+        "good": "Dinners are varied and easy to cook and the grocery list matches the meals exactly so shopping is simple.",
+        "bad": "The plan repeats meals or the grocery list is missing items so you cannot shop or cook as planned.",
+        "never": ["never includes ingredients you marked as allergy",
+                  "never suggests a meal without adding its ingredients to the grocery list"],
+        "needs": [{"what": "your food preferences and allergies", "tool": "", "ask": True},
+                  {"what": "your household size and cooking time", "tool": "", "ask": True}]}
+FOLLOW = "You can add or change anything before it builds."
+
+
+def meal(question):
+    return say(json.dumps({"card": MEAL, "question": question, "follow": FOLLOW}))
+
+
+class AskOnce(PageCase):
+    """The meal planner needed the user's preferences, allergies and household size, and asked nothing."""
+
+    def draft(self):
+        return json.loads((self.folder / qs.DRAFT_FILE).read_text(encoding="utf-8"))["turns"]
+
+    def test_the_prompt_asks_for_a_need_only_the_user_can_tell_once(self):
+        for part in ('"ask": true only when no tool or file holds it', "ask for that need",
+                     "Never ask again for anything they already said or were asked here",
+                     "They can build without answering"):
+            self.assertIn(part, qs.CARD_PROMPT)
+        self.assertNotIn("and only when where one case ends is unclear", qs.CARD_PROMPT)
+
+    def test_ask_is_kept_only_on_a_need_no_tool_holds(self):
+        card = dict(MEAL, needs=MEAL["needs"] + [{"what": "Your store's stock", "tool": "store", "ask": True},
+                                                 {"what": "your hours", "tool": "", "ask": "yes"}])
+        needs = qs.clean_card({"card": card, "question": "", "follow": FOLLOW})["card"]["needs"]
+        self.assertEqual([n.get("ask") for n in needs], [True, True, None, None])
+
+    def test_each_need_is_asked_once_and_never_again_once_answered(self):
+        q1 = "What do you love to eat, and any allergies?"
+        q2 = "How many people do you cook for, and how much time do you have?"
+        self.page(meal(q1), meal("Any allergies I should know about?"), meal(q2), meal(q2), meal(""))
+        self.send("a meal planner for my weekly dinners")
+        self.assertIn(console.h(q1), self.get())
+        self.send("No nuts, we love pasta and fish.")
+        self.assertEqual(self.draft()[-1]["question"], "")  # allergies again: already asked and answered
+        note = self.model.calls[1]["messages"][0]["content"]
+        self.assertIn("Asked already, never ask again: your food preferences and allergies.", note)
+        self.assertIn("Needs marked ask, not asked yet: your household size and cooking time.", note)
+        self.send("Sounds good.")
+        self.assertEqual(self.draft()[-1]["question"], q2)  # the other need, asked once
+        self.send("Four of us, 30 minutes a night.")
+        self.assertEqual(self.draft()[-1]["question"], "")  # the same question again
+        self.send("Add a fish night.")
+        note = self.model.calls[4]["messages"][0]["content"]
+        self.assertIn("Needs marked ask, not asked yet: none.", note)
+        self.assertNotIn("In this chat so far", self.model.calls[0]["messages"][0]["content"])
+        self.assertEqual([qs.ask_once(q, MEAL, []) for q in (q1, "", q2)], [q1, "", q2])
+
+    def test_build_never_waits_for_an_answer(self):
+        from tests.test_quickstart import exam_reply, no_keys, plug_reply
+        from tests.test_any_agent import sample_reply
+        self.m.db_path = str(self.folder / "ascent.db")
+        with no_keys():
+            self.page(meal("What do you love to eat, and any allergies?"), plug_reply(), exam_reply(), sample_reply())
+            self.send("a meal planner for my weekly dinners")
+            page = self.get()
+            self.assertIn('action="/quickstart/build"', page)
+            self.assertTrue(self.build().startswith("Built Weekly Dinner Planner"))
+
+    def test_the_tile_of_a_need_only_the_user_can_tell_says_to_say_it(self):
+        from reflection import pages
+        card = qs.clean_card({"card": MEAL, "question": "", "follow": FOLLOW})["card"]
+        html = pages.plan_card(card)
+        self.assertEqual(html.count(pages.HOW_ASK), 2)
+        self.assertNotIn(pages.HOW_OTHER, html)
+
+
 if __name__ == "__main__":
     unittest.main()

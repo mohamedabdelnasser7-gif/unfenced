@@ -1282,6 +1282,7 @@ HOW_STORE = ("Put your Shopify store address (SHOPIFY_STORE, like name.myshopify
              "(SHOPIFY_TOKEN) in .env, then start the page again. Until then it works from sample data.")
 HOW_WHATSAPP = "Put the values from your WhatsApp Business number ({keys}) in .env, then start the page again. {next}"
 HOW_OTHER = "Unfenced cannot connect this yet. Until it can, the agent works from sample data."
+HOW_ASK = "Only you can tell it this. Say it in the box before Build. Until you do, it works from sample data."
 SHEET = "Use a sheet instead"
 SHEET_NOW = ": add your rows or a CSV file in the Add data box."
 SHEET_LATER = ": once it is built, add your rows or a CSV file in the Add data box under its steps."
@@ -1330,6 +1331,8 @@ def how_to_connect(n):
     other need by what it reads from until a connection exists."""
     if n["tool"] == "store":
         return HOW_STORE
+    if n.get("ask"):  # only the user can tell it (reflection/quickstart.py ask_once)
+        return HOW_ASK
     if n["tool"] == "whatsapp":
         return HOW_WHATSAPP.format(keys=", ".join(need_keys("whatsapp")), next=QUICK_NEXT.format(name="WhatsApp"))
     return HOW_OTHER

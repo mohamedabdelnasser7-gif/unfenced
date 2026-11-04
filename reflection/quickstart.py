@@ -302,12 +302,12 @@ The card:
 - good: one plain sentence on what a good result looks like for one case.
 - bad: one plain sentence on what a bad result looks like for one case.
 - never: one to four short lines, each a thing it never does.
-- needs: what it needs connected or handed over, each {{"what": a few plain words, "tool": one key from the list below, or "" when nothing there fits}}. A tool fits only when it does that very thing; a need on another service (a courier, another app or site) gets "" even when a tool does something close, and its "what" names that service.
+- needs: what it needs connected or handed over, each {{"what": a few plain words, "tool": one key from the list below, or "" when nothing there fits, "ask": true only when no tool or file holds it and only they can tell it (their preferences, allergies, household size, working hours, their own rules), else false}}. A tool fits only when it does that very thing; a need on another service (a courier, another app or site) gets "" even when a tool does something close, and its "what" names that service.
 
 Tools that can be connected today:
 {tools}
 
-question: at most one question, and only when where one case ends is unclear, so a wrong guess would judge the agent on the wrong result. Shape it by what they said and what the agent is for. When it is clear, an empty string.
+question: at most one question, in one short line. Ask it when where one case ends is unclear, so a wrong guess would judge the agent on the wrong result. Else, when a need marked ask is not in what they wrote yet and was not asked before in this chat, ask for that need, in their words. Never ask again for anything they already said or were asked here. Shape it by what they said and what the agent is for. When nothing is left to ask, an empty string. They can build without answering: the agent practises on made up data until they say it.
 follow: a second short message written for this chat. It tells them they can add or change anything now, before it builds. Warm and calm, never pushy, not a question.
 
 No chat ever goes to a person: the agent never passes a chat or a case to a team, and the card never promises that someone takes over. When a case needs people, the agent tags it itself (for example "needs the team") and still ends the case with its own result; a person sees the tag. Beyond such a tag, Leave that subject out of the card entirely, never lines too.
@@ -398,7 +398,10 @@ def clean_card(raw, need_case=True):
         tool = n.get("tool") if isinstance(n, dict) else ""
         tool = tool if isinstance(tool, str) and tool in TOOLS and not outside(what) else ""
         if what:
-            needs.append({"what": what, "tool": tool, "connected": bool(tool) and tool not in NOT_BUILT})
+            need = {"what": what, "tool": tool, "connected": bool(tool) and tool not in NOT_BUILT}
+            if not tool and isinstance(n, dict) and n.get("ask") is True:  # only the user can tell it
+                need["ask"] = True
+            needs.append(need)
     card = {"name": line(c.get("name"), CAPS["name"]), "key": line(c.get("key"), CAPS["key"]),
             "does": line(c.get("does"), CAPS["does"]), "good": line(c.get("good"), CAPS["good"]),
             "never": [x for x in (line(v, CAPS["never"]) for v in never[:MOST_NEVER]) if x], "needs": needs}
@@ -821,13 +824,15 @@ class QuickStart:
             d = {"turns": [], "built": None, "builds": 0}
         if len(d["turns"]) >= MAX_TURNS:
             raise Refused("This chat is long now. Build it, or start over.")
-        messages = [{"role": "system", "content": CARD_PROMPT.format(tools=_tool_lines(), kinds=_kinds(folder))}]
+        messages = [{"role": "system", "content": CARD_PROMPT.format(tools=_tool_lines(), kinds=_kinds(folder))
+                     + ask_note(d["turns"])}]
         for t in d["turns"]:
             messages.append({"role": "user", "content": t["said"]})
             messages.append({"role": "assistant", "content": json.dumps(
                 {"card": _model_card(t["card"]), "question": t["question"], "follow": t["follow"]}, ensure_ascii=False)})
         messages.append({"role": "user", "content": text})
         got = clean_card(read_json(self._chat(messages, 6000), MAX_REPLY))
+        got["question"] = ask_once(got["question"], got["card"], d["turns"])  # once per need, never again
         d["turns"].append(dict(got, said=text))
         self._save(folder, d)
         return None
@@ -1126,8 +1131,70 @@ def _model_card(card):
     out["good"] = card["good"]
     if card.get("bad"):
         out["bad"] = card["bad"]
-    out.update(never=card["never"], needs=[{"what": n["what"], "tool": n["tool"]} for n in card["needs"]])
+    out.update(never=card["never"], needs=[dict({"what": n["what"], "tool": n["tool"]}, **({"ask": True} if n.get("ask")
+                                                                                           else {}))
+                                           for n in card["needs"]])
     return out
+
+
+# ---- ask once: a need only the user can tell is asked for once, never again once answered ----
+
+_ASK_STOP = frozenset(("your", "you", "yours", "what", "which", "how", "and", "the", "for", "with", "any", "are", "is",
+                       "do", "does", "have", "has", "tell", "me", "about", "please", "many", "much", "there", "their",
+                       "they", "this", "that", "from", "into", "each", "every", "own", "it", "its", "or", "of", "to",
+                       "in", "on", "a", "an"))
+
+
+def _ask_words(text):
+    """The content words of a line, each in all its forms (_stems), for telling what a question asks."""
+    out = set()
+    for t in _TOKEN.findall(str(text or "").lower()):
+        if t not in _ASK_STOP and len(t) > 2:
+            out |= _stems(t)
+    return out
+
+
+def asks_for(question, need):
+    """True when the question asks for this need: they share a content word (allergies meets allergy)."""
+    return bool(question) and bool(_ask_words(question) & _ask_words(need.get("what", "")))
+
+
+def answered(turns):
+    """The needs (their what, lowercased) a question in this chat already asked for: every turn's
+    question was followed by a message from the user, so whatever it asked is answered or passed."""
+    out = set()
+    for t in turns:
+        for n in t["card"].get("needs", []):
+            if t.get("question") and asks_for(t["question"], n):
+                out.add(n["what"].lower())
+    return out
+
+
+def ask_once(question, card, turns):
+    """The card turn's question, or "" when it asks again for a need a question here asked before, or
+    repeats an earlier question. The model writes every word of it (DECISIONS item 38)."""
+    if not question:
+        return ""
+    if any(question.strip().lower() == (t.get("question") or "").strip().lower() for t in turns):
+        return ""
+    done = answered(turns)
+    if any(n["what"].lower() in done and asks_for(question, n) for n in card.get("needs", [])):
+        return ""
+    return question
+
+
+def ask_note(turns):
+    """The line the card writer reads after the first turn: the needs only the user can tell, asked
+    already or not yet (data, never wording), so it asks for each once. "" when there are none."""
+    if not turns:
+        return ""
+    done = answered(turns)
+    asks = [n["what"] for n in turns[-1]["card"].get("needs", []) if n.get("ask")]
+    if not asks and not done:
+        return ""
+    left = [w for w in asks if w.lower() not in done]
+    return ("\n\nIn this chat so far. Asked already, never ask again: " + ("; ".join(sorted(done)) or "nothing")
+            + ". Needs marked ask, not asked yet: " + ("; ".join(left) or "none") + ".")
 
 
 def _kinds(folder):

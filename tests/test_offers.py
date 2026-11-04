@@ -12,8 +12,8 @@ from kit import offers
 
 ROOT = Path(__file__).resolve().parent.parent
 
-ELITE = {"product": "Nike Phantom 6 Football Boots", "tier": "Elite", "size": "42", "price": "16500", "quantity": 1}
-PRO = {"product": "Nike Phantom 6 Football Boots", "tier": "Pro", "size": "42", "price": "11000", "quantity": 1}
+ELITE = {"product": "Nike Phantom 6", "tier": "Elite", "size": "42", "price": "16500", "quantity": 1}
+PRO = {"product": "Nike Phantom 6", "tier": "Pro", "size": "42", "price": "11000", "quantity": 1}
 PRINT = {"product": "Beyond the Limits Name Printing", "type": "Printing", "size": "", "price": "400", "quantity": 1}
 
 
@@ -101,7 +101,8 @@ class Data(unittest.TestCase):
         self.assertTrue(all("names" not in o and "covers" not in o for o in shown))
         self.assertEqual(shown[0]["what"], "Pay in installments through valU")
         self.assertEqual(offers.limit_line(d),
-                         "One offer an order: the one that saves the customer most applies; always on top: free_delivery.")
+                         "One offer an order: the one that saves the customer most applies; paying by an offer's "
+                         "payment method makes that offer the order's one offer; always on top: free_delivery.")
         self.assertIn("فاليو", offers.mention_words(d)["valu_3m"])
         self.assertIn("valu 3m", offers.mention_words(d)["valu_3m"])
         self.assertIn("خصم", offers.talk_words(d))
@@ -134,11 +135,37 @@ class Totals(unittest.TestCase):
         self.assertEqual(got["discounts"][0]["discount"], Decimal(1100))   # 10% of the cheaper pair
         self.assertEqual(got["total"], Decimal(26800))
 
-    def test_valu_saves_nothing_so_the_line_offer_applies(self):
+    def test_valu_is_the_order_s_one_offer_so_no_free_printing(self):
+        # the owner, 2026-11-04: valU is still an offer (no paying all at once), so it takes the one slot
         got = offers.apply([ELITE, PRINT], "valu", self.d)
+        self.assertEqual(got["discounts"], [])
+        self.assertEqual(got["total"], Decimal(16900))
+        self.assertNotIn("fee", got)
+
+    def test_card_gets_the_five_percent_only_even_when_a_line_offer_saves_more(self):
+        lines = [dict(ELITE, price="1000"), PRINT]
+        self.assertEqual(self.ids(offers.apply(lines, "cash", self.d)), ["elite_print"])   # 400 saved
+        got = offers.apply(lines, "card", self.d)
+        self.assertEqual(self.ids(got), ["card_5"])   # chosen by payment, though it saves only 70
+        self.assertEqual(got["total"], Decimal(1330))
+        got = offers.apply([ELITE, PRINT], "card", self.d)
+        self.assertEqual(self.ids(got), ["card_5"])
+        self.assertEqual(got["discounts"][0]["discount"], Decimal(845))   # 5% of 16900, no free printing
+
+    def test_cash_and_an_elite_get_the_free_printing(self):
+        got = offers.apply([ELITE, PRINT], "cash", self.d)
         self.assertEqual(self.ids(got), ["elite_print"])
         self.assertEqual(got["total"], Decimal(16500))
-        self.assertNotIn("fee", got)
+
+    def test_the_payment_slot_is_the_data_s_choice(self):
+        d = json.loads(json.dumps(self.d))
+        d.pop("payment_takes_slot")
+        self.assertEqual(self.ids(offers.apply([ELITE, PRINT], "valu", d)), ["elite_print"])   # most saved only
+        self.assertEqual(self.ids(offers.apply([ELITE, PRINT], "card", d)), ["card_5"])        # 845 beats 400
+        self.assertTrue(offers.clean(self.d)["payment_takes_slot"])
+        self.assertNotIn("payment_takes_slot", offers.clean(dict(self.d, payment_takes_slot="yes")))
+        self.assertIn("paying by an offer's payment method", offers.limit_line(self.d))
+        self.assertNotIn("paying by", offers.limit_line(d))
 
     def test_printing_is_one_per_elite_pair(self):
         two = dict(PRINT, quantity=2)

@@ -54,6 +54,10 @@ Rules (from the store rules, the 27 Oct morning review and Mohamed's calls on 28
    common Franco word counts each time it comes, and the Franco currency and mawgood words are common
    Franco words. The customer's line is read as written; when only those words make it
    read as Franco ("Do you have the F50?"), the reply may be English or Franco, Arabic letters refused.
+9. Offers (2026-11-04, decision 105): for an agent with store offers (offers=, kit/offers.py for_check),
+   a reply may name only an offer a tool gave in this chat (its id's words or its names), may use an
+   offer talk word (discount, خصم) only once some offer was given, and may give a percent only when a
+   given offer has it. The words come from the offers data, never from this code.
 """
 import functools
 import math
@@ -186,6 +190,7 @@ NOT_FRANCO = "Reply in plain English, not Franco."
 CURRENCY_SAID = {"arabic": "جنيه", "english": "EGP", "franco": "geneh"}
 EXAMPLE_AMOUNT = "16,500"
 FROM_TOOLS = "Use only prices and fees from tool results, or say you do not have that number."
+OFFERS_RULE = "Name an offer, a discount or a percent only when a tool gave it in this chat."
 RULES_HEAD = "Every reply is checked before it goes out, and a reply that breaks one of these rules is not sent:"
 
 
@@ -202,12 +207,13 @@ def digits_rule():
             f"({cur['arabic']} in Arabic, {cur['english']} in English, {cur['franco']} in Franco), so it can be checked.")
 
 
-def prompt_rules(full=True, stock=True):
+def prompt_rules(full=True, stock=True, offers=False):
     """The rules the send check holds a reply to, as short lines for the agent's own prompt (sales/loop.py
     and kit/turn.py system_prompt), read from the same words its feedback gives. Every agent: the house
     style (banned words, dashes, emoji, markdown). full: the full check on top (why WhatsApp shows **, no
     sympathy lines, links, script, amount format, prices and fees from tools only). stock: with full, the
-    stock count rule too, for an agent whose check holds it (check stock)."""
+    stock count rule too, for an agent whose check holds it (check stock). offers: the offers rule, for an
+    agent whose check is given offers (check offers)."""
     markdown = f"{NO_MARKDOWN} {ON_WHATSAPP}" if full else NO_MARKDOWN
     lines = [RULES_HEAD, " ".join(fix for _, fix in BANNED),
              " ".join((NO_DASHES, NO_SPACED_HYPHEN, NO_EMOJI, markdown))]
@@ -223,6 +229,8 @@ def prompt_rules(full=True, stock=True):
                   FROM_TOOLS]
         if stock:
             lines.append(NO_STOCK_COUNT)
+    if offers:
+        lines.append(OFFERS_RULE)
     return "\n".join(lines)
 
 LETTER_BEFORE = r"(?<![^\W\d_])"
@@ -660,7 +668,7 @@ def _links(reply, links):
     return out, list(dict.fromkeys(wrong))
 
 
-AMOUNT_KEYS = frozenset({"price", "fee", "total", "subtotal"})
+AMOUNT_KEYS = frozenset({"price", "fee", "total", "subtotal", "discount"})
 AMOUNT_TEXT = re.compile(r"\s*\d[\d,]*(?:\.\d+)?\s*")
 
 
@@ -1360,7 +1368,7 @@ def amount(x):
 
 
 def amounts_in(obj):
-    """Numbers under the exact keys price, fee, total or subtotal anywhere in a tool result.
+    """Numbers under the exact keys price, fee, total, subtotal or discount anywhere in a tool result.
 
     Strings are never parsed as JSON, so free text inside a result adds nothing.
     """
@@ -1422,6 +1430,70 @@ def is_total(n, parts):
     return go(0, n, 0, 0)
 
 
+# Offers (rule 9). A word matches whole: Latin words on word edges, an Arabic word also after one of the
+# common joined lead letters (و, ب, ف, ل, ك) and the article, so "والخصم" holds "خصم".
+OFFER_AR_FOLD = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ة": "ه", "ى": "ي"})
+OFFER_AR_LEAD = re.compile(r"^(?:[وفبلك]?ال|لل|[وفبلك])(?=[\u0621-\u064A]{2})")
+PERCENT = re.compile(r"(?<![\d.,])(?P<a>\d+(?:[.,]\d+)?)\s*(?:%|٪|percent\b|per\s+cent\b|في\s*الم[يئ]+[هة]|بالم[يئ]+[هة])"
+                     r"|(?:%|٪)\s*(?P<b>\d+(?:[.,]\d+)?)(?![\d.,]*\d)", re.IGNORECASE)
+NO_OFFER = "That offer was not given by a tool in this chat: {}."
+NO_OFFER_TALK = "No tool gave an offer in this chat, so do not talk about a discount or an offer."
+NO_PERCENT = "No offer a tool gave has this percent: {}."
+
+
+def _offer_tokens(text):
+    """The words of a text for the offers rule, each as (word, word with its Arabic lead letters off)."""
+    text = unicodedata.normalize("NFKC", western_digits(text or "")).casefold().translate(OFFER_AR_FOLD)
+    return [(w, OFFER_AR_LEAD.sub("", w)) for w in WORD.findall(text)]
+
+
+def _has_words(toks, phrase):
+    """True when the words of phrase come in a row in toks (_offer_tokens), each as written or with its
+    Arabic lead letters off on both sides."""
+    want = _offer_tokens(phrase)
+    if not want:
+        return False
+    for i in range(len(toks) - len(want) + 1):
+        if all(want[j][0] == toks[i + j][0] or want[j][1] == toks[i + j][1] for j in range(len(want))):
+            return True
+    return False
+
+
+def percents_in(text):
+    """Every percent written in the text, as Decimals (10%, ٪10, 5 percent, 10 في المية)."""
+    found = set()
+    for m in PERCENT.finditer(unicodedata.normalize("NFKC", western_digits(text or ""))):
+        try:
+            found.add(Decimal((m.group("a") or m.group("b")).replace(",", ".")).normalize())
+        except InvalidOperation:
+            continue
+    return found
+
+
+def offer_problems(reply, offers):
+    """The offers rule's feedback lines, [] when it passes or when offers is None (an agent with no store
+    offers). offers: {"given": offer ids a tool gave in this chat, "percents": the given offers' percents,
+    "words": {offer id: the words that name it}, "talk": words that talk about an offer at all}."""
+    if offers is None:
+        return []
+    given = set(offers.get("given") or ())
+    toks = _offer_tokens(reply)
+    out = []
+    named = [i for i, words in (offers.get("words") or {}).items()
+             if i not in given and any(_has_words(toks, w) for w in words)]
+    if named:
+        out.append(NO_OFFER.format(", ".join(sorted(named))))
+    if not given and any(_has_words(toks, w) for w in offers.get("talk") or ()):
+        out.append(NO_OFFER_TALK)
+    allowed = {Decimal(str(x)).normalize() for x in offers.get("percents") or ()}
+    wrong = sorted(percents_in(reply) - allowed)
+    if wrong:
+        out.append(NO_PERCENT.format(", ".join(f"{p:f}%" for p in wrong)))
+    if out:
+        out.append(OFFERS_RULE)
+    return out
+
+
 def style_problems(text):
     """Feedback for the house style: banned words, dashes, spaced hyphens, emoji, markdown bold."""
     return [fb for _, fb in named_style(text)]
@@ -1447,7 +1519,7 @@ def named_style(text):
 
 
 def check(reply, customer_text="", amounts=(), vocabulary=frozenset(), sizes=(), orders=(), links=(), names=(),
-          priced_only=False, stock=True, totals=()):
+          priced_only=False, stock=True, totals=(), offers=None):
     """(passed, feedback) for one reply.
 
     amounts: every price and fee in the store and delivery data, plus amounts from this turn's store tools.
@@ -1461,19 +1533,21 @@ def check(reply, customer_text="", amounts=(), vocabulary=frozenset(), sizes=(),
     agent but Sales. stock: False leaves out the stock count rule, for an agent with no store.
     totals: every amount a tool gave in this chat, in order (sales/loop.py tool_amounts), so a total that adds
     up some of them passes (is_total); a number no sum of them makes still fails.
+    offers: what the offers rule reads (offer_problems; kit/offers.py for_check), or None for an agent with
+    no store offers.
     """
     problems = named_problems(reply, customer_text, amounts, vocabulary, sizes, orders, links, names,
-                              priced_only=priced_only, stock=stock, totals=totals)
+                              priced_only=priced_only, stock=stock, totals=totals, offers=offers)
     if problems:
         return False, " ".join(dict.fromkeys(fb for _, fb in problems))
     return True, ""
 
 
 def named_problems(reply, customer_text="", amounts=(), vocabulary=frozenset(), sizes=(), orders=(), links=(),
-                   names=(), priced_only=False, stock=True, totals=()):
+                   names=(), priced_only=False, stock=True, totals=(), offers=None):
     """Every rule the reply breaks, as (check name, feedback) pairs, in the order check() gives
     them; [] when it passes. The names: empty, links, script, banned, dashes, emoji, markdown, sympathy,
-    amounts, digits and stock. check() is this list joined, so the exam (reflection/exam.py) reads
+    amounts, digits, stock and offers. check() is this list joined, so the exam (reflection/exam.py) reads
     the same rules by name and never keeps a second copy of one."""
     if not (reply or "").strip():
         return [("empty", "The reply was empty. Write a reply to the customer.")]
@@ -1504,4 +1578,7 @@ def named_problems(reply, customer_text="", amounts=(), vocabulary=frozenset(), 
         problems.append(("digits", digits_rule()))
     if stock and stock_counts(reply, sizes, orders, names):
         problems.append(("stock", NO_STOCK_COUNT))
+    fb = offer_problems(reply, offers)
+    if fb:
+        problems.append(("offers", " ".join(fb)))
     return problems

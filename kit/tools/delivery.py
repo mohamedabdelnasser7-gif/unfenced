@@ -10,12 +10,17 @@ note asking which governorate. Cities and districts are not in the list yet.
 A call with no governorate gets every zone's fee and days with its governorates (table, through
 kit/tools run and NEEDS), so the agent can answer "how long does delivery take" before the customer
 names a place.
+
+A delivery offer in the store's offers (kit/offers.py delivery_fee, decision 105) sets the fee for
+every zone, in quote and in table alike, with the offer's line as "offer" and its id as "offer_id" (so the
+send check knows a tool gave it, sales/loop.py store_offers); the days stay the zone's.
 """
 import json
 import re
 from functools import lru_cache
 from pathlib import Path
 
+from kit import offers
 from kit.tools import store
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -80,22 +85,33 @@ def quote(place):
     zone = next((z for z in store.delivery().get("zones", []) if z.get("area") == gov["zone"]), None)
     if zone is None or not all(k in zone for k in ("fee", "days_min", "days_max")):
         return {"ok": False, "note": "The delivery data has no fee for this governorate."}
-    return {"ok": True, "governorate": gov["name"], "governorate_ar": gov["name_ar"], "area": zone["area"],
-            "fee": zone["fee"], "days_min": zone["days_min"], "days_max": zone["days_max"]}
+    data = offers.current()
+    out = {"ok": True, "governorate": gov["name"], "governorate_ar": gov["name_ar"], "area": zone["area"],
+           "fee": offers.delivery_fee(data, zone["fee"]), "days_min": zone["days_min"], "days_max": zone["days_max"]}
+    deal = offers.delivery_offer(data)
+    if deal is not None and out["fee"] != zone["fee"]:
+        out.update(offer=deal["what"], offer_id=deal["id"])
+    return out
 
 
 def table(ctx=None):
-    """Every zone in the delivery data with its fee, days and governorates, for a call with no governorate."""
+    """Every zone in the delivery data with its fee (after a delivery offer), days and governorates, for a
+    call with no governorate."""
     names = {}
     for g in _data()["governorates"]:
         names.setdefault(g["zone"], []).append(g["name"])
-    zones = [{"area": z["area"], "fee": z["fee"], "days_min": z["days_min"], "days_max": z["days_max"],
-              "governorates": names.get(z["area"], [])}
-             for z in store.delivery().get("zones", [])
-             if isinstance(z, dict) and all(k in z for k in ("area", "fee", "days_min", "days_max"))]
+    data = offers.current()
+    raw = [z for z in store.delivery().get("zones", [])
+           if isinstance(z, dict) and all(k in z for k in ("area", "fee", "days_min", "days_max"))]
+    zones = [{"area": z["area"], "fee": offers.delivery_fee(data, z["fee"]), "days_min": z["days_min"],
+              "days_max": z["days_max"], "governorates": names.get(z["area"], [])} for z in raw]
     if not zones:
         return {"ok": False, "note": "The delivery data has no zones."}
-    return {"ok": True, "zones": zones, "note": NO_PLACE}
+    out = {"ok": True, "zones": zones, "note": NO_PLACE}
+    deal = offers.delivery_offer(data)
+    if deal is not None and any(z["fee"] != r["fee"] for z, r in zip(zones, raw)):
+        out.update(offer=deal["what"], offer_id=deal["id"])
+    return out
 
 
 def find(place):

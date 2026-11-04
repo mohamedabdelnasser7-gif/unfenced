@@ -48,7 +48,9 @@ stock     a reply that says a named product (and size, when it gives one) is ava
 delivery  an amount in a sentence about delivery is a delivery fee (the named governorate's
           zone fee when the reply names one); a count of days there sits inside the zones' days
           (the named zone's when it names one). A count of days an exchange or return word governs
-          (exchange_days) is the exchange window, not a delivery time.
+          (exchange_days) is the exchange window, not a delivery time. Every fee is the zone's fee
+          after the store's delivery offer (kit/offers.py delivery_fee, 2026-11-04): under free
+          delivery it is 0, so the zone's old fee is no fact and fails.
 order     a reply that says the order is placed or confirmed (claims_order below) passes only
           when a tool placed an order this turn (draft_order created): in a match the agent is
           the store, so its own claim is never a sale.
@@ -66,7 +68,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from arena import clean, label
-from kit import send_check, tools
+from kit import offers, send_check, tools
 from kit.tools import draft_order, store
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -404,12 +406,19 @@ def _variant_for(item, number=None, letter=None, tiers=()):
     return None
 
 
+def _fee(zone):
+    """A zone's delivery fee after the store's delivery offer (kit/offers.py delivery_fee, decision 105): under
+    free delivery every zone's fee is 0, so a reply that quotes the zone's old fee fails; with no offers it
+    is the zone's own fee."""
+    return send_check.amount(offers.delivery_fee(offers.current(), zone["fee"]))
+
+
 def check(reply, customer_text="", tool_results=(), orders=()):
     reply, customer_text = _visible(reply), _visible(customer_text)
     items = store.catalogue()
     sizes = store.size_strings()
     zones = store.delivery().get("zones", [])
-    fees = {send_check.amount(z["fee"]) for z in zones if "fee" in z}
+    fees = {_fee(z) for z in zones if "fee" in z}
     all_tiers = store.tiers()
     said = tiers_named(reply, all_tiers) or tiers_named(customer_text, all_tiers)
     # an extra (the name printing) goes on any product, so a named boot never hides its price, and
@@ -543,7 +552,7 @@ def check(reply, customer_text="", tool_results=(), orders=()):
     for sentence in SENTENCE.findall(reply):
         if not DELIVERY.search(sentence):
             continue
-        zone_fees = {send_check.amount(z["fee"]) for z in mine if "fee" in z}
+        zone_fees = {_fee(z) for z in mine if "fee" in z}
         for a in send_check.prices_in(without_model_numbers(sentence, items), sizes, orders):
             if a in prices or a in zone_fees or any(a == x for x in allowed if x not in fees):
                 continue

@@ -224,5 +224,18 @@ class PhotoTurn(unittest.TestCase):
         self.assertIn("image link", store.DEFINITION["function"]["description"])
 
 
+def setUpModule():
+    # These pin a store with no offers, where the zone fees (60, 85) are facts; under free delivery they are
+    # not (tests/test_offers_paths.py FactCheck).
+    global _NO_OFFERS
+    from kit import offers
+    _NO_OFFERS = offers.OFFERS.set(offers.EMPTY)
+
+
+def tearDownModule():
+    from kit import offers
+    offers.OFFERS.reset(_NO_OFFERS)
+
+
 if __name__ == "__main__":
     unittest.main()

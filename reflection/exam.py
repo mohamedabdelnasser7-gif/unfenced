@@ -49,7 +49,7 @@ from engine import lessons as engine_lessons  # noqa: E402
 from engine import plug as plug_mod  # noqa: E402
 from engine import risk as risk_mod  # noqa: E402
 from sales import loop, stages  # noqa: E402
-from kit import send_check, tools  # noqa: E402
+from kit import offers, send_check, tools  # noqa: E402
 from kit.chats import Chats  # noqa: E402
 from kit import db as kit_db  # noqa: E402
 from kit.db import Db  # noqa: E402
@@ -356,7 +356,9 @@ def _answer(s, lesson, *, model, kept=None):
                                                            store.size_strings(), orders=orders,
                                                            links=loop.store_links(chats, chat_id),
                                                            names=store.titles(),
-                                                           totals=loop.tool_amounts(chats, chat_id)))}
+                                                           totals=loop.tool_amounts(chats, chat_id),
+                                                           offers=offers.for_check(
+                                                               offers.current(), loop.store_offers(chats, chat_id))))}
     finally:
         db.close()
 

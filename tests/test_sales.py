@@ -85,7 +85,7 @@ class Instructions(unittest.TestCase):
                 self.assertNotIn(gone, loop.INSTRUCTIONS)
 
     def test_the_seed_stays_short(self):
-        self.assertLess(len(loop.INSTRUCTIONS.split()), 200)  # the scope line (Mohamed 2026-11-03) took it past 160
+        self.assertLess(len(loop.INSTRUCTIONS.split()), 225)  # the scope line (Mohamed 2026-11-03) took it past 160, the offers line (decision 105) past 200
 
 
 class Turns(unittest.TestCase):

@@ -96,3 +96,16 @@ class ModelNumbers(unittest.TestCase):
         with mock.patch.object(store, "catalogue", return_value=[future]):
             self.assertEqual(checks("The price of the Future 8 is 9,000 EGP."), [])
             self.assertEqual(checks("is the Vapor 17"), ["price"])   # no Vapor in this store: 17 is an amount
+
+
+def setUpModule():
+    # These pin a store with no offers, where the zone fees (60, 85) are facts; under free delivery they are
+    # not (tests/test_offers_paths.py FactCheck).
+    global _NO_OFFERS
+    from kit import offers
+    _NO_OFFERS = offers.OFFERS.set(offers.EMPTY)
+
+
+def tearDownModule():
+    from kit import offers
+    offers.OFFERS.reset(_NO_OFFERS)

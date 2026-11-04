@@ -23,16 +23,21 @@ the chat id on it and cod_risk's level as a tag ("unknown" when the check could 
 created an order makes no new summary, so a re-draft right after an order cannot become a
 second order (review t261028j round 2, finding 1).
 
-Money keys in results are price, fee, subtotal and total only, so the send check reads them.
+Offers (decision 105, kit/offers.py): payment is the customer's payment method, one of the store's.
+The totals take the store's offers through offers.apply (one offer an order, the one that saves most,
+delivery on top), and the draft keeps the payment, the discounts and the total. quote set to true works
+out the totals for items and payment alone (a governorate adds the fee and days): no name or address,
+nothing saved, so the agent can tell a customer what an order costs before they decide.
+
+Money keys in results are price, fee, subtotal, discount and total only, so the send check reads them.
 """
 import hmac
 import json
 import logging
 import re
 import time
-from decimal import Decimal
 
-from kit import orders, send_check
+from kit import offers, orders, send_check
 from kit.tools import cod_risk, delivery, store, voice_note
 from reflection.results import Results
 
@@ -40,7 +45,8 @@ log = logging.getLogger("kit.tools.draft_order")
 
 MAX_LINES = 10
 MAX_QUANTITY = 20
-FIELDS = {"items", "name", "governorate", "address", "phone", "confirm"}
+FIELDS = {"items", "name", "governorate", "address", "phone", "confirm", "payment", "quote"}
+QUOTE_FIELDS = {"items", "governorate", "payment", "quote"}
 REQUIRED = ("items", "name", "governorate", "address")
 ITEM_FIELDS = {"product", "tier", "size", "quantity", "print_name"}
 TEXT_LIMITS = (("name", 2, 80), ("governorate", 2, delivery.MAX_PLACE), ("address", 5, 300))
@@ -54,7 +60,8 @@ DEFINITION = {"type": "function", "function": {
         "Place an order in two steps. Step 1: call without confirm. It returns a summary with the subtotal, "
         "delivery fee and total from the store data, and a code. Show the summary and ask the customer to "
         "confirm. Step 2: only after the customer answers with a plain yes in a new message, call again with "
-        "the same details and confirm set to the code. A question, or a yes with a change, means step 1 again."),
+        "the same details and confirm set to the code. A question, or a yes with a change, means step 1 again. "
+        "With quote set to true it only works out the totals, with the store's offers, for items and payment."),
     "parameters": {
         "type": "object",
         "properties": {
@@ -75,17 +82,22 @@ DEFINITION = {"type": "function", "function": {
             "address": {"type": "string", "description": "Area, street, building, floor and flat, as the customer wrote them."},
             "phone": {"type": "string", "description": "Only if the customer gives another number for the courier. Leave out to use this chat's WhatsApp number."},
             "confirm": {"type": "string", "description": "Step 2 only: the code from the summary."},
+            "payment": {"type": "string", "description": "How the customer pays: one of the payment methods the store tool lists. Leave out when they have not said."},
+            "quote": {"type": "boolean", "description": "true to work out the totals for items and payment only (a governorate adds the fee): no name or address needed, nothing is saved."},
         },
-        "required": list(REQUIRED),
+        "required": ["items"],
         "additionalProperties": False,
     },
 }}
 
 SUMMARY_NEXT = (
     "Show this summary to the customer in their language and script: items (with the name to print on a "
-    "printing line), subtotal, delivery fee, total, name, address, phone and delivery days. Ask them to confirm. Never show the code. When they answer with a "
+    "printing line), subtotal, any discount with its offer, delivery fee, total, name, address, phone and delivery days. Ask them to confirm. Never show the code. When they answer with a "
     "plain yes in a new message, call draft_order again with the same details and confirm set to the code. A "
     "question, or a yes with a change, needs a new summary: call draft_order again without confirm.")
+QUOTE_NEXT = ("These are the totals for these items with the store's offers; nothing is saved. Give the customer "
+              "the amounts as they are here. To order, ask for the name, governorate and address and call draft_order "
+              "without quote.")
 CREATED_NEXT = "Tell the customer the order is received, with its number, the total and the delivery days."
 NOT_SAVED = "The store did not take the order. Say the order did not go through and ask them to try again later."
 ORDER_MADE_NOW = ("Order {order} was created in this turn, so no new summary is made. Tell the customer the "
@@ -118,10 +130,34 @@ def check(args, ctx):
     extra = set(args) - FIELDS
     if extra:
         return False, f"Unknown arguments: {', '.join(sorted(extra))}."
+    if "quote" in args and args["quote"] is not True:
+        return False, "quote must be true, or left out to place an order."
+    if "payment" in args:
+        methods = offers.payment_methods(offers.current())
+        if not isinstance(args["payment"], str) or _key(args["payment"]) not in methods:
+            listed = ", ".join(methods) or "none"
+            return False, f"payment must be one of the payment methods the store lists: {listed}."
+    if args.get("quote"):
+        extra = set(args) - QUOTE_FIELDS
+        if extra:
+            return False, f"A quote takes items, payment and governorate only, not {', '.join(sorted(extra))}."
+        return _check_items(args, ("governorate",) if "governorate" in args else ())
     missing = [k for k in REQUIRED if k not in args]
     if missing:
         return False, f"Missing: {', '.join(missing)}. Ask the customer for them first."
-    items = args["items"]
+    ok, problem = _check_items(args, [k for k, _, _ in TEXT_LIMITS])
+    if not ok:
+        return ok, problem
+    if "phone" in args and (not isinstance(args["phone"], str) or not orders.phone_key(args["phone"])):
+        return False, "phone must be a phone number, or left out to use this chat's WhatsApp number."
+    if "confirm" in args and (not isinstance(args["confirm"], str) or not 0 < len(args["confirm"].strip()) <= 12):
+        return False, "confirm must be the code from the summary."
+    return True, ""
+
+
+def _check_items(args, texts):
+    """The items and the text fields named in texts, checked."""
+    items = args.get("items")
     if not isinstance(items, list) or not 1 <= len(items) <= MAX_LINES:
         return False, f"items must be a list of 1 to {MAX_LINES} lines."
     for it in items:
@@ -141,17 +177,17 @@ def check(args, ctx):
         if isinstance(q, bool) or not isinstance(q, int) or not 1 <= q <= MAX_QUANTITY:
             return False, f"quantity must be a whole number from 1 to {MAX_QUANTITY}. Say that is the most for one order."
     for key, lo, hi in TEXT_LIMITS:
+        if key not in texts:
+            continue
         v = args[key]
         if not isinstance(v, str) or not lo <= len(_text(v)) <= hi:
             return False, f"{key} must be text, {lo} to {hi} characters."
-    if "phone" in args and (not isinstance(args["phone"], str) or not orders.phone_key(args["phone"])):
-        return False, "phone must be a phone number, or left out to use this chat's WhatsApp number."
-    if "confirm" in args and (not isinstance(args["confirm"], str) or not 0 < len(args["confirm"].strip()) <= 12):
-        return False, "confirm must be the code from the summary."
     return True, ""
 
 
 def run(args, ctx):
+    if args.get("quote"):
+        return quote(args)
     book = orders.Book(ctx.chats.db)
     if "confirm" in args:
         return _confirm(book, args, ctx)
@@ -202,9 +238,12 @@ def _confirm(book, args, ctx):
         book.save_draft(ctx.chat_id, pending["code"], pending["draft"], pending["after_step"])
         return {"ok": False, "feedback": NOT_SAVED}
     _record(ctx, made, draft, risk)
-    return {"ok": True, "step": "created", "order": made["order"], "subtotal": orders.amount(draft["subtotal"]),
-            "fee": orders.amount(draft["fee"]), "total": orders.amount(draft["total"]),
-            "days_min": draft["days_min"], "days_max": draft["days_max"], "next": CREATED_NEXT}
+    out = {"ok": True, "step": "created", "order": made["order"], "subtotal": orders.amount(draft["subtotal"])}
+    if draft.get("discounts"):
+        out["discounts"] = _shown_discounts(draft)
+    out.update({"fee": orders.amount(draft["fee"]), "total": orders.amount(draft["total"]),
+                "days_min": draft["days_min"], "days_max": draft["days_max"], "next": CREATED_NEXT})
+    return out
 
 
 def _refuse(feedback):
@@ -299,23 +338,87 @@ def _not_a_yes(answered, ctx):
     return None
 
 
+def quote(args):
+    """The totals for items and payment with the store's offers, and the fee and days when a governorate is
+    given. Nothing is saved and no name or address is needed."""
+    items, kinds, currency, problem = _lines(args["items"], None)
+    if problem:
+        return _refuse(problem)
+    fee, place = None, None
+    if args.get("governorate"):
+        place = delivery.quote(args["governorate"])
+        if not place["ok"]:
+            return _refuse(place["note"])
+        fee = place["fee"]
+    payment = _key(args["payment"]) if args.get("payment") else None
+    got = offers.apply(_offer_lines(items, kinds), payment, offers.current(), fee=fee)
+    out = {"ok": True, "step": "quote", "items": _shown_items(items), "subtotal": orders.amount(got["subtotal"])}
+    if payment:
+        out["payment"] = payment
+    if got["discounts"]:
+        out["discounts"] = [{"offer": d["offer"], "what": d["what"], "discount": orders.amount(d["discount"])}
+                            for d in got["discounts"]]
+    if place is not None:
+        out.update({"fee": orders.amount(got["fee"]), "governorate": place["governorate"],
+                    "days_min": place["days_min"], "days_max": place["days_max"]})
+        if place.get("offer_id"):
+            out["offer_id"] = place["offer_id"]   # the delivery offer that set the fee
+    out.update({"total": orders.amount(got["total"]), "next": QUOTE_NEXT})
+    return out
+
+
 def build(args, ctx):
-    """The order from the arguments and the store and delivery data now: (draft, None) or (None, feedback)."""
+    """The order from the arguments and the store, delivery and offers data now: (draft, None) or (None,
+    feedback)."""
     chat = ctx.chats.get(ctx.chat_id)
     whatsapp = orders.phone_key(chat["customer_id"]) if chat["channel"] == "whatsapp" else ""
     phone = orders.phone_key(args["phone"]) if args.get("phone") else whatsapp
     if not phone:
         return None, "Ask the customer for a phone number for the courier and pass it as phone."
-    catalogue = store.catalogue()
     name = _text(args["name"])
-    lines, currencies = {}, set()
-    for it in args["items"]:
+    items, kinds, currency, problem = _lines(args["items"], name)
+    if problem:
+        return None, problem
+    place = delivery.quote(args["governorate"])
+    if not place["ok"]:
+        return None, place["note"]
+    payment = _key(args["payment"]) if args.get("payment") else None
+    got = offers.apply(_offer_lines(items, kinds), payment, offers.current(), fee=place["fee"])
+    draft = {
+        "items": items, "name": name, "address": _text(args["address"]),
+        "phone": phone, "whatsapp": whatsapp,
+        "governorate": place["governorate"], "area": place["area"],
+        "days_min": place["days_min"], "days_max": place["days_max"],
+        "subtotal": str(got["subtotal"]), "fee": str(got["fee"]), "total": str(got["total"]),
+        "currency": currency,
+    }
+    if payment:
+        draft["payment"] = payment
+    if got["discounts"]:
+        draft["discounts"] = [{"offer": d["offer"], "what": d["what"], "discount": str(d["discount"])}
+                              for d in got["discounts"]]
+    return draft, None
+
+
+def _offer_lines(items, kinds):
+    """The lines offers.apply reads: each item with its product's type from the store data."""
+    return [{**i, **({"type": kinds[i["product"]]} if kinds.get(i["product"]) else {})} for i in items]
+
+
+def _lines(raw_items, name):
+    """(items, {product: type}, currency, None) from the arguments' items and the store data, or
+    (None, None, None, feedback). name None: a quote, where a printing line needs no name to print."""
+    catalogue = store.catalogue()
+    lines, currencies, kinds = {}, set(), {}
+    for it in raw_items:
         item, v, problem = _variant(catalogue, it["product"], it.get("size"), it.get("tier"))
         if problem:
-            return None, problem
+            return None, None, None, problem
         print_name, problem = _print_name(item, it, name)
         if problem:
-            return None, problem
+            return None, None, None, problem
+        if item.get("type"):
+            kinds[item["title"]] = item["type"]
         key = (item["title"], v.get("tier", ""), v.get("size", ""), print_name)
         if key not in lines:
             lines[key] = {"product": item["title"], **({"tier": v["tier"]} if v.get("tier") else {}),
@@ -326,41 +429,43 @@ def build(args, ctx):
         line = lines[key]
         line["quantity"] += it["quantity"]
         if line["quantity"] > MAX_QUANTITY:
-            return None, f"At most {MAX_QUANTITY} of one item. Say that is the most for one order."
+            return None, None, None, f"At most {MAX_QUANTITY} of one item. Say that is the most for one order."
         if v.get("currency"):
             currencies.add(v["currency"])
     if len(currencies) > 1:
-        return None, "The items are priced in different currencies. Order them one at a time."
-    quote = delivery.quote(args["governorate"])
-    if not quote["ok"]:
-        return None, quote["note"]
+        return None, None, None, "The items are priced in different currencies. Order them one at a time."
     items = sorted(lines.values(), key=lambda line: (line["product"], line.get("tier", ""), line["size"],
                                                    line.get("print_name", "")))
-    subtotal = sum((orders.money(line["price"]) * line["quantity"] for line in items), Decimal(0))
-    fee = orders.money(quote["fee"])
-    return {
-        "items": items, "name": name, "address": _text(args["address"]),
-        "phone": phone, "whatsapp": whatsapp,
-        "governorate": quote["governorate"], "area": quote["area"],
-        "days_min": quote["days_min"], "days_max": quote["days_max"],
-        "subtotal": str(subtotal), "fee": str(fee), "total": str(subtotal + fee),
-        "currency": currencies.pop() if currencies else None,
-    }, None
+    return items, kinds, (currencies.pop() if currencies else None), None
+
+
+def _shown_items(items):
+    return [{"product": i["product"], **({"tier": i["tier"]} if i.get("tier") else {}),
+             **({"size": i["size"]} if i["size"] else {}),
+             **({"print_name": i["print_name"]} if i.get("print_name") else {}),
+             "quantity": i["quantity"], "price": orders.amount(i["price"])} for i in items]
+
+
+def _shown_discounts(draft):
+    return [{"offer": d["offer"], "what": d["what"], "discount": orders.amount(d["discount"])}
+            for d in draft.get("discounts") or []]
 
 
 def shown(draft):
-    """The summary the model reads: amounts as numbers, no sku, the phone as Egyptians write it."""
-    return {
-        "items": [{"product": i["product"], **({"tier": i["tier"]} if i.get("tier") else {}),
-                   **({"size": i["size"]} if i["size"] else {}),
-                   **({"print_name": i["print_name"]} if i.get("print_name") else {}),
-                   "quantity": i["quantity"], "price": orders.amount(i["price"])} for i in draft["items"]],
-        "subtotal": orders.amount(draft["subtotal"]), "fee": orders.amount(draft["fee"]),
-        "total": orders.amount(draft["total"]),
+    """The summary the model reads: amounts as numbers, no sku, the phone as Egyptians write it; the payment
+    and each offer's discount when the draft has them."""
+    out = {"items": _shown_items(draft["items"]), "subtotal": orders.amount(draft["subtotal"])}
+    if draft.get("discounts"):
+        out["discounts"] = _shown_discounts(draft)
+    out.update({
+        "fee": orders.amount(draft["fee"]), "total": orders.amount(draft["total"]),
         "name": draft["name"], "phone": orders.local_phone(draft["phone"]),
         "governorate": draft["governorate"], "address": draft["address"],
         "days_min": draft["days_min"], "days_max": draft["days_max"],
-    }
+    })
+    if draft.get("payment"):
+        out["payment"] = draft["payment"]
+    return out
 
 
 def _variant(catalogue, product, size, tier=None):
@@ -407,6 +512,8 @@ def _print_name(item, it, name):
             return None, (f"print_name goes only on a printing line, not on {item['title']}. Put the name on "
                           "the printing line, or leave it out.")
         return "", None
+    if name is None and "print_name" not in it:   # a quote: the name to print does not change the price
+        return "", None
     wanted = _text(it["print_name"]) if "print_name" in it else name
     if not PRINT_MIN <= len(wanted) <= PRINT_MAX:
         return None, (f"The name to print must be {PRINT_MIN} to {PRINT_MAX} characters. Ask the customer which "
@@ -437,6 +544,10 @@ def _log(ctx, outcome, detail):
 
 def _fold(s):
     return " ".join(str(s or "").lower().split())
+
+
+def _key(s):
+    return offers._key(str(s or ""))
 
 
 def _text(s):

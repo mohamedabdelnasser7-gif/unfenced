@@ -464,7 +464,8 @@ def check(reply, customer_text="", tool_results=(), orders=()):
     backdrop = extras_named(reply, extras, items)
     if not backdrop and not products_named(reply, items):
         backdrop = extras_named(customer_text, extras, items)
-    for clause, start, boot, kinds, sentence_boot, sentence in _extra_clauses(text, items, extras, all_tiers):
+    for clause, start, boot, kinds, sentence_boot, sentence, before in _extra_clauses(text, items, extras,
+                                                                                         all_tiers):
         here = extras_named(clause, extras, items)
         # the extra the clause names, else one its sentence names, keeps its price beside an add-on
         # word: "If you add printing to the Elite, it's 400 EGP more" (DECISIONS item 52). An extra
@@ -487,8 +488,18 @@ def check(reply, customer_text="", tool_results=(), orders=()):
         # "Printing on the Vapor 17 Elite is 400 EGP" passes (red team gatefb rounds 1 and 2).
         if _extra_not_held(clause, extras, items, all_tiers, sizes, orders) and not set(amounts) & sums:
             here = []
-        own = _dec(send_check.amount(v["price"]) for e in (here if sentence_boot else here or backdrop)
-                   for v in e.get("variants", []) if "price" in v)
+        # A sentence that names a boot or a tier only after the clause (in a later clause, "It costs 400
+        # EGP, free with an Elite") reads a clause that names no product, no tier and no extra like a
+        # sentence with no boot: the extra named before it in its sentence, else the one the sentence
+        # before names (before). A boot or a tier before the clause keeps the clause to its own extra
+        # (live Sales Arena run 2026-11-04: 3 of 4 losses in 20 matches were this false fail).
+        if not sentence_boot:
+            holds = here or backdrop
+        elif here or boot or _names_boot(sentence[:start], items, extras, all_tiers):
+            holds = here
+        else:
+            holds = extras_named(sentence[:start], extras, items) or before
+        own = _dec(send_check.amount(v["price"]) for e in holds for v in e.get("variants", []) if "price" in v)
         if kinds and not boot:
             ok = own | sums | _dec(fees | from_tools) | {e + f for e in own for f in _dec(fees)}
             if any(d in ok and d not in _dec(fees | from_tools) for d in amounts):
@@ -684,8 +695,13 @@ def _extra_clauses(text, items, extras, all_tiers):
     A clause that names no product (boot or extra) and no tier takes the boots, tiers and kinds of
     the clauses before it in its sentence: in "Vapor Elite, 400 EGP, with your name" the 400 sits
     beside the boot (red team round 2, R2-1). A bracket or a spaced dash cuts a clause too (ASIDE).
-    sentence_boot: the sentence names a boot or a tier."""
+    sentence_boot: the sentence names a boot or a tier. before: the extras the nearest sentence before
+    it that names a product, a tier or an extra names, when that sentence names an extra and no boot
+    and no tier, else none ("Printing is available. It costs 400 EGP, free with an Elite": the 400 is
+    the printing's, live Sales Arena run 2026-11-04). A sentence that names nothing passes it on, as
+    _with_context does for stock; one that names a boot or a tier ends it."""
     out = []
+    before = []
     for sentence in PRICE_SENTENCE.findall(text):
         sentence_boot = bool(tiers_named(sentence, all_tiers) or _boots(products_named(sentence, items), extras))
         seen_boot, seen_kinds = [], []
@@ -699,7 +715,11 @@ def _extra_clauses(text, items, extras, all_tiers):
                 seen_kinds += kinds
             else:
                 boot, kinds = list(seen_boot), list(seen_kinds)
-            out.append((clause, found.start(), boot, kinds, sentence_boot, sentence))
+            out.append((clause, found.start(), boot, kinds, sentence_boot, sentence, before))
+        if sentence_boot:
+            before = []
+        else:
+            before = extras_named(sentence, extras, items) or before
     return out
 
 

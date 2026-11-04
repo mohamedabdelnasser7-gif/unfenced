@@ -27,9 +27,12 @@ ORDER = (LOW, MEDIUM, HIGH)
 DEFAULT = MEDIUM
 # wins needed out of the gate size, and the run's shape (decision 85)
 LEVELS = {
-    LOW: {"wins": 5, "of": 10, "no_failed_checks": False, "rounds": 2, "gate": 10, "cap": 1000, "customers": 20},
-    MEDIUM: {"wins": 7, "of": 10, "no_failed_checks": False, "rounds": 2, "gate": 10, "cap": 1000, "customers": 20},
-    HIGH: {"wins": 16, "of": 20, "no_failed_checks": True, "rounds": 3, "gate": 20, "cap": 1500, "customers": 30},
+    LOW: {"wins": 5, "of": 10, "no_failed_checks": False, "rounds": 2, "matches": 10, "gate": 10, "cap": 1000,
+          "customers": 20},
+    MEDIUM: {"wins": 7, "of": 10, "no_failed_checks": False, "rounds": 2, "matches": 10, "gate": 10, "cap": 1000,
+             "customers": 20},
+    HIGH: {"wins": 16, "of": 20, "no_failed_checks": True, "rounds": 3, "matches": 10, "gate": 20, "cap": 1500,
+           "customers": 30},
 }
 # a name and one plain line each, for the card picker and the Arena tab
 NAMES = {LOW: "Low", MEDIUM: "Medium", HIGH: "High"}
@@ -119,9 +122,9 @@ def needs(level, size=None):
 
 
 def shape(level):
-    """The run's shape at level: rounds, gate, cap and customers (a copy)."""
+    """The run's shape at level: rounds, practice matches a round, gate, cap and customers (a copy)."""
     rule = LEVELS[level if valid(level) else HIGH]
-    return {k: rule[k] for k in ("rounds", "gate", "cap", "customers", "no_failed_checks")}
+    return {k: rule[k] for k in ("rounds", "matches", "gate", "cap", "customers", "no_failed_checks")}
 
 
 def read(folder):

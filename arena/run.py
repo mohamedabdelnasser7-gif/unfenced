@@ -486,10 +486,12 @@ class Arena:
                 m, judged = out
                 one["gate"]["played"] += 1
                 one["gate"]["won"] += judged["won"]
+                if "failed_check" in judged:  # a built agent's verdict marks its safety checks (arena/practice.py)
+                    one["gate"]["failed_checks"] = one["gate"].get("failed_checks", 0) + bool(judged["failed_check"])
                 if not judged["won"]:
                     one["gate"]["lost"].append({"card": m["card"], "why": judged["why"], "quote": judged["quote"]})
             wins = one["gate"]["won"]
-            if wins >= self.trust["wins"]:
+            if self._passed(one):
                 return self._report(rounds, PASSED)
             flat = flat + 1 if best is not None and wins <= best else 0
             best = wins if best is None else max(best, wins)
@@ -497,6 +499,10 @@ class Arena:
                 stopped = STUCK
                 break
         return self._report(rounds, stopped)
+
+    def _passed(self, one):
+        """Did the round pass the gate? Its wins reach the trust level's (arena/practice.py adds its rule)."""
+        return one["gate"]["won"] >= self.trust["wins"]
 
     def replay(self, planned, skipped=None):
         """The replay of real lost chats ([(entry, card, opening)], arena/replay.py plan): each

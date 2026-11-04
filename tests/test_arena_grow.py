@@ -920,6 +920,18 @@ class NightStep(unittest.TestCase):
         self.assertEqual(len(grow.Pool(self.dir, "sales").items), 2)
         self.assertTrue(json.loads((self.dir / run.CALLS_FILE).read_text(encoding="utf-8"))["calls"] == 2)
 
+    def test_the_night_hands_the_study_a_link_with_the_owner_id_of_the_db_folder(self):
+        from reflection import shared
+        self.run_main()
+        self.assertEqual(night.night.call_args.kwargs["shared"].owner, "")  # no owner.json: gives nothing
+        write_plug(self.dir, "sales", owner="acme")
+        write_owner(self.dir, "acme")
+        self.run_main()
+        link = night.night.call_args.kwargs["shared"]
+        self.assertIsInstance(link, shared.Link)
+        self.assertEqual((link.kind, link.owner), ("sales", shared.owner_id(self.dir)))
+        self.assertTrue(link.owner)
+
     def test_with_no_recipe_no_chat_is_read(self):
         rep = self.run_main()
         self.assertTrue(rep["practice"]["stopped"].startswith("no recipe"))

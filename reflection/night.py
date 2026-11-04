@@ -12,7 +12,10 @@ plug and every other plug in the repo (<folder>/plug.json), and runs the engine'
 tagger on the study route (Muse Wonder on the Meta Model API, or Muse Spark Open with
 META_STUDY_ROUTE=open), and the fit check, the adapter and the risk judge on Muse Spark Open
 (reflection/study.py, reflection/judge.py). The other agents' plugs are given, so the study also
-reads their cases and kept lessons. The idea part, on the study route too, gives at most 3
+reads their cases and kept lessons, siblings first, then the shared pool of the agent's kind across
+owners (reflection/shared.py, DECISIONS item 83): lesson patterns seen at 2 or more other owners,
+each on trial only through the agent's eval gate, and this agent's kept lessons given to the pool as
+clean patterns. The idea part, on the study route too, gives at most 3
 ideas a night: lessons with no past cases behind them, each going the normal way to a trial.
 
 N comes from the plug unless --days gives it: twice the longest time the plug says its deciding
@@ -225,7 +228,7 @@ def other_plugs(plug, root=ROOT, db=None):
 
 
 def night(db, plug, *, days=None, until=None, others=None, judge=None, proposer=None, tagger=None, fit=None,
-          adapter=None, ideas=None, exam=None, spotter=None, note_writer=None, practice=None):
+          adapter=None, ideas=None, exam=None, spotter=None, note_writer=None, practice=None, shared=None):
     """Run one night study over [until - days, until). Parts left out are the Meta ones, except
     the idea part: main() gives the Meta one; left out here, the night asks for no ideas, so a
     night run with scripted parts never reaches a model for ideas. exam: makes the gate before a
@@ -235,7 +238,9 @@ def night(db, plug, *, days=None, until=None, others=None, judge=None, proposer=
     over track's parts (engine/handover.py); main() gives the Meta ones; left out, nothing is
     handed over and no line is sorted. practice: the folder of an agent Quick start built; its
     practice matches not in the log yet are written first, as cases the study reads and no trial
-    counts (arena/learn_built.py from_folder); the report counts them as practice_cases.
+    counts (arena/learn_built.py from_folder); the report counts them as practice_cases. shared: the
+    agent's link into the shared pool of its kind (reflection/shared.py Link); main() gives one with
+    the Meta writer; left out, the pool is neither read nor given to.
     The trial check runs first, at until. Returns the study's report, with the runner's own
     window line, the links and the trial check ("trials") added."""
     days = default_days(plug) if days is None else float(days)
@@ -265,7 +270,7 @@ def night(db, plug, *, days=None, until=None, others=None, judge=None, proposer=
             if spotter is not None and note_writer is not None and plug.hands_over else None)
     study = LinkedStudy(db, plug, proposer=proposer or parts.Proposer(), tagger=tagger or parts.Tagger(),
                         fit=fit or parts.FitCheck(), adapter=adapter or parts.Adapter(),
-                        others=others, lessons=lessons, ideas=ideas, hand_over=hand)
+                        others=others, lessons=lessons, ideas=ideas, hand_over=hand, shared=shared)
     rep = study.run(since, until, now=until)
     rep["days"] = days
     rep["parts"]["judge"] = _judge_label(judge)
@@ -467,6 +472,11 @@ def text(rep, plug):
         r = a["read"]
         lines.append(f'  from {a["agent"]}: read {r["cases"]} cases ({r["good"]} good, {r["bad"]} not, '
                      f'{r["pending"]} pending); candidates {len(a["candidates"])}, kept lessons asked {len(a["lessons"])}')
+    if rep.get("shared") is not None:
+        sh = rep["shared"]
+        lines.append(f'  from the shared pool of {plug.kind or plug.agent} agents: {sh["read"]} patterns seen at 2 or '
+                     f'more other owners, {sum(r["lesson_id"] is not None for r in sh["lessons"])} taken on through '
+                     f'the gate; {sum(g["pattern"] is not None for g in sh["given"])} kept lessons given to the pool')
     if rep["unread"]:
         lines.append("  not read, no plug given: " + ", ".join(rep["unread"]))
     lk = rep["links"]
@@ -662,10 +672,21 @@ def main(argv=None, *, until=None):
         now = time.time() if until is None else float(until)
         courier = courier_check(db, plug, now)  # before the study, so the results it brings count tonight
         exam = agent_exam(plug, args.db, folder=Path(args.plug).resolve().parent)
+        from reflection import shared as shared_mod  # the shared pool of this kind across owners (item 83)
+        home = folder if folder is not None else Path(args.db).expanduser().resolve().parent  # as grow.night
+        from arena import run as arena_run  # the writer counts on the Arena's day cap, as in grow.night
+        calls = arena_run.Calls(home / arena_run.CALLS_FILE, arena_run.DEFAULT_CAP)
+        writer = shared_mod.Writer(model=calls.model(model_mod.Model(timeout=parts.TIMEOUT, route=model_mod.OPEN)))
+        try:  # an owner id or shared folder that cannot be read leaves the pool out, not the night
+            link, left_out = shared_mod.Link.for_agent(plug, home, writer, shared_mod.root_for(args.db), db=args.db), None
+        except (shared_mod.Refused, OSError) as e:
+            link, left_out = None, shared_mod.left_out(e)
         rep = night(db, plug, days=args.days, until=now, ideas=parts.Ideas(), exam=exam,
                     spotter=parts.Spotter(), note_writer=parts.NoteWriter(), others=other_plugs(plug, db=args.db),
-                    practice=folder)
+                    practice=folder, shared=link)
         rep["courier"] = courier
+        if left_out:
+            rep["notes"].append(left_out)
     except Refused as e:
         print(f"Not run: {e}.", file=sys.stderr)
         return 2
@@ -687,7 +708,8 @@ def main(argv=None, *, until=None):
     from arena import grow
     try:  # every kind grows its own pool (DECISIONS item 79); a built agent's owner is found from its folder
         rep["practice"] = grow.night(args.db, plug, args.recipe, rep["window"]["since"], rep["window"]["until"],
-                                     folder=folder, own=plug.agent == SALES.agent)
+                                     folder=folder, own=plug.agent == SALES.agent,
+                                     shared_root=shared_mod.root_for(args.db))
     except Exception as e:  # the lessons went in already: the report and its rollback line are still saved
         rep["practice"] = {"kind": grow.kind_of(plug), "stopped": f"failed: {type(e).__name__}"}
     # ---- end of the practice step

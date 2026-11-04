@@ -116,8 +116,8 @@ class TheButton(Base):
         form = page.split(f'action="{pages.REFLECT_PATH}"')[1].split("</form>")[0]
         self.assertIn(f"{mo.REFLECT_BUTTON}</button>", form)
         self.assertIn('name="agent" value="stock_watch"', form)
-        after = page.split(f'action="{pages.REFLECT_PATH}"')[1].split("</form>", 1)[1]
-        self.assertTrue(after.startswith(f'<p class="quiet">{mo.REFLECT_SAID}</p>'))  # the line under it
+        before = page.split(f'action="{pages.REFLECT_PATH}"')[0]
+        self.assertTrue(before.endswith(f'<p class="quiet">{mo.REFLECT_SAID}</p><form method="post" '))  # the line, then the button (layout 2026-11-05)
         self.assertIn('data-live="reflect"', page)
         arena = self.page(query=ARENA_TAB)
         self.assertNotIn(f'action="{pages.REFLECT_PATH}"', arena)

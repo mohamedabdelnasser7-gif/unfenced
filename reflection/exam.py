@@ -100,6 +100,10 @@ SENTENCE = re.compile(r"[.!?؟\n]+")
 EXACT = "="
 SCOPE_WORDS = 45  # words in a reply that declines, at most (words)
 FOLD = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ؤ": "و", "ئ": "ي", "ة": "ه", "ى": "ي", "ـ": None})
+# Cyrillic letters that look like Latin ones, read as those (red team scopeguard2 r3, item 7): "w\u0430ves" is waves.
+LOOK_ALIKE = str.maketrans("\u0430\u0435\u043e\u0440\u0441\u0445\u0443\u0456\u0458\u0455"
+                           "\u0410\u0412\u0415\u041a\u041c\u041d\u041e\u0420\u0421\u0422\u0425\u0406\u0408\u0405",
+                           "aeopcxyijsABEKMHOPCTXIJS")
 TATWEEL = "\u0640"
 TASHKEEL = re.compile("[\u064b-\u0652\u0670]")
 # Arabic endings joined to a word: its, their, your, my, our, the plural, the dual (بصلتين). ة (folded ه) turns
@@ -459,10 +463,11 @@ def _plain(text, marks=""):
     """Text as off_scope reads it: its letters bare (_letters: compatibility forms, no accents); each hidden mark
     (_hidden) taken out, so one never splits a word, or with marks=" " read as a space, so marks between words
     never join them; hyphens and underscores read as spaces; Arabic folded (one alef, ه for ة, ي for ى, no
-    hamza seat, short vowel or tatweel). Red team scopeguard2 r2, item 5."""
+    hamza seat, short vowel or tatweel); Cyrillic look alikes as Latin letters (LOOK_ALIKE). Red team
+    scopeguard2 r2, item 5."""
     text = _letters(text, marks)
     text = re.sub(r"[-_\u2010-\u2015\u2212]+", " ", text)
-    return TASHKEEL.sub("", text.translate(FOLD))
+    return TASHKEEL.sub("", text.translate(FOLD).translate(LOOK_ALIKE))
 
 
 def _latin_form(token, exact=False):

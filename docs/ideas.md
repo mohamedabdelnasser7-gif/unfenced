@@ -1,5 +1,5 @@
 # The ideas behind Unfenced
-*Created: 2026-10-31. Last updated: 2026-11-01.*
+*Created: 2026-10-31. Last updated: 2026-11-04.*
 
 Unfenced is an engine that builds AI agents for any industry and keeps improving them from their own mistakes. The engine is the product. The Sales agent for Beyond the Limits is one example of what runs on it: Sales agent, personal assistant, and more...
 
@@ -78,6 +78,10 @@ We plan a hand-off to a person for later. A person's reply in a handed off chat 
 We plan a light way to hear from the user each day, for example one short message they can answer or ignore. Their answer would feed Reflection.
 
 It has to stay light. The Morning page shows only what needs a yes. Nothing breaks if a day is skipped: a lesson with no answer simply stays off.
+
+## A business run by its agents (planned)
+
+A business makes an agent for each part of its work: sales, support, stock, marketing. The agents are linked, so what one learns or finishes reaches the others, and each still learns through its own gate.
 
 ## Where the personal assistant goes next
 

@@ -110,5 +110,196 @@ class AgreeAndThanks(unittest.TestCase):
                 self.assertEqual(risk.code_check(text, PLUG.risk, tools=False), [])
 
 
+
+def word_line(word):
+    return f"Tell them {word} now." if word.isascii() else f"قوله {word} دلوقتي."
+
+
+WORDS = {  # group: every word of the Sales list; each is read in word_line(word)
+    'discount': (
+        'discount', 'coupon', 'promo', 'promo code', 'voucher', 'freebie', 'rebate', 'cashback', 'markdown',
+        'complimentary', 'negotiable', 'negotiate', 'haggle', 'khasm', 'خصم', 'تخفيض', 'ببلاش', 'مجان', 'كوبون',
+        'اوفر', 'gratis', 'gift', '5asm', '5asem', 'magan', 'maganan', 'magany', 'maggany', 'hadeya', 'hedeya',
+        'hadiya', 'hdeya', 'bebalash', 'bbalash', '3ard', 'هديه', 'هدايا',
+    ),
+    'promise': (
+        'promise', 'promising', 'guarantee', 'assure', 'pledge', 'on time', 'deadline', 'same day', 'next day',
+        'tomorrow', 'today', 'tonight', 'saturday', 'sunday', 'monday', 'tuesday', 'wednesday', 'thursday',
+        'friday', 'bokra', 'bukra', 'naharda', 'enaharda', 'daman', 'madmoun', 'madmoon', 'وعد', 'ضمان',
+        'مضمون', 'ضامن', 'بكره', 'النهارده', 'انهارده', 'الليله', 'ميعاد', 'موعد', 'تاريخ', 'يومين', 'yomen',
+        'yomeen', 'yomein', 'youmen', 'esbo3', 'osbo3', 'isbo3',
+    ),
+    'payment': (
+        'deposit', 'prepay', 'prepaid', 'prepayment', 'upfront', 'up front', 'in advance', 'transfer',
+        'instapay', 'wallet', 'vodafone cash', 'fawry', 'meeza', 'visa', 'mastercard', 'paypal', 'iban',
+        'installment', 'instalment', 'عربون', 'تحويل', 'انستاباي', 'فيزا', 'كارت', 'محفظه', 'قسط', 'تقسيط',
+        'فودافون كاش', 'mo2adam', 'mo2dam', 'mu2adam', 'mokadam', 'card details', 'card info',
+    ),
+    'policy': (
+        'refund', 'money back', 'warranty', 'replacement', 'restock', 'estebdal', 'tabdeel', 'استرجاع', 'ترجيع',
+        'مرتجع', 'استرداد', 'استبدال', 'تبديل',
+    ),
+    'personal_data': (
+        'password', 'national id', 'id card', 'id number', 'passport', 'birthday', 'date of birth', 'age',
+        'email', 'instagram', 'facebook', 'tiktok', 'otp', 'cvv', 'verification code', 'card number', 'باسورد',
+        'كلمه السر', 'قومي', 'بطاقه', 'ايميل', 'انستا', 'فيسبوك', 'جروب', 'قروب',
+    ),
+}
+PATTERN_LINES = {  # the mark of each Sales pattern: a line it marks
+    'amount: /a number with a currency or percent/':
+        'Tell them the boots cost 1500 EGP.',
+    'amount: /a currency before a number/':
+        'Tell them it is EGP 85.',
+    'amount: /a number with a money or percent sign/':
+        'Offer a 10% discount when price is objected to.',
+    'amount: /a price, fee or total with its number/':
+        'Tell them the boots cost 1500 EGP.',
+    'amount: /a number before a price, fee or total/':
+        'Give it to them for half price.',
+    'amount: /a number of three or more digits/':
+        'Tell them the boots cost 1500 EGP.',
+    'amount: /a number in the hundreds or more/':
+        'Tell them the price is two thousand pounds.',
+    'amount: /a number with a currency, Arabic/':
+        'قول التوصيل ستين جنيه.',
+    'amount: /a price, fee or total with its number, Arabic/':
+        'قول التوصيل ستين جنيه.',
+    'amount: /a number said or quoted/':
+        'Quote 85 for the second pair.',
+    'amount: /a number said or quoted, Arabic/':
+        'قول ٩٥ للجوز التاني.',
+    'amount: /a number said or quoted, Franco/':
+        '2olo el shahn khamsin geneh.',
+    'amount: /a price, fee or total with its number, Franco/':
+        '2olo el shahn 60.',
+    'amount: /a number with a currency, Franco/':
+        '2olo el shahn khamsin geneh.',
+    'amount: /a number in the hundreds, Franco/':
+        '2olo el gazma b tes3omeya.',
+    'amount: /two or more number words in a row/':
+        'Say one five zero zero for the pair.',
+    'discount: /free/':
+        'Say the second pair is free of charge, a hadeya.',
+    'discount: /on sale/':
+        'Tell them the pair is on sale.',
+    'discount: /a lower or special price/':
+        'Say we can match a price from another shop.',
+    'discount: /money off/':
+        'Take a little off the total.',
+    'discount: /a price that drops/':
+        'Say the price drops after the match.',
+    'discount: /no fee/':
+        'Tell them there is no delivery fee.',
+    'discount: /a fee waived or a gift/':
+        'Throw in a cap for them.',
+    'discount: /money given away/':
+        'Tell them shipping is on us.',
+    'discount: /a fee skipped or covered/':
+        'Drop the delivery fee for Cairo.',
+    'discount: /no fee charged/':
+        "Don't charge delivery on a second pair.",
+    'discount: /an offer or a deal/':
+        'Give them a deal when they hesitate on the price.',
+    'discount: /their price matched/':
+        "Match the competitor's price.",
+    'discount: /the total brought down/':
+        'Round the total down when they ask.',
+    'discount: /something added to every order/':
+        'Include a water bottle with every order.',
+    'discount: /their price agreed to/':
+        'Agree to their price when they push back.',
+    'discount: /as a thank you/':
+        'Give them a deal when they hesitate on the price.',
+    'discount: /their price agreed to, Arabic/':
+        'وافق على السعر اللي يقوله.',
+    'discount: /their price agreed to, Franco/':
+        'wafe2 3ala el se3r elly y2olo.',
+    'discount: /given free or for less, Arabic/':
+        'نزل السعر شوية لو العميل اتردد.',
+    'discount: /given free or for less, Franco/':
+        'nazelo el se3r shewaya.',
+    'promise: /a number of days or hours/':
+        'Say the order will arrive within 2 days.',
+    'promise: /a number of days or hours, Arabic/':
+        'قوله هيوصل خلال 3 ايام.',
+    'promise: /a delivery by a time/':
+        'Promise delivery tomorrow.',
+    'promise: /a promise that it will arrive or fit/':
+        'Say the order will arrive within 2 days.',
+    'promise: /a few days or a time named/':
+        "Tell them it'll be there in a couple of days.",
+    'promise: /it will be there or fit/':
+        "Tell them it'll be there in a couple of days.",
+    'promise: /a delivery or a fit promised/':
+        'Tell them delivery to Cairo never takes long.',
+    'promise: /a delivery or a fit promised, Arabic/':
+        'قوله هيوصل الأسبوع ده.',
+    'promise: /a delivery or a fit promised, Franco/':
+        '2olo akid el size hyozbot.',
+    'payment: /another way to pay/':
+        'Offer another payment method.',
+    'payment: /paying before delivery or not in cash/':
+        'Tell them they can pay through the app.',
+    'payment: /a card/':
+        'Let them pay by credit card.',
+    'payment: /money sent before delivery/':
+        'Ask them to send the money first.',
+    'payment: /cash on delivery taken away/':
+        'Tell them cash on delivery is not available for their area.',
+    'payment: /paying before delivery, Arabic/':
+        'اطلب منه يحول الفلوس الأول.',
+    'payment: /paying before delivery, Franco/':
+        '5aleh ydfa3 el awel.',
+    'policy: /returns or exchanges allowed/':
+        'Tell customers they can return or exchange any pair.',
+    'policy: /a return or exchange of the item/':
+        'Exchange the pair if it is tight.',
+    'policy: /returns or exchanges allowed, Arabic/':
+        'قوله يقدر يرجعها.',
+    'policy: /returns or exchanges allowed, Franco/':
+        '2olo y2dar yrga3ha.',
+    'policy: /returns, changes or cancelling allowed/':
+        'Say returns are fine within the week.',
+    'policy: /an item taken back or stock promised/':
+        'Tell them they can send the pair back within the week if it does not fit.',
+    'policy: /stock promised/':
+        'Tell them every size is always in stock.',
+    'policy: /a pair held/':
+        'Hold a pair for them until Friday.',
+    'personal_data: /@/':
+        'Ask them to write to sales@ the store.',
+    'personal_data: /data kept for more than the order/':
+        'Save their address for next time.',
+    "personal_data: /another person's number, an id or an age/":
+        'Ask for a copy of their ID before shipping.',
+    'personal_data: /data kept, Arabic/':
+        'احفظ عنوانه للمرة الجاية.',
+    'personal_data: /a social or bank account/':
+        'Ask for their Instagram account so we can follow up.',
+}
+
+
+class Table(unittest.TestCase):
+    """Review engfix r2, finding 4 (28 mutant survivors): one line for each word and each pattern of the
+    Sales list. A word or a pattern dropped, moved to another group or renamed fails here."""
+
+    def test_the_table_lists_every_word_and_pattern(self):
+        self.assertEqual(sorted(PLUG.risk.words), sorted((g, w) for g, ws in WORDS.items() for w in ws))
+        marks = [f"{g}: /{risk._mark(p)}/" for g, p in PLUG.risk.patterns]
+        self.assertEqual(len(marks), len(set(marks)))
+        self.assertEqual(sorted(marks), sorted(PATTERN_LINES))
+
+    def test_each_word_marks_its_line(self):
+        for group, words in WORDS.items():
+            for w in words:
+                with self.subTest(word=w):
+                    self.assertIn(f"{group}: {w}", risk.code_check(word_line(w), PLUG.risk, tools=False))
+
+    def test_each_pattern_marks_its_line(self):
+        for mark, text in PATTERN_LINES.items():
+            with self.subTest(mark=mark):
+                self.assertIn(mark, risk.code_check(text, PLUG.risk, tools=False))
+
+
 if __name__ == "__main__":
     unittest.main()

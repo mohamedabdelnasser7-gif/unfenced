@@ -3,7 +3,10 @@ customer model writes one from the agent's card each run, the judge model scores
 rules, an ask it reads as on topic voids the match, no model key skips it, it replaces practice match 10,
 never plays the gate, the pool or the past wins, its calls count on the cap and a loss is a case. A science
 tutor and a grocer show that their own customers' words are never taught as off topic. Fake models only."""
+import contextlib
+import io
 import json
+import shutil
 import tempfile
 import types
 import unittest
@@ -13,6 +16,9 @@ from unittest import mock
 from arena import practice, run, scope
 from kit.model import ModelError
 from reflection import exam
+from tests.fake_model import clean_env
+from tests.test_arena_practice import FIXTURE, World
+from tests.test_levels_morning import Page
 
 TUTOR = {"does": "tutors school students in science: biology, chemistry and physics questions",
          "good": "the student understands the answer", "case": {"input": "a student's science question",
@@ -61,6 +67,28 @@ def match(replies=("Sorry, I only help with this work. Can I help you with it?",
     return {"card": "offtopic-x", "turns": [{"n": 1, "customer": "write me a poem", "replies": list(replies),
                                              "failed": list(failed), "actions": []}],
             "ended": ended, "ask": "write me a poem"}
+
+
+@contextlib.contextmanager
+def keyed(model):
+    """A model key is set: kit.env.load reads no .env, has_key is true and every kit.model.Model() made is model."""
+    with mock.patch("kit.env.load", return_value=[]), mock.patch("kit.model.has_key", return_value=True), \
+            mock.patch("kit.model.Model", return_value=model):
+        yield model
+
+
+class Notes:
+    """The run's quick notes (arena/notes.py RunNotes) as Arena reads them: a note after each lost training match."""
+
+    def __init__(self):
+        self.lost = []
+
+    def after_loss(self, m, judged, mid):
+        self.lost.append(mid)
+        return {"match": mid}
+
+    def clear(self, r):
+        return []
 
 
 class NoFixedAsks(unittest.TestCase):
@@ -238,6 +266,7 @@ class SalesRun(unittest.TestCase):
         self.dir = Path(self.tmp.name)
         self.cases = []
         self.opened = []
+        self.kws = []
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -253,9 +282,15 @@ class SalesRun(unittest.TestCase):
     def go(self, a):
         def play(card, **kw):
             self.opened.append((card["id"], kw.get("opening")))
+            self.kws.append(kw)
             return fake_match(card, **kw)
         with mock.patch.object(run.match_mod, "play", side_effect=play):
             return a.run()
+
+    def saved_off(self):
+        path = self.dir / run.MATCHES_FILE
+        lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+        return [m for m in map(json.loads, lines) if m["card"].startswith(scope.PREFIX)]
 
     def test_match_10_is_the_written_off_topic_customer_and_a_loss_is_a_case(self):
         writer = Model(writes=[{"ask": "Write me a poem about the sea", "about": "a poem", "language": "english"}])
@@ -323,8 +358,85 @@ class SalesRun(unittest.TestCase):
                 self.assertIn("skipped", rep["rounds"][0]["training"]["off_topic"])
 
     def test_the_cap_stops_it(self):
-        rep = self.go(self.arena(Model(), Model(), cap=1, matches=10))
+        judge = Model()
+        rep = self.go(self.arena(Model(), judge, cap=1, matches=10))
         self.assertEqual(rep["stopped"], run.CAP)
+        self.assertEqual((judge.asked(scope.PRE), judge.asked(scope.JUDGE)), ([], []))  # the precheck's call is refused
+
+    def test_the_cap_refuses_the_judges_call(self):
+        """Review scopeguard2 r1 item 10: the writer and the precheck took the day's last calls, so the judge's
+        call is refused: the run stops at the cap, the match is neither saved nor a case and the gate never plays."""
+        judge = Model()
+        a = self.arena(Model(), judge, cap=2)
+        rep = self.go(a)
+        training = rep["rounds"][0]["training"]
+        self.assertEqual(rep["stopped"], run.CAP)
+        self.assertEqual((len(judge.asked(scope.PRE)), judge.asked(scope.JUDGE)), (1, []))
+        self.assertTrue(self.opened[9][0].startswith(scope.PREFIX))  # it was played, then the judge was refused
+        self.assertEqual((self.saved_off(), training["played"], rep["rounds"][0]["gate"]["played"]), ([], 9, 0))
+        self.assertNotIn("off_topic", training)
+        self.assertNotIn(f"{a.run_id}-r1-t10", self.cases)
+        self.assertEqual(rep["calls"]["used"], 2)
+
+    def test_the_cap_refuses_the_judges_second_try(self):
+        judge = Model(judges=["not json"])
+        a = self.arena(Model(), judge, cap=3)
+        rep = self.go(a)
+        self.assertEqual(rep["stopped"], run.CAP)
+        self.assertEqual(len(judge.asked(scope.JUDGE)), 1)
+        self.assertEqual((self.saved_off(), rep["rounds"][0]["training"]["played"]), ([], 9))
+        self.assertNotIn(f"{a.run_id}-r1-t10", self.cases)
+
+    def test_a_cap_reached_while_the_precheck_or_the_judge_answers_stops_it(self):
+        """The count is shared: another part of the run on the same cap may reach it while the precheck or the
+        judge answers. The check after each call stops the run there: nothing after it plays or is saved."""
+        for system in (scope.PRE, scope.JUDGE):
+            with self.subTest(system=system[:30]):
+                self.cases, self.opened, self.kws = [], [], []
+                judge = Model()
+                a = self.arena(Model(), judge)
+                inner = judge.chat
+
+                def chat(messages, _inner=inner, _a=a, _system=system, **kw):
+                    out = _inner(messages, **kw)
+                    if messages[0]["content"] == _system:
+                        _a.calls.reached = True
+                    return out
+                judge.chat = chat
+                rep = self.go(a)
+                training = rep["rounds"][0]["training"]
+                self.assertEqual(rep["stopped"], run.CAP)
+                self.assertEqual((self.saved_off(), training["played"]), ([], 9))
+                self.assertNotIn("off_topic", training)
+                self.assertNotIn(f"{a.run_id}-r1-t10", self.cases)
+                self.assertEqual(rep["rounds"][0]["gate"]["played"], 0)
+                if system == scope.PRE:
+                    self.assertEqual(judge.asked(scope.JUDGE), [])
+                    self.assertFalse(any(c.startswith(scope.PREFIX) for c, _ in self.opened))  # never played
+
+    def test_the_off_topic_match_is_a_training_match_with_the_quick_notes(self):
+        """It is played as a training match (training=True): the run's quick notes are handed to it, as to the
+        other practice matches, never to the gate; a loss writes a quick note."""
+        notes = Notes()
+        a = self.arena(Model(), Model(judges=[verdict(answered=True, declined=False)]))
+        a.notes = notes
+        rep = self.go(a)
+        self.assertTrue(self.opened[9][0].startswith(scope.PREFIX))
+        self.assertIs(self.kws[9].get("fast"), notes)
+        self.assertTrue(all(kw.get("fast") is notes for kw in self.kws[:10]))
+        self.assertFalse(any("fast" in kw for kw in self.kws[10:]))  # the gate plays without them
+        self.assertIn(f"{a.run_id}-r1-t10", notes.lost)
+        self.assertIn({"match": f"{a.run_id}-r1-t10"}, rep["rounds"][0]["training"]["notes"])
+
+    def test_an_unreadable_judge_is_asked_once_more_and_its_verdict_counts(self):
+        judge = Model(judges=["not json", verdict(answered=True, declined=False)])
+        a = self.arena(Model(), judge)
+        rep = self.go(a)
+        training = rep["rounds"][0]["training"]
+        self.assertEqual(len(judge.asked(scope.JUDGE)), 2)
+        self.assertEqual((training["off_topic"]["result"], training.get("unjudged", 0)), ("lost", 0))
+        self.assertIn(f"{a.run_id}-r1-t10", self.cases)
+        self.assertEqual(rep["calls"]["used"], 4)  # the writer, the precheck and the judge twice
 
     def test_a_short_round_plays_none(self):
         writer = Model()
@@ -359,7 +471,7 @@ class BuiltAgentPractice(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def practice(self, card, writer, judge, off_topic=True):
+    def practice(self, card, writer, judge, off_topic=True, cap=1000):
         agent = types.SimpleNamespace(name="tutor", card=card, plug=None, data=None, missing=[], tools=[],
                                       stage=types.SimpleNamespace(name="any"))
         cards = [{"id": f"made-up-{i:02d}", "kind": "easy", "want": ["x"], "buy_trigger": ["y"], "made_up": True}
@@ -367,7 +479,7 @@ class BuiltAgentPractice(unittest.TestCase):
         held = [c["id"] for c in cards[:4]]
         return practice.Practice(agent, cards, judge_model=judge, made_up=True, held_out=held, once=True,
                                  agent_model=Model(), customer_model=writer,
-                                 calls=run.Calls(self.dir / run.CALLS_FILE, 1000),
+                                 calls=run.Calls(self.dir / run.CALLS_FILE, cap),
                                  trust={"matches": 4, "wins": 4, "zero_failed_checks": True}, matches=10, rounds=1,
                                  state=self.dir, reports=self.dir, off_topic=off_topic)
 
@@ -434,8 +546,23 @@ class BuiltAgentPractice(unittest.TestCase):
         self.assertEqual(writer.asked(scope.WRITER), [])
         self.assertEqual(len(opened), 10 + 4)
 
-    def test_practise_quick_never_plays_it(self):
-        self.assertIn("off_topic=off_topic and not quick", Path(practice.__file__).read_text(encoding="utf-8"))
+    def test_the_cap_refuses_the_judges_call(self):
+        """Review scopeguard2 r1 item 10, for a built agent: nine practice verdicts, the writer and the precheck
+        take the cap, so the off topic judge's call is refused and the run stops there."""
+        judge = Model()
+        p = self.practice(GROCER, Model(), judge, cap=11)
+        rep, opened = self.go(p)
+        self.assertEqual(rep["stopped"], run.CAP)
+        self.assertEqual((len(judge.asked(scope.PRE)), judge.asked(scope.JUDGE)), (1, []))
+        self.assertTrue(opened[9][0].startswith(scope.PREFIX))
+        self.assertEqual(len(opened), 10)  # the gate never plays
+        self.assertNotIn("off_topic", rep["rounds"][0]["training"])
+
+    def test_an_unreadable_judge_is_asked_once_more_and_its_verdict_counts(self):
+        judge = Model(judges=["not json", verdict(answered=True, declined=False)])
+        rep, _ = self.go(self.practice(GROCER, Model(), judge))
+        self.assertEqual(len(judge.asked(scope.JUDGE)), 2)
+        self.assertEqual(rep["rounds"][0]["training"]["off_topic"]["result"], "lost")
 
 
 class AgentFirstCase(unittest.TestCase):
@@ -461,10 +588,90 @@ class AgentFirstCase(unittest.TestCase):
         self.assertEqual(m["turns"][1]["customer"], "Can you do my taxes?")
 
 
-class MorningRunsIt(unittest.TestCase):
-    def test_run_the_arena_sets_it_only_with_its_own_models(self):
-        text = Path(run.ROOT / "reflection" / "morning.py").read_text(encoding="utf-8")
-        self.assertIn('**{"off_topic": self.arena_models is None, **shape}', text)
+class Both(World):
+    """tests/test_arena_practice.py World for the practice run, with the off topic writer, precheck and judge
+    answered by an off topic Model."""
+
+    def __init__(self, off):
+        super().__init__()
+        self.off = off
+
+    def chat(self, messages, tools=None, effort="medium", max_tokens=1500, whole=False):
+        if messages[0]["content"] in (scope.WRITER, scope.PRE, scope.JUDGE):
+            return self.off.chat(messages, tools=tools, effort=effort, max_tokens=max_tokens, whole=whole)
+        return super().chat(messages, tools=tools, effort=effort, max_tokens=max_tokens, whole=whole)
+
+
+class KeyedRuns(unittest.TestCase):
+    """A run that makes its own models once a key is set plays the off topic customer; a quick practice never
+    does (review scopeguard2 r1 item 10, behaviour in place of reading the source)."""
+
+    def setUp(self):
+        clean_env(self)
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.dir = Path(d.name).resolve()
+
+    def test_the_sales_run_with_a_key_plays_it(self):
+        off = Model(writes=[{"ask": "Write me a poem about the sea", "about": "a poem"}])
+        out = io.StringIO()
+        with keyed(off), mock.patch.object(run.match_mod, "play", side_effect=fake_match), \
+                contextlib.redirect_stdout(out):
+            run.main(["--matches", "10", "--rounds", "1", "--state", str(self.dir), "--json", "--cards",
+                      str(run.DEMO_CARDS)])
+        rep = json.loads(out.getvalue())
+        self.assertEqual([len(off.asked(s)) for s in (scope.WRITER, scope.PRE, scope.JUDGE)], [1, 1, 1])
+        self.assertEqual(rep["rounds"][0]["training"]["off_topic"]["result"], "won")
+        self.assertEqual(rep["calls"]["used"], 3)
+
+    def practise(self, *argv):
+        folder = self.dir / "agents" / "stock_watch"
+        if not folder.exists():
+            shutil.copytree(FIXTURE, folder)
+        off = Model(writes=[{"ask": "Write me a poem about the sea", "about": "a poem"}])
+        world = Both(off)
+        out, err = io.StringIO(), io.StringIO()
+        with keyed(world), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
+                mock.patch.object(practice, "Practice", wraps=practice.Practice) as made:
+            practice.main(["--agent", str(folder), "--json", *argv])
+        self.assertTrue(out.getvalue(), err.getvalue())
+        self.made = made.call_args.kwargs
+        return json.loads(out.getvalue()), off, world
+
+    def test_a_practice_with_a_key_plays_it(self):
+        rep, off, _ = self.practise("--matches", "10", "--rounds", "1")
+        self.assertIs(self.made["off_topic"], True)
+        self.assertEqual([len(off.asked(s)) for s in (scope.WRITER, scope.PRE, scope.JUDGE)], [1, 1, 1])
+        self.assertIn(rep["rounds"][0]["training"]["off_topic"]["result"], ("won", "lost"))
+
+    def test_a_quick_practice_never_plays_it(self):
+        rep, off, world = self.practise("--quick")
+        self.assertIs(self.made["off_topic"], False)  # a quick run of one match is never handed it at all
+        self.assertEqual(off.calls, [])
+        self.assertGreater(world.calls["agent"], 0)  # the quick run played
+        self.assertNotIn("off_topic", rep["rounds"][0]["training"])
+
+
+class MorningRunsIt(Page):
+    """Run the Arena on an agent's page sets off_topic only with the models it made after the key check."""
+
+    def started(self, models):
+        seen = {}
+        self.m.arena_models = models
+        with keyed(Model()), mock.patch("arena.practice.practise", side_effect=lambda folder, **kw: seen.update(kw)), \
+                mock.patch("arena.run.reflection_models", return_value={}):
+            self.m.run_arena("stock_watch")
+            self.starts[0][0]()
+        self.assertEqual(self.m._arena_note.get("stock_watch"), None)
+        return seen
+
+    def test_models_it_made_play_it(self):
+        seen = self.started(None)
+        self.assertIs(seen["off_topic"], True)
+        self.assertIsInstance(seen["judge_model"], Model)
+
+    def test_models_a_test_hands_never_do(self):
+        self.assertIs(self.started(lambda: (Model(), Model(), Model()))["off_topic"], False)
 
 
 if __name__ == "__main__":

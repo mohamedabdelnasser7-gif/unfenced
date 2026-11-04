@@ -342,6 +342,8 @@ class PoolTest(unittest.TestCase):
         self.assertEqual(len(shared.Pool("support", self.root).shared(shared.LESSON)), 1)
         cases = {
             "an owner added by hand": lambda d: d["patterns"][0]["owners"].append("f" * 48),
+            "a seal copied to a new owner hash": lambda d: d["patterns"][0]["owners"].append(
+                "e" * 32 + d["patterns"][0]["owners"][0][32:]),  # the seal covers the owner (E07)
             "an owner moved from another pattern": lambda d: d["patterns"][0]["owners"].__setitem__(
                 1, d["patterns"][1]["owners"][1]),
             "the words changed": lambda d: d["patterns"][0].__setitem__("text", NEAR_EN),

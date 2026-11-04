@@ -1,0 +1,47 @@
+{
+ "id": "persona-02",
+ "worry": "meals will repeat too often",
+ "unwinnable": false,
+ "why_unwinnable": null,
+ "want": [
+  "7 vegetarian dinners for 2 adults",
+  "healthy balanced variety no meat or fish",
+  "easy recipes with ingredients",
+  "complete grocery list sorted by category"
+ ],
+ "buy_trigger": [
+  "gets 7 different vegetarian recipes",
+  "grocery list has everything and nothing extra",
+  "menu covers the whole coming week"
+ ],
+ "patience": {
+  "median": 3.0,
+  "most": 3
+ },
+ "style": {
+  "length": {
+   "medium": 1.0
+  },
+  "language": {
+   "english": 1.0
+  },
+  "voice_notes": 0.0,
+  "opening": {
+   "request for vegetarian week plan": 1.0
+  }
+ },
+ "chats": 0,
+ "won": 0,
+ "lost": 0,
+ "examples": [
+  "We eat eggs and dairy but no meat/fish",
+  "Can you keep it simple not fancy?"
+ ],
+ "share": 0.167,
+ "arena_weight": 0.167,
+ "made_up": true,
+ "kind": "easy",
+ "agent": "family_dinner_planner",
+ "from_card": "cf12f3b828f44fecb55d85cb4d8b96f742203ccdb8b19f9446ca1bbea4427d80",
+ "input": "Hello, need a dinner plan for next week for 2 adults. We are vegetarian - we eat dairy and eggs but no meat, chicken or fish. Looking for 7 balanced dinners, not too fancy, with recipes and a grouped grocery list (produce, dairy, pantry etc) so we can shop once. Thank you!"
+}

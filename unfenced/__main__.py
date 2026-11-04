@@ -7,6 +7,8 @@
 Run it from the repo's root folder. With no --db, --demo-days or --html and no database at data/ascent.db
 yet, it makes that database empty first, so the page opens on a fresh clone; the Sales agent writes to the
 same file once it runs. A database named with --db is never made here: the page refuses one that is not there.
+On that default database it also copies the example agents in examples/agents/ into data/agents/, each once
+and never over an agent of the same name (reflection/examples.py).
 """
 import sys
 from pathlib import Path
@@ -36,6 +38,10 @@ def main(argv=None):
         path.parent.mkdir(parents=True, exist_ok=True)
         Db(str(path)).close()
         print(f"No database yet, so an empty one was made at {path}. Build an agent on New agent to start.")
+    if _own_database(argv) and path.is_file():
+        from reflection import examples
+        for name in examples.install(path, {p.agent for p in morning.repo_plugs()}):
+            print(f"Added the example agent {name} to Agents. Like every agent, it starts with zero lessons.")
     return morning.main(argv)
 
 

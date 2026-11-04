@@ -1,0 +1,212 @@
+{
+ "agent": "family_dinner_planner",
+ "about": "Plans the week's family dinners and makes a clear grocery list for them.",
+ "case": "A request from a person to plan dinners for the coming week producing a weekly dinner menu with recipes and a grouped grocery list ending when the menu and grocery list are shared.",
+ "fields": [
+  "personal",
+  "family"
+ ],
+ "stages": [
+  "planning"
+ ],
+ "actions": {
+  "ask_profile": "Ask for family size and ages and food allergies or restrictions when not already known.",
+  "ask_preferences": "Ask for foods liked and avoided and weekly budget when not already known.",
+  "ask_time": "Ask for cooking time available on weekdays when not already known.",
+  "plan_menu": "Create a varied balanced weekly dinner menu with recipes that fits the family details and preferences.",
+  "make_list": "Make a grouped grocery list that exactly matches the ingredients needed for the planned menu.",
+  "share_plan": "Share the completed menu and grocery list with the person as the final output."
+ },
+ "results": {
+  "profile_asked": {
+   "speed": "fast",
+   "after": "ask_profile",
+   "about": "Asked for family size ages and allergies or restrictions."
+  },
+  "preferences_asked": {
+   "speed": "fast",
+   "after": "ask_preferences",
+   "about": "Asked for liked and avoided foods and budget."
+  },
+  "time_asked": {
+   "speed": "fast",
+   "after": "ask_time",
+   "about": "Asked for weekday cooking time available."
+  },
+  "menu_created": {
+   "speed": "fast",
+   "after": "plan_menu",
+   "about": "A weekly dinner menu with recipes was created."
+  },
+  "list_created": {
+   "speed": "fast",
+   "after": "make_list",
+   "about": "A grouped grocery list for the menu was created."
+  },
+  "shared": {
+   "speed": "fast",
+   "after": "share_plan",
+   "about": "The menu and grocery list were shared with the person."
+  },
+  "plan_good": {
+   "speed": "fast",
+   "about": "A week of varied balanced dinners that fit the family and a complete grocery list with nothing missing was shared."
+  },
+  "plan_bad": {
+   "speed": "fast",
+   "about": "Meals repeat too often or ignore food needs and the grocery list misses ingredients or adds extras."
+  },
+  "allergy_violation": {
+   "speed": "fast",
+   "about": "A suggested meal ignored a stated allergy or restriction."
+  },
+  "private_shared_outside": {
+   "speed": "fast",
+   "about": "Family details were shared outside the plan."
+  }
+ },
+ "causes": {
+  "info_missing": "Family did not provide size allergies or preferences before planning.",
+  "request_changed": "Person changed likes budget or time after the plan was shared.",
+  "store_variation": "Store availability or sizing caused a mismatch in the grocery list."
+ },
+ "source": {
+  "about": "The person who requested the weekly dinner plan. One case is one weekly request.",
+  "known_by": "case"
+ },
+ "harm": {
+  "results": [
+   "allergy_violation",
+   "plan_bad",
+   "private_shared_outside"
+  ],
+  "about": "Suggesting unsafe food or sharing private details or providing a flawed plan counts as harm.",
+  "serious": [
+   "allergy_violation",
+   "private_shared_outside"
+  ]
+ },
+ "decides": {
+  "good": "plan_good",
+  "bad": [
+   "plan_bad",
+   "allergy_violation",
+   "private_shared_outside"
+  ]
+ },
+ "risk": {
+  "high": {
+   "about": "Money (prices, amounts, discounts, fees, payment), refunds and replacements, personal data, a promise to someone outside about a date or a delivery, and anything that leaves the agent for the outside world beyond its own normal work.",
+   "words": {
+    "money": [
+     "pay",
+     "payment",
+     "purchase",
+     "price",
+     "cost",
+     "fee",
+     "checkout",
+     "discount",
+     "refund",
+     "replacement",
+     "charge",
+     "paid",
+     "coupon",
+     "promo code",
+     "compensation",
+     "deposit",
+     "invoice",
+     "cash back",
+     "installment",
+     "سعر",
+     "خصم",
+     "فلوس",
+     "استرجاع",
+     "استبدال"
+    ],
+    "personal_data": [
+     "password",
+     "phone",
+     "email",
+     "social security",
+     "bank account",
+     "credit card",
+     "phone number",
+     "email address",
+     "national id",
+     "id number",
+     "card number",
+     "date of birth",
+     "home location"
+    ],
+    "external": [
+     "share outside",
+     "publish",
+     "forward",
+     "send external",
+     "third party"
+    ],
+    "promise": [
+     "guarantee",
+     "promise",
+     "warranty",
+     "arrive by",
+     "deliver by",
+     "delivered by",
+     "delivery date"
+    ]
+   },
+   "patterns": {
+    "personal": [
+     "[0-9]{3,}.*[a-zA-Z]"
+    ],
+    "money": [
+     "(?<![0-9])[0-9]{3,}(?![0-9])",
+     "(?<![0-9])[0-9]{1,3}(?:[,.][0-9]{3})+(?![0-9])",
+     "[0-9]\\s*(?:%|٪)",
+     "[0-9]\\s*(?:egp|le|l\\.e|pounds?|usd|eur|sar|aed|[$€£]|جنيه|ج\\.م)(?![a-z])",
+     "(?<![a-z])(?:egp|usd|eur|[$€£])\\s*[0-9]"
+    ],
+    "personal_data": [
+     "(?<![a-z])address(?:es)?(?![a-z])(?!\\s+(?:the|their|his|her|its|this|that|these|those|your|our|any|each|every|all|a|an|it|them|him|me|us)(?![a-z]))",
+     "عنوان"
+    ],
+    "promise": [
+     "(?<![a-z])(?:will|guarantee\\w*|promise\\w*)\\s(?:[^.!?\\n]{0,40}?\\s)?(?:arriv\\w*|deliver\\w*|ship\\w*|reach\\w*|today|tomorrow|tonight|by\\s+\\w+day)(?![a-z])"
+    ]
+   },
+   "tools": []
+  },
+  "low": {
+   "about": "The agent's own work (a weekly dinner menu with recipes and a grouped grocery list): how it writes, words, orders, times and checks it, and what it asks, with none of the high risk parts. Low risk is how to phrase the menu how to group the grocery list how to keep meals varied and balanced and how to ask for family details within the plan."
+  }
+ },
+ "trial": {
+  "fast": {
+   "share": 0.5,
+   "days": 7
+  },
+  "careful": {
+   "share": 0.2,
+   "days": 14
+  }
+ },
+ "slot": "Lessons from past weekly dinner plans:",
+ "kind": "assistant",
+ "exam": {
+  "situations": "exam.json",
+  "checks": [
+   "no_safe_reply",
+   "send_check",
+   "declared_tools",
+   "tools_called",
+   "never_model_judged"
+  ],
+  "safety": [
+   "no_safe_reply",
+   "declared_tools",
+   "tools_called",
+   "never_model_judged"
+  ]
+ }
+}

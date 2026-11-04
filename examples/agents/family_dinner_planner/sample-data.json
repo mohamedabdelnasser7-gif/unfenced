@@ -1,0 +1,173 @@
+{
+ "what": "family dinner profiles",
+ "rows": [
+  {
+   "by": "made_up",
+   "row": {
+    "label": "family a",
+    "size": "2 adults 1 kid",
+    "kids_ages": "8",
+    "allergies": "peanut",
+    "diet": "none",
+    "likes": "chicken and pasta",
+    "avoids": "mushrooms",
+    "budget": "120 dollars",
+    "cook_time": "30 min"
+   }
+  },
+  {
+   "by": "made_up",
+   "row": {
+    "label": "family b",
+    "size": "2 adults 2 kids",
+    "kids_ages": "4 and 7",
+    "allergies": "none",
+    "diet": "vegetarian",
+    "likes": "tacos and rice",
+    "avoids": "spicy food",
+    "budget": "100 dollars",
+    "cook_time": "20 min"
+   }
+  },
+  {
+   "by": "made_up",
+   "row": {
+    "label": "family c",
+    "size": "2 adults",
+    "kids_ages": "none",
+    "allergies": "dairy",
+    "diet": "none",
+    "likes": "fish and salad",
+    "avoids": "olives",
+    "budget": "90 dollars",
+    "cook_time": "45 min"
+   }
+  },
+  {
+   "by": "made_up",
+   "row": {
+    "label": "family d",
+    "size": "2 adults 3 kids",
+    "kids_ages": "3, 6, 10",
+    "allergies": "gluten and dairy",
+    "diet": "none",
+    "likes": "beef stew and potatoes",
+    "avoids": "seafood",
+    "budget": "150 dollars",
+    "cook_time": "60 min"
+   }
+  },
+  {
+   "by": "made_up",
+   "row": {
+    "label": "family e",
+    "size": "1 adult 2 kids",
+    "kids_ages": "12 and 14",
+    "allergies": "none",
+    "diet": "none",
+    "likes": "burgers and fries",
+    "avoids": "onions",
+    "budget": "70 dollars",
+    "cook_time": "15 min"
+   }
+  },
+  {
+   "by": "made_up",
+   "row": {
+    "label": "family f",
+    "size": "2 adults 2 kids",
+    "kids_ages": "2 and 5",
+    "allergies": "egg",
+    "diet": "halal",
+    "likes": "chicken and lentils",
+    "avoids": "mushrooms",
+    "budget": "110 dollars",
+    "cook_time": "30 min"
+   }
+  },
+  {
+   "by": "made_up",
+   "row": {
+    "label": "family g",
+    "size": "2 adults 1 teen",
+    "kids_ages": "15",
+    "allergies": "shellfish",
+    "diet": "none",
+    "likes": "pasta and pork",
+    "avoids": "peppers",
+    "budget": "80 dollars",
+    "cook_time": "20 min"
+   }
+  },
+  {
+   "by": "made_up",
+   "row": {
+    "label": "family h",
+    "size": "2 adults 4 kids",
+    "kids_ages": "1, 4, 8, 11",
+    "allergies": "peanut and soy",
+    "diet": "vegan",
+    "likes": "curry and noodles",
+    "avoids": "cilantro",
+    "budget": "130 dollars",
+    "cook_time": "45 min"
+   }
+  },
+  {
+   "by": "made_up",
+   "row": {
+    "label": "family i",
+    "size": "3 adults",
+    "kids_ages": "none",
+    "allergies": "none",
+    "diet": "none",
+    "likes": "grill and corn",
+    "avoids": "eggplant",
+    "budget": "60 dollars",
+    "cook_time": "15 min"
+   }
+  },
+  {
+   "by": "made_up",
+   "row": {
+    "label": "family j",
+    "size": "2 adults 1 kid",
+    "kids_ages": "9",
+    "allergies": "wheat",
+    "diet": "gluten free",
+    "likes": "soup and chicken",
+    "avoids": "beans",
+    "budget": "95 dollars",
+    "cook_time": "30 min"
+   }
+  },
+  {
+   "by": "made_up",
+   "row": {
+    "label": "family k",
+    "size": "1 adult 1 kid",
+    "kids_ages": "6",
+    "allergies": "none",
+    "diet": "vegetarian",
+    "likes": "pizza and fruit",
+    "avoids": "nuts",
+    "budget": "75 dollars",
+    "cook_time": "20 min"
+   }
+  },
+  {
+   "by": "made_up",
+   "row": {
+    "label": "family l",
+    "size": "2 adults 2 teens",
+    "kids_ages": "13 and 16",
+    "allergies": "dairy and nut",
+    "diet": "none",
+    "likes": "stir fry and rice",
+    "avoids": "tofu",
+    "budget": "140 dollars",
+    "cook_time": "60 min"
+   }
+  }
+ ]
+}

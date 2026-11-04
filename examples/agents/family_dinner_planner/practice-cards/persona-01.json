@@ -1,0 +1,47 @@
+{
+ "id": "persona-01",
+ "worry": "grocery list will miss ingredients",
+ "unwinnable": false,
+ "why_unwinnable": null,
+ "want": [
+  "5 quick weeknight dinners for family of 4",
+  "balanced varied kid-friendly meals",
+  "recipes with short cook time",
+  "grouped grocery list by store section"
+ ],
+ "buy_trigger": [
+  "sees 5 different 30-min recipes",
+  "grocery list grouped by aisle and complete",
+  "can confirm menu with a yes"
+ ],
+ "patience": {
+  "median": 3.0,
+  "most": 3
+ },
+ "style": {
+  "length": {
+   "short": 1.0
+  },
+  "language": {
+   "english": 1.0
+  },
+  "voice_notes": 0.0,
+  "opening": {
+   "request for 5 quick family dinners": 1.0
+  }
+ },
+ "chats": 0,
+ "won": 0,
+ "lost": 0,
+ "examples": [
+  "Just Mon-Fri please, weekends we eat out",
+  "Looks great, that's all we need thanks!"
+ ],
+ "share": 0.167,
+ "arena_weight": 0.167,
+ "made_up": true,
+ "kind": "easy",
+ "agent": "family_dinner_planner",
+ "from_card": "cf12f3b828f44fecb55d85cb4d8b96f742203ccdb8b19f9446ca1bbea4427d80",
+ "input": "Hi! Can you plan dinners Mon-Fri for our family of 4 (2 adults, 2 kids 8 & 10). No allergies or restrictions. Need quick meals ~30 mins max, balanced and not repeating. Please include simple recipes and a full grocery list grouped by section (produce/dairy/pantry). Thanks!"
+}

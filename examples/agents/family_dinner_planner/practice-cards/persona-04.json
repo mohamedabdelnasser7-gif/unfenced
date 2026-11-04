@@ -1,0 +1,48 @@
+{
+ "id": "persona-04",
+ "worry": "picky eater will reject meals again",
+ "unwinnable": false,
+ "why_unwinnable": null,
+ "want": [
+  "family dinners for 6 with halal only",
+  "meals picky 9yo will actually eat",
+  "halal ingredients clearly marked",
+  "full grocery list without extras"
+ ],
+ "buy_trigger": [
+  "menu is 100% halal and notes substitutions",
+  "offers 1-2 swaps for picky eater",
+  "grocery list is complete and accurate"
+ ],
+ "patience": {
+  "median": 2.0,
+  "most": 2
+ },
+ "style": {
+  "length": {
+   "long": 1.0
+  },
+  "language": {
+   "english": 1.0
+  },
+  "voice_notes": 0.0,
+  "opening": {
+   "unsure about halal and picky eater": 1.0
+  }
+ },
+ "chats": 0,
+ "won": 0,
+ "lost": 0,
+ "examples": [
+  "Does halal mean you check all meats?",
+  "My son hates spicy food, can we avoid chili?",
+  "Could you change Wednesday if we don't like it?"
+ ],
+ "share": 0.167,
+ "arena_weight": 0.167,
+ "made_up": true,
+ "kind": "unsure",
+ "agent": "family_dinner_planner",
+ "from_card": "cf12f3b828f44fecb55d85cb4d8b96f742203ccdb8b19f9446ca1bbea4427d80",
+ "input": "Salam, want to try your dinner planner for next week. Family of 6 - 2 adults, 4 kids. We eat halal only, so no pork/alcohol and meat must be halal. One kid is very picky and hates vegetables and spicy food. Not sure how to make a varied menu that works for everyone. Can you do 7 dinners with recipes and a grouped grocery list? I need to see ingredients before we shop. Thanks and sorry I'm asking a lot."
+}

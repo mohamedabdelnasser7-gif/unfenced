@@ -1,0 +1,48 @@
+{
+ "id": "persona-03",
+ "worry": "allergy restriction might be missed",
+ "unwinnable": false,
+ "why_unwinnable": null,
+ "want": [
+  "week of dinners for 2 adults + 5yo with peanut allergy",
+  "budget-friendly meals under $90",
+  "safe ingredients with no nuts",
+  "grouped grocery list with quantities"
+ ],
+ "buy_trigger": [
+  "confirms all meals are nut-free and kid-safe",
+  "sees prices/portions fit budget",
+  "gets complete grouped grocery list to approve"
+ ],
+ "patience": {
+  "median": 2.0,
+  "most": 2
+ },
+ "style": {
+  "length": {
+   "long": 1.0
+  },
+  "language": {
+   "english": 1.0
+  },
+  "voice_notes": 0.0,
+  "opening": {
+   "hesitant request about allergy and budget": 1.0
+  }
+ },
+ "chats": 0,
+ "won": 0,
+ "lost": 0,
+ "examples": [
+  "Are you sure none of these have peanuts or peanut oil?",
+  "Do we need to buy everything or can we swap something cheaper?",
+  "What if my kid won't eat that, any alternative?"
+ ],
+ "share": 0.167,
+ "arena_weight": 0.167,
+ "made_up": true,
+ "kind": "unsure",
+ "agent": "family_dinner_planner",
+ "from_card": "cf12f3b828f44fecb55d85cb4d8b96f742203ccdb8b19f9446ca1bbea4427d80",
+ "input": "Hi, I need help planning dinners for next week but I'm a bit nervous. It's for 2 adults and a 5 year old who has a severe peanut allergy so absolutely no peanuts/nuts or traces. We also have a tight budget around $80-90 for the week. Is that even possible for 7 dinners? Do you include recipes and a grocery list? I need the list grouped so I don't miss anything. Can you make sure it's varied and safe? Sorry for all the questions!"
+}

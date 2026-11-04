@@ -33,8 +33,9 @@ marks a correction that runs in the chats. With demo days each day shows its own
 serves the real database with real answers and the real clock, never marked Sample data.
 
 No count of what is left anywhere (item 35), no trust level and no won and lost total (item 17,
-LOCKS Quick start B). No script, except the build page's one hashed script (NEW_SCRIPT, its poll and
-countdown) and, on the page of an agent made here, Run the Arena's poll (ARENA_SCRIPT): Modify is a details element inside its card. Every field is
+LOCKS Quick start B), apart from the Arena tab's summary card, which names the last run's wins of its matches (DECISIONS 104). No script, except the build page's one hashed script (NEW_SCRIPT, its poll and
+countdown) and, on an agent's page, the one poll (ARENA_SCRIPT) that follows Run the Arena, Train and Run reflection
+while they run: Modify is a details element inside its card. Every field is
 escaped. With demo days (--demo-days) a Day 1, Day 2, Day 3 switch sits on top, marked Sample
 data (Sample on the phone bar, so every label stays on one line at 390); each day is its own throwaway copy, so answers there never touch the sample files.
 """
@@ -51,6 +52,7 @@ from kit import sample as sample_mod
 from reflection import console as console_mod
 from reflection import morning as mo
 from reflection import quickstart as qs_mod
+from reflection import reflect_now
 from reflection import snapshots
 from reflection import try_sales as try_mod
 from reflection.page_css import CSS
@@ -81,17 +83,19 @@ var ta=q(document,'.dock textarea')||q(document,'.hero textarea');if(ta)ta.addEv
 if(q(document,'[data-live="thread"]'))window.scrollTo(0,document.body.scrollHeight);setTimeout(poll,T);count()})();"""
 
 
-# The agent page's one script (Run the Arena), allowed by its hash in the /agents/<name> policy only: while
-# a run goes it fetches the page again with the X-Poll header, as the build page does, and swaps the part
-# marked data-live="arena" until the run is over; when that part is gone (Overview once a run is saved),
-# it loads the page again.
+# The agent page's one script (Run the Arena and Run reflection), allowed by its hash in the /agents/<name>
+# policy only: while a run goes it fetches the page again with the X-Poll header, as the build page does, and
+# swaps each part marked data-live (arena, reflect) and data-running until its run is over; when that part is
+# gone (Overview once an Arena run is saved), and when a reflection ends (its lessons show elsewhere on the
+# page too), it loads the page again.
 ARENA_SCRIPT = """(function(){
 var T=2000;function q(d,s){return d.querySelector(s)}
-function poll(){var el=q(document,'[data-live="arena"][data-running]');if(!el)return;
+function poll(){var els=document.querySelectorAll('[data-live][data-running]');if(!els.length)return;
 fetch(location.href,{headers:{'X-Poll':'1'},credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.text():null}).then(function(t){if(!t)return;
-var n=q(new DOMParser().parseFromString(t,'text/html'),'[data-live="arena"]');if(!n){location.reload();return}
-el.innerHTML=n.innerHTML;if(!n.hasAttribute('data-running'))el.removeAttribute('data-running')}).catch(function(){}).then(function(){
-if(q(document,'[data-live="arena"][data-running]'))setTimeout(poll,T)})}
+var d=new DOMParser().parseFromString(t,'text/html');for(var i=0;i<els.length;i++){var el=els[i],k=el.getAttribute('data-live'),n=q(d,'[data-live="'+k+'"]');
+if(!n||(k==='reflect'&&!n.hasAttribute('data-running'))){location.reload();return}
+el.innerHTML=n.innerHTML;if(!n.hasAttribute('data-running'))el.removeAttribute('data-running')}}).catch(function(){}).then(function(){
+if(q(document,'[data-live][data-running]'))setTimeout(poll,T)})}
 setTimeout(poll,T)})();"""
 
 
@@ -233,8 +237,18 @@ class Pages:
                         # the console's Operator correction: the same path as the agent page's (Morning.correct)
                         "/console/correct": lambda m, f, now=None: m.correct(mo._field(f, "agent"), mo._field(f, "line"),
                                                                              now=now, by=console_mod.OPERATOR),
-                        # Run the Arena on an agent's page (Morning.run_arena), refused while it builds
-                        ARENA_PATH: lambda m, f, now=None: self._arena(m, mo._field(f, "agent"), now)}
+                        # Run the Arena on an agent's page (Morning.run_arena), always the full run (DECISIONS
+                        # 104), refused while it builds
+                        ARENA_PATH: lambda m, f, now=None: self._arena(m, mo._field(f, "agent"), now),
+                        # Train on the Arena tab (Morning.run_train, DECISIONS 104), refused as Run the Arena is
+                        mo.TRAIN_PATH: lambda m, f, now=None: self._arena(m, mo._field(f, "agent"), now, train=True),
+                        # Stop a running Train or Run reflection (Morning.stop_run, DECISIONS 98)
+                        mo.STOP_PATH: lambda m, f, now=None: m.stop_run(mo._field(f, "agent"), now=now),
+                        # Edit an existing lesson as a new version that replaces it only on a pass (DECISIONS 100)
+                        mo.REVISE_PATH: lambda m, f, now=None: m.revise(mo._field(f, "lesson"), mo._field(f, "line"),
+                                                                       now=now),
+                        # Run reflection on the Overview (Morning.run_reflection), with the same refusals
+                        REFLECT_PATH: lambda m, f, now=None: self._reflect(m, mo._field(f, "agent"), now)}
 
     def back(self, value):
         """Where an answer returns to: one of the page's own paths, with the demo day; else /."""
@@ -265,8 +279,9 @@ class Pages:
 
     def csp_for(self, path):
         """The policy a page is sent with: the console's own (its one script by hash), else the page's."""
-        if path.startswith("/agents/") and _AGENT.match(path[8:]) and self.made_here(path[8:]):
-            return AGENT_CSP  # the page of an agent made here: Run the Arena's poll
+        if path.startswith("/agents/") and _AGENT.match(path[8:]) and (self.made_here(path[8:])
+                                                                     or self.reflects(path[8:])):
+            return AGENT_CSP  # the page of an agent made here or one Run reflection serves: the poll
         return console_mod.csp() if path == "/console" else NEW_CSP if path == "/new" else self.csp
 
     def made_here(self, agent):
@@ -275,6 +290,14 @@ class Pages:
         for m in (self.morning, self.live):
             folder = getattr(m, "agent_folder", None)
             if folder is not None and folder(agent) is not None:
+                return True
+        return False
+
+    def reflects(self, agent):
+        """Does the page's own morning (or Live) carry Run reflection for agent: an agent on it, with the
+        database folder? Its page is then sent the policy that allows ARENA_SCRIPT too."""
+        for m in (self.morning, self.live):
+            if hasattr(m, "run_reflection") and getattr(m, "db_path", None) is not None and agent in m.plugs:
                 return True
         return False
 
@@ -349,17 +372,33 @@ class Pages:
         except Exception as e:
             run.join_note = f"It could not join this page ({e}). Restart the page to see it."
 
-    def _arena(self, m, agent, now):
-        """Run the Arena (Morning.run_arena), refused while a build on this page may be writing the agent
-        and while the short practice Build started for it still runs."""
+    def _arena(self, m, agent, now, train=False):
+        """Run the Arena, always the full run (Morning.run_arena full, DECISIONS 104), or Train (Morning.run_train),
+        refused while a build on this page may be writing the agent and while the first Arena run Build started
+        for it still runs."""
         run = self.run
+        then = mo.TRAIN_BUTTON if train else "Run the Arena"
         if run is not None and run.m is m and run.running and run.agent in (None, agent):
-            raise mo.Refused("It is building. Run the Arena once the build is done.")
+            raise mo.Refused(f"It is building. {then} once the build is done.")
         if self.quick.practising(agent):
-            raise mo.Refused("Its first short practice is still running. Run the Arena once it ends.")
+            raise mo.Refused(f"{qs_mod.FIRST_RUNNING} {then} once it ends.")
         if not hasattr(m, "run_arena"):
             raise mo.Refused(mo.ARENA_NOT_HERE)
-        return m.run_arena(agent, now=now)
+        if train:
+            return m.run_train(agent, now=now)
+        return m.run_arena(agent, now=now, full=True)
+
+    def _reflect(self, m, agent, now):
+        """Run reflection (Morning.run_reflection), refused as Run the Arena is: while a build on this page
+        may be writing the agent and while the first Arena run Build started for it still runs."""
+        run = self.run
+        if run is not None and run.m is m and run.running and run.agent in (None, agent):
+            raise mo.Refused("It is building. Run reflection once the build is done.")
+        if self.quick.practising(agent):
+            raise mo.Refused(f"{qs_mod.FIRST_RUNNING} Run reflection once it ends.")
+        if not hasattr(m, "run_reflection"):
+            raise mo.Refused(mo.REFLECT_NOT_HERE)
+        return m.run_reflection(agent, now=now)
 
     def _say(self, m, text, now):
         """The box on the build page. Before the build writes its files, a message changes the card
@@ -432,8 +471,9 @@ class Pages:
         if path.startswith("/agents/") and _AGENT.match(path[8:]):
             body = agent_page(m, m.view(now=now), path[8:], ctx)
             return None if body is None else self.shell(body, "agents", ctx, flash,
-                                                        script=ARENA_SCRIPT if 'data-live="arena"' in body
-                                                        and self.made_here(path[8:]) else None)
+                                                        script=ARENA_SCRIPT if 'data-live="' in body
+                                                        and (self.made_here(path[8:]) or self.reflects(path[8:]))
+                                                        else None)
         if path.startswith("/agents/") and path.endswith(ROLLBACK) and _AGENT.match(path[8:-len(ROLLBACK)]):
             body = rollback_page(m, path[8:-len(ROLLBACK)], ctx)
             return None if body is None else self.shell(body, "agents", ctx, flash)
@@ -943,8 +983,12 @@ def overview_tab(m, view, a, agent, st, ctx):
             if go:
                 left.append(f'<section class="grp sq" aria-labelledby="ra-h"{arena_live(m, agent)}><h3 id="ra-h">'
                             f'The Arena</h3><small class="quiet">No practice run saved yet.</small>{go}</section>')
+    learn = run_reflection(m, a, agent, ctx, ctx["path"] + ctx["q"])
+    if learn:  # Run reflection beside it, for any agent on the page
+        left.append(f'<section class="grp sq" aria-labelledby="rf-h"{reflect_live(m, agent)}><h3 id="rf-h">'
+                    f'Reflection</h3>{learn}</section>')
     if tok:
-        left.append(f'<section class="say sq" aria-label="Send an idea or a correction"><form method="post" action="/correct">'
+        left.append(f'<section class="say sq" id="say" aria-label="Send an idea or a correction"><form method="post" action="/correct">'
                     f'{_hidden(ctx, agent=agent)}<span class="lab">Send an idea or a correction</span><div class="box">'
                     f'<textarea name="line" aria-label="Your idea or correction" maxlength="{mo.MAX_LEN}" dir="auto" required>'
                     f'</textarea></div><div class="say-f"><p class="quiet">{icon("loop")}{SAY_NOTE}</p><button class="send" type="submit">Send{icon("arrow")}</button></div></form></section>')
@@ -960,17 +1004,130 @@ def overview_tab(m, view, a, agent, st, ctx):
 
 
 def arena_tab(m, view, a, agent, st, ctx):
-    """Arena: the practice matches of its newest run, a lost one with Correct this (into the exam), and
-    Try again, beside the climb. Answers come back to this tab."""
+    """Arena (DECISIONS 99, 100 and 104). On top: the status line and the track (Run the Arena, Train, Connect)
+    with one next step lit, or Ready to connect with Connect; Run the Arena, always the full run, and while it
+    runs how many matches it played; the stuck card's next step. Then the card of a newest full run that did
+    not pass (train_card): won N of M, the main reasons it lost and what its quick notes did, with Train (and,
+    while Train runs, each lesson as it takes its exam, with Stop) and the correction box right under it; before
+    any run the box stands alone. Then the practice matches of its newest run, a lost one with Correct this (into
+    the exam), and Try again, beside the climb; and its lessons with Edit. While a run or a Train goes the poll
+    swaps each part marked data-live; the correction box sits outside them, so typing is never lost. Answers
+    come back to this tab."""
     c = tab_ctx(ctx, agent, "arena")
     glow, tiles, retry = arena_parts(m, agent if agent in m.plugs else None, c, back=c["path"] + c["q"],
                                      fix_ctx=c)
-    go = run_arena(m, agent, c, c["path"] + c["q"])
-    live = arena_live(m, agent) if go else ""
+    able = arena_able(m, agent)
+    go = run_arena(m, agent, c, c["path"] + c["q"]) if able else ""
+    track = arena_track(m, agent, c) if able else ""
+    learn = ""
+    if agent in m.plugs and hasattr(m, "next_step") and not (hasattr(m, "training") and m.training(agent)):
+        learn = mo.next_step_html(m.next_step(agent), agent)  # the one next step under a run that did not pass
     level = level_card(m, agent, m.read_arena()[0].get(agent), c, c["path"] + c["q"])
-    return (f'<div class="qs"{live}><div class="ar"><section class="ar-l" aria-labelledby="m-h"><div class="sec-h"><h2 id="m-h">Practice '
-            f'matches</h2><small>Where it slipped</small></div><div class="tiles">{tiles}</div>{retry}{go}</section>'
-            f'<div class="ar-r">{level}{glow}</div></div></div>')
+    card = train_card(m, a, agent, c) if able else ""
+    top = arena_live(m, agent) if able else ""
+    low = arena_live(m, agent, "tiles") if able else ""
+    return (f'<div class="qs"><div{top}>{track}{go}{learn}</div>{card}<div{low}><div class="ar"><section class="ar-l" '
+            f'aria-labelledby="m-h"><div class="sec-h"><h2 id="m-h">Practice matches</h2><small>Where it slipped'
+            f'</small></div><div class="tiles">{tiles}</div>{retry}</section><div class="ar-r">{level}{glow}</div>'
+            f'</div></div></div>')
+
+
+def arena_able(m, agent):
+    """True when Run the Arena is for this agent here: an agent made here, or the Sales agent with the
+    database folder (Morning.run_arena)."""
+    if not hasattr(m, "run_arena"):
+        return False
+    sales = agent == mo.SALES.agent and agent in m.plugs and getattr(m, "db_path", None) is not None
+    return m.agent_folder(agent) is not None or sales
+
+
+def arena_track(m, agent, ctx):
+    """The status line and the track (Morning.arena_status, DECISIONS 104): Run the Arena, Train, Connect, the
+    next one lit and the others ticked when done, with Ready to connect and Connect on a pass. Empty once the
+    agent is live, or with no status."""
+    status = m.arena_status(agent) if hasattr(m, "arena_status") else None
+    if status is None:
+        return ""
+    steps = []
+    for key, word, done in (("arena", mo.ARENA_BUTTON, status["ran"]), ("train", mo.TRAIN_BUTTON, status["trained"]),
+                            ("connect", mo.CONNECT_WORD, False)):
+        cls = "next" if status["next"] == key else "done" if done else ""
+        tick = f'<small>{mo.DONE_WORD}</small>' if cls == "done" else ""
+        steps.append(f'<li class="{cls}">{h(word)}{tick}</li>' if cls else f"<li>{h(word)}{tick}</li>")
+    out = [f'<p class="stl" role="status">{h(status["line"])}</p>',
+           f'<ol class="trk" aria-label="Arena steps">{"".join(steps)}</ol>']
+    if status["ready"] and agent in m.plugs:
+        conns = m.connection_view(agent)
+        if conns:
+            out.append(connections_html(agent, conns, ctx, ctx["token"]))
+    return f'<div class="trkw">{"".join(out)}</div>'
+
+
+def summary_html(s):
+    """The summary of a newest full run that did not pass (Morning.arena_summary): won N of M, each main
+    reason it lost with its count, and the quick notes line when its report has notes. Counts only."""
+    out = [f'<p class="stl">{h(mo.SUMMARY_HEAD.format(won=s["won"], played=s["played"]))}</p>']
+    if s["reasons"]:
+        rows = "".join(f"<li>{h(words)}: {n}</li>" for words, n in s["reasons"])
+        out.append(f'<ul class="rsn" aria-label="{h(mo.SUMMARY_LABEL)}">{rows}</ul>')
+    notes = s.get("notes")
+    if notes is not None:
+        line = mo.HOTFIX_LINE.format(written=_plural(notes["written"], "quick note"), stopped=notes["stopped"])
+        out.append(f'<p class="quiet">{h(line)}</p>')
+    return "".join(out)
+
+
+def train_card(m, a, agent, ctx):
+    """The card under the top of the Arena tab (DECISIONS 100 and 104). Its part the poll swaps (data-live
+    train): the summary of a newest full run that did not pass (summary_html) with Train, lit when it is the next
+    step, and its line; while Train runs, the Reflecting line with each lesson as it takes its exam and Stop
+    (live_view); what the last Train did. Nothing of it while Run the Arena runs. Right under it, outside the
+    swapped part so typing is never lost, the correction box (Morning.correct, the hotfix with its exam first),
+    open any time; then the agent's live lessons, each with Edit (Morning.revise: a new version that replaces it
+    only if it passes the exam). With no token: the summary only."""
+    if agent not in m.plugs:
+        return ""
+    inner = []
+    step = m.training(agent) if hasattr(m, "training") else None
+    if step is not None:
+        summary = m.arena_summary(agent) if hasattr(m, "arena_summary") else None
+        if summary is not None:
+            inner.append(summary_html(summary))
+        inner.append(f'<div class="act">{reflect_running(step)}</div>{live_view(m, agent, ctx)}')
+    elif not m.arena_running(agent):
+        summary = m.arena_summary(agent) if hasattr(m, "arena_summary") else None
+        if summary is not None:
+            inner.append(summary_html(summary))
+        done = m.trained(agent) if hasattr(m, "trained") else None
+        if done is not None:
+            inner.append(trained_html(done))
+        if summary is not None and summary["lost"] and ctx["token"]:  # Train only on a run that lost matches
+            nxt = (m.arena_status(agent) or {}).get("next") if hasattr(m, "arena_status") else None
+            inner.append('<div class="act">' + _post(ctx, mo.TRAIN_PATH[1:], f'{icon("flask")}{mo.TRAIN_BUTTON}',
+                                                     "yes" if nxt == "train" else "gb", agent=agent,
+                                                     back=ctx["path"] + ctx["q"])
+                         + f'<p class="quiet">{h(mo.TRAIN_SAID)}</p></div>')
+    part = f'<div{arena_live(m, agent, "train")}>{"".join(inner)}</div>'
+    box = ""
+    if ctx["token"]:
+        box = (f'<form method="post" action="/correct">{_hidden(ctx, agent=agent)}<span class="lab">Send an idea or a '
+               f'correction</span><div class="box"><textarea name="line" aria-label="Your idea or correction" '
+               f'maxlength="{mo.MAX_LEN}" dir="auto" required></textarea></div><div class="say-f"><p class="quiet">'
+               f'{icon("loop")}{SAY_NOTE}</p><button class="send" type="submit">Send{icon("arrow")}</button></div></form>')
+    if not inner and not box:
+        return part
+    rows = []
+    for i in (a.get("live") or []) if ctx["token"] else []:
+        rows.append(f'<div class="lr"><b dir="auto">{h(i["text"])}</b><details class="mx"><summary class="mod">'
+                    f'{icon("pen")}{mo.REVISE_BUTTON}</summary><div class="edit"><form method="post" '
+                    f'action="{mo.REVISE_PATH}">{_hidden(ctx, lesson=i["id"])}<textarea name="line" '
+                    f'aria-label="{mo.REVISE_FIELD}" maxlength="{mo.MAX_LEN}" dir="auto" required>{h(i["text"])}'
+                    f'</textarea><button class="yes" type="submit">{mo.REVISE_SAVE}</button></form>'
+                    f'<p class="quiet">{h(mo.REVISE_SAID)}</p></div></details></div>')
+    edits = (f'<section class="grp sq" aria-labelledby="ed-h"><h3 id="ed-h">{mo.EDITS_HEAD}</h3>{"".join(rows)}</section>'
+             if rows else "")
+    return (f'<div class="ar"><section class="say sq" aria-label="Send an idea or a correction">{part}{box}</section>'
+            f'{edits}</div>')
 
 
 LEVEL_HELP = "Correct a lost reply and press Try again, add sample data on the Overview, or lower the level."
@@ -1028,20 +1185,25 @@ def level_card(m, agent, run, ctx, back):
 
 
 ARENA_PATH = "/arena/run"
-ARENA_SAID = "Plays its practice matches against made-up customers, with its sample data. A few minutes."
+ARENA_SAID = "Plays its practice matches against made-up customers, with its sample data."
 
 
-def arena_live(m, agent):
-    """The marks the agent page's script polls (ARENA_SCRIPT): data-running while a run goes."""
-    return ' data-live="arena"' + (" data-running" if m.arena_running(agent) else "")
+def arena_live(m, agent, key="arena"):
+    """The marks the agent page's script polls (ARENA_SCRIPT): data-live key, and data-running while a run or
+    a Train goes."""
+    running = m.arena_running(agent) or (hasattr(m, "training") and m.training(agent) is not None)
+    return f' data-live="{key}"' + (" data-running" if running else "")
 
 
 def run_arena(m, agent, ctx, back):
-    """Run the Arena (Morning.run_arena) for an agent made here: the button while no run goes and the page
-    has a token, how many matches it played while one runs, and a line when the last one could not finish.
-    Empty for any other agent (the Sales agent has Try again)."""
-    if not hasattr(m, "run_arena") or m.agent_folder(agent) is None:
+    """Run the Arena (Morning.run_arena, always the full run, DECISIONS 104) for an agent made here or the Sales
+    agent with the database folder: its button, Run the Arena again after a full run that did not pass, lit when
+    it is the next step (Morning.arena_status), with its line, while no run or Train goes and the page has a
+    token; while it runs, how many matches it played; and a line when the last run or Train could not finish.
+    Empty for any other agent."""
+    if not arena_able(m, agent):
         return ""
+    sales = agent == mo.SALES.agent
     if m.arena_running(agent):
         n = m.arena_played(agent)
         said = (f"Running the Arena: {n} practice {'match' if n == 1 else 'matches'} played so far." if n
@@ -1053,9 +1215,150 @@ def run_arena(m, agent, ctx, back):
         out.append(f'<p class="no-yet" role="status">{h(note)}</p>')
     if note and ctx["token"] and getattr(m, "arena_record", lambda a: None)(agent):  # torn or gone: the one step
         out.append(_post(ctx, mo.NEW_TEST_PATH[1:], "Start a new test set", "yes", agent=agent, back=back))
+    training = hasattr(m, "training") and m.training(agent) is not None
+    if ctx["token"] and not training:
+        status = (m.arena_status(agent) if hasattr(m, "arena_status") else None) or {}
+        word = mo.ARENA_AGAIN if status.get("ran") and not status.get("ready") else mo.ARENA_BUTTON
+        out.append(("" if sales else f'<p class="quiet">{ARENA_SAID}</p>')  # the Sales agent has no sample data
+                   + _post(ctx, ARENA_PATH[1:], f'{icon("flask")}{h(word)}',
+                           "yes" if status.get("next", "arena") == "arena" else "gb", agent=agent, back=back)
+                   + f'<p class="quiet">{h(mo.ARENA_RUN_SAID)}</p>')
+    return f'<div class="act">{"".join(out)}</div>' if out else ""
+
+
+def trained_html(done):
+    """What the last Train did (Morning.trained), in one line, with the lessons it showed and what waits."""
+    when = mo._when(done["at"])
+    if not done.get("lost"):
+        line = mo.TRAIN_NO_LOSS
+    else:
+        n = done["lost"]
+        line = mo.TRAINED.format(when=when, lost=f"{n} lost {'match' if n == 1 else 'matches'}",
+                                 written=_plural(done.get("written") or 0, "lesson"), passed=done.get("passed") or 0)
+    out = [f'<div class="nr"><p>{h(line)}</p></div>']
+    out += seen_rows(done.get("seen") or [])
+    if done.get("queued"):
+        out.append(f'<p class="quiet">{h(waiting_line(done["queued"]))}</p>')
+    return "".join(out)
+
+
+def waiting_line(n):
+    """N lessons wait for tonight (DECISIONS 98)."""
+    return mo.WAIT_ONE if n == 1 else mo.WAIT_MANY.format(n=n)
+
+
+def seen_rows(seen):
+    """Each lesson as it took its exam (reflect_now Steps.seen): its words, then the exam's word."""
+    rows = []
+    for x in seen:
+        who = f"{mo.LIVE_YOURS}. " if x.get("kind") == "correction" else ""
+        rows.append(f'<div class="lr"><b dir="auto">{h(x["text"])}</b><small>{h(who)}'
+                    f'{h(mo.LIVE_EXAM.get(x.get("exam"), mo.LIVE_EXAM["in exam"]))}</small></div>')
+    return rows
+
+
+def live_view(m, agent, ctx):
+    """The live view while Train or Run reflection runs (DECISIONS 99 and 100): each lesson as it is written and
+    takes its exam, then the exam's word, refreshed by the page's poll; Stop with its line (Morning.stop_run); and
+    how many lessons wait for tonight (Morning.queued)."""
+    rows = seen_rows(m.live_seen(agent)) or [f'<div class="nr"><p>{mo.LIVE_NONE}</p></div>']
+    out = [f'<span class="lab">{mo.LIVE_HEAD}</span>', *rows]
     if ctx["token"]:
-        out.append(f'<p class="quiet">{ARENA_SAID}</p>'
-                   + _post(ctx, ARENA_PATH[1:], f'{icon("flask")}Run the Arena', "yes", agent=agent, back=back))
+        out.append('<div class="act">' + _post(ctx, mo.STOP_PATH[1:], mo.STOP_BUTTON, "gb", agent=agent,
+                                               back=ctx["path"] + ctx["q"])
+                   + f'<p class="quiet">{h(mo.STOP_SAID)}</p></div>')
+    n = m.queued(agent) if hasattr(m, "queued") else 0
+    if n:
+        out.append(f'<p class="quiet">{h(waiting_line(n))}</p>')
+    return f'<div class="live">{"".join(out)}</div>'
+
+
+REFLECT_PATH = "/reflect/run"
+# What the exam a lesson Run reflection wrote said, by Morning._item exam_result (None: it took none).
+REFLECT_EXAM = {"passed": "It passed the full exam.",
+                "failed": "It did not pass the exam, so it waits for your yes.",
+                "not run": "The exam could not run, so it waits for your yes.",
+                None: "It took no exam."}
+
+
+def reflect_live(m, agent):
+    """The marks the agent page's script polls (ARENA_SCRIPT): data-running while a reflection goes."""
+    return ' data-live="reflect"' + (" data-running" if m.reflecting(agent) else "")
+
+
+def reflect_running(step):
+    """The running line, the owner's words (mo.REFLECT_RUNNING), with the current step marked."""
+    said = ", then ".join(f'<b aria-current="step">{h(w)}</b>' if k == step else h(w) for k, w in mo.REFLECT_STEPS)
+    return f'<p class="no-yet" role="status">Reflecting: {said}</p>'
+
+
+def reflect_result(a, done, no_lost=mo.NO_LOST):
+    """What the last Run reflection did, with the lesson rows' own rendering (lesson_rows, _chip): each
+    lesson it wrote with its chip (on trial, or waiting for a yes) and what its exam said; else why it
+    wrote none (no_lost: the agent's own no lost chats line, Morning.no_lost)."""
+    items = {i["id"]: i for i in a["live"] + a["waiting"] + a["pulled"]}
+    out = [f'<span class="lab">Last reflection, {h(mo._when(done["at"]))}</span>',
+           f'<div class="nr"><p>Reflection read {_plural(done["lost"], "lost chat")}.</p></div>']
+    rows = []
+    for lid in done["cards"]:
+        i = items.get(lid)
+        if i is None:
+            continue
+        cls, chip, small = _chip(i, a)
+        exam = REFLECT_EXAM.get(i.get("exam_result"), REFLECT_EXAM[None])
+        held = i.get("exam") or ""
+        rows.append(f'<div class="lr"><b dir="auto">{h(i["text"])}</b><span class="vchip {cls}">{chip}</span>'
+                    f'<small>{h(small)}</small><small>{h(exam)}{" " + h(_cap(held)) + "." if held else ""}</small></div>')
+    if rows:
+        out += rows
+    else:
+        if not done["lost"]:
+            why = no_lost
+        elif done.get("written"):  # the Sales agent's Arena losses: lessons written in its copy, none passed the gate
+            why = (f'It wrote {_plural(done["written"], "lesson")} from them; none passed the exam, so none reaches a '
+                   "real customer.")
+        elif not done["candidates"]:
+            why = f'It found no lesson in {_plural(done["lost"], "lost chat")}.'
+        else:
+            why = (f'It weighed {_plural(done["candidates"], "possible lesson")}; none was clear enough to write, '
+                   "so no lesson was written.")
+        if done["notes"]:
+            why += f' It noted: {" ".join(str(done["notes"][0]).split())[:200]}'
+        out.append(f'<div class="nr"><p>No lesson this time. {h(why)}</p></div>')
+    return "".join(out)
+
+
+def run_reflection(m, a, agent, ctx, back):
+    """Run reflection (Morning.run_reflection) for any agent on the page with the database folder: the
+    button with the line under it while no run goes and the page has a token (greyed out with the reason
+    when there is no model key or no lost chat), the steps while one runs, and what the last one did.
+    Empty on the sample days (no database folder) and for an agent with no plug here."""
+    if not hasattr(m, "run_reflection") or agent not in m.plugs or getattr(m, "db_path", None) is None:
+        return ""
+    step = m.reflecting(agent)
+    if step is not None:
+        return f'<div class="act">{reflect_running(step)}</div>{live_view(m, agent, ctx)}'
+    out = []
+    done = m.reflected(agent)
+    if done is not None:
+        out.append(reflect_result(a, done, m.no_lost(agent) if hasattr(m, "no_lost") else mo.NO_LOST))
+    n = m.queued(agent) if hasattr(m, "queued") else 0
+    if n:
+        out.append(f'<p class="quiet">{h(waiting_line(n))}</p>')
+    note = m.reflect_note(agent)
+    if note:
+        out.append(f'<p class="no-yet" role="status">{h(note)}</p>')
+    if ctx["token"]:
+        why = mo.REFLECT_ARENA if m.arena_running(agent) else m.reflect_ready(agent)
+        if why is None:
+            out.append(_post(ctx, REFLECT_PATH[1:], f'{icon("loop")}{mo.REFLECT_BUTTON}', "yes", agent=agent, back=back))
+        else:
+            out.append(f'<button class="yes" type="button" disabled>{icon("loop")}{mo.REFLECT_BUTTON}</button>')
+        out.append(f'<p class="quiet">{h(mo.REFLECT_SAID)}</p>')
+        if why == mo.NO_KEY:
+            out.append(f'<p class="no-yet" role="status">{h(why)} <code>{h(mo.REPLAY)}</code></p>')
+        elif why is not None:
+            out.append(f'<p class="no-yet" role="status">{h(why)}</p>')
     return f'<div class="act">{"".join(out)}</div>' if out else ""
 
 

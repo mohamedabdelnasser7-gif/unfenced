@@ -100,7 +100,7 @@ class TryAgainBuilt(Tab):
         lose = World(reached=False)
         self.m.arena_models = lambda: (lose, lose, lose)
         self.m.arena_shape = {"matches": 4, "rounds": 1}  # 4 of 10 practice customers, at most 3 never ones
-        self.m.run_arena("stock_watch")
+        self.m.run_arena("stock_watch", full=True)
         self.starts.pop()[0]()
         item = self.m.read_arena()[0]["stock_watch"]
         self.assertTrue(item["lost"])
@@ -123,7 +123,7 @@ class TryAgainBuilt(Tab):
         lose = World(reached=False)  # every match lost: practice and test alike
         self.m.arena_models = lambda: (lose, lose, lose)
         self.m.arena_shape = {"matches": 4, "rounds": 1}  # 4 of 10 practice customers, at most 3 never ones
-        self.m.run_arena("stock_watch")
+        self.m.run_arena("stock_watch", full=True)
         self.starts.pop()[0]()
         test = {e["id"] for e in json.loads((self.folder / practice.TEST_FILE).read_text(encoding="utf-8"))["test"]}
         self.assertEqual(len(test), 10)
@@ -142,7 +142,7 @@ class TryAgainBuilt(Tab):
         lose = World(reached=False)
         self.m.arena_models = lambda: (lose, lose, lose)
         self.m.arena_shape = {"matches": 4, "rounds": 1}  # 4 of 10 practice customers, at most 3 never ones
-        self.m.run_arena("stock_watch")
+        self.m.run_arena("stock_watch", full=True)
         self.starts.pop()[0]()
         agent, customer, judge = World(), World(), World()
         self.m.retry_models = lambda: (agent, customer, judge)
@@ -172,7 +172,7 @@ class TryAgainHandsTheCorrections(Tab):
         world = Climb((self.folder / "instructions.md").read_text(encoding="utf-8"))
         self.m.arena_models = lambda: (world, world, world)
         self.m.arena_shape = {"matches": 4, "rounds": 1}  # 4 of 10 practice customers, at most 3 never ones
-        self.m.run_arena("stock_watch")
+        self.m.run_arena("stock_watch", full=True)
         self.starts.pop()[0]()
         self.assertEqual(world.handed_seen and max(n for n, _ in world.handed_seen), 0)
         EngineLessons(self.db, turn.load(self.folder).plug)

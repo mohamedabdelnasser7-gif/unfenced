@@ -13,8 +13,10 @@ a lesson card through the agent's own lessons and risk check.
    API on the night run or a person (reflection/late.py). A settled case with a cause (the plug lists the causes that
    are outside the agent) is left out of every pattern count and named with its cause.
 3. Find patterns. A proposer reads a small sample of settled cases, half good and half
-   not, and proposes up to LIMIT candidates: a plain pattern (something an action did or
-   missed), whether it helps or hurts, the lesson line, its situation and stage tags. A
+   not, and proposes every pattern it sees (DECISIONS item 98: no cap on lessons): a plain pattern
+   (something an action did or missed), whether it helps or hurts, the lesson line, its situation and
+   stage tags. One answer holds at most ANSWER_MAX of them, a size bound on one call and not a count
+   of lessons; an item past it is named in the report, never kept quietly. A
    tagger marks settled cases yes or no for each pattern, up to TAGGED of them, a seeded
    sample when there are more; it never sees a case's deciding result, nor anything logged
    after it, so it cannot mark by the answer. The proposer sees a case up to its deciding
@@ -74,7 +76,7 @@ a lesson card through the agent's own lessons and risk check.
    on the lessons (Lessons.examiner) it waits for a yes and never starts a trial by itself.
    The shared pool comes next (DECISIONS item 83; reflection/shared.py), with a link given
    (shared): the lesson patterns of this agent's kind seen at 2 or more other owners, most
-   owners first, at most LIMIT a night, each through the same fit check and adapter, and on
+   owners first, every one not taken before, each through the same fit check and adapter, and on
    trial only through this agent's eval gate as a sibling's line is (with no gate it waits
    for a yes). Its source line names the pattern and how many owners it was learned from,
    and a pattern taken before, in any state, is not asked again. The study also gives the
@@ -82,8 +84,9 @@ a lesson card through the agent's own lessons and risk check.
    night, each written up once; the pool keeps only clean patterns and hashed owners.
 7. Ideas. With an idea part given, the study also asks for ideas: lessons with no past cases
    behind them, paths worth trying ("let's try this path"). The part reads the proposer's
-   sample and the agent's lessons, and gives at most IDEAS (3) a night; any past the cap is
-   named and dropped. The cap is on what the part may write, not on trials: each idea goes
+   sample and the agent's lessons, and gives every idea worth a try (DECISIONS item 98: no cap on
+   lessons; one answer holds at most ANSWER_MAX, a size bound on one call, and an item past it is
+   named in the report). Each idea goes
    the normal way, through Lessons.propose with kind IDEA, so the risk check, the copy check
    on the cases the part read, the plug's stage check, the clash check, a yes when high and
    a trial at the level that applies, or its turn. A low risk idea starts its trial by
@@ -112,6 +115,20 @@ read at the night's now, and notes on any part that failed. A failing part makes
    work), never a refusal of a topic, through Lessons.propose as any lesson, its source line starting
    "night study of <agent>, scope:" (SCOPE_SOURCE). A night with no lost scope case writes none; a
    line already among the lessons or close to a pulled one is treated as in 5.
+10. A deadline and a queue (DECISIONS item 98). run() may be given a deadline (a time; the scheduled
+   night's is the next 09:00 in NIGHT_TZ, reflection/scheduler.py), a stop check (True once a person
+   pressed Stop) and a cap check (True once the day's model call cap is reached). Before each lesson
+   is written, so before its risk check and its exam, the study asks them; once one says stop, every
+   lesson not written yet is saved to the agent's queue (engine/study_queue.py) instead, with its
+   sources and kind, and named in rep["queued"]; nothing is dropped. A check that fails counts as
+   stop, so its lessons are queued too. From then on the parts that only find more (other agents,
+   the shared pool, ideas, the hand over track, giving to the pool) are not run that time: what they
+   read is still there for the next study, and the note says so. The next study of the agent, a night
+   or a Run reflection (run(take_queue=True); an Arena round leaves the queue alone, as its exam is
+   the scoped one), takes the queued lessons first, oldest first, before any it finds itself
+   (rep["from_queue"]); each goes through the same write, so the same risk check, the full exam, one
+   trial on a stage at a time and a yes when high. A queued line that is a lesson by then is taken
+   with that said, and not written again.
 """
 import difflib
 import math
@@ -124,13 +141,16 @@ from collections import Counter
 from engine import exam as exam_mod
 from engine import risk as risk_mod
 from engine.lessons import DAY, IDEA, KEPT, MAX_LEN, PATTERN, PERSON, PULLED, WAITING, Lessons, meet, whose
+from engine import study_queue as queue_mod
 from engine.log import Log
 from engine.plug import ALL, SLOW
 
 CHANCE = 0.75     # the chance the named side is better, decided item 7
 MIN_CASES = 5     # cases on each side
 MIN_SOURCES = 3   # different sources on each side
-LIMIT = 5         # candidates the proposer may give
+ANSWER_MAX = 12   # items one answer of the proposer or the idea part may hold: a size bound on one
+                  # call (the study parts' answers fit MAX_TOKENS in reflection/study.py), not a
+                  # count of lessons; past it an item is named in the report (DECISIONS item 98)
 SAMPLE = 20       # settled cases the proposer reads
 TAGGED = 200      # settled cases the tagger reads for each candidate
 SHOWN = 20        # case ids a source line names
@@ -158,10 +178,6 @@ SMALL_WORDS = frozenset(
     "is are was were be been being am do does did has have had it its this that these those them they "
     "their there then than as so if when while before after until each every all any some very just also "
     "always often ever too only first last more most less once again".split())
-IDEAS = 3         # ideas the idea part may write a night. Not a cap on trials (call 1A): every
-                  # low risk lesson still starts. Ideas have no cases behind them and one trial
-                  # runs on a stage at a time, so more would only queue on the stages, ahead of
-                  # later lessons that have cases, and lengthen the morning page.
 NO_CASES = "no past cases: this is a try"  # how sure an idea's card is today
 SCOPE = "scope"  # the case kind of an off topic practice match, on each row's detail (see 9)
 # the one line the study writes from lost scope cases: general, never a topic (see 9)
@@ -169,6 +185,11 @@ DECLINE = ("When someone asks for something that is not part of your work, say i
            "help with your own work, give no part of what they asked for, and offer to help with your work.")
 DECLINE_SITUATION = "a person asks for something outside the agent's work"
 SCOPE_SOURCE = "night study of {agent}, scope: "  # how a scope line's source starts
+# why a study stopped writing and queued the rest (see 10)
+PAST_DEADLINE = "past the study's deadline"
+STOP_PRESSED = "a person pressed Stop"
+CAP_REACHED = "the day's model call cap is reached"
+QUEUED = "queued for the next study"
 
 
 class HandedOver(ValueError):
@@ -178,6 +199,15 @@ class HandedOver(ValueError):
     def __init__(self, to, kind):
         super().__init__(f"handed over to {to} ({kind}), not a lesson")
         self.to, self.kind = to, kind
+
+
+class Queued(Exception):
+    """The study stopped before this lesson's write (see 10): it went to the queue, not to the
+    lessons. why: what stopped the study; queue_id: its row, None when the same line waits already."""
+
+    def __init__(self, why, queue_id):
+        super().__init__(f"{QUEUED}: {why}")
+        self.why, self.queue_id = why, queue_id
 
 
 class PartError(Exception):
@@ -231,15 +261,16 @@ class Study:
     situation, stages} in this agent's words. clash(plug, new, live), optional: True when a
     new lesson goes against a live one, False when not; each is {lesson, stages}. others:
     the plugs of the other agents in the same database. ideas(plug, sample, limit, known),
-    optional: ideas with no past cases behind them, each {lesson, situation, stages}; at most
-    idea_limit a night are written. When this agent has lessons that failed the eval gate (see 5),
+    optional: ideas with no past cases behind them, each {lesson, situation, stages}. limit: the
+    most items one answer of either may hold (ANSWER_MAX), told to the part; a size bound on one
+    call, not a count of lessons (see 3 and 7). When this agent has lessons that failed the eval gate (see 5),
     the proposer and the idea part are called with failed=[{lesson, first_fail, fails,
     broke_cases, fixed, broke}] too, and those lines are left out of known; with none, the call is
-    as above."""
+    as above. clock: the time a deadline is read against (see 10), the computer's clock unless given."""
 
     def __init__(self, db, plug, *, proposer, tagger, fit=None, adapter=None, others=(), lessons=None,
-                 judge=risk_mod.no_judge, limit=LIMIT, sample=SAMPLE, seed=0, clash=None, ideas=None,
-                 idea_limit=IDEAS, hand_over=None, shared=None):
+                 judge=risk_mod.no_judge, limit=ANSWER_MAX, sample=SAMPLE, seed=0, clash=None, ideas=None,
+                 hand_over=None, shared=None, clock=time.time):
         self.db = db
         self.plug = plug
         self.log = Log(db, plug)
@@ -248,23 +279,38 @@ class Study:
             raise ValueError("a study and its lessons belong to one agent")
         self.proposer, self.tagger, self.fit, self.adapter = proposer, tagger, fit, adapter
         self.clash = clash
-        self.ideas, self.idea_limit = ideas, int(idea_limit)
+        self.ideas = ideas
         self.hand_over = hand_over  # engine/handover.py Track, or None for no hand over track (see 8)
         self.others = tuple(others)
         self.shared = shared  # reflection/shared.py Link, or None: the shared pool is not read (see 6)
         self.limit, self.sample, self.seed = int(limit), int(sample), seed
         self._failed_lines, self._given, self._given_ids = set(), [], set()  # this night's failed lines (see 5)
+        self.clock = clock
+        self._checks, self._halt, self._waiting = None, None, set()  # this run's stop checks (see 10)
 
-    def run(self, since, until, *, now=None):
+    def run(self, since, until, *, now=None, deadline=None, stop=None, capped=None, take_queue=False):
         """One night's study of the cases touched in [since, until). now: when new lessons are
-        added and their trials start; the clock when left out."""
+        added and their trials start; the clock when left out. deadline, stop and capped (see 10):
+        a time, read against the study's clock, past which no lesson is written; a callable, True
+        once a person pressed Stop; a callable, True once the day's model call cap is reached. Once
+        one says stop, every lesson not written yet is queued for the next study; left out, the
+        study writes to the end. take_queue: write the lessons earlier studies queued first (the
+        night and Run reflection, reflection/night.py); left False, the queue is not touched, so an
+        Arena round, whose exam is the scoped one, never writes a lesson that waits for the full exam."""
         since, until = float(since), float(until)
         if not until > since:
             raise ValueError("the window ends after it starts")
         self._now = now
+        self._checks = (None if deadline is None else float(deadline), stop, capped)
+        self._halt = None
+        self._waiting = set()
+        if take_queue or any(x is not None for x in self._checks):
+            queue_mod.ensure(self.db)
+            self._waiting = {_norm(r["lesson"]) for r in queue_mod.waiting(self.db, self.plug.agent)}
         at = time.time() if now is None else float(now)
         rep = {"agent": self.plug.agent, "window": {"since": since, "until": until}, "candidates": [], "dropped": [],
-               "cards": [], "across": [], "ideas": [], "unread": [], "notes": [],
+               "cards": [], "across": [], "ideas": [], "unread": [], "notes": [], "queued": [], "from_queue": [],
+               "stopped": None,
                "parts": {name: _label(part) for name, part in (("proposer", self.proposer), ("tagger", self.tagger),
                                                                ("fit", self.fit), ("adapter", self.adapter),
                                                                ("clash", self.clash), ("ideas", self.ideas))
@@ -280,6 +326,8 @@ class Study:
         rep["failed_given"] = [t["lesson_id"] for t in tries[:FAILED_GIVEN]]
         self._given_ids = set(rep["failed_given"])
         self._given = [{k: v for k, v in t.items() if k != "lesson_id"} for t in tries[:FAILED_GIVEN]]
+        if take_queue:
+            self._from_queue(known, pulled, rep)  # the lessons an earlier study queued go first (see 10)
         found = self._find(self.plug, cases, [les["text"] for les in mine if les["id"] not in self._given_ids],
                            texts, rep["notes"], failed=self._given)
         rep["dropped"] = found["dropped"]
@@ -300,17 +348,101 @@ class Study:
             except HandedOver as e:  # another agent's matter (see 8): never a lesson here
                 rec["verdict"], rec["handed_to"] = HANDED, {"agent": e.to, "kind": e.kind}
                 continue
+            except Queued as e:  # the study stopped first: queued for the next one (see 10)
+                rec["verdict"] = f"{QUEUED} ({e.why})"
+                continue
             rec["lesson_id"] = card["lesson_id"]
             known[_norm(cand["lesson"])] = KNOWN
         rep["candidates"] = found["candidates"]
         self._scope(scoped, known, pulled, rep, since, until)
         self._across(since, until, known, pulled, rep)
-        self._ideas(cases, known, pulled, texts, rep, since, until)
-        self._give_shared(rep)
-        rep["hand_over"] = (None if self.hand_over is None else
-                             self.hand_over.night(cases, texts, since, until, now=at, notes=rep["notes"]))
+        if not self._halted():
+            self._ideas(cases, known, pulled, texts, rep, since, until)
+        if not self._halted():
+            self._give_shared(rep)
+        rep["hand_over"] = None
+        if self.hand_over is not None and not self._halted():
+            rep["hand_over"] = self.hand_over.night(cases, texts, since, until, now=at, notes=rep["notes"])
+        rep["stopped"] = self._halt
+        if self._halt:
+            rep["notes"].append(f"{self._halt}: {len(rep['queued'])} lessons queued for the next study, which "
+                                "takes them first; the parts that only find more (other agents, the shared pool, "
+                                "ideas, hand over) did not run after it and run next time")
         rep["switches"] = self.lessons.switches.reading(at)
+        self._checks = None
         return rep
+
+    def _halted(self):
+        """Why this run stops writing (see 10), or None. Once one check says stop, the run stays
+        stopped. A check that fails counts as stop."""
+        if self._halt is None and self._checks is not None:
+            deadline, stop, capped = self._checks
+            if deadline is not None and float(self.clock()) >= deadline:
+                self._halt = PAST_DEADLINE
+            for check, why in ((stop, STOP_PRESSED), (capped, CAP_REACHED)):
+                if self._halt is not None or check is None:
+                    continue
+                try:
+                    hit = check()
+                except Exception as e:  # fail closed: a check that fails queues the rest, never drops it
+                    self._halt = f"the check for {why!r} failed ({type(e).__name__})"
+                    continue
+                if hit is True:
+                    self._halt = why
+        return self._halt
+
+    def _queue(self, cand, source, sources, rec, origin, kind, source_lesson_id, gated, close, rep):
+        """Save one lesson the study found to the agent's queue instead of writing it (see 10).
+        Raises Queued. A line that waits in the queue already is not queued twice."""
+        why = self._halt
+        if origin is not None:
+            part = "pool" if origin.get("agent") == POOL_AGENT else "across"
+        else:
+            part = "idea" if kind == IDEA else "scope" if rec is None else "pattern"
+        qid = None
+        if _norm(cand["lesson"]) not in self._waiting:
+            item = {"cand": dict(cand), "source": source, "sources": list(sources), "rec": rec, "origin": origin,
+                    "source_lesson_id": source_lesson_id, "gated": gated, "close": close}
+            qid = queue_mod.add(self.db, self.plug.agent, kind=kind, part=part, lesson=cand["lesson"], item=item,
+                                why=why, now=self._now)
+            self._waiting.add(_norm(cand["lesson"]))
+        rep["queued"].append({"queue_id": qid, "lesson": cand["lesson"], "kind": kind, "part": part, "why": why})
+        raise Queued(why, qid)
+
+    def _from_queue(self, known, pulled, rep):
+        """The lessons earlier studies queued, oldest first, each written as when it was found (see
+        10), before any lesson this run finds. Each is named in rep["from_queue"] as {queue_id,
+        lesson, kind, part, lesson_id, why}, with cases_with when it was found on this agent's
+        cases. Once this run stops too, the rest stay queued, ahead of anything it queues."""
+        for row in queue_mod.waiting(self.db, self.plug.agent):
+            if self._halted():
+                return
+            item = row["item"]
+            cand, rec = item["cand"], item.get("rec")
+            out = {"queue_id": row["id"], "lesson": row["lesson"], "kind": row["kind"], "part": row["part"],
+                   "lesson_id": None, "why": None}
+            if (rec or {}).get("cases_with") is not None:  # every case it was found on (reflection/night.py links)
+                out["cases_with"] = list(rec["cases_with"])
+            rep["from_queue"].append(out)
+            self._waiting.discard(_norm(row["lesson"]))
+            if _norm(cand["lesson"]) in known:
+                out["why"] = known[_norm(cand["lesson"])]
+            else:
+                close = item.get("close") or _close(cand["lesson"], pulled, self._failed_lines)
+                try:
+                    card = self._write(cand, item["source"], item.get("sources") or [], rec, item.get("origin"), rep,
+                                       source_lesson_id=item.get("source_lesson_id"), close=close, kind=row["kind"],
+                                       gated=item.get("gated") or False, check=False)
+                except HandedOver as e:
+                    out["why"] = f"{HANDED} to {e.to} ({e.kind})"
+                except ValueError as e:  # refused by the lessons (a kept lesson pulled meanwhile, a bad line)
+                    out["why"] = f"not written: {e}"
+                else:
+                    card["from_queue"] = row["id"]
+                    out["lesson_id"] = card["lesson_id"]
+                    known[_norm(cand["lesson"])] = KNOWN
+            queue_mod.take(self.db, self.plug.agent, row["id"], lesson_id=out["lesson_id"],
+                           outcome=out["why"] or "written", now=self._now)
 
     def _scope(self, scoped, known, pulled, rep, since, until):
         """The night's scope cases (see 9): from the lost ones only DECLINE is written, as one lesson through
@@ -330,6 +462,9 @@ class Study:
             card = self._write(cand, source, [], None, None, rep, close=_close(DECLINE, pulled, self._failed_lines))
         except HandedOver as e:
             rec["why"], rec["handed_to"] = HANDED, {"agent": e.to, "kind": e.kind}
+            return
+        except Queued as e:  # the study stopped first (see 10)
+            rec["why"] = f"{QUEUED} ({e.why})"
             return
         except ValueError as e:  # refused by the lessons
             rec["why"] = f"not written: {e}"
@@ -375,14 +510,15 @@ class Study:
     def _ideas(self, cases, known, pulled, texts, rep, since, until):
         """The night's ideas, lessons with no past cases behind them, written after the patterns
         and the lessons from other agents. Each is named in rep["ideas"] as {idea, lesson_id,
-        why}: why says what stopped one (the cap, a bad line, already a lesson, pulled before, a
-        refused write). A failing part writes nothing."""
+        why}: why says what stopped one (past the size bound of one answer, a bad line, already a
+        lesson, pulled before, a refused write, queued when the study stopped first). A failing part
+        writes nothing."""
         if self.ideas is None:
             return
         plug = self.plug
         sample = self._pick([c for c in cases if c.status in (GOOD, BAD)])  # the proposer's sample
         try:
-            raw = self.ideas(plug, [_view(plug, c, texts, blind=False) for c in sample], self.idea_limit,
+            raw = self.ideas(plug, [_view(plug, c, texts, blind=False) for c in sample], self.limit,
                              [les["text"] for les in self.lessons.mine() if les["id"] not in self._given_ids],
                              **({"failed": self._given} if self._given else {}))
         except Exception as e:  # a failing idea part makes no lesson
@@ -398,8 +534,8 @@ class Study:
             line = item.get("lesson") if isinstance(item, dict) else None
             rec = {"idea": line if isinstance(line, str) else repr(item)[:200], "lesson_id": None, "why": None}
             rep["ideas"].append(rec)
-            if n >= self.idea_limit:
-                rec["why"] = f"over the cap of {self.idea_limit} ideas a night"
+            if n >= self.limit:  # a size bound on one answer, not a cap on ideas (see 7)
+                rec["why"] = past_bound(self.limit)
                 continue
             try:
                 idea = _adapted(plug, item)
@@ -412,6 +548,9 @@ class Study:
             try:
                 card = self._write(idea, source, read, None, None, rep,
                                    close=_close(idea["lesson"], pulled, self._failed_lines), kind=IDEA)
+            except Queued as e:  # the study stopped first (see 10)
+                rec["why"] = f"{QUEUED} ({e.why})"
+                continue
             except ValueError as e:  # refused by the lessons
                 rec["why"] = f"not written: {e}"
                 continue
@@ -430,6 +569,7 @@ class Study:
         it or None, "notes": [...]}. A failing idea part writes nothing."""
         since, until = float(since), float(until)
         self._now = now
+        self._checks, self._halt = None, None  # a rewrite in the Arena run is never queued (see 10)
         out = {"idea": None, "lesson_id": None, "card": None, "why": None, "notes": []}
         if self.ideas is None:
             out["why"] = "no idea part"
@@ -504,6 +644,8 @@ class Study:
             return found
         seen, winners = set(), []
         rng = random.Random(f"tag|{self.seed}|{plug.agent}")  # the tagger's samples and keys, drawn in turn
+        for item in raw[self.limit:]:  # a size bound on one answer, not a cap on lessons (see 3)
+            found["dropped"].append({"agent": plug.agent, "candidate": _said(item), "why": past_bound(self.limit)})
         for item in raw[:self.limit]:
             try:
                 cand = _candidate(plug, item)
@@ -579,12 +721,16 @@ class Study:
         return out
 
     def _write(self, cand, source, sources, rec, origin, rep, *, source_lesson_id=None, close=None, kind=PATTERN,
-               gated=False):
+               gated=False, check=True):
         """Write one lesson and add its card. close: the pulled line it comes close to; it then
         waits for a yes. gated: a sibling's line (see 6); with no examiner it waits for a yes. A lesson that goes against a live one waits for a yes too, its card
         asking "replace it?". kind: IDEA for one with no past cases behind it; its card carries
         idea_card. A lesson its exam held (Lessons(exam=...)) waits for a yes, its card's "exam"
-        naming the first fail ("" when it passed or took no exam). Returns the card."""
+        naming the first fail ("" when it passed or took no exam). Returns the card. check: ask the
+        run's stop checks first (see 10); once one says stop, the lesson is queued and Queued raised,
+        before its sort, its clash check, its risk check and its exam. _from_queue asks them itself."""
+        if check and self._halted():
+            self._queue(cand, source, sources, rec, origin, kind, source_lesson_id, gated, close, rep)
         held = self._sort(cand, rep)  # raises HandedOver for another agent's matter (see 8)
         against = self._against(cand, rep)
         trial = close is None and against is None and not held
@@ -676,6 +822,8 @@ class Study:
         linked = {les["source_lesson_id"] for les in self.lessons.mine() if les["source_lesson_id"] is not None}
         pool_read = False
         for other in sorted(others, key=lambda o: (not sibling(self.plug, o), -len(fields & set(o.fields)), o.agent)):
+            if self._halted():  # the other agents left are read next time (see 10)
+                break
             gated = sibling(self.plug, other)
             if not gated and not pool_read:  # the shared pool right after the siblings (see 6)
                 pool_read = True
@@ -713,7 +861,9 @@ class Study:
                            source=lambda fit: f"adapted {fit} from {other.agent} cases {shown}: {there}",
                            origin={"agent": other.agent, "cases": ids})
             kept = [les for les in theirs.mine(KEPT) if les["id"] not in linked]
-            for les in sorted(kept, key=lambda x: (-x["score"], x["id"]))[:self.limit]:
+            for les in sorted(kept, key=lambda x: (-x["score"], x["id"])):
+                if self._halted():  # the rest are read again next time (see 10)
+                    break
                 rec = {"lesson": les["id"], "fit": None, "lesson_id": None, "why": None}
                 entry["lessons"].append(rec)
                 public = {"lesson": les["text"], "situation": "", "stages": les["stages"]}
@@ -740,7 +890,9 @@ class Study:
         entry["read"] = len(patterns)
         taken = {self.shared.pattern_of(les.get("source") or "") for les in self.lessons.mine()} - {None}
         other = _PoolAgent(self.plug, POOL_AGENT)
-        for p in [p for p in patterns if p["id"] not in taken][:self.limit]:
+        for p in [p for p in patterns if p["id"] not in taken]:
+            if self._halted():  # the rest are read again next time (see 10)
+                break
             rec = {"pattern": p["id"], "owners": p["owners"], "fit": None, "lesson_id": None, "why": None}
             entry["lessons"].append(rec)
             public = {"lesson": p["text"], "situation": "", "stages": []}
@@ -835,6 +987,9 @@ class Study:
             card = self._write(adapted, source(answer), sources, rec, dict(origin, fit=answer), rep,
                                source_lesson_id=source_lesson_id, close=_close(adapted["lesson"], pulled,
                                                                                     self._failed_lines), gated=gated)
+        except Queued as e:  # the study stopped first (see 10)
+            into["why"] = f"{QUEUED} ({e.why})"
+            return
         except ValueError as e:  # refused by the lessons (a kept lesson pulled meanwhile, a bad line)
             into["why"] = f"not written: {e}"
             return
@@ -1013,6 +1168,20 @@ def _view(plug, case, texts, *, blind):
         view["deciding"] = case.deciding
         view["good"] = case.status == GOOD
     return view
+
+
+def past_bound(limit):
+    """Why an item past the size bound of one answer was not read (see 3 and 7)."""
+    return f"past the {limit} items one answer may hold; a size bound on one call, not a cap on lessons"
+
+
+def _said(item):
+    """An answer's item as the report names it: its pattern or lesson line, else its start."""
+    if isinstance(item, dict):
+        for key in ("pattern", "lesson"):
+            if isinstance(item.get(key), str):
+                return item[key][:200]
+    return repr(item)[:200]
 
 
 def _candidate(plug, raw):

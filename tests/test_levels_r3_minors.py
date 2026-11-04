@@ -38,7 +38,7 @@ class Record(test_levels_tab.Tab):
         world = world or World()
         self.m.arena_models = lambda: (world, world, world)
         self.starts.clear()
-        self.m.run_arena(AGENT)
+        self.m.run_arena(AGENT, full=True)
         self.starts[-1][0]()
 
     def old_customers(self):

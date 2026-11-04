@@ -49,11 +49,11 @@ folder and capped (kit/sample.py MAX_MADE). The agent reads it through the data 
 reads its products when no Shopify keys are set; practice customers and the judge read the same rows.
 An answer that cannot be read leaves the agent with none; the build goes on.
 
-After a successful Build with the real model, the new agent plays one short practice in the background
-(arena/practice.py practise, the --quick shape: one training match, a gate of one, at most arena/run.py
-QUICK_CALLS model calls), one at a time; the page says it is practising and then how it went. With no
-key it says so in one line; a test's model starts none. Each lost match becomes a case for the night
-when arena/learn_built.py is there.
+After a successful Build with the real model, the new agent plays its first Arena run in the background
+(arena/practice.py practise, the full run the Arena tab's Run the Arena makes; DECISIONS 104 item 6), one
+at a time; the page says it is playing and then how it went, and its result shows on the Arena tab. With
+no key it says so in one line; a test's model starts none. Each lost match becomes a case when
+arena/learn_built.py is there.
 
 Safety. The user's text and the model's output are both untrusted: every field is capped and made
 one plain line, the folder name is a safe slug (letters, digits and _, no path parts) and the folder
@@ -102,13 +102,14 @@ OLD_HOUSE_STYLE = ("How you write every reply: plain text only, no markdown (no 
 CALLS_PER_MINUTE = 10
 MAX_BUILDS = 3           # Build presses that reach the model in one chat
 MAX_CARD_CHANGES = 3     # card changes one build takes in before its files are written
-PRACTICES_AT_ONCE = 1    # short practices Build runs at the same time (arena/practice.py practise, quick)
-# The page's lines for the short practice Build starts (frame, not model words).
-PRACTISING = "It is practising one short case in the Arena now."
-PRACTICE_NO_KEY = "No model key is set, so it did not start a practice."
-PRACTICE_BUSY = "Another agent is practising now, so it did not start one. Run arena/practice.py --quick for it later."
-PRACTICE_DONE = "Its first short practice is done, and the report is with the Arena reports."
-PRACTICE_NOT_RUN = "Its first short practice did not run: {why}"
+PRACTICES_AT_ONCE = 1    # first Arena runs Build starts at the same time (arena/practice.py practise, full)
+# The page's lines for the first Arena run Build starts (frame, not model words; DECISIONS 104 item 6).
+PRACTISING = "Its first Arena run is playing now: new matches, then the gate. It takes a while."
+FIRST_RUNNING = "Its first Arena run is still running."
+PRACTICE_NO_KEY = "No model key is set, so its first Arena run did not start."
+PRACTICE_BUSY = "Another agent's first Arena run is playing now, so this one did not start. Run the Arena on its page."
+PRACTICE_DONE = "Its first Arena run is done. Its result is on the agent's Arena tab."
+PRACTICE_NOT_RUN = "Its first Arena run did not finish: {why}"
 CAPS = {"name": 60, "key": 41, "does": 280, "good": 220, "bad": 220, "never": 160, "what": 120, "question": 240,
         "follow": 400, "input": 300, "output": 220, "ends": 220}
 CASE_KEYS = ("input", "starts", "output", "ends")  # card.json "case" (kit/turn.py read_case)
@@ -839,7 +840,7 @@ class QuickStart:
         self._model = model
         self._clock = clock
         self._calls = collections.deque()
-        self._practice = {}  # agent: the page's line for the short practice Build started
+        self._practice = {}  # agent: the page's line for the first Arena run Build started
         self._running = set()
         self._practice_lock = threading.Lock()
 
@@ -1022,24 +1023,24 @@ class QuickStart:
         practice = self.start_practice(m, agent)
         return said if practice is None else f"{said} {practice}"
 
-    # ---- the short practice after Build (C8) ----
+    # ---- the first Arena run after Build (C8, DECISIONS 104 item 6) ----
 
     def practice_line(self, agent):
-        """The page's line for the short practice Build started for agent, or None."""
+        """The page's line for the first Arena run Build started for agent, or None."""
         with self._practice_lock:
             return self._practice.get(agent)
 
     def practising(self, agent):
-        """True while the short practice Build started for agent runs (start_practice)."""
+        """True while the first Arena run Build started for agent runs (start_practice)."""
         with self._practice_lock:
             return agent in self._running
 
     def start_practice(self, m, agent):
-        """After a successful Build: one short practice of the new agent (arena/practice.py practise, the
-        --quick shape, at most arena/run.py QUICK_CALLS model calls and the day's cap) in a background
-        thread, so the page never waits. Only with the real model: Quick start with a model handed in (a
-        test's) starts none and returns None. No key, or a practice already running, returns its one line
-        and starts nothing."""
+        """After a successful Build: the new agent's first Arena run (arena/practice.py practise, the full run
+        the Arena tab's Run the Arena makes: the agent's level shape, new matches, the gate, under the day's
+        cap; DECISIONS 104 item 6) in a background thread, so the page never waits. Only with the real model:
+        Quick start with a model handed in (a test's) starts none and returns None. No key, or a first run
+        already going, returns its one line and starts nothing."""
         if self._model is not None:
             return None
         if not model_mod.has_key():
@@ -1057,11 +1058,13 @@ class QuickStart:
         return PRACTISING
 
     def _practise(self, agent_folder, agent, db_path):
-        """The thread's work: the practice, then the agent's line says how it went. Never raises."""
+        """The thread's work: the first Arena run, then the agent's line says how it went. Never raises. As
+        Morning.run_arena runs it full: with this page's database, each lost match becomes a case there and
+        the run studies between rounds with the night's models (none when their keys are missing: one round)."""
         db = None
         try:
             from arena import practice
-            learn = None
+            learn, study = None, None
             try:  # each lost practice match becomes a case the night studies (arena/learn_built.py), when it is here
                 from arena import learn_built
             except ImportError:
@@ -1071,8 +1074,15 @@ class QuickStart:
                 from kit.db import Db
                 db = Db(db_path)  # its own connection: the page's answers keep theirs
                 learn = learn_built.learner(db, turn_mod.load(agent_folder).plug)
+            if db is not None:
+                from arena import run as run_mod
+                try:
+                    study = run_mod.reflection_models()
+                except run_mod.Refused:
+                    study = None
             practice.practise(agent_folder, agent_model=model_mod.Model(), customer_model=model_mod.Model(),
-                              judge_model=model_mod.Model(), quick=True, learn=learn)
+                              judge_model=model_mod.Model(), learn=learn, study=study, db=db, live_path=db_path,
+                              off_topic=True)
             line = PRACTICE_DONE
         except Exception as e:  # a thread nobody waits on: what went wrong becomes the agent's line
             line = PRACTICE_NOT_RUN.format(why=" ".join(str(e).split())[:200] or type(e).__name__)

@@ -10,7 +10,7 @@ calling it with a round's number then:
 1. Runs the night study (reflection/night.py LinkedStudy, the night's own Meta parts) on that
    round's lost matches only: every other case in the database is out of its window, and no other
    agent is read. All its cases ended not good, so the pattern search, which needs good and not
-   good cases, finds nothing; the idea part (at most 3 ideas a study) is what writes lessons here.
+   good cases, finds nothing; the idea part (every idea worth a try, DECISIONS item 98) is what writes lessons here.
    A lesson the gate failed after an earlier round goes back into this study with what it broke
    (engine/study.py, step 5; DECISIONS item 50), so the idea part writes a different try.
 2. Puts every new lesson through the eval gate (arena/gate.py: the exam, then the rerun of past
@@ -335,6 +335,12 @@ class Between:
         self.pending = []
         self.live, self._live = live, None
         self.scoped = None  # the exam made for this round (its source names a rewrite's earlier fails)
+        # where the study's read starts: None, the days before now as a round reads them; Train on the agent's
+        # page sets the oldest row of the round's losses (reflection/reflect_now.py run_arena)
+        self.since = None
+        # a person's Stop (engine/study.py Study.run stop, DECISIONS 98): None between CLI rounds; Train on the page
+        # sets its Stop check, so once pressed no new lesson starts its write and exam and the rest are queued
+        self.stop = None
 
     def learn(self, match, judged, match_id):
         """A lost training match as a case (arena/learn.py), kept for the study after its round."""
@@ -386,8 +392,9 @@ class Between:
                                   ideas=parts.Ideas(model=study_m))
         study.log = _Only(study.log, ids)
         until = float(self.now())
-        rep = study.run(until - (read_days(self.plug) + 2) * DAY, until, now=until)
+        rep = study.run(self._since(until), until, now=until, stop=self.stop)
         out["notes"] += rep["notes"]
+        out["queued"] = len(rep.get("queued") or [])  # lessons found after a Stop, not examined: queued
         for card in rep["cards"]:
             out["lessons"].append(self._gate(lessons, examiner, card["lesson_id"], until))
         self._rewrite(study, lessons, examiner, out, until)
@@ -416,7 +423,7 @@ class Between:
         as any lesson that passes; one that still fails stays out, as does a lesson whose exam
         could not run. Each try is named in out["rewrites"] as {of, try, lesson_id, idea, passed,
         why}, and each rewritten lesson is in out["lessons"] with "rewrite_of"."""
-        since = until - (read_days(self.plug) + 2) * DAY
+        since = self._since(until)
         rewrites = []
         for first in list(out["lessons"]):
             if first["passed"] or not _broke_something(lessons.exam_of(first["lesson_id"])):
@@ -445,6 +452,10 @@ class Between:
                 chain.append(got["lesson_id"])
         if rewrites:
             out["rewrites"] = rewrites
+
+    def _since(self, until):
+        """Where the study reads from: since when set, else the days a round reads before until."""
+        return float(self.since) if self.since is not None else until - (read_days(self.plug) + 2) * DAY
 
     def _source(self, lessons, chain):
         """Point a scoped exam at the situations the earlier tries in chain failed (none for ())."""

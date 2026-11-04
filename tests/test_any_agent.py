@@ -472,7 +472,7 @@ class RunTheArena(unittest.TestCase):
         self.assertIn(f'action="{pages.ARENA_PATH}"', page)
         self.assertIn('value="/agents/stock_watch?tab=arena"', page)  # it comes back to the Arena tab
         self.assertIn(pages.ARENA_SAID, page)
-        self.assertEqual(self.m.run_arena("stock_watch"), mo.ARENA_STARTED)
+        self.assertEqual(self.m.run_arena("stock_watch", full=True), mo.ARENA_STARTED)  # Full run (decision 96)
         self.assertEqual([n for _, n in self.starts], ["arena-stock_watch"])
         self.assertTrue(self.m.arena_running("stock_watch"))
         page = self.tab()
@@ -505,7 +505,7 @@ class RunTheArena(unittest.TestCase):
         self.assertIn('role="status">Running the Arena', self.p.get("/agents/stock_watch", {}, "t"))  # Overview too
 
     def test_refusals_start_nothing(self):
-        for agent in ("sales", "nobody", "../agents"):
+        for agent in ("nobody", "../agents"):  # the Sales agent runs it too now (decision 96)
             with self.subTest(agent=agent), self.assertRaises(mo.Refused) as e:
                 self.m.run_arena(agent)
             self.assertEqual(str(e.exception), mo.ARENA_NOT_HERE)
@@ -518,7 +518,10 @@ class RunTheArena(unittest.TestCase):
         self.assertIn("No model key", str(e.exception))
         self.assertEqual(self.starts, [])
         self.assertFalse(self.m.arena_running("stock_watch"))
-        self.assertNotIn("Run the Arena", self.p.get("/agents/sales", ARENA_TAB, "t"))  # Sales has Try again
+        sales = self.p.get("/agents/sales", ARENA_TAB, "t")  # Sales too (decisions 96 and 104): Run the Arena first
+        self.assertIn(f'action="{pages.ARENA_PATH}"', sales)
+        self.assertIn(f"{mo.ARENA_BUTTON}</button>", sales)
+        self.assertNotIn(f'action="{mo.TRAIN_PATH}"', sales)  # Train only after a run that did not pass
 
     def test_a_run_that_fails_says_why_and_the_button_comes_back(self):
         self.m.arena_models = lambda: (tap.raises, tap.raises, tap.raises)
@@ -539,7 +542,7 @@ class RunTheArena(unittest.TestCase):
         self.p.quick._running.add("stock_watch")
         with self.assertRaises(mo.Refused) as e:
             go(self.m, {"agent": ["stock_watch"]})
-        self.assertIn("first short practice", str(e.exception))
+        self.assertIn("Its first Arena run is still running.", str(e.exception))
         self.p.quick._running.discard("stock_watch")
         self.assertEqual(go(self.m, {"agent": ["stock_watch"]}), mo.ARENA_STARTED)
 
@@ -559,8 +562,9 @@ class RunTheArena(unittest.TestCase):
         self.assertEqual(policy, pages.AGENT_CSP)
         self.assertIn(f"script-src 'sha256-{pages._sha(pages.ARENA_SCRIPT)}'", policy)
         self.assertIn("connect-src 'self'", policy)
-        self.assertNotIn("script-src", self.p.csp_for("/agents/sales"))
-        self.assertNotIn("<script>", self.p.get("/agents/sales", ARENA_TAB, "t"))
+        # the Sales agent's page has Run reflection (DECISIONS 92), polled by the same script under the same policy
+        self.assertEqual(self.p.csp_for("/agents/sales"), pages.AGENT_CSP)
+        self.assertIn(f"<script>{pages.ARENA_SCRIPT}</script>", self.p.get("/agents/sales", ARENA_TAB, "t"))
         self.assertNotIn("script-src", self.p.csp_for("/agents/stock_watch/rollback"))
         self.assertIn("'X-Poll':'1'", pages.ARENA_SCRIPT)
 

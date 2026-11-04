@@ -446,11 +446,13 @@ def held(why):
     return lambda lessons: (lambda text, tags: engine_exam.could_not_run(why))
 
 
-def binding(plug, folder=None, db=None, *, model=None, judge_model=None):
+def binding(plug, folder=None, db=None, *, model=None, judge_model=None, calls=None):
     """make(lessons) -> examiner for a built agent whose plug names an exam, or None: no exam or no
     folder. A folder that does not load as this agent, or a plug whose exam file is not in that folder
     (a repo agent never takes a built agent's exam), gets held(): every lesson fails as could not run. The examiner counts (count=True) and is wrapped in
-    the Arena rerun of the agent's past practice wins (arena/gate.py wrap_turn)."""
+    the Arena rerun of the agent's past practice wins (arena/gate.py wrap_turn). calls: a call count already
+    open (Run reflection's): the examiner and its judge take each call from it, and the rerun gets the models
+    as they are with the same calls, so a rerun call counts once."""
     if plug.exam is None:
         return None
     where = folder_of(plug, folder, db)
@@ -473,7 +475,8 @@ def binding(plug, folder=None, db=None, *, model=None, judge_model=None):
         from kit import model as model_mod
         m = model if model is not None else model_mod.Model()
         j = judge_model if judge_model is not None else model_mod.Model()
-        return gate.wrap_turn(Examiner(agent, kept=lessons, model=m, judge_model=j, count=True), lessons,
+        em, ej = (m, j) if calls is None else (calls.model(m), calls.model(j))
+        return gate.wrap_turn(Examiner(agent, kept=lessons, model=em, judge_model=ej, count=True), lessons,
                               agent=agent, state=where, reports=practice.reports_of(where),
-                              agent_model=m, customer_model=m, judge_model=j)
+                              agent_model=m, customer_model=m, judge_model=j, calls=calls)
     return make

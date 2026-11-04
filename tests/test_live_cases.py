@@ -427,7 +427,8 @@ class BuildWritesTheCase(Base):
 
 
 class BuildStartsAShortPractice(Base):
-    """C8: after a successful Build, one short practice in the background, only with the real model."""
+    """C8 and DECISIONS 104 item 6: after a successful Build, the agent's first full Arena run in the background,
+    only with the real model."""
 
     def setUp(self):
         super().setUp()
@@ -464,15 +465,18 @@ class BuildStartsAShortPractice(Base):
         self.assertNotIn(qs.PRACTISING, said)
         self.assertIsNone(quick.practice_line("stock_watcher"))
 
-    def test_the_real_model_practises_the_new_agent_quick_in_the_background(self):
+    def test_the_real_model_plays_the_new_agents_first_full_arena_run_in_the_background(self):
         got = []
         quick = self.real(lambda folder, **kw: got.append((folder, kw)))
         self.assertEqual(quick.start_practice(self.m, "ticket_desk"), qs.PRACTISING)
         self.wait("ticket_desk")
         (folder, kw), = got
         self.assertEqual(folder, self.root / "agents" / "ticket_desk")
-        self.assertIs(kw["quick"], True)
+        self.assertNotIn("quick", kw)  # the full run Run the Arena makes (DECISIONS 104 item 6), never the short one
         self.assertIsNone(kw["learn"])  # no database path on this page, so no case is written
+        self.assertIsNone(kw["study"])  # and no study between rounds
+        self.assertIsNone(kw["db"])
+        self.assertIs(kw["off_topic"], True)  # models made with the key
         self.assertEqual(quick.practice_line("ticket_desk"), qs.PRACTICE_DONE)
 
     def test_the_page_never_waits_and_one_practice_runs_at_a_time(self):
@@ -520,6 +524,36 @@ class BuildStartsAShortPractice(Base):
             quick.start_practice(self.m, "ticket_desk")
             self.wait("ticket_desk")
         self.assertEqual(got, [("learner", "ticket_desk")])
+
+    def test_with_a_database_it_studies_between_rounds_as_run_the_arena_does(self):
+        from unittest import mock
+        write_agent(self.root, "ticket_desk", case=TICKET_CASE, actions=TICKET_ACTIONS)
+        got = []
+        quick = self.real(lambda folder, **kw: got.append(kw))
+        self.m.db_path = str(self.root / "ascent.db")
+        models = {"study": "s", "open": "o", "exam": "e"}
+        with mock.patch.object(run, "reflection_models", return_value=models):
+            quick.start_practice(self.m, "ticket_desk")
+            self.wait("ticket_desk")
+        kw, = got
+        self.assertIs(kw["study"], models)
+        self.assertIsNotNone(kw["db"])
+        self.assertEqual(kw["live_path"], self.m.db_path)
+        self.assertNotIn("quick", kw)
+        self.assertEqual(quick.practice_line("ticket_desk"), qs.PRACTICE_DONE)
+
+    def test_with_the_study_keys_missing_it_still_plays_with_no_study(self):
+        from unittest import mock
+        write_agent(self.root, "ticket_desk", case=TICKET_CASE, actions=TICKET_ACTIONS)
+        got = []
+        quick = self.real(lambda folder, **kw: got.append(kw))
+        self.m.db_path = str(self.root / "ascent.db")
+        with mock.patch.object(run, "reflection_models", side_effect=run.Refused("a key is missing")):
+            quick.start_practice(self.m, "ticket_desk")
+            self.wait("ticket_desk")
+        kw, = got
+        self.assertIsNone(kw["study"])
+        self.assertEqual(quick.practice_line("ticket_desk"), qs.PRACTICE_DONE)
 
     def test_the_new_agent_page_shows_it_is_practising(self):
         from reflection import pages

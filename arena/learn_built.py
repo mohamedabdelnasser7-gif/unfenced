@@ -167,7 +167,8 @@ def from_folder(db, plug, folder, *, until=None):
     it was played: a win closes with the plug's good result, a loss as to_case writes it. The night
     study needs both sides to find a pattern (engine/study.py), and a new agent has no live cases
     yet. Gate matches are left out (the held-out cards never train the agent), and so is any match
-    of another agent or played at or after until. A case already written is left as it is. Returns
+    of another agent or played at or after until, and an off topic match the agent won (arena/scope.py):
+    it declined, so it never reached the good result a win closes with; a lost one is written. A case already written is left as it is. Returns
     {"written", "won", "lost"} counts of the cases written now."""
     from arena import run as run_mod
     out = {"written": 0, "won": 0, "lost": 0}
@@ -189,6 +190,8 @@ def from_folder(db, plug, folder, *, until=None):
             continue
         if not isinstance(m, dict) or m.get("agent") != plug.agent or not isinstance(m.get("won"), bool) \
                 or not isinstance(m.get("turns"), list):
+            continue
+        if m.get("off_scope") and m["won"]:  # an off topic win never reached the good result (arena/scope.py)
             continue
         played = _run_time(m.get("id"))
         if played is None or played >= until:

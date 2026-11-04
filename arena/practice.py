@@ -120,6 +120,7 @@ import re
 import secrets
 import string
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -493,9 +494,14 @@ class Practice(run.Arena):
     def blocks(self, rounds, stopped):
         """What held the run below its level, each {"kind", "line"} in plain words: safety checks that
         failed, lessons waiting for a yes, lessons the exam refused, a study that found no lesson, no
-        study between rounds, tools named but not built, the call cap."""
+        study between rounds, tools named but not built, the call cap; first, test matches left unjudged."""
         out = []
         last = rounds[-1]["gate"] if rounds else {}
+        n = last.get("unjudged", 0)
+        if n:
+            out.append({"kind": "unjudged", "line": f"{n} test match{'' if n == 1 else 'es'} could not be judged "
+                                                     "(the judge's answer could not be read twice), so the round "
+                                                     "could not pass. Run the Arena again."})
         n = last.get("failed_checks", 0)
         if n:
             out.append({"kind": "safety", "line": f"{n} test match{'' if n == 1 else 'es'} failed a safety check "
@@ -540,6 +546,7 @@ class Practice(run.Arena):
         item.setdefault("quick", self.quick)  # a stuck item too, so Morning.gate reads it the same way
         item.setdefault("stopped", run.STUCK if item.get("kind") == "arena_stuck" else None)
         item.update(level=self.level, gate_size=self.trust["matches"], failed_checks=last.get("failed_checks", 0),
+                    unjudged=last.get("unjudged", 0),
                     scores=[r["gate"]["won"] for r in rounds], no_failed_checks=bool(self.trust.get("no_failed_checks")),
                     studied=self.between is not None)
         if item.get("stopped") != run.PASSED:
@@ -644,6 +651,16 @@ def shape_mix(count):
     return {k: n for k, n in madeup.mix(count).items() if k != "never" and n}
 
 
+class Unrecorded(run.Refused):
+    """read_test or trained refused: the agent's record of its test set (file: test-set.json) or of who
+    trained (file: arena-matches.jsonl) is torn, cannot be read or is gone. Only new_test_set gets past
+    it, never a skipped line."""
+
+    def __init__(self, line, file):
+        super().__init__(line)
+        self.file = file
+
+
 def read_test(folder):
     """The saved test customers, [(id, fingerprint)], [] when there is no test-set.json or its seal does
     not hold (write_test seals it with the key of reports_of the folder, as each match line is), so one
@@ -653,8 +670,8 @@ def read_test(folder):
     path = Path(folder) / TEST_FILE
     if not path.exists() and not path.is_symlink():
         return []
-    bad = run.Refused(f"the agent's {TEST_FILE} cannot be read, so the run did not start; it keeps the test "
-                      "customers, so it is never guessed")
+    bad = Unrecorded(f"the agent's {TEST_FILE} cannot be read, so the run did not start; it keeps the test "
+                     "customers, so it is never guessed", TEST_FILE)
     try:
         if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_TEST_FILE:
             raise bad
@@ -721,11 +738,12 @@ def trained(folder):
     path = folder / run.MATCHES_FILE
     if not path.exists() and not path.is_symlink():
         if (folder / TEST_FILE).exists() or (folder / TEST_FILE).is_symlink():
-            raise run.Refused(f"the agent's saved matches are gone while its {TEST_FILE} is there, so the run did "
-                              "not start; they say which customers trained, and a test customer never has")
+            raise Unrecorded(f"the agent's saved matches are gone while its {TEST_FILE} is there, so the run did "
+                             "not start; they say which customers trained, and a test customer never has",
+                             run.MATCHES_FILE)
         return set()
-    bad = run.Refused("the agent's saved matches cannot be read, so the run did not start; they say "
-                      "which customers trained, and a test customer never has")
+    bad = Unrecorded("the agent's saved matches cannot be read, so the run did not start; they say "
+                     "which customers trained, and a test customer never has", run.MATCHES_FILE)
     if path.is_symlink() or not path.is_file():
         raise bad
     out, k = set(), seal.key(reports_of(folder))  # read only: a reader never makes the key
@@ -748,6 +766,87 @@ def trained(folder):
     except (OSError, UnicodeDecodeError):
         raise bad from None
     return out
+
+
+def broken_record(folder):
+    """The file name (test-set.json or arena-matches.jsonl) when read_test or trained refuses it, else None."""
+    try:
+        read_test(folder)
+        trained(folder)
+    except Unrecorded as e:
+        return e.file
+    return None
+
+
+def _card_of(c):
+    """The card fingerprint c names (text or None), else _ANY: the id counts whatever card it is from."""
+    f = c.get("from_card", _ANY) if isinstance(c, dict) else _ANY
+    return f if f is None or isinstance(f, str) else _ANY
+
+
+RESET = "reset"  # the id of a reset line starts with it, and every reset line carries it true
+
+
+def new_test_set(folder, now=time.time):
+    """The way past a torn or missing record (Unrecorded): the old matches file and test-set.json are
+    renamed aside, never deleted or read past a bad line, and a new matches file holds the old file's
+    lines that read whole, then one training line (RESET) for every practice customer saved in the
+    folder and every one the old test-set.json names, with the card it was written from (any card when
+    that cannot be read). So the next run counts every old customer as trained and its test set is made
+    from new customers the writer writes. Returns what was renamed aside. run.Refused when the record
+    reads whole (nothing to reset)."""
+    folder = Path(folder)
+    if broken_record(folder) is None:
+        raise run.Refused("the agent's saved matches and test set read whole, so nothing was changed")
+    stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime(now())) + "-" + secrets.token_hex(3)
+    old, rows = folder / run.MATCHES_FILE, []
+    if old.is_file() and not old.is_symlink():
+        try:
+            fd = os.open(old, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            with open(fd, "rb") as f:
+                for raw in f:
+                    try:
+                        m = json.loads(raw.decode("utf-8"))
+                    except (ValueError, RecursionError):
+                        continue  # kept in the file set aside; the reset lines below cover its customer
+                    if isinstance(m, dict) and isinstance(m.get("card"), str):
+                        rows.append(m)
+        except OSError:
+            rows = []
+    people = []
+    cards = folder / madeup.FOLDER
+    if cards.is_dir() and not cards.is_symlink():
+        for p in sorted(cards.iterdir()):
+            if not madeup.CARD_FILE.fullmatch(p.name):
+                continue
+            try:
+                c = json.loads(p.read_text(encoding="utf-8"))
+                people.append((p.stem, _card_of(c)))
+            except (OSError, ValueError, UnicodeDecodeError, RecursionError):
+                people.append((p.stem, _ANY))
+    test = folder / TEST_FILE
+    try:
+        got = json.loads(test.read_text(encoding="utf-8")).get("test") if test.is_file() and not test.is_symlink() else []
+        people += [(e["id"], _card_of(e)) for e in got if isinstance(e, dict) and isinstance(e.get("id"), str)]
+    except (OSError, ValueError, UnicodeDecodeError, RecursionError, AttributeError, TypeError):
+        pass
+    for n, (cid, f) in enumerate(dict.fromkeys(people), 1):
+        rows.append({"id": f"{RESET}-{stamp}-t{n:03d}", "card": cid, RESET: True, TEST_KEY: False,
+                     "persona": {"id": cid, "from_card": f} if f is not _ANY else "a customer before the reset"})
+    tmp = folder / f".{run.MATCHES_FILE}.{secrets.token_hex(4)}.tmp"
+    aside = []
+    try:
+        with open(tmp, "x", encoding="utf-8") as f:
+            f.write("".join(json.dumps(m, ensure_ascii=False) + "\n" for m in rows))
+        for path, name in ((old, f"arena-matches-before-{stamp}.jsonl"), (test, f"test-set-before-{stamp}.json")):
+            if path.exists() or path.is_symlink():
+                os.replace(path, folder / name)  # a link is renamed, never followed
+                aside.append(name)
+        os.replace(tmp, old)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+    return aside
 
 
 def fixed_test(cards, size, saved, done, mix=None):

@@ -534,6 +534,11 @@ ARENA_NOT_HERE = "Run the Arena is for an agent made here, so nothing was starte
 LEVEL_NOT_HERE = "A risk level is for an agent made here, so nothing was changed."
 LEVEL_BAD = "Pick low, medium or high, please. Nothing was changed."
 NO_STUDY = "It plays one round: the study between rounds needs its model keys"
+RECORD_NOTE = ("The last run did not start: {file} in the agent's folder is torn, cannot be read or is gone, so it "
+               "cannot tell which customers trained. One step: press Start a new test set below. Its next run writes "
+               "new customers for the test set and counts every customer before as trained.")
+NEW_TEST_SET = ("A new test set is ready: the old files are kept beside it, every customer before counts as trained, "
+                "and its next Arena run writes new customers for the test set. Nothing was started.")
 ARENA_STARTED = "The Arena is running. Its practice matches show here as it plays; it takes a few minutes."
 
 
@@ -650,6 +655,7 @@ class Morning:
         # length when each started, what went wrong with the last one, its models (None: kit.model.Model;
         # a test hands (agent, customer, judge) fakes), how it starts, and the practice's shape (a test's)
         self._arenas, self._arena_note, self._arena_from, self._arena_lock = set(), {}, {}, threading.Lock()
+        self._arena_record = {}  # agent: the file its last run found torn or gone (new_test_set is the way on)
         self.arena_models = None
         self.arena_start = lambda work, name: threading.Thread(target=work, name=name, daemon=True).start()
         self.arena_shape = {}
@@ -842,6 +848,34 @@ class Morning:
         with self._arena_lock:
             return self._arena_note.get(agent)
 
+    def arena_record(self, agent):
+        """The file (test-set.json or arena-matches.jsonl) the agent's last run found torn, unreadable or
+        gone (arena/practice.py Unrecorded), so the Arena tab offers Start a new test set; else None."""
+        with self._arena_lock:
+            return self._arena_record.get(agent)
+
+    def new_test_set(self, agent, now=None):
+        """Start a new test set on the Arena tab (arena/practice.py new_test_set): the way on when the
+        agent's matches file or test-set.json is torn or gone. The old files are renamed aside, every
+        customer before counts as trained, and the next run's test set is written new. Never starts a
+        run. Refused for any other agent, while a run goes, and when the record reads whole."""
+        from arena import practice, run as run_mod
+        folder = self.agent_folder(agent) if isinstance(agent, str) else None
+        if agent == SALES.agent or folder is None or folder.is_symlink() or not folder.is_dir():
+            raise Refused("A new test set is for an agent made here, so nothing was changed.")
+        with self._arena_lock:
+            if agent in self._arenas:
+                raise Refused("The Arena is running for this agent, so nothing was changed.")
+            try:
+                practice.new_test_set(folder)
+            except run_mod.Refused as e:
+                raise Refused(f"Nothing was changed: {' '.join(str(e).split())[:160]}.")
+            except OSError as e:
+                raise Refused(f"Nothing was changed: the files could not be renamed ({type(e).__name__}).")
+            self._arena_note.pop(agent, None)
+            self._arena_record.pop(agent, None)
+        return NEW_TEST_SET
+
     def arena_played(self, agent):
         """The practice matches the running Run the Arena played so far: the lines its matches file gained
         since it started (arena/run.py MATCHES_FILE, in the agent's folder); 0 when none runs."""
@@ -875,11 +909,12 @@ class Morning:
                 raise Refused("The Arena is running for this agent already. Its matches show here as it plays.")
             self._arenas.add(agent)
             self._arena_note.pop(agent, None)
+            self._arena_record.pop(agent, None)
             self._arena_from[agent] = _lines(folder)
         db_path, shape = self.db_path, dict(self.arena_shape)
 
         def work():  # the thread's work: never raises, a failure becomes the tab's one line
-            note, db = None, None
+            note, db, record = None, None, None
             try:
                 from arena import practice
                 if self.arena_models is None:
@@ -909,7 +944,13 @@ class Morning:
                                   learn=learn, study=study if db is not None else None, db=db, live_path=db_path,
                                   **shape)
             except Exception as e:
-                note = f"The last run could not finish ({' '.join(str(e).split())[:200] or type(e).__name__})."
+                try:
+                    from arena.practice import Unrecorded
+                except ImportError:
+                    Unrecorded = ()
+                record = e.file if isinstance(e, Unrecorded) else None  # a torn or missing record: its own step
+                note = RECORD_NOTE.format(file=record) if record else \
+                    f"The last run could not finish ({' '.join(str(e).split())[:200] or type(e).__name__})."
             finally:
                 if db is not None:
                     try:
@@ -921,6 +962,8 @@ class Morning:
                 self._arena_from.pop(agent, None)
                 if note:
                     self._arena_note[agent] = note
+                if record:
+                    self._arena_record[agent] = record
         try:
             self.arena_start(work, f"arena-{agent}")
         except Exception:
@@ -3163,6 +3206,7 @@ ACTIONS = {"/stop": lambda m, f, now=None: m.stop(_field(f, "lesson"), _field(f,
                                                          _field(f, "name") if "name" in f else "", now=now)}
 SHEET_PATH = "/late_sheet"  # a POST that takes a file: multipart, its own size cap (MAX_SHEET)
 SHEET_FIELDS = ("token", "back", "agent", "sheet")
+NEW_TEST_PATH = "/arena/newtest"  # Start a new test set on the Arena tab (Morning.new_test_set)
 LEVEL_PATH = "/arena/level"  # a built agent's risk level (Morning.set_risk_level); "/level" is the trial level
 DATA_PATH = "/agents/data"  # rows or a file added to a built agent's sample data (Morning.add_data): multipart too
 DATA_FIELDS = ("token", "back", "agent", "text", "file")
@@ -3214,6 +3258,8 @@ TWO_TAB_ACTIONS = {**{k: v for k, v in ACTIONS.items() if k not in A3_ONLY},
                    "/tryagain": lambda m, f, now=None: m.try_again(_field(f, "agent"), now=now),
                    # keep, lower or raise a built agent's risk level on the Arena screen (decision 84)
                    LEVEL_PATH: lambda m, f, now=None: m.set_risk_level(_field(f, "agent"), _field(f, "level"), now=now),
+                   # a new test set when the agent's matches file or test-set.json is torn or gone (Unrecorded)
+                   NEW_TEST_PATH: lambda m, f, now=None: m.new_test_set(_field(f, "agent"), now=now),
                    # rows or a file the user adds to a built agent's sample data (kit/sample.py)
                    DATA_PATH: lambda m, f, now=None: m.add_data(_field(f, "agent"), _field(f, "text"),
                                                                  _sheet(f, "file"), now=now)}
@@ -3606,7 +3652,7 @@ def _count(v):
 def _level_fields(item):
     """A built agent's Arena item's level fields (arena/practice.py, decisions 84 and 85), checked: level,
     gate_size, failed_checks, scores (test wins a round), blocks ({kind, line}, what held it below its
-    level), stopped and studied. Anything of the wrong type reads as missing."""
+    level), stopped, studied and unjudged (the last round's test matches left unjudged, 0 when none). Anything of the wrong type reads as missing."""
     from arena import levels
     level = item.get("level")
     scores = item.get("scores") if isinstance(item.get("scores"), list) else []
@@ -3618,7 +3664,7 @@ def _level_fields(item):
             "gate_size": _count(item.get("gate_size")), "failed_checks": _count(item.get("failed_checks")),
             "scores": [s for s in (_count(x) for x in scores[:20]) if s is not None],
             "blocks": blocks, "stopped": item["stopped"] if isinstance(item.get("stopped"), str) else None,
-            "studied": item.get("studied") is True}
+            "studied": item.get("studied") is True, "unjudged": _count(item.get("unjudged")) or 0}
 
 
 def _arena_rounds(rows):

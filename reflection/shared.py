@@ -243,6 +243,11 @@ quarter quartered thrice twain dozen score fiver tenner grand quid buck pence pe
 nought naught zilch triple quadruple tenfold hundredfold twofold threefold
 """
 NUMBERISH = frozenset(w for b in _NUMBERISH.split() for w in (b, b + "s", b + "es")) | {"halves", "pennies"}
+# the letters of the alphabet spelled out: never English words to the word list either (make_words.py
+# leaves them out too), so a short brand or handle spelled in them (dee jay, em tee) is refused
+LETTER_NAMES = frozenset("""
+bee cee dee ee ef eff gee aitch haitch jay kay el ell em en pee cue kew ar ess tee vee ex wye zee zed
+""".split())
 WORDS_FILE = Path(__file__).with_name("words_en.xz")
 # common English words that are also first names the cleaner knows (arena/words.py): kept
 NAME_WORDS = frozenset("body may mark said shady sandy".split())
@@ -287,7 +292,10 @@ SOUNDS = {"zero": 0, "oh": 0, "o": 0, "nil": 0, "nought": 0, "naught": 0, "one":
           "seven": 7, "sevn": 7, "eight": 8, "ate": 8, "ait": 8, "eit": 8, "nine": 9, "nein": 9, "nyne": 9,
           "nain": 9}
 WEAK_SOUNDS = frozenset({"one", "to", "for"})  # plain words alone: count only in a run with strong ones
-ALWAYS_SOUNDS = frozenset({"fife", "sicks", "siks", "fiv", "sevn", "nein", "nyne", "wun", "tew", "thre"})
+# a digit wherever they stand: no plain word, or one a pattern has no need of (review crossowner round 3)
+ALWAYS_SOUNDS = frozenset({"fife", "sicks", "siks", "fiv", "sevn", "nein", "nyne", "wun", "tew", "thre",
+                           "ate", "ait", "tree", "won", "oh", "fore", "nain"})
+STRONG_ANYWHERE = 3  # this many strong sound alikes (not WEAK_SOUNDS) anywhere in a line are a number
 TOKEN = re.compile(r"[a-z]+(?:['’-][a-z]+)*")
 
 
@@ -295,8 +303,8 @@ _READ = {}  # the word list as last read, with the file's inode, size and change
 
 
 def english():
-    """The bundled English words (WORDS_FILE), less the first names the cleaner knows (but NAME_WORDS)
-    and NUMBERISH. A list that cannot be read is empty, so every word outside the openers and SAFE
+    """The bundled English words (WORDS_FILE), less the first names the cleaner knows (but NAME_WORDS),
+    NUMBERISH and LETTER_NAMES. A list that cannot be read is empty, so every word outside the openers and SAFE
     is refused, and the pool reads as broken (Pool.ready, Pool.add). The list is kept as read only
     while the file is the same one: a file moved away, put back or mended is read again."""
     try:
@@ -316,7 +324,7 @@ def english():
             continue
         prev = prev[:int(line[0])] + line[1:]
         out.add(prev)
-    words = frozenset(out - (first_names() - NAME_WORDS) - NUMBERISH) if out else frozenset()
+    words = frozenset(out - (first_names() - NAME_WORDS) - NUMBERISH - LETTER_NAMES) if out else frozenset()
     _READ.update(at=at, words=words)  # an empty list stays only while this same file is there
     return words
 
@@ -380,23 +388,27 @@ def _not_english(plain):
 
 def _folded(toks):
     """The line's words with number words and their sound alikes as digits: a run of three or more
-    of them with at least two that are not plain words alone (one, to, for), a sound alike that is
-    no plain word (fife, sicks), and double or triple before one. Any digit in it is a number."""
-    out, i = list(toks), 0
-    while i < len(toks):
+    of them with at least two that are not plain words alone (one, to, for), STRONG_ANYWHERE strong
+    ones anywhere in the line, a sound alike in ALWAYS_SOUNDS (fife, won, tree), and double or triple
+    before one. The first part of a contraction (won in won't, split by _tokens) is no sound alike.
+    Any digit in it is a number."""
+    out, i, n = list(toks), 0, len(toks)
+    sound = [t in SOUNDS and not (k + 1 < n and toks[k + 1] == "t" and f"{t}'t" in CONTRACTIONS)
+             for k, t in enumerate(toks)]
+    while i < n:
         j = i
-        while j < len(toks) and toks[j] in SOUNDS:
+        while j < n and sound[j]:
             j += 1
         run = toks[i:j]
         strong = [t for t in run if t not in WEAK_SOUNDS]
         if len(run) >= 3 and len(strong) >= 2:
             out[i:j] = [str(SOUNDS[t]) for t in run]
         i = max(j, i + 1)
+    strong_at = [k for k, t in enumerate(toks) if sound[k] and t not in WEAK_SOUNDS]
     for k, t in enumerate(toks):
-        if t in ALWAYS_SOUNDS:
+        if sound[k] and (t in ALWAYS_SOUNDS or len(strong_at) >= STRONG_ANYWHERE and k in strong_at):
             out[k] = str(SOUNDS[t])
-        if t in ("double", "triple") and k + 1 < len(toks) and toks[k + 1] in SOUNDS \
-                and toks[k + 1] not in WEAK_SOUNDS:
+        if t in ("double", "triple") and k + 1 < n and sound[k + 1] and toks[k + 1] not in WEAK_SOUNDS:
             out[k + 1] = str(SOUNDS[toks[k + 1]]) * (2 if t == "double" else 3)
     return " ".join(out)
 

@@ -244,6 +244,10 @@ CLEAN = [
     "Offer gift boxes when a customer buys jewellery, and explain the licence card inside.",
     "If guests ask about parking, explain whether the kerb outside is free to stop at.",
     "When a client began strong but stopped logging workouts, ask what changed without blame.",
+    # review crossowner round 3, item 5: a contraction and a plain too twice stay clean
+    "If the device won't turn on, ask whether the charger works with another device.",
+    "If the device won’t charge, ask whether the cable is damaged before anything else.",
+    "Customers who say the price is too high and the wait too long want reassurance first.",
 ]
 
 
@@ -337,10 +341,39 @@ class CleanTable(unittest.TestCase):
                 self.assertTrue(shared._english_word(w))
 
     def test_sound_alikes_count_only_in_a_run(self):
-        self.assertEqual(shared.check("When the customer won too, thank them and offer the next size."), [])
+        self.assertEqual(shared.check("When the customer agrees too, thank them and offer the next size."), [])
         self.assertEqual(shared.check("Offer a one to one call when a learner is stuck on the same lesson."), [])
         self.assertIn("a number in words", shared.check("When the customer at house won too tree asks, answer."))
         self.assertIn("a number in words", shared.check("When the customer says one won one too, greet them."))
+
+    def test_letter_names_digit_sound_alikes_and_three_strong_ones_anywhere_are_refused(self):
+        # red team crossowner round 3, item 1 and review item 5
+        for line, reason in (
+                ("When customers ask about the dee jay hoodie, share the size chart.",
+                 "a word not in the English word list"),
+                ("When customers mention em tee by name, reply in chat only.", "a word not in the English word list"),
+                ("When customers ask about the zee ex label, share the size chart.",
+                 "a word not in the English word list"),
+                ("When the customer at house won and too and tree asks, answer calmly.", "a number in words"),
+                ("When the customer says oh, ask again and wait for the reply.", "a number in words"),
+                ("When the customer ate the cost, thank them and confirm the order.", "a number in words"),
+                ("When the customer fore the order, check the stock first.", "a number in words"),
+                ("When customers text from the number with nain at the end, answer calmly.", "a number in words"),
+                ("When the customer writes too, then tu, then too again, answer calmly.", "a number in words")):
+            with self.subTest(line=line):
+                self.assertIn(reason, shared.check(line))
+        self.assertNotIn("a number in words", shared.check("When the customer writes too, then tu, answer calmly."))
+
+    def test_the_word_list_file_holds_no_letter_names(self):
+        import lzma
+        raw, words, prev = lzma.decompress(shared.WORDS_FILE.read_bytes()).decode("ascii"), set(), ""
+        for line in raw.split("\n"):
+            if line and line[0].isdigit():
+                prev = prev[:int(line[0])] + line[1:]
+                words.add(prev)
+        self.assertGreater(len(words), 150_000)
+        self.assertEqual(words & (shared.LETTER_NAMES | shared.NUMBERISH), set())
+        self.assertIn("queue", words)  # a word, not the letter's name
 
     def test_the_franco_tens_with_a_currency_are_a_spelled_amount_in_the_send_check(self):
         for line in ("el zbon 3ayez talateen geneh", "3ayez khamseen gneh bas", "be arba3een geneh"):

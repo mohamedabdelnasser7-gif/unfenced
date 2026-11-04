@@ -244,7 +244,7 @@ class PoolTest(unittest.TestCase):
         data = json.loads((self.root / "patterns-support.json").read_text())
         self.assertEqual(set(data), {"kind", "patterns", "keys"})
         for o in data["patterns"][0]["owners"]:
-            self.assertRegex(o, r"^[0-9a-f]{32}$")
+            self.assertRegex(o, r"^[0-9a-f]{48}$")  # the keyed hash, then its seal
         self.assertEqual(oct((self.root / "patterns-support.json").stat().st_mode & 0o777), "0o600")
 
     def test_hashes_are_keyed_per_folder(self):
@@ -274,6 +274,61 @@ class PoolTest(unittest.TestCase):
         data["patterns"][0]["owners"] = [OWNER_A, OWNER_B]  # raw ids, not hashes
         path.write_text(json.dumps(data))
         self.assertEqual(shared.Pool("support", self.root).shared(shared.LESSON), [])
+
+    def two_shared(self):
+        self.pool.add(shared.LESSON, CLEAN_EN, OWNER_A, "k1")
+        self.pool.add(shared.LESSON, NEAR_EN, OWNER_B, "k2")
+        self.pool.add(shared.LOST, LOST_EN, OWNER_A, "k3")
+        self.pool.add(shared.LOST, LOST_EN, OWNER_B, "k4")
+        path = self.root / "patterns-support.json"
+        return path, json.loads(path.read_text())
+
+    def test_owners_are_sealed_to_their_pattern(self):
+        path, data = self.two_shared()
+        self.assertEqual(len(shared.Pool("support", self.root).shared(shared.LESSON)), 1)
+        cases = {
+            "an owner added by hand": lambda d: d["patterns"][0]["owners"].append("f" * 48),
+            "an owner moved from another pattern": lambda d: d["patterns"][0]["owners"].__setitem__(
+                1, d["patterns"][1]["owners"][1]),
+            "the words changed": lambda d: d["patterns"][0].__setitem__("text", NEAR_EN),
+            "the worry changed": lambda d: d["patterns"][0].__setitem__("worry", "price"),
+            "the id changed": lambda d: d["patterns"][0].__setitem__("id", "a" * 12),
+            "lesson made lost": lambda d: d["patterns"][0].__setitem__("what", shared.LOST),
+            "the same owner twice": lambda d: d["patterns"][0]["owners"].__setitem__(
+                1, d["patterns"][0]["owners"][0]),
+        }
+        for name, edit in cases.items():
+            with self.subTest(name):
+                d = json.loads(json.dumps(data))
+                edit(d)
+                path.write_text(json.dumps(d))
+                pool = shared.Pool("support", self.root)
+                self.assertEqual(pool.shared(shared.LESSON), [])  # the edited row is dropped
+                self.assertEqual(len(pool.shared(shared.LOST)), 1)  # the other row stands
+                self.assertFalse(pool.broken)
+
+    def test_a_pool_with_no_key_or_a_new_key_is_broken_and_never_written(self):
+        path, data = self.two_shared()
+        before = path.read_bytes()
+        (self.root / shared.KEY_FILE).unlink()
+        pool = shared.Pool("support", self.root)
+        self.assertFalse((self.root / shared.KEY_FILE).exists())  # reading never makes a key
+        self.assertTrue(pool.broken)
+        self.assertEqual(pool.patterns, [])
+        with self.assertRaises(shared.Refused):
+            pool.add(shared.LESSON, CLEAN_EN, OWNER_C, "k5")  # makes a new key, which seals none of them
+        self.assertTrue((self.root / shared.KEY_FILE).exists())
+        with self.assertRaises(shared.Refused):
+            shared.Pool("support", self.root).add(shared.LESSON, CLEAN_EN, OWNER_C, "k6")
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_rows_copied_to_another_kind_do_not_verify(self):
+        path, data = self.two_shared()
+        data["kind"] = "sales"
+        (self.root / "patterns-sales.json").write_text(json.dumps(data))
+        pool = shared.Pool("sales", self.root)
+        self.assertEqual(pool.patterns, [])
+        self.assertTrue(pool.broken)
 
     def test_refusals(self):
         from arena import paths

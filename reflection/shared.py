@@ -81,6 +81,7 @@ SHARED_DIR = "shared"
 POOL_AGENT = "shared_pool"  # the name the study's notes and links give the pool
 MAX_FILE = 5_000_000
 HASH = re.compile(r"[0-9a-f]{32}")
+SEALED = re.compile(r"([0-9a-f]{32})([0-9a-f]{16})")  # an owner in the file: its hash, then its seal
 PID = re.compile(r"[0-9a-f]{12}")
 LABEL = re.compile(r"[a-z]+(?: [a-z]+){0,3}")
 
@@ -405,6 +406,13 @@ class Pool:
             raise Refused("an owner is a name")
         return hmac.new(self._secret(), b"owner\x00" + owner.encode("utf-8"), hashlib.sha256).hexdigest()[:32]
 
+    def seal(self, p, oh):
+        """The 16 hex the file keeps after an owner's hash: a keyed hash over the pattern (kind, id,
+        what, text, worry) and that owner, so an owner added or moved by hand to another pattern,
+        or a pattern's words changed, fails on the next read."""
+        raw = "\x00".join([self.kind, p["id"], p["what"], p["text"], p.get("worry") or "", oh]).encode("utf-8")
+        return hmac.new(self._secret(), b"seal\x00" + raw, hashlib.sha256).hexdigest()[:16]
+
     def key_hash(self, owner, key):
         """Where a pattern came from (an owner's agent and lesson, or chat and step), as a keyed hash."""
         raw = f"{owner}\x00{key}".encode("utf-8")
@@ -424,12 +432,28 @@ class Pool:
         data = data if isinstance(data, dict) else {}
         if data.get("kind", self.kind) != self.kind:
             raise Refused("the pool file is for another kind of agent")
-        self.patterns = [p for p in (data.get("patterns") or [])[:MAX_PATTERNS] if _pattern_ok(p)]
+        rows = [p for p in (data.get("patterns") or [])[:MAX_PATTERNS] if _pattern_ok(p)]
+        # rows but no key, or a key none of them was sealed with (a new key after the old was lost):
+        # the read is broken, and add() writes nothing rather than wipe the pool
+        key = self._secret(make=False)
+        self.patterns = [p for p in (self._unsealed(p) for p in rows) if p is not None] if key else []
+        self.broken = bool(rows) and not self.patterns
         for p in self.patterns:
             p["words"] = words(p["text"])
         keys = data.get("keys")
         self.keys = [k for k in keys if isinstance(k, str) and HASH.fullmatch(k)][-MAX_KEYS:] \
             if isinstance(keys, list) else []
+
+    def _unsealed(self, p):
+        """The row with its owners as hashes, or None when any owner's seal fails (_pattern_ok has
+        already refused an owner written twice)."""
+        owners = []
+        for o in p["owners"]:
+            m = SEALED.fullmatch(o)
+            if not hmac.compare_digest(m.group(2), self.seal(p, m.group(1))):
+                return None
+            owners.append(m.group(1))
+        return dict(p, owners=owners)
 
     @contextlib.contextmanager
     def _locked(self):
@@ -446,7 +470,8 @@ class Pool:
         os.makedirs(self.root, mode=0o700, exist_ok=True)
         if not self.root.is_symlink():
             os.chmod(self.root, 0o700)
-        kept = [{k: p[k] for k in ("id", "what", "text", "worry", "owners", "at")} for p in self.patterns]
+        kept = [dict({k: p[k] for k in ("id", "what", "text", "worry", "at")},
+                     owners=[oh + self.seal(p, oh) for oh in p["owners"]]) for p in self.patterns]
         _write(self.path, json.dumps({"kind": self.kind, "patterns": kept, "keys": self.keys[-MAX_KEYS:]},
                                      ensure_ascii=False).encode("utf-8"))
 
@@ -467,6 +492,9 @@ class Pool:
         oh, kh = self.owner_hash(owner), self.key_hash(owner, key)
         with self._locked():
             self._read()
+            if self.broken:
+                raise Refused("the pool file has patterns none of which the shared folder's key sealed; nothing is "
+                              "written")
             if kh not in self.keys:
                 self.keys.append(kh)
             if reasons:
@@ -510,12 +538,12 @@ class Pool:
 
 def _pattern_ok(p):
     """A pattern as add() writes it, its text clean by check() again (a hand edited file gains
-    nothing), its owners hashes only."""
+    nothing), its owners sealed hashes (Pool._unsealed checks each seal against the key)."""
     return (isinstance(p, dict) and isinstance(p.get("id"), str) and PID.fullmatch(p["id"])
             and p.get("what") in WHATS and isinstance(p.get("text"), str) and not check(p["text"])
             and (p.get("worry") is None or isinstance(p["worry"], str) and LABEL.fullmatch(p["worry"]))
             and isinstance(p.get("owners"), list) and 0 < len(p["owners"]) <= MAX_OWNERS
-            and all(isinstance(o, str) and HASH.fullmatch(o) for o in p["owners"])
+            and all(isinstance(o, str) and SEALED.fullmatch(o) for o in p["owners"])
             and len(set(p["owners"])) == len(p["owners"])
             and isinstance(p.get("at"), (int, float)) and not isinstance(p["at"], bool))
 

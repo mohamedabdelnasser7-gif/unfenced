@@ -99,7 +99,7 @@ class TryAgainBuilt(Tab):
     def test_it_plays_the_lost_practice_matches_again_with_its_own_judge(self):
         lose = World(reached=False)
         self.m.arena_models = lambda: (lose, lose, lose)
-        self.m.arena_shape = {"matches": 1, "rounds": 1}
+        self.m.arena_shape = {"matches": 4, "rounds": 1}  # 4 of 10 practice customers, at most 3 never ones
         self.m.run_arena("stock_watch")
         self.starts.pop()[0]()
         item = self.m.read_arena()[0]["stock_watch"]
@@ -122,7 +122,7 @@ class TryAgainBuilt(Tab):
         from arena import practice
         lose = World(reached=False)  # every match lost: practice and test alike
         self.m.arena_models = lambda: (lose, lose, lose)
-        self.m.arena_shape = {"matches": 2, "rounds": 1}
+        self.m.arena_shape = {"matches": 4, "rounds": 1}  # 4 of 10 practice customers, at most 3 never ones
         self.m.run_arena("stock_watch")
         self.starts.pop()[0]()
         test = {e["id"] for e in json.loads((self.folder / practice.TEST_FILE).read_text(encoding="utf-8"))["test"]}
@@ -141,7 +141,7 @@ class TryAgainBuilt(Tab):
     def test_the_try_is_judged_by_the_third_model(self):
         lose = World(reached=False)
         self.m.arena_models = lambda: (lose, lose, lose)
-        self.m.arena_shape = {"matches": 1, "rounds": 1}
+        self.m.arena_shape = {"matches": 4, "rounds": 1}  # 4 of 10 practice customers, at most 3 never ones
         self.m.run_arena("stock_watch")
         self.starts.pop()[0]()
         agent, customer, judge = World(), World(), World()
@@ -171,7 +171,7 @@ class TryAgainHandsTheCorrections(Tab):
         from tests.test_levels_study import FIRST, Climb
         world = Climb((self.folder / "instructions.md").read_text(encoding="utf-8"))
         self.m.arena_models = lambda: (world, world, world)
-        self.m.arena_shape = {"matches": 2, "rounds": 1}
+        self.m.arena_shape = {"matches": 4, "rounds": 1}  # 4 of 10 practice customers, at most 3 never ones
         self.m.run_arena("stock_watch")
         self.starts.pop()[0]()
         self.assertEqual(world.handed_seen and max(n for n, _ in world.handed_seen), 0)

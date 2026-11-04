@@ -16,7 +16,7 @@ For every agent in the database, read from the lessons, trials and trial marks t
    them: where it went and what it says, no case id, no count and no button; it asks nothing
    (DECISIONS items 19 and 35).
    When the Arena got stuck (arena/run.py), the newest stuck item saved next to the database
-   (arena-<agent>-<run>.json): its line and the held-out matches it lost, each quoting a turn.
+   (arena-<agent>-<run>.json): its line and the gate matches it lost, each quoting a turn.
    For the personal assistant, the open new mode card the night wrote next to the database
    (assistant/newmode.py, mode-assistant-<run>.json): the mode's name, the user's words behind
    it and the Arena's counts, with Yes, Rename and Drop. An answer goes through
@@ -607,6 +607,7 @@ REFLECT_SAID = ("This is the learning step. The agent reads the chats it lost, w
 REFLECT_STEPS = (("read", "reading lost chats"), ("lesson", "writing a lesson"), ("exam", "the exam"))
 REFLECT_RUNNING = "Reflecting: " + ", then ".join(w for _, w in REFLECT_STEPS)
 NO_LOST = "No lost chats to learn from yet. In the Arena, Train learns from the matches a run loses."
+NO_LOST_CHATS = "No lost chats to learn from yet."  # an agent with no Arena here (Morning.no_lost)
 NO_KEY = "Reflection needs a model key. Watch a recorded reflection run instead."
 REPLAY = "python3 -I recorded/play.py"  # the recorded replay docs/judges.md names
 REFLECT_NOT_HERE = "Run reflection is for an agent on this page, so nothing was started."
@@ -1438,14 +1439,20 @@ class Morning:
 
     def reflect_ready(self, agent):
         """None when Run reflection can start for the agent as far as the page knows before a press, else
-        the line that says why not: no model key (NO_KEY) or no lost chats (NO_LOST)."""
+        the line that says why not: no model key (NO_KEY) or no lost chats (no_lost)."""
         if self.reflection_models is None:
             try:
                 if night_mod.missing_keys():
                     return NO_KEY
             except night_mod.Refused:
                 return NO_KEY
-        return None if self.lost_count(agent) else NO_LOST
+        return None if self.lost_count(agent) else self.no_lost(agent)
+
+    def no_lost(self, agent):
+        """The no lost chats line for the agent. The Sales agent and an agent made here have the Arena tab, so
+        theirs points to Train (NO_LOST); any other agent on the page has no Arena here, so its line stops at
+        the plain words (NO_LOST_CHATS) and points nowhere it cannot go (review reflectbtn r1, finding 1)."""
+        return NO_LOST if agent == SALES.agent or self.agent_folder(agent) is not None else NO_LOST_CHATS
 
     def arena_losses(self, agent):
         """The Sales agent's lost Arena chats its Run reflection studies, in the copy <db>.arena
@@ -1545,13 +1552,12 @@ class Morning:
         night now (reflection/night.py night) with the real models on the real database, in a background
         thread, so the page returns at once and polls its steps. Any agent on the page, the Sales agent or
         one made here. Refused for an agent not on the page, with no database folder, with no model key,
-        when the day's model call cap has no room, with no lost chats, while a Run the Arena or a Run
+        when the day's model call cap has no room, with no lost chats, while a Run the Arena, a Train or a Run
         reflection goes for the agent, and while the night lock is held (the scheduled night or another
         Run reflection on this database). The lock is held until the run ends, so the scheduled night waits. A
         holder left by a page stopped mid run (Ctrl+C) is taken over once its process is gone (reflect_now.gone).
-        While the Sales agent's Arena copy holds the chats it lost there (arena_losses), it studies those in the
-        copy instead (reflect_now.run_arena, DECISIONS 96): the gate between Arena rounds and the full exam, and
-        only a lesson that passes both is written to this database."""
+        It reads real customer chats only: the Sales agent's Arena losses in its copy are Train's to study
+        (run_train, DECISIONS 102 and 104)."""
         from arena import retry as retry_mod, run as run_mod
         from reflection import reflect_now, scheduler
         if not isinstance(agent, str) or agent not in self.plugs or agent not in self.lessons:
@@ -1568,7 +1574,7 @@ class Morning:
         if not retry_mod.has_room(run_mod.state_dir(self.db_path)):
             raise Refused(REFLECT_CAP)
         if not reflect_now.lost_chats(self.db, self.plugs[agent], until=now):
-            raise Refused(NO_LOST)
+            raise Refused(self.no_lost(agent))
         folder = self.agent_folder(agent)
         if folder is not None and (folder.is_symlink() or not folder.is_dir()):
             raise Refused(REFLECT_NOT_HERE)

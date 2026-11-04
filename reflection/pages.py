@@ -1292,10 +1292,10 @@ def reflect_running(step):
     return f'<p class="no-yet" role="status">Reflecting: {said}</p>'
 
 
-def reflect_result(a, done):
+def reflect_result(a, done, no_lost=mo.NO_LOST):
     """What the last Run reflection did, with the lesson rows' own rendering (lesson_rows, _chip): each
     lesson it wrote with its chip (on trial, or waiting for a yes) and what its exam said; else why it
-    wrote none."""
+    wrote none (no_lost: the agent's own no lost chats line, Morning.no_lost)."""
     items = {i["id"]: i for i in a["live"] + a["waiting"] + a["pulled"]}
     out = [f'<span class="lab">Last reflection, {h(mo._when(done["at"]))}</span>',
            f'<div class="nr"><p>Reflection read {_plural(done["lost"], "lost chat")}.</p></div>']
@@ -1313,7 +1313,7 @@ def reflect_result(a, done):
         out += rows
     else:
         if not done["lost"]:
-            why = mo.NO_LOST
+            why = no_lost
         elif done.get("written"):  # the Sales agent's Arena losses: lessons written in its copy, none passed the gate
             why = (f'It wrote {_plural(done["written"], "lesson")} from them; none passed the exam, so none reaches a '
                    "real customer.")
@@ -1341,7 +1341,7 @@ def run_reflection(m, a, agent, ctx, back):
     out = []
     done = m.reflected(agent)
     if done is not None:
-        out.append(reflect_result(a, done))
+        out.append(reflect_result(a, done, m.no_lost(agent) if hasattr(m, "no_lost") else mo.NO_LOST))
     n = m.queued(agent) if hasattr(m, "queued") else 0
     if n:
         out.append(f'<p class="quiet">{h(waiting_line(n))}</p>')

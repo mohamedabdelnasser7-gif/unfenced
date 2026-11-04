@@ -176,6 +176,36 @@ class Wording(Base):
         self.assertEqual(str(e.exception), mo.NO_LOST)
         self.assertEqual(self.starts, [])
 
+    def test_an_agent_with_no_arena_here_gets_the_plain_no_lost_line(self):
+        # review reflectbtn r1 finding 1: the marketing and assistant plugs have no Arena tab, so their line
+        # never sends them to Train; the Sales agent and an agent made here keep the line that does
+        m = mo.Morning(self.db, [plug_mod.load(tq.ROOT / "sales" / "plug.json"),
+                                 plug_mod.load(tq.ROOT / "marketing" / "plug.json")],
+                       reports=self.dir, db_path=self.dir / "ascent.db")
+        m.reflection_models = self.m.reflection_models
+        m.reflect_start = self.m.reflect_start
+        self.assertEqual(mo.NO_LOST_CHATS, "No lost chats to learn from yet.")
+        self.assertEqual(m.no_lost("marketing"), mo.NO_LOST_CHATS)
+        self.assertEqual(m.no_lost(SALES.agent), mo.NO_LOST)
+        self.assertEqual(self.m.no_lost("stock_watch"), mo.NO_LOST)
+        page = pages.Pages(m).get("/agents/marketing", {}, "t").split("</style>")[1].split("<script>")[0]
+        self.assertIn(f'<p class="no-yet" role="status">{mo.NO_LOST_CHATS}</p>', page)
+        self.assertNotIn(mo.NO_LOST, page)
+        with self.assertRaises(mo.Refused) as e:
+            m.run_reflection("marketing")
+        self.assertEqual(str(e.exception), mo.NO_LOST_CHATS)
+        a = {"live": [], "waiting": [], "pulled": []}
+        done = {"at": 1.8e9, "lost": 0, "candidates": 0, "cards": [], "notes": []}
+        plain = pages.reflect_result(a, done, m.no_lost("marketing"))
+        self.assertIn(mo.NO_LOST_CHATS, plain)
+        self.assertNotIn(mo.NO_LOST, plain)  # NO_LOST starts with the plain words, so only NotIn tells them apart
+        self.assertIn(mo.NO_LOST, pages.reflect_result(a, done))
+        with mock.patch.object(m, "reflected", return_value=done):  # a last reflection that read no lost chat
+            page = pages.Pages(m).get("/agents/marketing", {}, "t").split("</style>")[1].split("<script>")[0]
+        self.assertIn("Last reflection", page)
+        self.assertNotIn(mo.NO_LOST, page)
+        self.assertEqual(self.starts, [])
+
     def test_no_key_points_to_the_recorded_replay(self):
         self.lose()
         self.m.reflection_models = None

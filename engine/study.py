@@ -709,7 +709,9 @@ class Study:
         """This agent's kept lessons into the shared pool (see 6): the ones that did not come from
         it (nor from a lesson that did, _from_pool), oldest first, at most the link's give a night
         that reach the writer. Each is written up
-        once; what the pool drops is never kept. A writer that fails stops the giving for the night."""
+        once; what the pool drops is never kept. A writer that fails, or a pool that reads broken or
+        refuses, stops the giving for the night; a writer that gives no line for one lesson does not
+        (that lesson is asked again another night, once: reflection/shared.py Pool.miss)."""
         if self.shared is None:
             return
         entry = rep.setdefault("shared", {"read": 0, "lessons": [], "given": []})

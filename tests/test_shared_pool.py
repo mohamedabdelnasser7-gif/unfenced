@@ -296,7 +296,7 @@ class PoolTest(unittest.TestCase):
                 self.assertNotIn(owner.encode(), raw)
                 self.assertNotIn(hashlib.sha256(owner.encode()).hexdigest()[:32].encode(), raw)  # keyed, not bare
         data = json.loads((self.root / "patterns-support.json").read_text())
-        self.assertEqual(set(data), {"kind", "patterns", "keys", "names"})
+        self.assertEqual(set(data), {"kind", "patterns", "keys", "missed", "names"})
         for o in data["patterns"][0]["owners"]:
             self.assertRegex(o, r"^[0-9a-f]{48}$")  # the keyed hash, then its seal
         self.assertEqual(oct((self.root / "patterns-support.json").stat().st_mode & 0o777), "0o600")
@@ -576,14 +576,51 @@ class RefusePath(unittest.TestCase):
         self.assertEqual(self.asked, [])
         self.assertFalse((self.root / shared.KEY_FILE).exists())
 
-    def test_a_writer_with_no_line_is_failed_and_not_kept_as_given(self):
+    def test_a_writer_with_no_line_is_not_failed_and_kept_as_given_after_a_second_night(self):
         shared.Pool("support", self.root).add(shared.LESSON, CLEAN_EN, OWNER_B, "other")  # the pool has a key
-        for line in (None, ""):
+        for n, line in enumerate((None, "")):
             with self.subTest(line=line):
                 link = shared.Link("support", OWNER_A, self.writer(line), self.root)
-                got = link.give_lesson("a", {"id": 2, "text": "Spin the fans slowly."})
-                self.assertEqual((got["failed"], got["asked"], got["pattern"]), (True, True, None))
-                self.assertEqual(link.pool.ready(f"{link.db}\x00lesson:2", OWNER_A), None)  # asked again later
+                got = link.give_lesson("a", {"id": 2 + n, "text": "Spin the fans slowly."})
+                self.assertEqual((got.get("failed"), got["asked"], got["pattern"]), (None, True, None))
+                key = f"{link.db}\x00lesson:{2 + n}"
+                self.assertEqual(link.pool.ready(key, OWNER_A), None)  # asked again another night
+                again = link.give_lesson("a", {"id": 2 + n, "text": "Spin the fans slowly."})
+                self.assertEqual(again["why"], "the writer gave no line; not asked again")
+                self.assertEqual(link.pool.ready(key, OWNER_A), "given before")
+        self.assertEqual(shared.Pool("support", self.root).missed, [])
+
+    def test_a_missed_lesson_given_a_line_later_leaves_the_missed_list(self):
+        link = shared.Link("support", OWNER_A, self.writer(None), self.root)
+        link.give_lesson("a", {"id": 4, "text": "Spin the fans slowly."})
+        self.assertEqual(len(shared.Pool("support", self.root).missed), 1)
+        link = shared.Link("support", OWNER_A, self.writer(CLEAN_EN), self.root)
+        self.assertIsNotNone(link.give_lesson("a", {"id": 4, "text": "Spin the fans slowly."})["pattern"])
+        self.assertEqual(shared.Pool("support", self.root).missed, [])
+
+    def test_a_grow_night_goes_on_past_a_chat_with_no_line(self):
+        from arena import grow
+        from arena.scripted import ScriptedModel
+        from arena.tag import Tagger
+        from kit.db import Db
+        from tests.test_arena_grow import LOST, NOW, SINCE, recipe, write_chats, write_owner, write_plug
+        owner = self.root.parent / "agents"
+        owner.mkdir(parents=True)
+        write_owner(owner, "north")
+        write_plug(owner / "store_north", "store_north", "sales", owner="north")
+        db = Db(":memory:")
+        self.addCleanup(db.close)
+        write_chats(db, tuple((f"{LOST[0]}-{i}", LOST[1]) for i in range(3)))
+        lines = [None, LOST_EN, LOST_EN]
+
+        def writer(what, kind, data):
+            self.asked.append(what)
+            return lines[len(self.asked) - 1]
+        link = shared.Link("sales", shared.owner_id(owner / "store_north"), writer, self.root)
+        counts = grow.grow(db, grow.Pool(owner, "sales"), since=SINCE, until=NOW, shared=link,
+                           tagger=Tagger(model=ScriptedModel(recipe()), cap=50, recipe=recipe()))
+        self.assertEqual(len(self.asked), 3)
+        self.assertEqual((counts.get("writer failed", 0), counts.get("patterns given")), (0, 2))
 
     def test_a_pool_that_breaks_after_it_was_read_is_failed(self):
         link = shared.Link("support", OWNER_A, self.writer(CLEAN_EN), self.root)

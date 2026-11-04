@@ -38,10 +38,13 @@ whose owner.json does not name the owner its plug names gives nothing (its folde
 who the owner is, as in arena/grow.py); it still reads the pool. Within one install, whoever can
 make owner folders can still make owners; the id only stops one owner counting twice by a new name.
 What was given is kept by the lesson's or chat's own id and its database (key_hash, Link db), never
-by the owner, so a lesson is written up once whatever id its owner has. Each pool also keeps, sealed,
-which owner id each owner name (owner.json) gave under: a known name with a new id (its owner-id file
-deleted and made again) gives nothing until the operator clears that name (clear_owner, or
-python3 -m reflection.shared clear-owner --db <the agents' database> <owner name>).
+by the owner, so a lesson is written up once whatever id its owner has. A kept lesson the writer
+gives no line for never holds back the ones after it: it is kept as missed and asked again another
+night, and after a second night with no line it is kept as given (Pool.miss). A lost chat is given
+only the night it is added (arena/grow.py). Each pool also keeps, sealed, which owner id each owner
+name (owner.json) gave under: a known name with a new id (its owner-id file deleted and made again)
+gives nothing until the operator clears that name (clear_owner, or python3 -m reflection.shared
+clear-owner --db <the agents' database> <owner name>).
 
 Where the patterns go, each through the paths siblings already take:
   lessons  engine/study.py step 6 reads the shared lesson patterns of its kind beside its siblings,
@@ -649,6 +652,9 @@ class Pool:
         keys = data.get("keys")
         self.keys = [k for k in keys if isinstance(k, str) and HASH.fullmatch(k)][-MAX_KEYS:] \
             if isinstance(keys, list) else []
+        missed = data.get("missed")  # the writer gave no line for these once (miss)
+        self.missed = [k for k in missed if isinstance(k, str) and HASH.fullmatch(k)][-MAX_KEYS:] \
+            if isinstance(missed, list) else []
         named = data.get("names")
         named = [m for m in (NAMED.fullmatch(n) for n in named[:MAX_KEYS] if isinstance(n, str)) if m] \
             if isinstance(named, list) else []
@@ -688,7 +694,8 @@ class Pool:
                      owners=[oh + self.seal(p, oh) for oh in p["owners"]]) for p in self.patterns]
         names = [nh + oh + self.name_seal(nh, oh) for nh, oh in self.names.items()]
         _write(self.path, json.dumps({"kind": self.kind, "patterns": kept, "keys": self.keys[-MAX_KEYS:],
-                                      "names": names[-MAX_KEYS:]}, ensure_ascii=False).encode("utf-8"))
+                                      "missed": self.missed[-MAX_KEYS:], "names": names[-MAX_KEYS:]},
+                                     ensure_ascii=False).encode("utf-8"))
 
     def given(self, key):
         """True when this lesson or chat (its own id in the install's database) was written up before,
@@ -709,6 +716,26 @@ class Pool:
             if self.held(name, owner):
                 return HELD
         return None
+
+    def miss(self, key):
+        """The writer gave no line for this lesson or chat: the first time it is kept as missed, so it
+        is asked again another night (the study asks each lesson once a night); the second time it is
+        kept as given and never asked again. True when it is now kept as given."""
+        with self._locked():
+            self._read()
+            if self.broken:
+                raise Refused(BROKEN + "; nothing is written")
+            kh = self.key_hash(key)
+            if kh in self.keys:
+                return True
+            gone = kh in self.missed
+            if gone:
+                self.missed.remove(kh)
+                self.keys.append(kh)
+            else:
+                self.missed.append(kh)
+            self._save()
+            return gone
 
     def clear(self, name):
         """The operator's step after an owner's id was made again: the name may give under its new id."""
@@ -745,6 +772,8 @@ class Pool:
                 self.names[self.name_hash(name)] = oh
             if kh not in self.keys:
                 self.keys.append(kh)
+            if kh in self.missed:
+                self.missed.remove(kh)
             if reasons:
                 self._save()
                 return None, reasons
@@ -869,8 +898,10 @@ def owner_id(folder):
 class Link:
     """One agent's way into its kind's pool. owner: the owner's id (owner_id), or "" (gives nothing).
     writer: Writer or a test's stand in. give, give_lost: the writer's calls a night at most. A give
-    whose writer raised or gave no line, or whose pool reads broken or refused it, says failed, and
-    the night then asks the writer nothing more. The pool is read before the writer is asked."""
+    whose writer raised, or whose pool reads broken or refused it, says failed, and the night then
+    asks the writer nothing more. A writer that gives no line is not failed: the night goes on to the
+    next lesson or chat, and a lesson is asked again another night, once (Pool.miss). The pool is
+    read before the writer is asked."""
 
     def __init__(self, kind, owner, writer, root, give=GIVE, give_lost=GIVE_LOST, name=None, db=None):
         self.kind, self.owner, self.writer, self.name = kind, owner or "", writer, name or None
@@ -926,8 +957,13 @@ class Link:
             line = self.writer(what, self.kind, data)
         except Exception as e:  # a failing writer gives nothing tonight; asked again another night
             return {"pattern": None, "why": f"the writer failed ({type(e).__name__})", "asked": True, "failed": True}
-        if not line:  # no line (nothing, or not the JSON asked for): failed, asked again another night
-            return {"pattern": None, "why": "the writer gave no line", "asked": True, "failed": True}
+        if not line:  # no line (nothing, or not the JSON asked for): the night goes on (Pool.miss)
+            try:
+                done = self.pool.miss(key)
+            except Refused as e:  # broken since it was read: failed
+                return {"pattern": None, "why": f"the pool refused it ({e})", "asked": True, "failed": True}
+            return {"pattern": None, "asked": True,
+                    "why": "the writer gave no line" + ("; not asked again" if done else "; asked again another night")}
         try:
             got, reasons = self.pool.add(what, line, self.owner, key, worry=worry, sources=sources, name=self.name)
         except Refused as e:  # broken since it was read: failed, as above

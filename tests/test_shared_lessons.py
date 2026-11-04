@@ -208,6 +208,31 @@ class SharedLessons(unittest.TestCase):
         self.assertEqual(len(model.calls), 1)
         self.assertEqual([g["why"] for g in rep["shared"]["given"]], ["the writer failed (PartError)"])
 
+    def test_a_lesson_the_writer_gives_no_line_for_never_holds_back_the_next(self):
+        # review crossowner round 3, item 1: the first lesson always gets no line; the second is still
+        # given the same night, and the first is asked again one more night, then kept as given
+        mine = Lessons(self.db, self.new, judge=always_low)
+        stuck_text = "Explain the quiet setting first when the grower asks about noise twice."
+        stuck = kept_lesson(mine, stuck_text, ["all"], yes_by="owner")
+        later = kept_lesson(mine, "Show the filter choices before the price when the grower asks about dust.",
+                            ["all"], yes_by="owner")
+        asked = []
+
+        def writer(what, kind, data):
+            asked.append(data["lesson"])
+            return None if data["lesson"] == stuck_text else GIVEN
+
+        rep = self.night(exam=passing, writer=writer, give=2)
+        given = {g["lesson"]: g for g in rep["shared"]["given"]}
+        self.assertEqual(len(asked), 2)
+        self.assertEqual(given[stuck]["why"], "the writer gave no line; asked again another night")
+        self.assertIsNotNone(given[later]["pattern"])
+        rep = self.night(exam=passing, writer=writer, give=2)
+        self.assertEqual(asked[2:], [stuck_text])
+        self.assertEqual([g["why"] for g in rep["shared"]["given"]], ["the writer gave no line; not asked again"])
+        rep = self.night(exam=passing, writer=writer, give=2)
+        self.assertEqual((len(asked), rep["shared"]["given"]), (3, []))
+
     def test_a_lesson_still_on_trial_is_not_given(self):
         mine = Lessons(self.db, self.new, judge=always_low)
         lid = mine.add("Explain the quiet setting first when the grower asks about noise twice.", ["all"],

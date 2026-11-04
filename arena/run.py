@@ -23,8 +23,9 @@ exam rows, DECISIONS item 50, and so do its study queue's waiting rows), and eve
 The live database changes only when a lesson passes the eval gate between rounds: that lesson
 alone is written to it, as the night study writes one there (arena/rounds.py hand_live). Before
 every match the Arena reads the live database, read only, for a correction the user typed there
-that passed its exam and runs there as a hotfix, and hands it from that match on (arena/rounds.py
-live_hotfixes and Pool.refresh). The
+that passed its exam (or had a person's yes after it) and runs there as a hotfix, and for a lesson on
+trial there whose exam passed (decision 112), and hands them from that match on (arena/rounds.py
+live_lessons and Pool.refresh). The
 Sales agent plays every match with the database's kept lessons handed, as the exam hands them,
 so the gate tests the agent with what it has learned, not the bare seed. A lost training match
 becomes a case in the copy, for the night study between rounds (arena/learn.py). Every agent
@@ -1429,9 +1430,10 @@ def play(args, *, agent_model=None, customer_model=None, reflection=None, limit=
                               "its lessons in the Arena (DECISIONS item 20): start from a database with no lesson "
                               "mined from imported history")
             learn = lambda m, judged, mid: learn_mod.to_case(db, m, judged, mid)  # noqa: E731
-            # the agent's kept lessons, handed as the exam hands them, then those passed between rounds
+            # the agent's kept lessons, handed as the exam hands them, the live ones on trial (decision 112),
+            # then those passed between rounds
             live_path = args.db
-            pool = rounds_mod.Pool(SalesLessons(db), hotfixes=lambda: rounds_mod.live_hotfixes(  # read only
+            pool = rounds_mod.Pool(SalesLessons(db), hotfixes=lambda: rounds_mod.live_lessons(  # read only
                 live_path, SALES_PLUG.agent))
             before_match = pool.refresh
             lessons = _Lessons(pool, None)

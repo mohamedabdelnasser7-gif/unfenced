@@ -17,7 +17,7 @@ from engine import exam as engine_exam
 from engine import lessons as engine_lessons
 from engine import plug as plug_mod
 from engine import risk
-from kit import turn
+from kit import seal, turn
 from kit.db import Db
 from reflection import morning as mo
 from reflection import night
@@ -360,6 +360,11 @@ class RerunOfPracticeWins(Base):
         self.assertEqual(code, 0)
         return run.past_wins(self.folder)
 
+    def training_wins(self):
+        """The past wins that are not sealed test matches: the ones the gate reruns."""
+        k = seal.key(practice.reports_of(self.folder))
+        return [w for w in run.past_wins(self.folder) if not practice.is_test(w, k)]
+
     def fresh(self, world, examiner=None):
         ex = examiner or turn_exam.Examiner(self.agent, model=world, judge_model=world)
         return gate.wrap_turn(ex, None, agent=self.agent, state=self.folder, reports=self.root,
@@ -374,7 +379,8 @@ class RerunOfPracticeWins(Base):
 
     def test_a_lesson_that_keeps_the_past_wins_passes_with_their_pairs(self):
         world = World()
-        wins = self.practise(world)
+        self.practise(world)
+        wins = self.training_wins()
         got = self.fresh(world)("Say the stock in one short line.", (plug_mod.ALL,))
         self.assertTrue(got.passed, got.rows)
         arena = [r for r in got.rows if r.part == gate.PART]
@@ -394,7 +400,7 @@ class RerunOfPracticeWins(Base):
         self.fresh(world, examiner=lambda text, tags: engine_exam.Result(passed=True))(
             "Say the stock in one short line.", (plug_mod.ALL,))
         self.assertTrue(any("- Say the stock in one short line." in p for p in prompts))
-        reruns = min(len(run.past_wins(self.folder)), gate.MAX_RERUNS)
+        reruns = min(len(self.training_wins()), gate.MAX_RERUNS)
         self.assertEqual(world.calls["customer"] - before, reruns)  # only the closing line: the first is the win's own
 
     def test_a_past_win_now_lost_holds_the_lesson(self):
@@ -414,6 +420,29 @@ class RerunOfPracticeWins(Base):
         got = self.fresh(world, examiner=lambda text, tags: engine_exam.Result(passed=True))("x line", (plug_mod.ALL,))
         self.assertFalse(got.passed)
         self.assertEqual(got.first.check, engine_exam.NOT_RUN)
+
+    def test_a_test_match_win_is_never_rerun_and_a_relabelled_one_still_is(self):
+        world = World()
+        wins = self.practise(world)
+        k = seal.key(practice.reports_of(self.folder))
+        tests = {w["id"] for w in wins if practice.is_test(w, k)}
+        training = [w for w in wins if not practice.is_test(w, k)]
+        self.assertTrue(tests and training)  # the run's fixed test set won some of its matches
+        self.assertEqual([w["id"] for w in self.fresh(world)._wins()], [w["id"] for w in training])
+        path = self.folder / run.MATCHES_FILE
+        rows = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines()]
+        one, two = training[0]["id"], training[-1]["id"]
+        for m in rows:
+            if m["id"] in (one, two):  # relabelled as test matches: one keeps its old seal, one has none
+                m[practice.TEST_KEY] = True
+                if m["id"] == two:
+                    m.pop(seal.FIELD)
+                m["id"] = m["id"].rsplit("-", 1)[0] + ("-g98" if m["id"] == one else "-g99")
+        path.write_text("".join(json.dumps(m) + "\n" for m in rows), encoding="utf-8")
+        got = {w["id"] for w in self.fresh(world)._wins()}
+        self.assertFalse(got & tests)
+        self.assertEqual(len(got), len(training))  # the relabelled two are still wins to rerun
+        self.assertFalse({w["id"] for w in self.fresh(world).gate().wins} & tests)  # what the gate replays
 
     def test_with_no_practice_win_the_exam_runs_alone(self):
         world = World()

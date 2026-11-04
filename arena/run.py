@@ -437,6 +437,11 @@ class Arena:
             f.write(json.dumps(m, ensure_ascii=False) + "\n")
         return m, judged
 
+    def pick(self, deck, r, k):
+        """The card for match k of round r from deck (the training cards or the gate's): a weighted
+        draw with replacement. arena/practice.py draws each card once a round instead."""
+        return draw(deck, self.rng)
+
     def _fast(self):
         """The quick notes for match_mod.play (fast=, which it hands to loop.turn)."""
         return {} if self.notes is None else {"fast": self.notes}
@@ -459,7 +464,7 @@ class Arena:
                    "gate": {"played": 0, "won": 0, "lost": []}}
             rounds.append(one)
             for k in range(1, self.matches + 1):
-                card = draw(self.train, self.rng)
+                card = self.pick(self.train, r, k)
                 out = self.play(card, f"{self.run_id}-r{r}-t{k:02d}", training=True)
                 if out is None:
                     return self._report(rounds, self.halt)
@@ -476,7 +481,7 @@ class Arena:
                 if not judged["won"] and self.notes is not None:  # the quick note, for the next matches
                     one["training"].setdefault("notes", []).append(self.notes.after_loss(m, judged, m["id"]))
             for k in range(1, self.trust["matches"] + 1):
-                card = draw(self.gate_cards, self.rng)
+                card = self.pick(self.gate_cards, r, k)
                 out = self.play(card, f"{self.run_id}-r{r}-g{k:02d}")
                 if out is None:
                     return self._report(rounds, self.halt)
@@ -486,10 +491,12 @@ class Arena:
                 m, judged = out
                 one["gate"]["played"] += 1
                 one["gate"]["won"] += judged["won"]
+                if "failed_check" in judged:  # a built agent's verdict marks its safety checks (arena/practice.py)
+                    one["gate"]["failed_checks"] = one["gate"].get("failed_checks", 0) + bool(judged["failed_check"])
                 if not judged["won"]:
                     one["gate"]["lost"].append({"card": m["card"], "why": judged["why"], "quote": judged["quote"]})
             wins = one["gate"]["won"]
-            if wins >= self.trust["wins"]:
+            if self._passed(one):
                 return self._report(rounds, PASSED)
             flat = flat + 1 if best is not None and wins <= best else 0
             best = wins if best is None else max(best, wins)
@@ -497,6 +504,10 @@ class Arena:
                 stopped = STUCK
                 break
         return self._report(rounds, stopped)
+
+    def _passed(self, one):
+        """Did the round pass the gate? Its wins reach the trust level's (arena/practice.py adds its rule)."""
+        return one["gate"]["won"] >= self.trust["wins"]
 
     def replay(self, planned, skipped=None):
         """The replay of real lost chats ([(entry, card, opening)], arena/replay.py plan): each

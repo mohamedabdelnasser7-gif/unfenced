@@ -27,6 +27,7 @@ KIND = "arena_retry"
 PREFIX = "retry-"  # the retry's run id starts with it: arena-<agent>-retry-<time>.json beside the run's item
 STARTED = "Trying the lost matches again with your corrections. This takes a few minutes."
 NOT_SAVED = "its saved match was not found"
+NEVER_SAFE = "a customer that never buys: no safety check failed this time"  # a never customer's try, passed
 WON_AGAIN, STILL_LOST, NOT_PLAYED = "won", "lost", "not_played"
 
 
@@ -68,14 +69,20 @@ def has_room(state, cap=run_mod.DEFAULT_CAP):
 
 
 def retry(*, agent, run, cards, state, reports, pool, agent_model, customer_model, facts=True,
-          cap=run_mod.DEFAULT_CAP, now=time.time):
+          cap=run_mod.DEFAULT_CAP, now=time.time, built=None, judge_model=None):
     """Play each card's lost match of run again and write the arena_retry item. pool: the lessons the
     matches hand (arena/rounds.py Pool on the agent's kept lessons, with its live hotfixes). Stops at
     the call cap or at a model that does not answer; the cards left are not played. Returns the item,
-    with "file" set to its name."""
+    with "file" set to its name. built: an agent made in Quick start (kit/turn.py Agent): its lost
+    practice matches are in its folder (state), each is played again with arena/practice.py play and
+    judged by arena/good.py with judge_model, and the call count is the one beside the database
+    (reports), as its practice runs count."""
     from reflection.exam import _Lessons
-    calls = run_mod.Calls(Path(state) / run_mod.CALLS_FILE, cap)
+    calls = run_mod.Calls(Path(reports if built is not None else state) / run_mod.CALLS_FILE, cap)
     a_model, c_model = calls.model(agent_model), calls.model(customer_model)
+    if built is not None:
+        return _retry_built(built, run, cards, state, reports, pool, a_model, c_model, calls.model(judge_model),
+                            calls, facts, now)
     lessons = _Lessons(pool, None)
     saved = saved_lost(state, run, cards)
     results, stopped, error = [], None, ""
@@ -111,6 +118,62 @@ def retry(*, agent, run, cards, state, reports, pool, agent_model, customer_mode
         if not judged["won"]:
             got["quote"] = judged["quote"]
         results.append(got)
+    return _write(agent, run, cards, results, stopped, error, pool, calls, reports, now)
+
+
+def _retry_built(agent, run, cards, state, reports, pool, a_model, c_model, j_model, calls, facts, now):
+    """retry for an agent made in Quick start: its practice play and its card's judge. A never customer
+    (one that cannot reach the good result) is on the lost list only for a failed safety check
+    (arena/practice.py Practice.play), so its try is judged on the safety checks only: won when none
+    failed, whatever the customer did."""
+    from arena import good, practice
+    from engine.lessons import MAX_PICK
+    from kit.model import ModelError
+    saved = saved_lost(state, run, cards)
+    results, stopped, error = [], None, ""
+    for card in cards:
+        past = saved.get(card)
+        persona = past.get("persona") if past else None
+        if stopped:
+            results.append({"card": card, "result": NOT_PLAYED, "why": "the try stopped before it"})
+            continue
+        if not isinstance(persona, dict):
+            results.append({"card": card, "result": NOT_PLAYED, "why": NOT_SAVED})
+            continue
+        pool.refresh()  # the corrections that passed since the last match
+        judged = None
+        try:
+            m = practice.play(agent, persona, agent_model=a_model, customer_model=c_model, seed=past.get("id"),
+                              lessons=pool.live(agent.stage.name)[:MAX_PICK], opening=match_mod.first_line(past))
+            if m.get("ended") == match_mod.VOID:
+                stopped, error = run_mod.MODEL_ERROR, m.get("error") or ""
+            elif not calls.reached:
+                judged = good.judge(m, agent.card, j_model, facts=facts, plug=agent.plug, data=agent.data)
+        except run_mod.CapReached:
+            stopped = run_mod.CAP
+        except good.Unreadable:
+            results.append({"card": card, "result": NOT_PLAYED, "why": "the judge's answer could not be read"})
+            continue
+        except ModelError as e:
+            stopped, error = run_mod.MODEL_ERROR, " ".join(str(e).split())[:200]
+        if not stopped and calls.reached:
+            stopped = run_mod.CAP
+        if stopped or judged is None:
+            results.append({"card": card, "result": NOT_PLAYED, "why": "the try stopped here"})
+            continue
+        won = judged["won"]
+        if not run_mod.can_buy(persona):  # a never customer: kept for a safety slip, so judged on those only
+            won = not practice.failed_check(judged)
+            judged = dict(judged, why=NEVER_SAFE) if won else judged
+        got = {"card": card, "result": WON_AGAIN if won else STILL_LOST, "why": judged["why"]}
+        if not won:
+            got["quote"] = judged.get("quote")
+        results.append(got)
+    return _write(agent.name, run, cards, results, stopped, error, pool, calls, reports, now)
+
+
+def _write(agent, run, cards, results, stopped, error, pool, calls, reports, now):
+    """The arena_retry item beside the database, with "file" set to its name."""
     at = now()
     rid = PREFIX + time.strftime("%Y%m%dT%H%M%S", time.gmtime(at))
     won = sum(r["result"] == WON_AGAIN for r in results)

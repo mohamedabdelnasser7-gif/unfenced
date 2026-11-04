@@ -515,8 +515,9 @@ class AQuickStartAgent(unittest.TestCase):
         self.m = mo.Morning(self.db, plugs, reports=folder, built=built, db_path=db_path)
         self.p = pages.Pages(self.m)
         (folder / "arena-stock_watch-r1.json").write_text(json.dumps(seal.sign(
-            {"agent": "stock_watch", "kind": "arena_rounds", "at": NOW, "run": "r1", "gate_won": 4, "gate_played": 4,
-             "needs": 4, "lost": [], "line": "x", "practice": True, "quick": False}, folder)), encoding="utf-8")
+            {"agent": "stock_watch", "kind": "arena_rounds", "at": NOW, "run": "r1", "gate_won": 10, "gate_played": 10,
+             "needs": 7, "gate_size": 10, "level": "medium", "lost": [], "line": "x", "practice": True, "quick": False}, folder)),
+            encoding="utf-8")
 
     def test_whatsapp_is_next_and_other_channels_are_not_connected_yet(self):
         self.assertEqual(self.m.channels_of("stock_watch"), ["whatsapp", "email"])

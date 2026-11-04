@@ -45,6 +45,7 @@ import threading
 import time
 import urllib.parse
 
+from arena import levels as levels_mod
 from engine import lessons as lessons_mod
 from kit import sample as sample_mod
 from reflection import console as console_mod
@@ -128,6 +129,7 @@ class BuildRun:
         self.join_note = None         # the line when the built agent could not join the running page
         self.base = 0                 # the chat's turns when Build was pressed; later ones came in during it
         self.ended = None
+        self.level = None             # the risk level picked on the card (arena/levels.py), None: its suggestion
 
     def step(self, name, detail=""):
         if name == "again":  # the card changed meanwhile: its plug and exam are written again
@@ -223,7 +225,7 @@ class Pages:
         self.try_sales = try_mod.TrySales(try_model)  # its own database in memory, never the page's
         # the page's own answers, taken by the server next to morning.TWO_TAB_ACTIONS
         self.actions = {"/quickstart": lambda m, f, now=None: self._say(m, mo._field(f, "text"), now),
-                        "/quickstart/build": lambda m, f, now=None: self._build(m, now),
+                        "/quickstart/build": lambda m, f, now=None: self._build(m, now, _level(f)),
                         "/quickstart/clear": lambda m, f, now=None: self._clear(m, now),
                         # Try Sales on the Sales agent's page (reflection/try_sales.py): the demo store, never counts
                         "/try/sales": lambda m, f, now=None: self._try(self.try_sales.say, m, now, mo._field(f, "text")),
@@ -302,7 +304,7 @@ class Pages:
         except try_mod.Refused as e:
             raise mo.Refused(str(e)) from None
 
-    def _build(self, m, now):
+    def _build(self, m, now, level=None):
         """Build (LOCKS "App pages", 2A): the cheap refusals at once, then the build in a thread whose
         steps the thread on /new ticks off; inline with a test's model, returning the flash as before.
         The new agent joins the running page (Morning.add_built) on the server's thread (settle)."""
@@ -311,6 +313,7 @@ class Pages:
             raise mo.Refused("It is building already. The steps tick off below.")
         self._quick(lambda mm, now=None: self.quick.check_build(mm), m, now)
         run = self.run = BuildRun(m)
+        run.level = level
         run.base = len(self.quick.draft(m)["turns"])
         if self.background:
             threading.Thread(target=self._work, args=(run, now), name="quick-build", daemon=True).start()
@@ -324,7 +327,7 @@ class Pages:
     def _work(self, run, now):
         """The build thread's work. Never raises: what went wrong becomes the run's error line."""
         try:
-            run.said = self.quick.build(run.m, now, step=run.step, lock=run.lock)
+            run.said = self.quick.build(run.m, now, step=run.step, lock=run.lock, level=run.level)
         except qs_mod.Refused as e:
             run.error = str(e)
         except Exception as e:
@@ -539,9 +542,33 @@ def _hidden(ctx, **kv):
     return "".join(f'<input type="hidden" name="{h(k)}" value="{h(v)}">' for k, v in kv.items())
 
 
+def _level(form):
+    """The risk level a form posted: None when it sent none, else one of the three (any other is refused)."""
+    if "level" not in form:
+        return None
+    level = mo._field(form, "level")
+    if not levels_mod.valid(level):
+        raise mo.Refused("Pick low, medium or high.")
+    return level
+
+
 def _post(ctx, action, button, cls, **kv):
     return (f'<form method="post" action="/{action}">{_hidden(ctx, **kv)}'
             f'<button class="{cls}" type="submit">{button}</button></form>')
+
+
+def level_picker(ctx, card):
+    """The Build form with the risk level picker (decision 84): three choices, one plain line each, the
+    level the card suggests picked and marked. Build posts the choice; level.json keeps it."""
+    tip = levels_mod.suggest(card)
+    rows = []
+    for lv in levels_mod.ORDER:
+        mark = '<i class="tip">Suggested</i>' if lv == tip else ""
+        rows.append(f'<label class="lv"><input type="radio" name="level" value="{lv}"{" checked" if lv == tip else ""}>'
+                    f'<span><b>{levels_mod.NAMES[lv]}{mark}</b><small>{h(levels_mod.WORDS[lv])}</small></span></label>')
+    return (f'<form method="post" action="/quickstart/build" class="lvlf">{_hidden(ctx)}<fieldset class="lvl">'
+            f'<legend>Risk level: how careful it must be before it goes live</legend>{"".join(rows)}</fieldset>'
+            f'<button class="yes" type="submit">Build{icon("arrow")}</button></form>')
 
 
 def _yc_head(agent, small, risk=""):
@@ -940,9 +967,64 @@ def arena_tab(m, view, a, agent, st, ctx):
                                      fix_ctx=c)
     go = run_arena(m, agent, c, c["path"] + c["q"])
     live = arena_live(m, agent) if go else ""
+    level = level_card(m, agent, m.read_arena()[0].get(agent), c, c["path"] + c["q"])
     return (f'<div class="qs"{live}><div class="ar"><section class="ar-l" aria-labelledby="m-h"><div class="sec-h"><h2 id="m-h">Practice '
             f'matches</h2><small>Where it slipped</small></div><div class="tiles">{tiles}</div>{retry}{go}</section>'
-            f'<div class="ar-r">{glow}</div></div></div>')
+            f'<div class="ar-r">{level}{glow}</div></div></div>')
+
+
+LEVEL_HELP = "Correct a lost reply and press Try again, add sample data on the Overview, or lower the level."
+
+
+def level_card(m, agent, run, ctx, back):
+    """The risk level of an agent made here on its Arena tab (decision 84): its newest run's test wins
+    against what its level needs ("N of 10, your level needs M"), each round's score, what holds it below
+    the level (the item's blocks) with what the owner can do, and Keep, Lower and Raise (Morning
+    set_risk_level, which never starts a run). Empty for any other agent."""
+    folder = m.agent_folder(agent) if hasattr(m, "set_risk_level") else None
+    if folder is None:
+        return ""
+    level = levels_mod.read(folder)
+    rule = levels_mod.LEVELS[level]
+    out = [f'<div class="grp-h"><h3 id="lv-h">Risk level: {levels_mod.NAMES[level]}</h3></div>']
+    size = (run or {}).get("gate_size") or (run or {}).get("gate_played")
+    if run and run.get("gate_won") is not None and size:
+        need = levels_mod.needs(level, size)
+        if size < rule["gate"]:  # a smaller run than the level's gate: the level asks for a new run (Morning.gate)
+            need = f'{levels_mod.needs(level)} of {rule["gate"]}'
+        safe = " with no failed safety check" if rule["no_failed_checks"] else ""
+        played = run.get("gate_played")
+        short = played is not None and played < size  # cut short (the cap, or a match left unjudged)
+        unjudged = run.get("unjudged") or 0  # the last round's test matches the judge could not read
+        why = (f'{"one test match" if unjudged == 1 else f"{unjudged} test matches"} could not be judged'
+               if unjudged else f"the run stopped before all {size}")
+        score = (f'<b>{run["gate_won"]} won of {played} played</b> ({why})' if short
+                 else f'<b>{run["gate_won"]} of {size}</b>')
+        out.append(f'<p class="score">{score}, your level needs {need}{safe}</p>')
+        gate = m.gate(agent)
+        out.append(f'<p class="calm">{h(gate["said"])}</p>')
+        scores = run.get("scores") or []
+        rows = "".join(f'<li><span>Round {i}</span><b>{n} of {played if short and i == len(scores) else size}</b></li>'
+                       for i, n in enumerate(scores, 1))
+        if rows:
+            out.append(f'<ol class="rnd" aria-label="Each round">{rows}</ol>')
+        if not gate["passed"]:
+            blocks = "".join(f'<li dir="auto">{h(b["line"])}</li>' for b in run.get("blocks") or [])
+            if blocks:
+                out.append(f'<p class="lab">What holds it back</p><ul class="blk">{blocks}</ul>')
+            if not unjudged:  # a match left unjudged needs only a new run; the help's steps cannot pass it
+                out.append(f'<p class="quiet">{LEVEL_HELP}</p>')
+    else:
+        out.append(f'<p class="calm">{h(levels_mod.WORDS[level])} Its first Arena run shows the score against it.</p>')
+    if ctx["token"]:
+        ways = [(level, f"Keep {level}", "lb on")]
+        for way, word in (("lower", "Lower to"), ("raise", "Raise to")):
+            to = levels_mod.step(level, way)
+            if to != level:
+                ways.append((to, f"{word} {to}", "lb"))
+        out.append('<div class="lvb">' + "".join(_post(ctx, mo.LEVEL_PATH[1:], h(label), cls, agent=agent, level=to,
+                                                     back=back) for to, label, cls in ways) + '</div>')
+    return f'<section class="grp sq lvc" aria-labelledby="lv-h">{"".join(out)}</section>'
 
 
 ARENA_PATH = "/arena/run"
@@ -969,6 +1051,8 @@ def run_arena(m, agent, ctx, back):
     note = m.arena_note(agent)
     if note:
         out.append(f'<p class="no-yet" role="status">{h(note)}</p>')
+    if note and ctx["token"] and getattr(m, "arena_record", lambda a: None)(agent):  # torn or gone: the one step
+        out.append(_post(ctx, mo.NEW_TEST_PATH[1:], "Start a new test set", "yes", agent=agent, back=back))
     if ctx["token"]:
         out.append(f'<p class="quiet">{ARENA_SAID}</p>'
                    + _post(ctx, ARENA_PATH[1:], f'{icon("flask")}Run the Arena', "yes", agent=agent, back=back))
@@ -1215,7 +1299,7 @@ def new_agent(m, quick, ctx, run=None):
         if built or building or run is not None and run.error is None:
             card.append(f'<div class="cact"><span class="started">{icon("check")}Build started</span></div>')
         elif tok:
-            card.append('<div class="cact">' + _post(ctx, "quickstart/build", f'Build{icon("arrow")}', "yes")
+            card.append('<div class="cact">' + level_picker(ctx, t["card"])
                         + '<span class="cnote">You can keep typing while it builds.</span></div>')
         out.append("".join(card) + "</div></div>")
     if run is not None or built:
@@ -1471,8 +1555,10 @@ TRY_SAID = "Plays only the matches it lost again, with your corrections. A few m
 def try_again(m, agent, run, ctx, back=None):
     """Try again under the practice matches (Morning.try_again, arena/retry.py): the button while no try
     runs and the page has a token, "Trying again..." while one runs, and a line when the last one could
-    not run or stopped early. The Sales agent only; any other agent shows it greyed out, like Pull."""
-    if agent != mo.SALES.agent or agent not in m.lessons:
+    not run or stopped early. The Sales agent and an agent made here (decision 84); any other agent
+    shows it greyed out, like Pull."""
+    built = hasattr(m, "agent_folder") and agent is not None and m.agent_folder(agent) is not None
+    if (agent != mo.SALES.agent and not built) or agent not in m.lessons:
         return (f'<div class="act"><button class="gb" type="button" disabled title="Not built for this agent yet">'
                 f'{icon("loop")}Try again</button></div>') if ctx["token"] else ""
     trying = getattr(m, "trying", None)

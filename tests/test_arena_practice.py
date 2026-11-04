@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from arena import good, madeup, practice, run
+from arena import good, levels, madeup, practice, run
 from kit import turn
 from kit.chats import Chats
 from kit.db import Db
@@ -53,14 +53,15 @@ class World:
     def __init__(self, agent=None, reached=True, judge=None, people=None, customer=None):
         self.agent, self.reached, self.judge, self.customer = agent, reached, judge, customer
         self.people = PEOPLE if people is None else people
+        self.written = 0  # people written so far for a shaped run (people_for)
         self.calls = {"cards": 0, "customer": 0, "agent": 0, "judge": 0}
         self.offered, self.judged = [], []
 
     def chat(self, messages, tools=None, effort="medium", max_tokens=1500, whole=False):
         system = messages[0]["content"]
-        if system in (madeup.SYSTEM, madeup.SYSTEM + madeup.CASE_PART):
+        if system in WRITER_SYSTEMS:
             self.calls["cards"] += 1
-            return say(json.dumps({"customers": self.people}))
+            return say(json.dumps({"customers": self.people_for(json.loads(messages[1]["content"]))}))
         if system == good.SYSTEM:
             self.calls["judge"] += 1
             self.judged.append(json.loads(messages[1]["content"]))
@@ -80,6 +81,32 @@ class World:
         if messages[-1]["role"] == "tool":
             return say(ANSWER)
         return tool_call("store", {"query": "mercurial"})
+
+
+    def people_for(self, ask):
+        """The writer's answer to ask: people as given for the old one call of KINDS; for a shaped run
+        (arena/madeup.py for_agent count, decision 85) a different person for every kind asked, PEOPLE
+        first and then numbered ones, as a real writer gives as many people as it is asked for."""
+        kinds = ask.get("kinds") if isinstance(ask, dict) else None
+        if not isinstance(self.people, list) or not isinstance(kinds, list) or \
+                (kinds == list(madeup.KINDS) and "already" not in ask):
+            return self.people
+        out = []
+        for _ in kinds:
+            n, self.written = self.written, self.written + 1
+            out.append(dict(self.people[n]) if n < len(self.people) else numbered(n))
+        return out
+
+
+def numbered(n):
+    """A made-up person no other one matches (arena/madeup.py person: the want and the opening)."""
+    return {"want": [f"a boot for match day {n}"], "worry": f"worry {n}", "settles_it": [f"a clear answer {n}"],
+            "language": "english", "length": "short", "opening": f"question {n}", "examples": [OPENING]}
+
+
+# the writer's system lines: the first batch, later ones told who is already written, with a case or not
+WRITER_SYSTEMS = frozenset(madeup.SYSTEM + already + case for already in ("", madeup.ALREADY_PART)
+                           for case in ("", madeup.CASE_PART))
 
 
 def raises(*_, **__):
@@ -113,6 +140,15 @@ class Base(unittest.TestCase):
 
 
 class EndToEnd(Base):
+    def test_each_saved_match_says_whether_it_was_a_test_match(self):
+        code, rep = self.main("--matches", "2", "--json")
+        self.assertEqual(code, 0, self.err)
+        ms = self.matches()
+        self.assertTrue(ms)
+        for m in ms:
+            self.assertIs(m[practice.TEST_KEY], m["id"].rsplit("-", 1)[-1].startswith("g"), m["id"])
+        self.assertEqual({m[practice.TEST_KEY] for m in ms}, {True, False})
+
     def test_a_fixture_plug_practises_and_writes_the_files_a_sales_run_writes(self):
         code, rep = self.main("--matches", "2", "--json")
         self.assertEqual(code, 0, self.err)
@@ -229,10 +265,12 @@ class NoSend(Base):
         before = {p for p in REPO.rglob("*") if "__pycache__" not in p.parts and ".git" not in p.parts}
         code, rep = self.main("--matches", "1", "--json")
         self.assertEqual(code, 0, self.err)
-        cards = [f"agents/stock_watch/practice-cards/persona-{i:02d}.json" for i in range(1, 7)]
+        count = levels.shape(levels.DEFAULT)["customers"]  # no level file: medium's customers (decision 85)
+        cards = [f"agents/stock_watch/practice-cards/persona-{i:02d}.json" for i in range(1, count + 1)]
         self.assertEqual(self.files(), sorted(
             ["agents/stock_watch/card.json", "agents/stock_watch/instructions.md", "agents/stock_watch/plug.json",
-             f"agents/stock_watch/{run.MATCHES_FILE}", run.CALLS_FILE, "arena-calls.lock", run.seal.KEY_FILE,
+             f"agents/stock_watch/{run.MATCHES_FILE}", f"agents/stock_watch/{practice.TEST_FILE}",
+             f"agents/stock_watch/{practice.ROSTER_FILE}", run.CALLS_FILE, "arena-calls.lock", run.seal.KEY_FILE,
              rep["item"]["file"]]
             + cards))
         after = {p for p in REPO.rglob("*") if "__pycache__" not in p.parts and ".git" not in p.parts}
@@ -321,7 +359,8 @@ class MadeUp(Base):
         world = World(judge=lambda m: say(json.dumps({"reached": next(judge2), "broke_never": False, "turn": 1})))
         code, rep = self.main("--matches", "1", "--trust", str(trust), "--json", world=world)
         self.assertEqual((code, rep["stopped"]), (1, run.ROUNDS))
-        self.assertTrue(rep["item"]["lost"])
+        self.assertTrue(rep["rounds"][-1]["gate"]["lost"])
+        self.assertEqual(rep["item"]["lost"], [])  # the item keeps lost practice matches only, never a test one
 
     def test_the_practice_gate_setting(self):
         plug = turn.load(self.folder).plug

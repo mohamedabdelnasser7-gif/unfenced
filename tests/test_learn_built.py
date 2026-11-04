@@ -288,7 +288,7 @@ class PracticeThenNight(unittest.TestCase):
         plug["results"]["chat_closed"] = STOCK["results"]["chat_closed"]
         plug["decides"]["bad"] = ["chat_closed"]
         (base.folder / "plug.json").write_text(json.dumps(plug))
-        code, rep = base.main("--matches", "4", "--json", world=tp.World(judge=judge))
+        code, rep = base.main("--matches", "4", "--rounds", "1", "--json", world=tp.World(judge=judge))
         self.assertIn(code, (0, 1))
         trained = [m for m in base.matches() if "-t" in m["id"]]
         self.assertEqual(len(trained), 4)

@@ -73,6 +73,7 @@ import time
 import unicodedata
 from pathlib import Path
 
+from arena import levels as levels_mod
 from engine import plug as plug_mod
 from engine import risk as risk_mod
 from kit import model as model_mod
@@ -80,7 +81,7 @@ from kit import sample as sample_mod
 
 DRAFT_FILE = "quickstart.json"
 AGENTS = "agents"
-FILES = ("plug.json", "instructions.md", "card.json", "exam.json")  # the practice side reads the first three
+FILES = ("plug.json", "instructions.md", "card.json", "exam.json", "level.json")  # the practice side reads the first three
 
 MAX_TEXT = 1000          # characters in one message from the user
 MAX_TURNS = 12           # answers in one chat
@@ -913,12 +914,13 @@ class QuickStart:
             raise Refused(f"There is an agent called {agent} already. Give this one another name in the box.")
         return agent
 
-    def build(self, m, now=None, step=None, lock=None):
+    def build(self, m, now=None, step=None, lock=None, level=None):
         """The card becomes a plug folder. Returns the flash line; Refused writes nothing.
         step(name, detail): told as each part is done ("card", "plug", "exam", "files"; "again" when the
         card changed meanwhile), so the page can tick them off. lock: held while the files are written;
         a card change made under it before then (QuickStart.say) is taken in: the plug and the exam are
-        written again from the new card, at most MAX_CARD_CHANGES times."""
+        written again from the new card, at most MAX_CARD_CHANGES times. level: the risk level the user
+        picked (arena/levels.py); anything else takes the level the card suggests. It goes in level.json."""
         step = step or (lambda name, detail="": None)
         lock = lock if lock is not None else contextlib.nullcontext()
         folder, d, card, agent = self.check_build(m)
@@ -970,7 +972,8 @@ class QuickStart:
                 _write_folder(agents, agent, {"plug.json": json.dumps(plug, ensure_ascii=False, indent=1) + "\n",
                                               "instructions.md": words + "\n",
                                               "card.json": json.dumps(record, ensure_ascii=False, indent=1) + "\n",
-                                              "exam.json": json.dumps(exam, ensure_ascii=False, indent=1) + "\n"})
+                                              "exam.json": json.dumps(exam, ensure_ascii=False, indent=1) + "\n",
+                                              "level.json": levels_mod.dump(levels_mod.pick(level, record))})
                 latest["built"] = agent  # the newest draft: a message saved meanwhile stays in it
                 latest["builds"] = max(latest["builds"], d["builds"])
                 self._save(folder, latest)

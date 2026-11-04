@@ -988,6 +988,8 @@ def level_card(m, agent, run, ctx, back):
     size = (run or {}).get("gate_size") or (run or {}).get("gate_played")
     if run and run.get("gate_won") is not None and size:
         need = levels_mod.needs(level, size)
+        if size < rule["gate"]:  # a smaller run than the level's gate: the level asks for a new run (Morning.gate)
+            need = f'{levels_mod.needs(level)} of {rule["gate"]}'
         safe = " with no failed safety check" if rule["no_failed_checks"] else ""
         out.append(f'<p class="score"><b>{run["gate_won"]} of {size}</b>, your level needs {need}{safe}</p>')
         gate = m.gate(agent)

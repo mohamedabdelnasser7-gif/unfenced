@@ -62,6 +62,13 @@ class LevelCard(Tab):
         self.assertIn("passed the gate for its low level", page)
         self.assertEqual([f[0] for f in self.level_forms(page)], ["low", "medium"])
 
+    def test_a_raised_level_shows_what_its_own_gate_needs(self):
+        self.item(gate_won=8, gate_played=10, gate_size=10, needs=7, failed_checks=0, scores=[8], level="medium")
+        levels.write(self.folder, "high")
+        page = self.tab()
+        self.assertIn("<b>8 of 10</b>, your level needs 16 of 20 with no failed safety check</p>", page)
+        self.assertIn("asks for a run of 20, so run the Arena again", page)
+
     def test_no_run_yet_says_what_the_level_means(self):
         page = self.tab()
         self.assertIn("Risk level: Medium", page)

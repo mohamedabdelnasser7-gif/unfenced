@@ -1,6 +1,6 @@
 """The risk level on the agent's page (decision 84, reflection/morning.py): set_risk_level and its POST
 /arena/level keep, lower or raise it, refuse anything else and never start a run; Connect unlocks on the
-agent's own level (the gate size from the item, stuck runs count, no failed safety check at high); Run the
+agent's own level (a run at least the level's gate size, stuck runs count, no failed safety check at high); Run the
 Arena studies between rounds when it has the study models. A fake model only."""
 import json
 import shutil
@@ -117,12 +117,28 @@ class ConnectOnTheAgentsLevel(Page):
         self.item(run="r4", gate_won=15, gate_played=20, gate_size=20, needs=16, failed_checks=0)
         self.assertFalse(self.passed())
 
-    def test_the_gate_size_comes_from_the_item(self):
+    def test_a_raised_level_asks_for_a_run_at_its_own_size(self):
         levels.write(self.folder, "high")  # a medium run of 10, raised to high: 8 of 10 with no failed check
-        self.item(gate_won=8, gate_played=10, gate_size=10, needs=7, failed_checks=0)
-        self.assertTrue(self.passed())
-        self.item(run="r2", gate_won=7, gate_played=10, gate_size=10, needs=7, failed_checks=0)
+        self.item(gate_won=8, gate_played=10, gate_size=10, needs=7, failed_checks=0, level="medium")
         self.assertFalse(self.passed())
+        self.assertIn("its high level asks for a run of 20, so run the Arena again", self.m.gate("stock_watch")["said"])
+        self.item(run="r2", gate_won=10, gate_played=10, gate_size=10, needs=7, failed_checks=0, level="medium")
+        self.assertFalse(self.passed())
+
+    def test_lowering_from_a_bigger_run_still_passes(self):
+        levels.write(self.folder, "medium")  # a high run of 20 lowered to medium: 14 of 20 is 7 of 10
+        self.item(gate_won=14, gate_played=20, gate_size=20, needs=16, failed_checks=2, level="high")
+        self.assertTrue(self.passed())
+        self.item(run="r2", gate_won=13, gate_played=20, gate_size=20, needs=16, failed_checks=0, level="high")
+        self.assertFalse(self.passed())
+
+    def test_a_trust_file_of_one_match_never_unlocks(self):
+        for level in levels.ORDER:  # a sealed full run whose trust file asked for one match, won
+            with self.subTest(level=level):
+                levels.write(self.folder, level)
+                self.item(run=f"t-{level}", gate_won=1, gate_played=1, gate_size=1, needs=1, failed_checks=0,
+                          level=None)
+                self.assertFalse(self.passed())
 
     def test_a_short_gate_a_quick_run_and_an_unsealed_one_never_count(self):
         levels.write(self.folder, "low")

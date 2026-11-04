@@ -1062,13 +1062,15 @@ class Morning:
 
     def _level_gate(self, item, folder, won, played):
         """gate for an agent made here: the item's test wins against the wins its CURRENT risk level needs
-        for the item's gate size (arena/levels.py needs), so keeping, lowering or raising the level counts
-        at once. A stuck run counts as a rounds run does; the gate must be whole (every test match
-        played); at high no test match may have failed a safety check (a missing count is a fail). A quick
-        run or one with no seal never counts."""
+        for the item's gate size (arena/levels.py needs), so keeping or lowering the level counts at once.
+        The run's gate must be at least the level's own gate size (10, or 20 at high), so a raised level,
+        or a trust file's smaller gate, asks for a new run at the level's shape. A stuck run counts as a
+        rounds run does; the gate must be whole (every test match played); at high no test match may have
+        failed a safety check (a missing count is a fail). A quick run or one with no seal never counts."""
         from arena import levels
         level = levels.read(folder)
         size = item.get("gate_size") or played
+        floor = levels.LEVELS[level]["gate"]
         at = item["at"]
         if won is None or not played or not size:
             return {"passed": False, "said": "Its latest Arena run has no gate result.", "at": at}
@@ -1078,6 +1080,9 @@ class Morning:
                     else "carries no seal from an Arena run")
             return {"passed": False, "said": f"Its latest Arena run, on {_when(at)}, {what}; "
                     "a full run has to pass the gate first.", "at": at}
+        if size < floor or played < floor:
+            return {"passed": False, "said": f"Its practice in the Arena, on {_when(at)}, played {played} test "
+                    f"matches; its {level} level asks for a run of {floor}, so run the Arena again.", "at": at}
         safe = not levels.LEVELS[level]["no_failed_checks"] or item.get("failed_checks") == 0
         passed = (item["kind"] in ("arena_rounds", "arena_stuck") and played >= size and
                   won >= levels.needs(level, size) and safe)

@@ -134,6 +134,9 @@ PASSED, CAP, STUCK, ROUNDS, MODEL_ERROR = "passed", "cap", "stuck", "rounds", "m
 UNJUDGED = "unjudged"
 # What play returns for an off topic match the judge read as on topic (arena/scope.py): neither won nor lost.
 VOIDED = "voided"
+# What play returns for an off topic match whose judge model did not answer (arena/scope.py): noted on the round
+# as a writer that did not answer is, and the run goes on (red team scopeguard2 r1, item 3).
+JUDGE_FAILED = "judge failed"
 # --quick, the short run for judges (docs/judges.md): one round of one training match and a gate of
 # one match, at most QUICK_CALLS model calls in the run, its files under the ignored data/ folder.
 QUICK_TRUST = {"matches": 1, "wins": 1, "zero_failed_checks": True}
@@ -448,14 +451,14 @@ class Arena:
             except CapReached:
                 self.halt = CAP
                 return None
-            except ModelError as e:
-                self.halt, self.error = MODEL_ERROR, match_mod.plain(str(e))
-                return None
             if self.calls.reached:
                 self.halt = CAP
                 return None
             if judged is None:
                 return UNJUDGED
+            if "error" in judged:
+                self.off_error = judged["error"]
+                return JUDGE_FAILED
             if judged.get("void"):
                 return VOIDED
         else:
@@ -480,12 +483,14 @@ class Arena:
 
     def _judge_off(self, m):
         """arena/scope.py judge, asked once more when its answer cannot be read; None when the second cannot
-        be read either (unjudged)."""
+        be read either (unjudged); {"error"} when the judge model did not answer, so the run notes it and goes on."""
         for _ in range(2):
             try:
                 return scope.judge(m, self.scope_card(), self.judge_model, facts=self.facts)
             except scope.Unreadable:
                 continue
+            except ModelError as e:
+                return {"error": match_mod.plain(str(e)) or type(e).__name__}
         return None
 
     def _off_card(self, match_id, note):
@@ -544,6 +549,10 @@ class Arena:
                 if out is None:
                     return self._report(rounds, self.halt)
                 off = scope.is_off(card)
+                if out is JUDGE_FAILED:  # the off topic judge did not answer: noted, the run goes on
+                    one["training"]["off_topic"] = {"card": card["id"], "about": card["about"], "result": JUDGE_FAILED,
+                                                    "error": self.off_error}
+                    continue
                 if out is UNJUDGED or out is VOIDED:
                     if out is UNJUDGED:
                         one["training"]["unjudged"] = one["training"].get("unjudged", 0) + 1

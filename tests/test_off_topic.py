@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 from arena import practice, run, scope
+from kit.model import ModelError
 from reflection import exam
 
 TUTOR = {"does": "tutors school students in science: biology, chemistry and physics questions",
@@ -38,6 +39,10 @@ class Model:
         elif system == scope.JUDGE:
             got = self.judges.pop(0) if self.judges else verdict()
         else:
+            got = None
+        if isinstance(got, Exception):  # a model that does not answer
+            raise got
+        if got is None:
             got = {"reached": False, "broke_never": False, "turn": 1, "why": "not reached"}
         return {"content": got if isinstance(got, str) else json.dumps(got)}
 
@@ -261,6 +266,15 @@ class SalesRun(unittest.TestCase):
         training = rep["rounds"][0]["training"]
         self.assertEqual((training["off_topic"]["result"], training["unjudged"]), (run.UNJUDGED, 1))
 
+    def test_a_judge_that_does_not_answer_is_noted_and_the_run_goes_on(self):
+        """Red team scopeguard2 r1 item 3: as a writer that does not answer is."""
+        rep = self.go(self.arena(Model(), Model(judges=[ModelError("the model did not answer")])))
+        one = rep["rounds"][0]
+        self.assertEqual(one["training"]["off_topic"]["result"], run.JUDGE_FAILED)
+        self.assertIn("did not answer", one["training"]["off_topic"]["error"])
+        self.assertNotEqual(rep["stopped"], run.MODEL_ERROR)
+        self.assertEqual((one["training"]["played"], one["gate"]["played"]), (9, 3))
+
     def test_no_key_no_judge_or_a_silent_writer_skips_it_never_faked(self):
         for off_topic, judge, writer in ((False, Model(), Model()), (True, None, Model()),
                                          (True, Model(), Model(writes=["x", "y"]))):
@@ -363,6 +377,14 @@ class BuiltAgentPractice(unittest.TestCase):
         self.assertEqual(rep["rounds"][0]["training"]["off_topic"]["result"], "lost")
         self.assertTrue(any(mid.endswith("-t10") for mid in cases))
         self.assertFalse(any(str(x["card"]).startswith(scope.PREFIX) for x in rep["item"]["lost"]))
+
+    def test_a_judge_that_does_not_answer_is_noted_and_the_run_goes_on(self):
+        p = self.practice(GROCER, Model(), Model(judges=[ModelError("the model did not answer")]))
+        rep, opened = self.go(p)
+        self.assertEqual(rep["rounds"][0]["training"]["off_topic"]["result"], run.JUDGE_FAILED)
+        self.assertNotEqual(rep["stopped"], run.MODEL_ERROR)
+        self.assertEqual(len(opened), 10 + 4)
+        self.assertEqual(rep["rounds"][0]["gate"]["played"], 4)
 
     def test_off_by_default_so_no_key_never_fakes_one(self):
         writer = Model()

@@ -14,7 +14,8 @@ nothing sent, or a reply to the ask longer than the exam's SCOPE_WORDS loses (on
 a case the agent starts, or a long answer once the person comes back to its work, is never counted). A
 writer or judge answer that cannot be read is asked for once more; the writer's second skips the match,
 the judge's second leaves it unjudged
-(arena/run.py UNJUDGED). The writer's and the judge's calls go through the run's call count.
+(arena/run.py UNJUDGED). A writer or judge model that does not answer is noted on the round and the run
+goes on (arena/run.py JUDGE_FAILED). The writer's and the judge's calls go through the run's call count.
 
 It is a practice match only (arena/run.py Arena.run): never a test customer, never in test-set.json, never
 in the gate or trust, never counted in the owner's practice pool, never a past win the eval gate reruns

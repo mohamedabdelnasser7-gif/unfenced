@@ -421,6 +421,9 @@ class Practice(run.Arena):
         if self.calls.reached:
             self.halt = run.CAP
             return None
+        if isinstance(judged, dict) and "error" in judged:  # the off topic judge did not answer: noted, goes on
+            self.off_error = judged["error"]
+            return run.JUDGE_FAILED
         if judged is None:  # read twice and still unreadable: unjudged, the run goes on
             self.unread += 1
             if self.unread >= UNREAD_IN_A_ROW:
@@ -458,7 +461,8 @@ class Practice(run.Arena):
     def _judge(self, m):
         """good.judge, asked once more when its answer cannot be read; None when the second cannot be
         read either. A judge that does not answer raises ModelError as before. An off topic match takes
-        arena/scope.py judge the same way (arena/run.py Arena._judge_off)."""
+        arena/scope.py judge the same way (arena/run.py Arena._judge_off), but a judge that does not answer
+        it gives {"error"}: noted on the round, and the run goes on."""
         if m.get("off_scope"):
             return self._judge_off(m)
         for _ in range(2):

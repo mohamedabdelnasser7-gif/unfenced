@@ -9,6 +9,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from engine import exam as engine_exam
 from engine import risk, study
@@ -206,6 +207,68 @@ class SharedLessons(unittest.TestCase):
         les = self.by_text()[MINE]
         self.assertTrue(self.mine.keep(les["id"]))
         rep = self.night(exam=passing)  # the writer has no script: asking it would fail the run
+        self.assertEqual(rep["shared"]["given"], [])
+
+    def pooled_kept(self):
+        """A lesson this agent took from a pattern two other owners gave, kept: its row."""
+        self.seen_at("north", "south")
+        self.night(exam=passing)
+        les = self.by_text()[MINE]
+        self.assertTrue(self.mine.keep(les["id"]))
+        return les
+
+    def assert_not_given_back(self, rep):
+        self.assertEqual(rep["shared"]["given"], [])  # the writer has no script: asking it is a row here
+        self.assertEqual([len(set(p["owners"])) for p in self.pool.shared(shared.LESSON)], [2])
+
+    def test_a_pooled_lesson_brought_back_and_kept_is_not_given_back(self):
+        les = self.pooled_kept()
+        self.assertTrue(self.mine.pull(les["id"], "too pushy", now=NOW))
+        back = self.mine.bring_back(les["id"], "the user", now=NOW)
+        self.assertTrue(self.mine.keep(back))
+        self.assert_not_given_back(self.night(exam=passing))
+
+    def test_a_pooled_lesson_edited_and_kept_is_not_given_back(self):
+        from reflection import morning
+        les = self.pooled_kept()
+        new = morning.person_line(self.mine, "Explain the quiet setting first when the grower asks about noise.",
+                                  les["stages"], by="the user", old=les, now=NOW)
+        self.assertTrue(self.mine.pull(les["id"], f"{morning.EDITED}the user into lesson {new}", now=NOW))
+        self.mine.start_turns(NOW)
+        self.assertTrue(self.mine.keep(new))
+        self.assert_not_given_back(self.night(exam=passing))
+
+    def sibling_night(self, les, writer):
+        """A sibling of the same owner copies kept lesson les, keeps it and runs its night: the report."""
+        folder = self.folder.parent / "fan_sib"
+        folder.mkdir()
+        (folder / "plug.json").write_text(json.dumps(fan("fan_sib", kind=self.kind, owner="demo")), encoding="utf-8")
+        sib = plugs.plug.load(folder / "plug.json")
+        theirs = Lessons(self.db, sib, judge=always_low)
+        copied = theirs.borrow(les["id"], les["stages"], now=NOW)
+        self.assertTrue(theirs.keep(copied))
+        link = shared.Link.for_agent(sib, folder, writer, self.root)
+        self.assertTrue(link.owner)
+        return Study(self.db, sib, proposer=fk.Proposer(), tagger=fk.Tagger(), fit=fk.Fit({}), adapter=fk.Adapter({}),
+                     lessons=theirs, shared=link).run(fk.SINCE, UNTIL, now=NOW)
+
+    def test_a_pooled_lesson_a_sibling_copied_is_not_given_back_by_the_sibling(self):
+        self.assert_not_given_back(self.sibling_night(self.pooled_kept(), writer_of()))
+
+    def test_a_copied_lesson_that_never_came_from_the_pool_is_still_given(self):
+        mine = Lessons(self.db, self.new, judge=always_low)
+        lid = kept_lesson(mine, "Explain the quiet setting first when the grower asks about noise twice.", ["all"],
+                          yes_by="owner")
+        rep = self.sibling_night(mine.get(lid), writer_of(GIVEN))
+        self.assertEqual(len(rep["shared"]["given"]), 1)
+        self.assertIsNotNone(rep["shared"]["given"][0]["pattern"])
+
+    def test_a_chain_longer_than_the_lineage_read_is_not_given(self):
+        mine = Lessons(self.db, self.new, judge=always_low)
+        lid = kept_lesson(mine, "Explain the quiet setting first when the grower asks about noise twice.", ["all"],
+                          yes_by="owner")
+        with mock.patch.object(study, "LINEAGE", 1):
+            rep = self.sibling_night(mine.get(lid), writer_of())
         self.assertEqual(rep["shared"]["given"], [])
 
     def test_the_night_runner_reads_the_pool_and_its_text_names_it(self):

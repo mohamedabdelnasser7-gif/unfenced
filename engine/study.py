@@ -132,6 +132,9 @@ PULLED_BEFORE = "pulled before"
 NO_GATE = "a sibling's line waits for a yes: this agent has no eval gate to put it on trial through"
 POOL = "pool"  # gated: a line from the shared pool across owners (see 6)
 POOL_NO_GATE = "a line from the shared pool waits for a yes: this agent has no eval gate to put it on trial through"
+LINEAGE = 50  # lessons a kept lesson's chain back to the pool is read through (_from_pool)
+# the source line reflection/morning.py person_line gives an edited line: 'edited by <by> from lesson <id>: ...'
+_EDITED_FROM = re.compile(r"^edited by .+? from lesson (\d+)")
 HANDED = "handed over"  # a candidate that is another agent's matter (see 8)
 FAILED_BEFORE = "failed the eval gate before"
 FAILED_GIVEN = 10  # failed lines the proposer and the idea part are given a night, the newest
@@ -704,14 +707,15 @@ class Study:
 
     def _give_shared(self, rep):
         """This agent's kept lessons into the shared pool (see 6): the ones that did not come from
-        it, oldest first, at most the link's give a night that reach the writer. Each is written up
+        it (nor from a lesson that did, _from_pool), oldest first, at most the link's give a night
+        that reach the writer. Each is written up
         once; what the pool drops is never kept. A writer that fails stops the giving for the night."""
         if self.shared is None:
             return
         entry = rep.setdefault("shared", {"read": 0, "lessons": [], "given": []})
         asked = 0
         for les in self.lessons.mine(KEPT):
-            if asked >= self.shared.give or self.shared.pattern_of(les.get("source") or "") is not None:
+            if asked >= self.shared.give or self._from_pool(les):
                 continue
             try:
                 got = self.shared.give_lesson(self.plug.agent, {"id": les["id"], "text": les["text"]})
@@ -723,6 +727,31 @@ class Study:
                 entry["given"].append({"lesson": les["id"], "pattern": got.get("pattern"), "why": got.get("why")})
             if got.get("failed"):  # a writer that failed once is not asked again tonight
                 break
+
+    def _from_pool(self, les):
+        """True when this lesson, or any lesson it came from, was taken from the shared pool: one
+        brought back (lesson_returns), edited (its source names the lesson it was edited from) or
+        copied from another agent's lesson (source_lesson_id) keeps its pool source, so the pool
+        never counts this owner on a pattern it took. A chain longer than LINEAGE counts as from
+        the pool (not given)."""
+        with self.db.tx() as c:
+            returns = c.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'lesson_returns'"
+                                ).fetchone() is not None
+            row = les
+            for _ in range(LINEAGE):
+                if self.shared.pattern_of(row.get("source") or "") is not None:
+                    return True
+                back = c.execute("SELECT from_id FROM lesson_returns WHERE lesson_id = ?",
+                                 (row["id"],)).fetchone() if returns else None
+                edited = _EDITED_FROM.match(row.get("source") or "")
+                nxt = row.get("source_lesson_id") if row.get("source_lesson_id") is not None else \
+                    back[0] if back is not None else int(edited.group(1)) if edited else None
+                found = None if nxt is None else \
+                    c.execute("SELECT id, source, source_lesson_id FROM lessons WHERE id = ?", (nxt,)).fetchone()
+                if found is None:
+                    return False
+                row = dict(found)
+        return True
 
     def _take(self, other, public, rec, rep, known, pulled, *, sources, source, origin, into=None,
               source_lesson_id=None, gated=False):

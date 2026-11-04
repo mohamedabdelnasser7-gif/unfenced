@@ -965,9 +965,53 @@ def arena_tab(m, view, a, agent, st, ctx):
                                      fix_ctx=c)
     go = run_arena(m, agent, c, c["path"] + c["q"])
     live = arena_live(m, agent) if go else ""
+    level = level_card(m, agent, m.read_arena()[0].get(agent), c, c["path"] + c["q"])
     return (f'<div class="qs"{live}><div class="ar"><section class="ar-l" aria-labelledby="m-h"><div class="sec-h"><h2 id="m-h">Practice '
             f'matches</h2><small>Where it slipped</small></div><div class="tiles">{tiles}</div>{retry}{go}</section>'
-            f'<div class="ar-r">{glow}</div></div></div>')
+            f'<div class="ar-r">{level}{glow}</div></div></div>')
+
+
+LEVEL_HELP = "Correct a lost reply and press Try again, add sample data on the Overview, or lower the level."
+
+
+def level_card(m, agent, run, ctx, back):
+    """The risk level of an agent made here on its Arena tab (decision 84): its newest run's test wins
+    against what its level needs ("N of 10, your level needs M"), each round's score, what holds it below
+    the level (the item's blocks) with what the owner can do, and Keep, Lower and Raise (Morning
+    set_risk_level, which never starts a run). Empty for any other agent."""
+    folder = m.agent_folder(agent) if hasattr(m, "set_risk_level") else None
+    if folder is None:
+        return ""
+    level = levels_mod.read(folder)
+    rule = levels_mod.LEVELS[level]
+    out = [f'<div class="grp-h"><h3 id="lv-h">Risk level: {levels_mod.NAMES[level]}</h3></div>']
+    size = (run or {}).get("gate_size") or (run or {}).get("gate_played")
+    if run and run.get("gate_won") is not None and size:
+        need = levels_mod.needs(level, size)
+        safe = " with no failed safety check" if rule["no_failed_checks"] else ""
+        out.append(f'<p class="score"><b>{run["gate_won"]} of {size}</b>, your level needs {need}{safe}</p>')
+        gate = m.gate(agent)
+        out.append(f'<p class="calm">{h(gate["said"])}</p>')
+        rows = "".join(f'<li><span>Round {i}</span><b>{n} of {size}</b></li>'
+                       for i, n in enumerate(run.get("scores") or [], 1))
+        if rows:
+            out.append(f'<ol class="rnd" aria-label="Each round">{rows}</ol>')
+        if not gate["passed"]:
+            blocks = "".join(f'<li dir="auto">{h(b["line"])}</li>' for b in run.get("blocks") or [])
+            if blocks:
+                out.append(f'<p class="lab">What holds it back</p><ul class="blk">{blocks}</ul>')
+            out.append(f'<p class="quiet">{LEVEL_HELP}</p>')
+    else:
+        out.append(f'<p class="calm">{h(levels_mod.WORDS[level])} Its first Arena run shows the score against it.</p>')
+    if ctx["token"]:
+        ways = [(level, f"Keep {level}", "lb on")]
+        for way, word in (("lower", "Lower to"), ("raise", "Raise to")):
+            to = levels_mod.step(level, way)
+            if to != level:
+                ways.append((to, f"{word} {to}", "lb"))
+        out.append('<div class="lvb">' + "".join(_post(ctx, mo.LEVEL_PATH[1:], h(label), cls, agent=agent, level=to,
+                                                     back=back) for to, label, cls in ways) + '</div>')
+    return f'<section class="grp sq lvc" aria-labelledby="lv-h">{"".join(out)}</section>'
 
 
 ARENA_PATH = "/arena/run"
@@ -1496,8 +1540,10 @@ TRY_SAID = "Plays only the matches it lost again, with your corrections. A few m
 def try_again(m, agent, run, ctx, back=None):
     """Try again under the practice matches (Morning.try_again, arena/retry.py): the button while no try
     runs and the page has a token, "Trying again..." while one runs, and a line when the last one could
-    not run or stopped early. The Sales agent only; any other agent shows it greyed out, like Pull."""
-    if agent != mo.SALES.agent or agent not in m.lessons:
+    not run or stopped early. The Sales agent and an agent made here (decision 84); any other agent
+    shows it greyed out, like Pull."""
+    built = hasattr(m, "agent_folder") and agent is not None and m.agent_folder(agent) is not None
+    if (agent != mo.SALES.agent and not built) or agent not in m.lessons:
         return (f'<div class="act"><button class="gb" type="button" disabled title="Not built for this agent yet">'
                 f'{icon("loop")}Try again</button></div>') if ctx["token"] else ""
     trying = getattr(m, "trying", None)

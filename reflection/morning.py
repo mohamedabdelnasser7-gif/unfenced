@@ -771,11 +771,13 @@ class Morning:
         """Try again on the Arena screen (arena/retry.py): the practice matches the agent's latest Arena
         run lost, played once more against the same practice customers with its kept lessons and the
         corrections that passed, in a background thread, so the page returns at once. The Sales agent
-        only for now. Refused when the latest run lost no match, when a try runs already for the agent,
+        and an agent made here (its own practice play and judge, decision 84). Refused when the latest run lost no match, when a try runs already for the agent,
         when the day's model call cap has no room, or with no database folder or model key. It writes
         an arena_retry item, which never counts for the gate (gate)."""
         from arena import retry as retry_mod, rounds as rounds_mod, run as run_mod
-        if agent != SALES.agent or agent not in self.lessons:
+        folder = self.agent_folder(agent) if isinstance(agent, str) else None
+        built = folder is not None and not folder.is_symlink() and folder.is_dir() and agent in self.lessons
+        if (agent != SALES.agent and not built) or agent not in self.lessons:
             raise Refused(TRY_NOT_BUILT)
         if self.db_path is None or self.reports is None:
             raise Refused("Try again needs the database folder. Start the page with --db.")
@@ -783,8 +785,8 @@ class Morning:
         cards = retry_mod.lost_cards(item["lost"]) if item else []
         if not cards:
             raise Refused("Its latest Arena run lost no practice match, so there is nothing to try again.")
-        state = run_mod.state_dir(self.db_path)
-        if not retry_mod.has_room(state):
+        state = folder if built else run_mod.state_dir(self.db_path)
+        if not retry_mod.has_room(self.reports if built else state):
             raise Refused("The day's model call cap has no room left, so nothing was started. Try again "
                           "tomorrow, Cairo time.")
         if self.retry_models is None:
@@ -804,14 +806,18 @@ class Morning:
             try:
                 if self.retry_models is None:
                     from kit import model as model_mod
-                    models = (model_mod.Model(), model_mod.Model())
+                    models = (model_mod.Model(), model_mod.Model(), model_mod.Model())
                 else:
                     models = self.retry_models()
                 pool = rounds_mod.Pool(lessons, hotfixes=lambda: rounds_mod.live_hotfixes(db_path, agent))
+                extra = {}
+                if built:  # an agent made here: its own practice play and judge (arena/retry.py built)
+                    from kit import turn as turn_mod
+                    extra = {"built": turn_mod.load(folder), "judge_model": models[2] if len(models) > 2 else models[0]}
                 retry_mod.retry(agent=agent, run=item.get("run"), cards=cards, state=state, reports=self.reports,
                                 pool=pool, agent_model=models[0], customer_model=models[1],
                                 facts=item.get("facts", True) is not False,
-                                now=(lambda: now) if now is not None else time.time)
+                                now=(lambda: now) if now is not None else time.time, **extra)
             except Exception as e:
                 note = f"The last try could not run ({' '.join(str(e).split())[:200] or type(e).__name__})."
             with self._try_lock:

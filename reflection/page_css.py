@@ -511,6 +511,19 @@ textarea.typed{width:100%; border:0; background:transparent; resize:none; outlin
 .atabs a.on{background:var(--card); color:var(--ink); box-shadow:var(--shadow-soft)}
 .ov,.ov-l,.ov-r,.ar,.ar-l,.ar-r,.livetab,.lv-l,.lv-r,.lstab{display:flex; flex-direction:column; gap:16px; min-width:0}
 .ar-r{order:-1}
+.lvc .score{margin:6px 0 0; font:400 15px/22px var(--font); color:var(--ink-2)}
+.lvc .score b{font:300 34px/40px var(--font); letter-spacing:-.02em; color:var(--ink)}
+.lvc .calm,.lvc .quiet{margin:8px 0 0; font:400 14px/20px var(--font); color:var(--ink-2)}
+.lvc .rnd{list-style:none; margin:14px 0 0; padding:0; display:grid; gap:6px}
+.lvc .rnd li{display:flex; justify-content:space-between; gap:12px; padding:10px 14px; border-radius:14px; background:var(--chip); font:400 14px/20px var(--font); color:var(--ink-2)}
+.lvc .rnd li b{font-weight:500; color:var(--ink)}
+.lvc .lab{margin:16px 0 0; font:500 13px/18px var(--font); color:var(--ink)}
+.lvc .blk{margin:6px 0 0; padding:0 0 0 18px; display:grid; gap:4px; font:400 14px/20px var(--font); color:var(--ink)}
+.lvc .lvb{display:flex; flex-wrap:wrap; gap:8px; margin:16px 0 12px}
+.lvc .lvb form{margin:0}
+.lb{height:40px; padding:0 16px; border-radius:20px; border:0; background:#fff; box-shadow:inset 0 0 0 1px rgba(42,51,50,.18); font:500 14px/1 var(--font); color:var(--ink); cursor:pointer}
+.lb.on{background:var(--ink); color:#fff; box-shadow:none}
+.lb:focus-visible{outline:2px solid var(--ink); outline-offset:2px}
 .grp-h{display:flex; align-items:center; justify-content:space-between; gap:12px}
 .grp-h h3{margin:0}
 .lrows{display:flex; flex-direction:column; gap:8px}

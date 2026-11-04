@@ -12,11 +12,13 @@ from decimal import Decimal
 from pathlib import Path
 from unittest import mock
 
+from arena import factcheck
 from channels.base import Message
 from kit import offers, orders, send_check, tools, turn
 from kit.chats import Chats
 from kit.db import Db
 from kit.tools import cod_risk, data as data_tool, delivery, draft_order, find_order, store
+from reflection import exam
 from reflection.lessons import Lessons
 from reflection.results import Results
 from sales import loop, stages
@@ -188,6 +190,61 @@ class OffersRule(unittest.TestCase):
     def test_a_discount_a_tool_gave_is_an_amount(self):
         self.assertIn("discount", send_check.AMOUNT_KEYS)
         self.assertEqual(send_check.amounts_in({"discounts": [{"offer": "card_5", "discount": 1395}]}), {1395})
+
+
+class FactCheck(unittest.TestCase):
+    """arena/factcheck.py under the store's offers: free delivery makes the zone fees (60, 85) no facts."""
+
+    def setUp(self):
+        clean_env(self)
+
+    def names(self, reply, customer=""):
+        return [f["check"] for f in factcheck.check(reply, customer)]
+
+    def test_a_zone_fee_under_free_delivery_fails(self):
+        self.assertIn("delivery", self.names("Delivery to Cairo is 60 EGP and takes 1 to 2 days."))
+        self.assertIn("delivery", self.names("Delivery to Aswan is 85 EGP."))
+        self.assertIn("price", self.names("It is 16,500 EGP plus 60 EGP delivery to Cairo."))
+        self.assertIn("price", self.names("Your total is 16560 EGP."))          # a price plus the old fee
+        self.assertEqual(self.names("Delivery to Cairo is free and takes 1 to 2 days."), [])
+        self.assertEqual(self.names("The Phantom 6 Elite is 16,500 EGP with free delivery."), [])
+
+    def test_with_no_offers_the_zone_fees_stay_facts(self):
+        token = offers.OFFERS.set(offers.EMPTY)
+        self.addCleanup(offers.OFFERS.reset, token)
+        self.assertEqual(self.names("Delivery to Cairo is 60 EGP and takes 1 to 2 days."), [])
+        self.assertEqual(self.names("Delivery to Aswan is 85 EGP."), [])
+        self.assertEqual(self.names("Your total is 16560 EGP."), [])
+        self.assertIn("delivery", self.names("Delivery to Cairo is 85 EGP."))   # the other zone's fee
+
+
+class ExamTotals(unittest.TestCase):
+    """reflection/exam.py answer passes the chat's tool amounts to the send check (fix D): a total that adds
+    up amounts a tool gave passes, a made-up one fails."""
+
+    def setUp(self):
+        clean_env(self)
+        store._cache.update(at=0.0, items=None)
+        self.addCleanup(store._cache.update, at=0.0, items=None)
+
+    def did(self, reply):
+        s = {"id": 1, "stage": "asking", "expect": {},
+             "turns": [{"customer": "How much is the Phantom 6 Elite with a name printing?"}]}
+        model = FakeModel(call("store", query="phantom"), call("store", query="printing"), say(reply))
+        return exam.answer(s, None, model=model)
+
+    def test_a_sum_of_tool_amounts_passes_and_a_made_up_total_fails(self):
+        good = self.did("The Phantom 6 Elite is 16,500 EGP and the printing 400 EGP, 16,900 EGP in all.")
+        self.assertEqual([n for n, _ in good["tools"]], ["store", "store"])
+        self.assertNotIn(16900, good["amounts"])                 # no tool gave the total itself
+        self.assertNotIn("amounts", good["problems"])
+        bad = self.did("The Phantom 6 Elite is 16,500 EGP and the printing 400 EGP, 16,950 EGP in all.")
+        self.assertIn("16950", bad["problems"]["amounts"])
+
+    def test_an_offer_no_tool_gave_is_an_exam_problem(self):
+        s = {"id": 1, "stage": "asking", "expect": {}, "turns": [{"customer": "Any discount?"}]}
+        did = exam.answer(s, None, model=FakeModel(say("Yes, 10% off today.")))
+        self.assertIn("10%", did["problems"]["offers"])
 
 
 class SalesFrontDoor(unittest.TestCase):

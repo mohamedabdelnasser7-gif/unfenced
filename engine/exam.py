@@ -46,7 +46,9 @@ every other check is style. Each
 row keeps every check that failed on it (Row.fails), not only the first, so a style fail never hides a
 safety one. With the run on the kept lessons only beside it (before), a lesson passes when every
 situation was answered with the new line, no safety check fails on a situation where it passed
-before, and it fixed at least as many situations as it broke (the counts above, over every check).
+before, and it fixed at least as many situations as it broke counted on the safety checks alone
+(pair_rows with safety): a style check shows in the rows and the reported counts but never holds a
+lesson on its own (Arena run 20261104T143545, cause 2).
 With no run before (the gate that stops at the first fail), a lesson passes when no safety check
 fails at all. Always blocking, whatever the plug says: an answer that raised with the new line, an
 exam that could not run, a check name with no check, and the built agents' good result reached
@@ -63,6 +65,14 @@ first confirmed break, and only while the worst case of the reruns fits the call
 allows (no cap is raised); a rerun answer that raised, or that gave no words (did["empty"]), counts
 against the lesson. The vote decides for the lesson in hand only: the binding never keeps a voted row
 before for the next lessons, so one lesson's vote never excuses another's break.
+
+The baseline vote (new, 2026-11-04, Arena run 20261104T143545, cause 2). The run on the kept lessons is
+one answer a situation too, and one noisy answer reused for every lesson of a round made lessons "break"
+or "fix" situations they never touched. So the binding keeps up to BASE_VOTES answers a situation on the
+kept lessons and hands judge() their vote (vote(): a check fails before when it fails in more than half
+of them). The binding asks the extra answers only where they can matter (a situation where the checks
+that block differ between the two sides), inside its cap, keeps them for the next lessons on the same kept lessons,
+and the recheck's answers without the line reuse them before asking again.
 
 A failed gate is kept with the lesson too (new, 2026-10-31; DECISIONS item 50): beside the first
 fail, the fails column keeps every failed row of the result (at most MAX_FAILS, first fail first:
@@ -113,6 +123,7 @@ GOOD = "good_model_judged"  # the built agents' good result, reached before and 
 ALWAYS = (ANSWER, NOT_RUN, GOOD)  # block whatever the plug's list says
 RECHECK = 2  # more answers on each side for a newly broken safety check (recheck)
 RECHECK_MAX = 3  # situations a lesson rechecked at most
+BASE_VOTES = 3  # answers a situation on the kept lessons only, voted (vote)
 EMPTY = "empty"  # the did key of an answer that gave no words to grade (sit, empty_raises)
 
 
@@ -279,12 +290,20 @@ def blocks(row, safety):
     return bool(_blocking(row, safety))
 
 
+def blocking_checks(row, safety):
+    """The set of check names that block on row under safety."""
+    return frozenset(c for c, _ in _blocking(row, safety))
+
+
 def judge(after, before, total, safety, *, calls=0, pairs=None):
     """The pass rule (see the module's note) on the rows of a run with the new line (after), beside
     the rows of the run on the kept lessons only (before; None when there is none). total: the
     situations the exam has. Returns a Result with the after rows, blocked naming the row that held
-    the lesson (its check the blocking one), and pairs (pair_rows when before is given, unless given)."""
+    the lesson (its check the blocking one), and pairs (pair_rows when before is given, unless given: every
+    check, as reported). The counts rule holds on pair_rows with safety (safety checks only), or on the
+    pairs when given."""
     after = list(after)
+    given = pairs is not None
     if pairs is None:
         pairs = pair_rows(before, after) if before is not None else []
     before_by = {} if before is None else {r.situation: r for r in before if r.situation is not None}
@@ -302,7 +321,8 @@ def judge(after, before, total, safety, *, calls=0, pairs=None):
         held = next((r for r in after if not r.passed), None) or Row(None, "", "", False, NOT_RUN,
                                                                      "not every situation was run")
     if held is None and before is not None:
-        eff = effect(pairs)
+        # the counts that hold a lesson are on the safety checks alone; the reported pairs keep every check
+        eff = effect(pairs if given else pair_rows(before, after, safety))
         if eff is not None and eff["fixed"] < eff["broke"]:
             name = eff["broke_cases"][0]
             r = next((x for x in after if f"situation {x.situation}" == name), None)
@@ -353,7 +373,7 @@ def disputed(after, before, safety):
     return out
 
 
-def recheck(after, before, safety, again, *, left=None, per=1):
+def recheck(after, before, safety, again, *, left=None, per=1, free=None):
     """The vote on a newly broken safety check (engine fix B, 2026-11-03): one answer is noisy, so a
     lesson is not held on a single unlucky answer. For each disputed situation (disputed()), at most
     RECHECK_MAX a lesson, first to last as in after, it is answered RECHECK more times with the new line and
@@ -371,8 +391,9 @@ def recheck(after, before, safety, again, *, left=None, per=1):
     sit with empty_raises, so such a row comes back as one that raised. again(situation id, with_line)
     -> one fresh Row. left() -> the
     model calls still allowed for this lesson, or None for no cap; per: the most calls one answer
-    takes. A situation is rechecked only while its worst case (2 * RECHECK answers of per calls each)
-    fits in left(); else it stays counted broken, and so does every situation past RECHECK_MAX.
+    takes; free(situation id) -> the answers without the line again gives with no model call (kept
+    answers of the baseline vote), taken off the worst case. A situation is rechecked only while its
+    worst case (2 * RECHECK answers of per calls each, less the free ones) fits in left(); else it stays counted broken, and so does every situation past RECHECK_MAX.
     Returns (after rows, before rows, the before rows the vote changed {situation id: Row}). The rows
     before are for judge() on this lesson only; a binding never keeps them for the next lesson."""
     after, before = list(after), list(before or ())
@@ -382,7 +403,8 @@ def recheck(after, before, safety, again, *, left=None, per=1):
         if n >= RECHECK_MAX:
             break
         room = left() if left is not None else None
-        if room is not None and room < cost:
+        spare = min(RECHECK, max(0, int(free(sid)))) if free is not None else 0
+        if room is not None and room < cost - spare * per:
             break
         ai = next(i for i, r in enumerate(after) if r.situation == sid)
         bi = next(i for i, r in enumerate(before) if r.situation == sid)
@@ -509,14 +531,41 @@ def broke_cases(row):
     return [str(x) for x in got] if isinstance(got, list) else []
 
 
-def pair_rows(before, after):
+def pair_rows(before, after, safety=None):
     """The exam's pairs from two exam runs (sit()'s rows, no gate rows): each situation in both
     (by situation id), right without the new lesson (before) and with it (after). A situation whose
-    answer raised, or that could not run, on either side is left out."""
+    answer raised, or that could not run, on either side is left out. safety: right means no blocking
+    fail under it (blocks), so a style fail leaves a situation right; None: right means passed."""
     def usable(rows):
         return {r.situation: r for r in rows if r.situation is not None and r.check not in (ANSWER, NOT_RUN)}
+
+    def right(r):
+        return r.passed if safety is None else not blocks(r, safety)
     b, a = usable(before), usable(after)
-    return [Pair(f"situation {n}", b[n].passed, a[n].passed) for n in sorted(set(b) & set(a))]
+    return [Pair(f"situation {n}", right(b[n]), right(a[n])) for n in sorted(set(b) & set(a))]
+
+
+def vote(rows):
+    """One row from several answers to the same situation (the run on the kept lessons, BASE_VOTES at
+    most): a check fails when it fails in more than half of the answers that did not raise, its why from
+    the first answer it failed in. None for no rows; the first row when every answer raised; a single
+    answer as it is."""
+    rows = [r for r in rows or () if r is not None]
+    usable = [r for r in rows if r.check not in (ANSWER, NOT_RUN)]
+    if not usable:
+        return rows[0] if rows else None
+    if len(usable) == 1:
+        return usable[0]
+    seen = {}
+    for r in usable:
+        for c, w in _row_fails(r):
+            n, why = seen.get(c, (0, w))
+            seen[c] = (n + 1, why)
+    fails = tuple((c, w) for c, (n, w) in seen.items() if 2 * n > len(usable))
+    first = usable[0]
+    if not fails:
+        return Row(first.situation, first.name, first.part, True)
+    return Row(first.situation, first.name, first.part, False, fails[0][0], fails[0][1], fails)
 
 
 def effect(pairs):

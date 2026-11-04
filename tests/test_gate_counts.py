@@ -21,7 +21,7 @@ from reflection import exam, night
 from reflection import morning as page_mod
 from tests import plugs
 from tests import study_fakes as fk
-from tests.fake_model import Buyer, FakeModel, Seller, clean_env, say
+from tests.fake_model import Buyer, ByLesson, FakeModel, Seller, clean_env, say
 from tests.test_arena_gate import LESSON, past
 from tests.test_engine_lessons import always_low
 from tests.test_ideas import SHADE, WALL, Ideas
@@ -186,13 +186,14 @@ class Examiner(unittest.TestCase):
         kept.ids.append(7)  # a lesson kept since: the run without is made again
         ex("Fix both.", ("asking",))
         self.assertEqual([(x["lesson"] is None, x["stop"], x["sits"]) for x in self.runs],
-                         [(True, False, 4), (False, False, 4), (False, False, 4),
-                          (False, False, 1), (False, False, 1), (True, False, 1), (True, False, 1),  # the recheck of 2
-                          (True, False, 4), (False, False, 4)])
+                         [(True, False, 4), (False, False, 4), (True, False, 1), (True, False, 1),  # 1 fixed: voted
+                          (False, False, 4), (True, False, 1), (True, False, 1),  # 2 broke: voted
+                          (False, False, 1), (False, False, 1),  # the recheck of 2, its answers without the vote's
+                          (True, False, 4), (False, False, 4), (True, False, 1), (True, False, 1)])
         self.assertEqual(ex._kept_ids(), (1, 3, 7))
         e1, e2 = engine_exam.effect(r1.pairs), engine_exam.effect(r2.pairs)
-        self.assertEqual((r1.passed, e1["fixed"], e1["broke"], r1.calls), (True, 2, 0, 6 + 4))
-        self.assertEqual((r2.passed, e2["fixed"], e2["broke"], r2.calls), (False, 2, 1, 5))  # the run without counted once
+        self.assertEqual((r1.passed, e1["fixed"], e1["broke"], r1.calls), (True, 2, 0, 6 + 4))  # the vote's calls counted on the model
+        self.assertEqual((r2.passed, e2["fixed"], e2["broke"], r2.calls), (False, 2, 1, 5))
         self.assertEqual(r2.line(), "failed the exam: situation 2, check order")
 
     def test_the_pass_rule(self):
@@ -203,8 +204,9 @@ class Examiner(unittest.TestCase):
         e = engine_exam.effect(style.pairs)
         self.assertEqual((style.passed, e["fixed"], e["broke"], style.line()), (True, 2, 1, ""))
         self.assertEqual([r.check for r in style.rows if not r.passed], ["script"])  # still reported in the rows
-        self.assertFalse(worse.passed)
-        self.assertEqual((worse.first.check, worse.first.why), (engine_exam.COUNTS, "it broke 2 situations and fixed 1"))
+        self.assertTrue(worse.passed)  # style breaks report, never hold (Arena run 20261104T143545, cause 2)
+        e = engine_exam.effect(worse.pairs)
+        self.assertEqual((e["fixed"], e["broke"]), (1, 2))
         self.assertTrue(same.passed)
 
     def test_plug_safety_overrides_the_default(self):
@@ -263,7 +265,7 @@ class GatePairs(unittest.TestCase):
         self.assertEqual((eff["fixed"], eff["broke"], eff["both_right"]), (1, 0, 3))
 
     def test_a_win_now_lost_counts_as_broke_and_still_holds(self):
-        r = self.gate(counted(True, fixed=3), Seller("The Football Boots, Black are 700 EGP."), Buyer())(LESSON, ("all",))
+        r = self.gate(counted(True, fixed=3), ByLesson(LESSON, Seller("The Football Boots, Black are 700 EGP.")), Buyer())(LESSON, ("all",))
         self.assertFalse(r.passed)
         self.assertEqual(r.first.check, gate.CHECK)
         self.assertEqual(r.pairs[-1], Pair("rerun m1", True, False))

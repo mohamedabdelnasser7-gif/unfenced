@@ -406,7 +406,14 @@ class RerunOfPracticeWins(Base):
     def test_a_past_win_now_lost_holds_the_lesson(self):
         world = World()
         self.practise(world)
-        world.reached = False
+        handed = []
+
+        def agent(messages, tools):  # the default agent, noting whether the lesson was handed
+            handed.append("x line" in messages[0]["content"])
+            return say(ANSWER) if messages[-1]["role"] == "tool" else tool_call("store", {"query": "mercurial"})
+        world.agent = agent  # the judge: reached only on a play without the lesson
+        world.judge = lambda messages: say(json.dumps({"reached": not handed[-1], "broke_never": False, "turn": 1,
+                                                       "why": "a clear answer"}))
         got = self.fresh(world, examiner=lambda text, tags: engine_exam.Result(passed=True))("x line", (plug_mod.ALL,))
         self.assertFalse(got.passed)
         self.assertEqual(got.first.check, gate.CHECK)

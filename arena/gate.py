@@ -12,9 +12,15 @@ there and the Sales agent with the new lesson handed first. An agent Quick start
 gate (TurnGate, wrap_turn; DECISIONS item 59): its past wins are the practice matches arena/practice.py
 saved in its own folder, each played again with arena/practice.py play (the practice customer prompt,
 by its fingerprint) and judged by arena/good.py against the agent's card, the call count the one
-beside the database its practice runs share. A past win that is now lost is a
-regression and holds the lesson (no regression on past wins), with an "arena" row naming the
-match, the verdict and the turn it quotes. The rerun stops at its first loss. A rerun the model
+beside the database its practice runs share. A past win that is now lost is voted before it holds
+the lesson (Arena run 20261104T143545, cause 6: past wins lost by chance held lessons that changed
+nothing): it is played again with the lesson until one side of VOTES plays has a majority, and, when
+the lesson loses the majority, played VOTES times without the lesson the same way. Only a loss the
+version without the lesson wins by majority is a regression and holds the lesson (no regression on
+past wins), with an "arena" row naming the match, the verdict and the turn it quotes and the two
+votes. A loss the lesson wins back by majority is noise; a win that is lost by majority without the
+lesson too does not hold up as played, so it holds nothing; each passes with a row that says so. Every
+play counts on the Arena call cap. The rerun stops at its first held loss. A rerun the model
 call cap stops, or a model that does not answer (arena/match.py VOID), holds the lesson too (fail
 closed, as an exam that could not run), with a row that says which.
 
@@ -56,6 +62,7 @@ MAX_RERUNS = 5
 ROUND_PART = "practice round"
 ROUND_CHECK = engine_exam.ROUND  # "practice_round": a held correction's line reads "failed the practice round"
 ROUND_MATCHES = 2
+VOTES = 3  # plays a side when a past win is lost on rerun: with the lesson, then without it
 FAILED_CHECKS = "it failed a fact check when it was played"
 NO_PROMPT = "it was saved with no customer prompt fingerprint"
 PROMPT_GONE = "the customer prompt it was played with is not available (moved, changed or refused)"
@@ -63,9 +70,10 @@ PROMPT_GONE = "the customer prompt it was played with is not available (moved, c
 
 def _prompt_of(win, prompts=None):
     """The customer prompt a win was played with, or None when it cannot be had again. prompts: {sha:
-    prompt} known by fingerprint alone (the generic one when None)."""
+    prompt} known by fingerprint alone (when None the generic one and the generic ones played before it,
+    arena/match.py KNOWN_PROMPTS)."""
     sha = win.get("prompt_sha")
-    known = {match_mod.GENERIC_SHA: match_mod.GENERIC_PROMPT} if prompts is None else prompts
+    known = match_mod.KNOWN_PROMPTS if prompts is None else prompts
     if sha in known:
         return known[sha]
     path = win.get("prompt_file")
@@ -131,16 +139,50 @@ class Gate:
         self.agent_model, self.customer_model = calls.model(agent_model), calls.model(customer_model)
         self.facts = fact_checks
 
-    def _play(self, past, persona, prompt, text, tags):
-        """One past win played again with the new lesson handed first: the match, arena/match.py shape."""
+    def _play(self, past, persona, prompt, text, tags, with_line=True):
+        """One past win played again with the new lesson handed first (with_line False: the kept lessons
+        only): the match, arena/match.py shape."""
         from reflection.exam import _Lessons
         return match_mod.play(persona, agent_model=self.agent_model, customer_model=self.customer_model,
-                              prompt=prompt, lessons=_Lessons(self.kept, (text, tuple(tags))),
+                              prompt=prompt, lessons=_Lessons(self.kept, (text, tuple(tags)) if with_line else None),
                               seed=past.get("id"), opening=match_mod.first_line(past), checker=factcheck.check,
                               stop=verdict.closed)
 
     def _judge(self, m):
         return verdict.judge(m, facts=self.facts)
+
+    def _once(self, past, persona, prompt, text, tags, with_line):
+        """One play judged: (the verdict, None), or (None, the row that stops the gate: the cap, a model
+        that did not answer, a judge that did not answer)."""
+        try:
+            m = self._play(past, persona, prompt, text, tags, with_line=with_line)
+        except run_mod.CapReached:
+            m = None
+        if m is None or self.calls.reached:
+            why = (f"{self.calls.problem}; it counts as the cap reached" if self.calls.problem
+                   else "the Arena call cap is reached")
+            return None, engine_exam.Row(None, "", PART, False, engine_exam.NOT_RUN, why)
+        if m.get("ended") == match_mod.VOID:
+            return None, engine_exam.Row(None, "", PART, False, engine_exam.NOT_RUN,
+                                         f"a model error stopped the rerun: {m.get('error') or ''}")
+        try:
+            return self._judge(m), None
+        except run_mod.CapReached:
+            return None, engine_exam.Row(None, "", PART, False, engine_exam.NOT_RUN, "the Arena call cap is reached")
+        except ModelError as e:  # a model judge that did not answer: no verdict, so the lesson is held
+            return None, engine_exam.Row(None, "", PART, False, engine_exam.NOT_RUN,
+                                         f"a model error stopped the rerun: {match_mod.plain(str(e))}")
+
+    def _side(self, past, persona, prompt, text, tags, with_line, wins):
+        """Plays one side until VOTES plays have a majority (wins: the verdicts so far, True for won).
+        Returns (wins, None) or (wins, the row that stops the gate)."""
+        wins = list(wins)
+        while 2 * sum(wins) <= VOTES and 2 * (len(wins) - sum(wins)) <= VOTES and len(wins) < VOTES:
+            judged, stop = self._once(past, persona, prompt, text, tags, with_line)
+            if stop is not None:
+                return wins, stop
+            wins.append(bool(judged["won"]))
+        return wins, None
 
     def __call__(self, text, tags):
         result = self.examiner(text, tags)
@@ -154,33 +196,34 @@ class Gate:
             if not isinstance(persona, dict):
                 rows.append(engine_exam.Row(i, str(past.get("id")), PART, False, CHECK, "its persona card was not saved"))
                 break
-            try:
-                m = self._play(past, persona, prompt, text, tags)
-            except run_mod.CapReached:
-                m = None
-            if m is None or self.calls.reached:
-                why = (f"{self.calls.problem}; it counts as the cap reached" if self.calls.problem
-                       else "the Arena call cap is reached")
-                rows.append(engine_exam.Row(None, "", PART, False, engine_exam.NOT_RUN, why))
+            judged, stop = self._once(past, persona, prompt, text, tags, True)
+            if stop is not None:
+                rows.append(stop)
                 break
-            if m.get("ended") == match_mod.VOID:
-                rows.append(engine_exam.Row(None, "", PART, False, engine_exam.NOT_RUN,
-                                            f"a model error stopped the rerun: {m.get('error') or ''}"))
+            if judged["won"]:
+                rows.append(engine_exam.Row(i, str(past.get("id")), PART, True, "", ""))
+                pairs.append(engine_exam.Pair(f"rerun {past.get('id')}", True, True))  # won before: a past win
+                continue
+            withs, stop = self._side(past, persona, prompt, text, tags, True, [False])
+            withouts = []
+            if stop is None and 2 * sum(withs) <= len(withs):
+                withouts, stop = self._side(past, persona, prompt, text, tags, False, [])
+            if stop is not None:
+                rows.append(stop)
                 break
-            try:
-                judged = self._judge(m)
-            except run_mod.CapReached:
-                rows.append(engine_exam.Row(None, "", PART, False, engine_exam.NOT_RUN, "the Arena call cap is reached"))
-                break
-            except ModelError as e:  # a model judge that did not answer: no verdict, so the lesson is held
-                rows.append(engine_exam.Row(None, "", PART, False, engine_exam.NOT_RUN,
-                                            f"a model error stopped the rerun: {match_mod.plain(str(e))}"))
-                break
-            q = judged["quote"]
-            why = "" if judged["won"] else f"was won, now lost: {judged['why']} (turn {q['turn']}, {q['who']}: {q['text']})"
-            rows.append(engine_exam.Row(i, str(past.get("id")), PART, judged["won"], "" if judged["won"] else CHECK, why))
-            pairs.append(engine_exam.Pair(f"rerun {past.get('id')}", True, bool(judged["won"])))  # won before: a past win
-            if not judged["won"]:
+            won_with = 2 * sum(withs) > len(withs)
+            won_without = bool(withouts) and 2 * sum(withouts) > len(withouts)
+            votes = f"won {sum(withs)} of {len(withs)} with the lesson" + (
+                f", {sum(withouts)} of {len(withouts)} without it" if withouts else "")
+            held = not won_with and won_without
+            if held:
+                q = judged["quote"]
+                why = (f"was won, now lost: {judged['why']} (turn {q['turn']}, {q['who']}: {q['text']}); {votes}")
+            else:
+                why = f"lost once, then {votes}: " + ("noise" if won_with else "it is lost without the lesson too")
+            rows.append(engine_exam.Row(i, str(past.get("id")), PART, not held, CHECK if held else "", why))
+            pairs.append(engine_exam.Pair(f"rerun {past.get('id')}", won_with or won_without, won_with))
+            if held:
                 break
         n_arena = sum(r.part == PART for r in rows[len(result.rows):])
         # the exam's rows may hold style fails that passed it (engine/exam.py, the pass rule): only the
@@ -234,11 +277,11 @@ class TurnGate(Gate):
         super().__init__(examiner, **kw)
         self.judge_model = self.calls.model(judge_model)
 
-    def _play(self, past, persona, prompt, text, tags):
+    def _play(self, past, persona, prompt, text, tags, with_line=True):
         from arena import practice
         from reflection import turn_exam
         first = match_mod.first_line(past)
-        lessons = turn_exam.hand(self.kept, (text, tuple(tags)), self.agent.stage.name, first)
+        lessons = turn_exam.hand(self.kept, (text, tuple(tags)) if with_line else None, self.agent.stage.name, first)
         return practice.play(self.agent, persona, agent_model=self.agent_model, customer_model=self.customer_model,
                              seed=past.get("id"), lessons=lessons, opening=first)
 

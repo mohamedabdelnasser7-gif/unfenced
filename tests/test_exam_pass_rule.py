@@ -69,9 +69,15 @@ class Judge(unittest.TestCase):
         self.assertEqual((r.first.situation, r.first.check), (1, "amounts"))
 
     def test_fixed_must_be_at_least_broke(self):
+        # counted on the safety checks alone (Arena run 20261104T143545, cause 2): style breaks only report
         r = engine_exam.judge([bad(1, "script"), bad(2, "script"), good(3)], [good(1), good(2), bad(3, "script")], 3, SAFETY)
-        self.assertFalse(r.passed)
-        self.assertEqual((r.first.check, r.first.situation), (engine_exam.COUNTS, 1))
+        self.assertTrue(r.passed)
+        self.assertEqual((engine_exam.effect(r.pairs)["fixed"], engine_exam.effect(r.pairs)["broke"]), (1, 2))
+        held = engine_exam.judge([good(1)], [good(1)], 1, SAFETY, pairs=[engine_exam.Pair("situation 1", True, False)])
+        self.assertEqual((held.passed, held.first.check), (False, engine_exam.COUNTS))
+        self.assertEqual([(p.before, p.after) for p in engine_exam.pair_rows([good(1), bad(2, "script")],
+                                                                          [bad(1, "script"), bad(2, "amounts")], SAFETY)],
+                         [(True, True), (True, False)])
         even = engine_exam.judge([bad(1, "script"), good(3)], [good(1), bad(3, "script")], 2, SAFETY)
         self.assertTrue(even.passed)
 

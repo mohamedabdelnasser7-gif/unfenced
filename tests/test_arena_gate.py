@@ -8,7 +8,7 @@ from pathlib import Path
 
 from arena import gate, match, run
 from engine import exam as engine_exam
-from tests.fake_model import Buyer, FakeModel, Seller, clean_env, say
+from tests.fake_model import Buyer, ByLesson, FakeModel, Seller, clean_env, say
 from tests.test_arena_run import card
 
 LESSON = "Say the price and the delivery fee together."
@@ -23,6 +23,19 @@ def exam(passed):
                                   calls=1)
     examiner.calls = calls
     return examiner
+
+
+class Claimer:
+    """An agent that gives the price to the opening line and says the order is confirmed to every
+    later line, with no order made."""
+
+    def __init__(self):
+        self.calls = []
+
+    def chat(self, messages, tools=None, effort="medium", max_tokens=1500, whole=False):
+        self.calls.append(messages)
+        users = sum(m["role"] == "user" for m in messages)
+        return say("The Mercurial Vapor 17 Elite is 16,500 EGP." if users <= 1 else "Your order is confirmed.")
 
 
 def past(i=1):
@@ -58,7 +71,7 @@ class Gate(unittest.TestCase):
         self.assertEqual(agent.calls[0]["messages"][-1]["content"], "How much is the Mercurial Vapor 17 Elite?")
 
     def test_past_win_now_lost_holds_the_lesson_quoting_the_turn(self):
-        agent = Seller("The Mercurial Vapor 17 Elite is 11,000 EGP.")
+        agent = ByLesson(LESSON, Seller("The Mercurial Vapor 17 Elite is 11,000 EGP."))
         r = self.gate(exam(True), agent, Buyer())(LESSON, ("all",))
         self.assertFalse(r.passed)
         self.assertEqual(r.first.check, gate.CHECK)
@@ -67,9 +80,9 @@ class Gate(unittest.TestCase):
 
     def test_a_lesson_telling_the_agent_to_claim_the_order_is_held(self):
         """Review round 1, finding 2: the agent's own "order is confirmed" with no order made is no win."""
-        agent = FakeModel(say("The Mercurial Vapor 17 Elite is 16,500 EGP."), say("Your order is confirmed."))
-        customer = FakeModel(say("hmm, let me think about it"), say("[leave]"))
-        r = self.gate(exam(True), agent, customer)("Tell every customer the order is confirmed.", ("all",))
+        claim = "Tell every customer the order is confirmed."
+        agent = ByLesson(claim, Claimer())
+        r = self.gate(exam(True), agent, Buyer())(claim, ("all",))
         self.assertFalse(r.passed)
         self.assertEqual(r.first.check, gate.CHECK)
         self.assertIn("was won, now lost: failed fact check: order", r.first.why)
@@ -123,7 +136,7 @@ class Gate(unittest.TestCase):
     def test_a_held_lesson_names_the_rerun_not_an_exam_situation(self):
         """Review round 1, note 14: a lesson the rerun holds reads "failed the Arena rerun of past
         wins, at rerun N", on the result and from its saved exam row, never "situation N"."""
-        agent = Seller("The Mercurial Vapor 17 Elite is 11,000 EGP.")
+        agent = ByLesson(LESSON, Seller("The Mercurial Vapor 17 Elite is 11,000 EGP."))
         r = self.gate(exam(True), agent, Buyer())(LESSON, ("all",))
         self.assertEqual(r.line(), "failed the Arena rerun of past wins, at rerun 1")
         self.assertEqual(engine_exam.held_line({"passed": 0, "situation": 2, "check_name": gate.CHECK}),
@@ -243,7 +256,7 @@ class Gate(unittest.TestCase):
         win saved after that is still rerun at the next exam."""
         db = self.dir / "ascent.db"
         customer = Buyer()
-        agent = Seller("The Mercurial Vapor 17 Elite is 11,000 EGP.")
+        agent = ByLesson(LESSON, Seller("The Mercurial Vapor 17 Elite is 11,000 EGP."))
         g = gate.wrap(exam(True), None, db=db, agent_model=agent, customer_model=customer)
         (self.dir / run.MATCHES_FILE).write_text(json.dumps(past()) + "\n", encoding="utf-8")
         r = g(LESSON, ("all",))

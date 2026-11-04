@@ -172,7 +172,7 @@ class JudgeWiringGaps(unittest.TestCase):
     def test_the_recheck_counts_the_judge_calls_in_its_worst_case(self):
         seen = []
 
-        def recheck(after, before, safety, again, *, left, per):
+        def recheck(after, before, safety, again, *, left, per, free=None):
             seen.append(per)
             return after, before, {}
         ex = exam.Examiner(PLUG, model=object(), count=True)

@@ -396,4 +396,31 @@ class RemintedOwnerId(unittest.TestCase):
         self.assertEqual((got, why), (None, [shared.HELD]))
         self.assertEqual(shared.clear_owner(self.root, "demo"), ["fans"])
         cleared = self.link(NEAR).give_lesson("fan_a", {"id": 8, "text": FILTERS})
-        self.assertEqual(cleared["owners"], 2)
+        # review crossowner round 3, item 4: the new id takes the old one's place; one owner, not two
+        self.assertEqual(cleared["owners"], 1)
+        pool = shared.Pool("fans", self.root)
+        self.assertEqual([p["owners"] for p in pool.patterns], [[pool.owner_hash(again.owner)]])
+        self.assertEqual(pool.shared(shared.LESSON), [])
+        self.assertNotIn(pool.owner_hash(first.owner), (self.root / "patterns-fans.json").read_text())
+        self.assertEqual(pool.cleared, {})
+
+    def test_a_cleared_name_takes_its_old_hash_place_on_every_pattern_never_twice(self):
+        pool = shared.Pool("fans", self.root)
+        pool.add(shared.LESSON, PATTERN, "owner-id:old", "k1", name="demo")
+        pool.add(shared.LESSON, GIVEN, "owner-id:old", "k2", name="demo")
+        pool.add(shared.LESSON, GIVEN, "owner-id:new", "k3")  # the new id on one pattern already, no name
+        self.assertEqual(shared.clear_owner(self.root, "demo"), ["fans"])
+        pool = shared.Pool("fans", self.root)
+        pool.add(shared.LESSON, FILTERS, "owner-id:new", "k4", name="demo")
+        new = pool.owner_hash("owner-id:new")
+        self.assertEqual([p["owners"] for p in shared.Pool("fans", self.root).patterns], [[new], [new], [new]])
+
+    def test_a_cleared_row_whose_seal_fails_reads_broken(self):
+        shared.Pool("fans", self.root).add(shared.LESSON, PATTERN, "owner-id:old", "k1", name="demo")
+        shared.clear_owner(self.root, "demo")
+        path = self.root / "patterns-fans.json"
+        data = json.loads(path.read_text())
+        row = data["cleared"][0]
+        data["cleared"] = [row[:32] + "0" * 32 + row[64:]]  # moved to another owner hash by hand
+        path.write_text(json.dumps(data))
+        self.assertTrue(shared.Pool("fans", self.root).broken)

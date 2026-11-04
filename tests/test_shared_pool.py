@@ -296,7 +296,7 @@ class PoolTest(unittest.TestCase):
                 self.assertNotIn(owner.encode(), raw)
                 self.assertNotIn(hashlib.sha256(owner.encode()).hexdigest()[:32].encode(), raw)  # keyed, not bare
         data = json.loads((self.root / "patterns-support.json").read_text())
-        self.assertEqual(set(data), {"kind", "patterns", "keys", "missed", "names"})
+        self.assertEqual(set(data), {"kind", "patterns", "keys", "missed", "names", "cleared"})
         for o in data["patterns"][0]["owners"]:
             self.assertRegex(o, r"^[0-9a-f]{48}$")  # the keyed hash, then its seal
         self.assertEqual(oct((self.root / "patterns-support.json").stat().st_mode & 0o777), "0o600")

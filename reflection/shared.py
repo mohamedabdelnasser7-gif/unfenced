@@ -44,7 +44,8 @@ night, and after a second night with no line it is kept as given (Pool.miss). A 
 only the night it is added (arena/grow.py). Each pool also keeps, sealed, which owner id each owner
 name (owner.json) gave under: a known name with a new id (its owner-id file deleted and made again)
 gives nothing until the operator clears that name (clear_owner, or python3 -m reflection.shared
-clear-owner --db <the agents' database> <owner name>).
+clear-owner --db <the agents' database> <owner name>). The name's next give then puts its new id in
+the old one's place on every pattern of that pool, so the owner still counts once.
 
 Where the patterns go, each through the paths siblings already take:
   lessons  engine/study.py step 6 reads the shared lesson patterns of its kind beside its siblings,
@@ -641,9 +642,11 @@ class Pool:
     def name_hash(self, name):
         return hmac.new(self._secret(), b"name\x00" + name.encode("utf-8"), hashlib.sha256).hexdigest()[:32]
 
-    def name_seal(self, nh, oh):
+    def name_seal(self, nh, oh, what=b"named"):
+        """The seal of an owner name and the owner hash it gave under (what: b"named"), or the hash it
+        gave under before the operator cleared it (b"cleared")."""
         raw = "\x00".join([self.kind, nh, oh]).encode("utf-8")
-        return hmac.new(self._secret(), b"named\x00" + raw, hashlib.sha256).hexdigest()[:16]
+        return hmac.new(self._secret(), what + b"\x00" + raw, hashlib.sha256).hexdigest()[:16]
 
     def held(self, name, owner):
         """True when the owner name gave before under another owner id (see the module lines)."""
@@ -689,7 +692,13 @@ class Pool:
             if isinstance(named, list) else []
         self.names = {m.group(1): m.group(2) for m in named
                       if key and hmac.compare_digest(m.group(3), self.name_seal(m.group(1), m.group(2)))}
-        self.broken = self.broken or bool(named) and not self.names
+        # the owner hash a cleared name gave under before: its next add() puts the new one in its place
+        was = data.get("cleared")
+        was = [m for m in (NAMED.fullmatch(n) for n in was[:MAX_KEYS] if isinstance(n, str)) if m] \
+            if isinstance(was, list) else []
+        self.cleared = {m.group(1): m.group(2) for m in was if key and hmac.compare_digest(
+            m.group(3), self.name_seal(m.group(1), m.group(2), b"cleared"))}
+        self.broken = self.broken or bool(named) and not self.names or bool(was) and not self.cleared
 
     def _unsealed(self, p):
         """The row with its owners as hashes, or None when any owner's seal fails (_pattern_ok has
@@ -722,9 +731,10 @@ class Pool:
         kept = [dict({k: p[k] for k in ("id", "what", "text", "worry", "at")},
                      owners=[oh + self.seal(p, oh) for oh in p["owners"]]) for p in self.patterns]
         names = [nh + oh + self.name_seal(nh, oh) for nh, oh in self.names.items()]
+        was = [nh + oh + self.name_seal(nh, oh, b"cleared") for nh, oh in self.cleared.items()]
         _write(self.path, json.dumps({"kind": self.kind, "patterns": kept, "keys": self.keys[-MAX_KEYS:],
-                                      "missed": self.missed[-MAX_KEYS:], "names": names[-MAX_KEYS:]},
-                                     ensure_ascii=False).encode("utf-8"))
+                                      "missed": self.missed[-MAX_KEYS:], "names": names[-MAX_KEYS:],
+                                      "cleared": was[-MAX_KEYS:]}, ensure_ascii=False).encode("utf-8"))
 
     def given(self, key):
         """True when this lesson or chat (its own id in the install's database) was written up before,
@@ -767,14 +777,19 @@ class Pool:
             return gone
 
     def clear(self, name):
-        """The operator's step after an owner's id was made again: the name may give under its new id."""
+        """The operator's step after an owner's id was made again: the name may give under its new id.
+        The hash it gave under before is kept (cleared), so its next add() puts the new hash in its
+        place on every pattern and one owner never counts as two."""
         with self._locked():
             self._read()
             if self.broken:
                 raise Refused("the pool file could not be read; nothing is written")
             if self._secret(make=False) is None:
                 return False
-            if self.names.pop(self.name_hash(name), None) is not None:
+            nh = self.name_hash(name)
+            old = self.names.pop(nh, None)
+            if old is not None:
+                self.cleared[nh] = old
                 self._save()
                 return True
         return False
@@ -798,7 +813,13 @@ class Pool:
             if name:
                 if self.held(name, owner):
                     return None, [HELD]
-                self.names[self.name_hash(name)] = oh
+                nh = self.name_hash(name)
+                self.names[nh] = oh
+                old = self.cleared.pop(nh, None)
+                if old is not None and old != oh:  # the same owner under its new id: one owner
+                    for p in self.patterns:
+                        if old in p["owners"]:  # in the old hash's place, never twice
+                            p["owners"] = [oh if x == old else x for x in p["owners"] if x != oh]
             if kh not in self.keys:
                 self.keys.append(kh)
             if kh in self.missed:

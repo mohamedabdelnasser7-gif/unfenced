@@ -62,7 +62,7 @@ class World:
         if system in WRITER_SYSTEMS:
             self.calls["cards"] += 1
             return say(json.dumps({"customers": self.people_for(json.loads(messages[1]["content"]))}))
-        if system == good.SYSTEM:
+        if system.startswith(good.SYSTEM):  # a close case adds one paragraph after it (decision 105)
             self.calls["judge"] += 1
             self.judged.append(json.loads(messages[1]["content"]))
             if self.judge is not None:

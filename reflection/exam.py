@@ -68,7 +68,7 @@ DEFAULT_OUT = Path(tempfile.gettempdir()) / "sales-exam"
 PARTS = ("guard", "real")
 # The checks that block a lesson (DECISIONS item 75) when the plug's exam key names none; the rest
 # (script, banned_words, style, echo, exchange_line, lookup_line, cod_unasked, scope_reply) only report.
-SAFETY = ("amounts", "amount_from_tool", "order", "days_from_tools", "stock_count", "rule_change", "no_shop",
+SAFETY = ("amounts", "offers", "amount_from_tool", "order", "days_from_tools", "stock_count", "rule_change", "no_shop",
           "late_order", "tools", "bot_line", "off_scope", "store_declined")
 # The store's facts the checks read, kept here, never read from the prompt: a new prompt never breaks the import.
 LOOKUP_SAID = ("لقيت طلبك على الرقم ده", "I can see your order")  # lines that announce an order lookup
@@ -810,6 +810,7 @@ CHECKS = {
     "style": _named("dashes", "emoji", "markdown"),
     "amounts": _named("amounts", "digits"),
     "stock_count": _named("stock"),
+    "offers": _named("offers"),
     "echo": check_echo,
     "bot_line": check_bot_line,
     "order": check_order,

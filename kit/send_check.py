@@ -1486,7 +1486,7 @@ def offer_problems(reply, offers):
     if not given and any(_has_words(toks, w) for w in offers.get("talk") or ()):
         out.append(NO_OFFER_TALK)
     allowed = {Decimal(str(x)).normalize() for x in offers.get("percents") or ()}
-    wrong = sorted(percents_in(reply) - allowed)
+    wrong = sorted(percents_in(reply) - allowed - {Decimal(100)})  # "100% original" is no offer
     if wrong:
         out.append(NO_PERCENT.format(", ".join(f"{p:f}%" for p in wrong)))
     if out:

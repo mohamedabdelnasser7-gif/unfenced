@@ -23,7 +23,7 @@
    "what": "Free delivery", "terms": "on any order; delivery days stay per governorate",
    "when": "always",
    "names": ["free delivery", "free shipping", "توصيل مجاني", "شحن مجاني", "توصيل ببلاش", "شحن ببلاش"],
-   "covers": ["delivery fee", "shipping", "مصاريف الشحن", "التوصيل"]},
+   "covers": ["delivery fee", "delivery cost", "shipping", "مصاريف الشحن", "مصاريف التوصيل"]},
   {"id": "elite_print", "kind": "addon", "free": {"type": "Printing"}, "with": {"tier": "Elite"}, "per_item": true,
    "what": "Free name printing with any Elite boot", "terms": "one free name printing for each Elite pair",
    "when": "the customer buys an Elite boot or asks about name printing",
@@ -39,6 +39,11 @@
    "what": "A lower tier of the same boot at its own catalogue price", "terms": "a tier the store tool lists below the one asked about",
    "when": "price is the worry and valU does not suit",
    "names": ["lower tier", "cheaper tier", "فئة ارخص"],
-   "covers": ["price", "سعر", "غالي", "expensive", "cheaper", "budget", "ارخص"]}
+   "covers": ["price", "سعر", "غالي", "expensive", "cheaper", "budget", "ارخص"]},
+  {"id": "cash_on_delivery", "kind": "choice",
+   "what": "Cash on delivery", "terms": "pay in cash when the order arrives",
+   "when": "the customer asks how to pay or wants to pay on arrival",
+   "names": ["cash on delivery", "الدفع عند الاستلام", "كاش عند الاستلام"],
+   "covers": ["cash", "cash on delivery", "كاش", "عند الاستلام", "الدفع عند الاستلام"]}
  ]
 }

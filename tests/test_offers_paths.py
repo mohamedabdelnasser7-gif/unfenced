@@ -54,7 +54,7 @@ class Tools(unittest.TestCase):
         for args in ({}, {"query": "phantom"}, {"query": "zzzz"}):
             got = store.run(args, None)
             self.assertEqual([o["id"] for o in got["offers"]],
-                             ["valu_3m", "card_5", "free_delivery", "elite_print", "second_pair", "lower_tier"])
+                             ["valu_3m", "card_5", "free_delivery", "elite_print", "second_pair", "lower_tier", "cash_on_delivery"])
             self.assertEqual(got["payment_methods"], ["cash", "card", "valu"])
             self.assertIn("One offer an order", got["offer_limit"])
             self.assertFalse(any("names" in o or "covers" in o for o in got["offers"]))

@@ -21,7 +21,7 @@ class Data(unittest.TestCase):
     def test_demo_offers_are_the_owners(self):
         d = offers.read(ROOT / "demo" / "offers.json")
         self.assertEqual([o["id"] for o in d["offers"]],
-                         ["valu_3m", "card_5", "free_delivery", "elite_print", "second_pair", "lower_tier"])
+                         ["valu_3m", "card_5", "free_delivery", "elite_print", "second_pair", "lower_tier", "cash_on_delivery"])
         self.assertEqual((d["max_stack"], d["pick"], d["stack_counts"], d["round_to"]),
                          (1, "most_saved", {"delivery": False}, 1))
         self.assertEqual(d["payment_methods"], ["cash", "card", "valu"])

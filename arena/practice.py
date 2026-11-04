@@ -75,9 +75,21 @@ practise here), in the background.
 learn: Practice takes learn=callable(m, judged, mid) as arena/run.py Arena does: each lost training
 match is handed to it, and what it returns is the case for the night study. practise passes it on; a
 caller with a database wires it (arena/learn_built.py).
+
+A fixed test set (DECISIONS item 85). practise(customers=N, gate_size=G) has the writer make N
+different customers (arena/madeup.py for_agent count) and holds out exactly G of the ones that can
+reach the good result as the test set (test_set): the kinds in their shares, each kind's cards
+ranked by a hash of the card's fingerprint and id, so the same ids come back while card.json is
+unchanged. Test cards never train, so their matches never reach learn; "never" cards only train.
+Each round every test customer plays at most once (the draw is without replacement), and the
+training matches play the other customers the same way, each once before any plays again, up to
+matches. A level that asks for more test matches than there are test customers is refused. N and G
+come from the risk level unless given (arena/levels.py shape: 20 and 10, or 30 and 20 at high). On
+the old gate (--trust or --gate) and in --quick, with no gate_size, the split and the weighted draws
+are arena/run.py's, as before.
 """
 import argparse
-import inspect
+import hashlib
 import json
 import math
 import re
@@ -345,8 +357,9 @@ def read_gate(text):
 class Practice(run.Arena):
     """arena/run.py Arena with a new agent's match and verdict, and a Morning page item every run."""
 
-    def __init__(self, agent, cards, *, judge_model, made_up, behaviour_from=0, learn=None, **kw):
+    def __init__(self, agent, cards, *, judge_model, made_up, behaviour_from=0, learn=None, once=False, **kw):
         self.agent, self.who, self.made_up, self.lost = agent.name, agent, bool(made_up), []
+        self.once, self.bags = bool(once), {}  # once: each card once a round (a fixed test set)
         self.behaviour_from = behaviour_from  # the owner's real cards that lent the customers their behaviour
         self.unread = 0  # unjudged matches in a row (UNREAD_IN_A_ROW stops the run)
         super().__init__(cards, learn=learn, **kw)  # learn(m, judged, mid): a lost training match becomes a case
@@ -398,6 +411,18 @@ class Practice(run.Arena):
         with open(self.state / run.MATCHES_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(m, ensure_ascii=False) + "\n")
         return m, judged
+
+    def pick(self, deck, r, k):
+        """With a fixed test set (once): the next card of this round's shuffled bag of deck, so no card
+        plays twice before every card of deck has played; a new bag each round. Else arena/run.py's draw."""
+        if not self.once:
+            return super().pick(deck, r, k)
+        bag = self.bags.get(id(deck))
+        if k == 1 or not bag:
+            bag = sorted(deck, key=lambda c: c["id"])
+            self.rng.shuffle(bag)
+            self.bags[id(deck)] = bag
+        return bag.pop()
 
     def _judge(self, m):
         """good.judge, asked once more when its answer cannot be read; None when the second cannot be
@@ -499,12 +524,40 @@ def text(rep):
     return "\n".join(lines)
 
 
+def _rank(c):
+    return hashlib.sha256(f"{c.get('from_card') or ''}:{c['id']}".encode("utf-8")).hexdigest()
+
+
+def test_set(cards, size):
+    """The ids of exactly size cards that can reach the good result, held out as the test set: each
+    kind in its share of those cards (the largest remainders first), each kind's cards in the order of
+    a hash of their fingerprint and id, so the same ids come back while card.json is unchanged. A card
+    that cannot reach it, or one grown from real chats, is never in it. run.Refused when too few can,
+    or when none would be left to train on."""
+    if isinstance(size, bool) or not isinstance(size, int) or size < 1:
+        raise run.Refused("the test set is a whole number of customers, at least 1")
+    winnable = [c for c in cards if run.can_buy(c) and not str(c["id"]).startswith(run.GROWN)]
+    if len(winnable) < size:
+        raise run.Refused(f"the test set needs {size} customers that can reach the good result; "
+                          f"{len(winnable)} can")
+    if size >= len(cards):
+        raise run.Refused("the test set would hold every customer; leave at least one to practise on")
+    kinds = {}
+    for c in winnable:
+        kinds.setdefault(str(c.get("kind") or ""), []).append(c)
+    exact = {k: size * len(v) / len(winnable) for k, v in kinds.items()}
+    quota = {k: int(v) for k, v in exact.items()}
+    for k in sorted(kinds, key=lambda k: (quota[k] - exact[k], k))[:size - sum(quota.values())]:
+        quota[k] += 1
+    return sorted(c["id"] for k, v in kinds.items() for c in sorted(v, key=_rank)[:quota[k]])
+
+
 NOT_RUN = (run.Refused, turn_mod.Refused, run.CapReached, ModelError, OSError, ValueError, RecursionError)
 
 
 def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=None, rounds=None, cards=None,
              trust=None, cap=None, seed=0, quick=False, learn=None, gate=None, level=None, study=None, db=None,
-             live_path=None):
+             live_path=None, customers=None, gate_size=None):
     """One practice run of the agent in agent_folder: the report (arena/run.py Arena run). quick: the
     --quick shape (one training match, a gate of one, at most QUICK_CALLS model calls). learn: handed
     each lost training match (Practice). level: the risk level (arena/levels.py), else the one in the
@@ -519,6 +572,9 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
     round with the corrections that passed on the live page (live_path, the database's path). Without
     them nothing is studied, the run plays one round unless rounds is given, and learn (if given) gets
     each lost training match.
+    customers: how many made-up customers to write (arena/madeup.py for_agent count); gate_size: hold out
+    exactly that many as a fixed test set, each played once a round. Both come from the level unless
+    given, and are left out on the old gate (trust or gate) and in quick.
     Raises one of NOT_RUN when it cannot run."""
     folder = Path(agent_folder).expanduser().resolve()
     level = level if levels.valid(level) else levels.read(folder)
@@ -528,6 +584,10 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
     if rounds is None:  # more rounds only help with study between them
         rounds = shape["rounds"] if studies else 1
     cap = shape["cap"] if cap is None else cap
+    old_gate = quick or trust is not None or gate is not None
+    if not old_gate:
+        customers = shape["customers"] if customers is None else customers
+        gate_size = shape["gate"] if gate_size is None else gate_size
     if quick:
         matches, rounds = 1, 1
     reports = reports_of(folder)
@@ -544,16 +604,20 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
         made_up, behaviour_from = any(c.get("made_up") is True for c in played), 0
     else:
         profiles = madeup.owner_cards(folder)
-        more = {"count": shape["customers"]} if "count" in inspect.signature(madeup.for_agent).parameters else {}
-        played, _ = madeup.for_agent(folder, agent.name, agent.card, calls.model(customer_model), profiles, **more)
+        played, _ = madeup.for_agent(folder, agent.name, agent.card, calls.model(customer_model), profiles,
+                                     count=customers)
         made_up, behaviour_from = True, len(profiles or ())
     bar = dict(run.QUICK_TRUST) if quick else run.load_trust(trust, agent=agent.name)
-    if quick or trust is not None or gate is not None:  # the old gate: a trust file or --gate set it
+    if old_gate:  # the old gate: a trust file or --gate set it
         if made_up:
             bar = stricter(bar, agent.plug, gate or GATE)
     else:
         bar = for_level(level, bar, agent.plug)
         bar["made_up"] = made_up
+    held = None if gate_size is None else test_set(played, gate_size)
+    if held is not None and bar["matches"] > len(held):
+        raise run.Refused(f"the gate plays {bar['matches']} test matches a round but the test set holds "
+                          f"{len(held)} customers; each test customer plays once a round")
     between = pool = None
     if studies and rounds > 1:
         from arena import rounds as rounds_mod
@@ -565,6 +629,7 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
                                           examiner=study.get("examiner"))
         learn = between.learn
     arena = Practice(agent, played, judge_model=judge_model, made_up=made_up, behaviour_from=behaviour_from,
+                     held_out=held, once=held is not None,
                      agent_model=agent_model, customer_model=customer_model, calls=calls, trust=bar,
                      matches=matches, rounds=rounds, seed=seed, state=folder, reports=reports, learn=learn,
                      between=between, lessons=pool, before_match=None if pool is None else pool.refresh)

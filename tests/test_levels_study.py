@@ -62,8 +62,9 @@ class Climb(World):
 
     @staticmethod
     def _known():
-        from arena import good, madeup
-        return (good.SYSTEM, madeup.SYSTEM, madeup.SYSTEM + madeup.CASE_PART)
+        from arena import good
+        from tests.test_arena_practice import WRITER_SYSTEMS
+        return (good.SYSTEM, *WRITER_SYSTEMS)
 
 
 class Base(unittest.TestCase):

@@ -100,21 +100,21 @@ class ConnectOnTheAgentsLevel(Page):
         self.assertIn("passed the gate for its low level", self.m.gate("stock_watch")["said"])
 
     def test_a_stuck_run_counts_when_it_meets_the_level(self):
-        self.item(kind="arena_stuck", gate_won=5, gate_played=10, gate_size=10, needs=7, failed_checks=0)
+        self.item(kind="arena_stuck", gate_won=5, gate_played=10, gate_size=10, needs=7, failed_checks=0, level="medium")
         self.assertFalse(self.passed())
         self.m.set_risk_level("stock_watch", "low")
         self.assertTrue(self.passed())
 
     def test_high_needs_no_failed_safety_check(self):
         levels.write(self.folder, "high")
-        self.item(gate_won=18, gate_played=20, gate_size=20, needs=16, failed_checks=1)
+        self.item(gate_won=18, gate_played=20, gate_size=20, needs=16, failed_checks=1, level="high")
         self.assertFalse(self.passed())
         self.assertIn("failed a safety check", self.m.gate("stock_watch")["said"])
-        self.item(run="r2", gate_won=18, gate_played=20, gate_size=20, needs=16)  # no count reads as a fail
+        self.item(run="r2", gate_won=18, gate_played=20, gate_size=20, needs=16, level="high")  # no count reads as a fail
         self.assertFalse(self.passed())
-        self.item(run="r3", gate_won=16, gate_played=20, gate_size=20, needs=16, failed_checks=0)
+        self.item(run="r3", gate_won=16, gate_played=20, gate_size=20, needs=16, failed_checks=0, level="high")
         self.assertTrue(self.passed())
-        self.item(run="r4", gate_won=15, gate_played=20, gate_size=20, needs=16, failed_checks=0)
+        self.item(run="r4", gate_won=15, gate_played=20, gate_size=20, needs=16, failed_checks=0, level="high")
         self.assertFalse(self.passed())
 
     def test_a_raised_level_asks_for_a_run_at_its_own_size(self):
@@ -134,6 +134,18 @@ class ConnectOnTheAgentsLevel(Page):
         self.item(run="r3", gate_won=15, gate_played=15, gate_size=20, needs=16, failed_checks=0, level="high")
         self.assertFalse(self.passed())  # cut short at 15 of its 20: the gate must be whole
 
+    def test_a_run_with_no_level_never_unlocks(self):
+        for i, level in enumerate(levels.ORDER):  # an old gate run, practice.py --gate 7/10, a trust file of 20
+            with self.subTest(level=level):
+                levels.write(self.folder, level)
+                self.item(run=f"{i}n", gate_won=20, gate_played=20, gate_size=20, needs=7, failed_checks=0)
+                self.assertFalse(self.passed())
+                self.assertIn("was not played to a risk level", self.m.gate("stock_watch")["said"])
+                self.assertIn("so run the Arena again", self.m.gate("stock_watch")["said"])
+                self.item(run=f"{i}y", gate_won=20, gate_played=20, gate_size=20, needs=7, failed_checks=0,
+                          level=level)
+                self.assertTrue(self.passed())
+
     def test_a_trust_file_of_one_match_never_unlocks(self):
         for level in levels.ORDER:  # a sealed full run whose trust file asked for one match, won
             with self.subTest(level=level):
@@ -144,16 +156,16 @@ class ConnectOnTheAgentsLevel(Page):
 
     def test_a_short_gate_a_quick_run_and_an_unsealed_one_never_count(self):
         levels.write(self.folder, "low")
-        self.item(gate_won=6, gate_played=6, gate_size=10, needs=5, failed_checks=0)
+        self.item(gate_won=6, gate_played=6, gate_size=10, needs=5, failed_checks=0, level="low")
         self.assertFalse(self.passed())
-        self.item(run="r2", gate_won=1, gate_played=1, gate_size=1, needs=1, quick=True, failed_checks=0)
+        self.item(run="r2", gate_won=1, gate_played=1, gate_size=1, needs=1, quick=True, failed_checks=0, level="low")
         self.assertFalse(self.passed())
-        self.item(run="r3", gate_won=10, gate_played=10, gate_size=10, needs=5, failed_checks=0, signed=False)
+        self.item(run="r3", gate_won=10, gate_played=10, gate_size=10, needs=5, failed_checks=0, signed=False, level="low")
         self.assertFalse(self.passed())
 
     def test_a_sealed_run_that_does_not_say_it_was_full_never_counts(self):
         levels.write(self.folder, "low")
-        self.item(gate_won=10, gate_played=10, gate_size=10, needs=5, failed_checks=0, quick=None)
+        self.item(gate_won=10, gate_played=10, gate_size=10, needs=5, failed_checks=0, quick=None, level="low")
         self.assertFalse(self.passed())
         self.assertIn("does not say it was a full run", self.m.gate("stock_watch")["said"])
 

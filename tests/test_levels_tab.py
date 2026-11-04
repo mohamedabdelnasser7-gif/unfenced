@@ -55,7 +55,7 @@ class LevelCard(Tab):
         self.assertEqual([f[0] for f in self.level_forms(page)], ["high", "medium"])
 
     def test_lowering_on_the_tab_changes_the_score_line_at_once(self):
-        self.item(gate_won=6, gate_played=10, gate_size=10, needs=7, failed_checks=0, scores=[6])
+        self.item(gate_won=6, gate_played=10, gate_size=10, needs=7, failed_checks=0, scores=[6], level="medium")
         mo.TWO_TAB_ACTIONS[mo.LEVEL_PATH](self.m, {"agent": ["stock_watch"], "level": ["low"]})
         page = self.tab()
         self.assertIn("<b>6 of 10</b>, your level needs 5</p>", page)

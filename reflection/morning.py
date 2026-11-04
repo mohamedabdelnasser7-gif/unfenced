@@ -1066,7 +1066,8 @@ class Morning:
         The run's gate must be at least the level's own gate size (10, or 20 at high), so a raised level,
         or a trust file's smaller gate, asks for a new run at the level's shape. A stuck run counts as a
         rounds run does; the gate must be whole (every test match played); at high no test match may have
-        failed a safety check (a missing count is a fail). A quick run or one with no seal never counts."""
+        failed a safety check (a missing count is a fail). A quick run, one with no seal, or one not played
+        to a risk level (no level on the item: an old gate run or --gate) never counts."""
         from arena import levels
         level = levels.read(folder)
         size = item.get("gate_size") or played
@@ -1080,6 +1081,9 @@ class Morning:
                     else "carries no seal from an Arena run")
             return {"passed": False, "said": f"Its latest Arena run, on {_when(at)}, {what}; "
                     "a full run has to pass the gate first.", "at": at}
+        if item.get("level") is None:  # an old gate run, practice.py --gate, or a trust file's run: no level
+            return {"passed": False, "said": f"Its practice in the Arena, on {_when(at)}, was not played to a "
+                    f"risk level; its {level} level asks for a run of {floor}, so run the Arena again.", "at": at}
         if size < floor or played < floor:
             return {"passed": False, "said": f"Its practice in the Arena, on {_when(at)}, played {played} test "
                     f"matches; its {level} level asks for a run of {floor}, so run the Arena again.", "at": at}

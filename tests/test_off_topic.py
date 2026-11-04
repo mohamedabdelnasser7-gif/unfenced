@@ -440,7 +440,8 @@ class SalesRun(unittest.TestCase):
 
     def test_the_off_topic_match_is_a_training_match_with_the_quick_notes(self):
         """It is played as a training match (training=True): the run's quick notes are handed to it, as to the
-        other practice matches, never to the gate; a loss writes a quick note."""
+        other practice matches, never to the gate; its loss writes no quick note (an ask outside the work is no
+        sale for the next matches to learn from), only a case."""
         notes = Notes()
         a = self.arena(Model(), Model(judges=[verdict(answered=True, declined=False)]))
         a.notes = notes
@@ -449,8 +450,9 @@ class SalesRun(unittest.TestCase):
         self.assertIs(self.kws[9].get("fast"), notes)
         self.assertTrue(all(kw.get("fast") is notes for kw in self.kws[:10]))
         self.assertFalse(any("fast" in kw for kw in self.kws[10:]))  # the gate plays without them
-        self.assertIn(f"{a.run_id}-r1-t10", notes.lost)
-        self.assertIn({"match": f"{a.run_id}-r1-t10"}, rep["rounds"][0]["training"]["notes"])
+        self.assertNotIn(f"{a.run_id}-r1-t10", notes.lost)
+        self.assertNotIn({"match": f"{a.run_id}-r1-t10"}, rep["rounds"][0]["training"].get("notes", []))
+        self.assertIn(f"{a.run_id}-r1-t10", self.cases)
 
     def test_an_unreadable_judge_is_asked_once_more_and_its_verdict_counts(self):
         judge = Model(judges=["not json", verdict(answered=True, declined=False)])

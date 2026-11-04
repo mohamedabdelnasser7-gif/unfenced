@@ -48,8 +48,9 @@ lesson and never written to any database.
 The off topic customer (decisions 88 and 89, arena/scope.py): with off_topic set (main sets it where it
 makes the models, so only with a model key) and a judge model, practice match 10 of each round is a person
 whose ask the customer model writes from the agent's card, outside its work, judged by the judge model with
-the exam's off-topic rules. Its calls count on the day's cap, a loss is a case like any training loss, an
-ask the judge reads as on topic voids the match, and it never plays the gate, trust or the practice pool;
+the exam's off-topic rules. Its calls count on the day's cap, a loss is a case like any training loss but
+writes no quick note (it is handed the run's quick notes like any training match), an ask the judge reads as
+on topic voids the match, and it never plays the gate, trust or the practice pool;
 its matches are never past wins (past_wins). With no model key it is skipped, never faked.
 
 --replay names the persona build's replay.jsonl: once the gate passes, the Sales agent replays up
@@ -587,7 +588,8 @@ class Arena:
                     self.pool.record(card, judged["won"])
                 if not judged["won"] and self.learn is not None:
                     one["training"]["cases"].append(self.learn(m, judged, m["id"]))
-                if not judged["won"] and self.notes is not None:  # the quick note, for the next matches
+                # the quick note, for the next matches; never from the off topic customer, whose ask is no sale
+                if not judged["won"] and self.notes is not None and not off:
                     one["training"].setdefault("notes", []).append(self.notes.after_loss(m, judged, m["id"]))
             for k in range(1, self.trust["matches"] + 1):
                 card = self.pick(self.gate_cards, r, k)

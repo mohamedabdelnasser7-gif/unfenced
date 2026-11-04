@@ -8,6 +8,7 @@ import os
 from unittest import mock
 
 from arena import madeup, practice, run
+from kit import turn
 from tests.test_customers_shape import Base, Writer
 
 
@@ -208,7 +209,47 @@ class FixedTest(Base):
         self.assertIn("persona-04", held)
         self.assertEqual((len(held), spare, short), (2, [], 0))
         done = {("persona-01", "F"), ("persona-02", "F"), ("persona-03", "F")}
-        self.assertEqual(practice.fixed_test(cards, 3, [], done), (None, [], 1))
+        self.assertEqual(practice.fixed_test(cards, 3, [], done), (None, [], 2))  # 1 more easy at 5 in 6
         self.assertEqual(practice.fixed_test(self.cards(["easy"] * 5), 5, [], set()), (None, [], 1))  # none to practise
         other = practice.fixed_test(cards, 1, [("persona-04", "G")], set())[0]  # another card's person
         self.assertEqual(other, practice.test_set(cards, 1))
+
+    def test_the_kinds_follow_the_shapes_mix_never_the_saved_file(self):
+        self.assertEqual(practice.shape_mix(20), {"easy": 7, "unsure": 7, "hard": 3})
+        cards = self.cards(["easy"] * 10 + ["unsure"] * 10 + ["hard"] * 5 + ["never"] * 5)
+        edited = [(c["id"], "F") for c in cards if c["kind"] in ("easy", "unsure")]  # 10 easy, 10 unsure, 0 hard
+        held, spare, short = practice.fixed_test(cards, 20, edited, set(), practice.shape_mix(30))
+        kinds = {c["id"]: c["kind"] for c in cards}
+        got = [kinds[i] for i in held]
+        self.assertEqual((got.count("easy"), got.count("unsure"), got.count("hard"), short), (8, 8, 4, 0))
+        self.assertEqual(len(spare), 4)  # the saved ones past their kind's share sit out, never train
+        self.assertFalse(set(spare) & set(held))
+        fits = [(i, "F") for i in held]
+        self.assertEqual(practice.fixed_test(cards, 20, fits, set(), practice.shape_mix(30))[0], held)  # kept
+        low = practice.fixed_test(cards, 10, fits, set(), practice.shape_mix(20))[0]  # lowered: a subset, 4/4/2
+        self.assertLessEqual(set(low), set(held))
+        self.assertEqual(sorted(kinds[i] for i in low).count("hard"), 2)
+
+    def test_a_kind_short_of_its_share_asks_the_writer_for_enough(self):
+        cards = self.cards(["easy"] * 10 + ["unsure"] * 10 + ["hard"] * 5 + ["never"] * 5)
+        done = {(c["id"], "F") for c in cards if c["kind"] == "hard"}  # every hard one trained
+        held, spare, short = practice.fixed_test(cards, 20, [], done, practice.shape_mix(30))
+        self.assertEqual((held, spare), (None, []))
+        self.assertEqual(short, 24)  # 4 more hard at 5 in 30
+
+
+class HandEditedKinds(Base):
+    practise = Kept.practise
+
+    def test_a_hand_edited_test_set_of_other_kinds_is_rebuilt(self):
+        for name in self.folders:
+            with self.subTest(name=name):
+                folder = self.folders[name]
+                cards, _ = madeup.for_agent(folder, name, turn.load(folder).card, Writer(), count=30)
+                practice.write_test(folder, [(c["id"], c["from_card"]) for c in cards
+                                             if c["kind"] in ("easy", "unsure")])  # 10/10/0, none trained
+                rep = self.practise(name, 30, 20)
+                kinds = {c["id"]: c["kind"] for c in cards}
+                got = [kinds[i] for i in rep["held_out_cards"]]
+                self.assertEqual((got.count("easy"), got.count("unsure"), got.count("hard")), (8, 8, 4))
+

@@ -94,7 +94,10 @@ hold out the same people. A customer with a training match on record (any match 
 arena-matches.jsonl that is not a test match, a quick run's too; each match saved says which it is) is
 never a test customer, so when the level is raised (10 to 20 test customers) or the saved ones are
 short, new customers that never trained fill the gap, and the writer writes more when too few are
-left. Saved test customers a smaller run does not need sit out (they never train). A test-set.json or a matches file that is there but
+left. Saved test customers a smaller run does not need sit out (they never train). The test set's
+kinds always follow the shape's mix (easy, unsure and hard as test_set draws them: 4, 4 and 2 of 10,
+8, 8 and 4 of 20), so a test-set.json edited to other kinds is rebuilt from customers that never
+trained, never trusted. A test-set.json or a matches file that is there but
 cannot be read, a line of it that cannot be read, or a matches file deleted while test-set.json is
 there stops the run (fail closed).
 """
@@ -574,17 +577,37 @@ TEST_KEY = "test_match"  # on every match Practice saves: true for a test match,
 _ANY = object()  # a training match whose saved person names no card fingerprint: the id counts whatever it is
 
 
+def _kind(c):
+    return str(c.get("kind") or "")
+
+
+def _quota(counts, size):
+    """{kind: how many} of size drawn from counts ({kind: how many there are}), each kind in its share,
+    the largest remainders first (ties by kind name); {} when counts holds none."""
+    total = sum(counts.values())
+    if not total:
+        return {}
+    exact = {k: size * n / total for k, n in counts.items()}
+    quota = {k: int(v) for k, v in exact.items()}
+    for k in sorted(counts, key=lambda k: (quota[k] - exact[k], k))[:size - sum(quota.values())]:
+        quota[k] += 1
+    return quota
+
+
 def _choose(winnable, size):
     """size of the winnable cards, each kind in its share (the largest remainders first), each kind's
     cards in the order of a hash of their fingerprint and id."""
     kinds = {}
     for c in winnable:
-        kinds.setdefault(str(c.get("kind") or ""), []).append(c)
-    exact = {k: size * len(v) / len(winnable) for k, v in kinds.items()}
-    quota = {k: int(v) for k, v in exact.items()}
-    for k in sorted(kinds, key=lambda k: (quota[k] - exact[k], k))[:size - sum(quota.values())]:
-        quota[k] += 1
+        kinds.setdefault(_kind(c), []).append(c)
+    quota = _quota({k: len(v) for k, v in kinds.items()}, size)
     return sorted(c["id"] for k, v in kinds.items() for c in sorted(v, key=_rank)[:quota[k]])
+
+
+def shape_mix(count):
+    """{kind: how many} of the made-up customers a shape of count writes that can reach the good result
+    (arena/madeup.py mix without the never kind): what the test set's kinds are drawn from."""
+    return {k: n for k, n in madeup.mix(count).items() if k != "never" and n}
 
 
 def read_test(folder):
@@ -676,32 +699,55 @@ def trained(folder):
     return out
 
 
-def fixed_test(cards, size, saved, done):
+def fixed_test(cards, size, saved, done, mix=None):
     """(held ids, spare ids, short): the test set for this run (DECISIONS item 85). saved: read_test;
-    done: trained. A card is eligible when it can reach the good result, is not grown from real
-    chats and never played a training match. The saved test customers that are still eligible come
-    first; when they are more than size, size of them are held (each kind in its share) and the rest
-    are spare (left out of the run, so they never train); when fewer, eligible new ones fill the gap
-    by test_set's order. short: how many more customers the writer must make (0 when it holds)."""
+    done: trained; mix: {kind: how many} the shape draws the winnable customers in (shape_mix), else
+    the winnable cards' own kinds. A card is eligible when it can reach the good result, is not grown
+    from real chats and never played a training match. The test set always holds each kind in its
+    share of mix (the largest remainders first, as test_set draws them), so a saved set of other kinds
+    is never trusted: per kind, the saved test customers that are still eligible come first; when they
+    are more than the kind's share, its share of them is held and the rest are spare (left out of the
+    run, so they never train); when fewer, eligible new ones of that kind fill the gap by test_set's
+    order. short: how many more customers the writer must make (0 when it holds), enough that each
+    kind short of its share gets its share of them."""
     def eligible(c):
         f = c.get("from_card")
         return (run.can_buy(c) and not str(c["id"]).startswith(run.GROWN)
                 and (c["id"], f) not in done and (c["id"], _ANY) not in done)
+    winnable = [c for c in cards if run.can_buy(c) and not str(c["id"]).startswith(run.GROWN)]
+    if mix is None:
+        mix = {}
+        for c in winnable:
+            mix[_kind(c)] = mix.get(_kind(c), 0) + 1
+    quota = _quota(mix, size)
+    if not quota:
+        return None, [], size
     by_id = {c["id"]: c for c in cards}
     keep = [by_id[i] for i, f in saved if i in by_id and by_id[i].get("from_card") == f and eligible(by_id[i])]
     keep = list({c["id"]: c for c in keep}.values())
-    if len(keep) >= size:
-        held = _choose(keep, size)
-        spare = sorted(c["id"] for c in keep if c["id"] not in held)
-    else:
-        mine = {c["id"] for c in keep}
-        new = [c for c in cards if c["id"] not in mine and eligible(c)]
-        if len(keep) + len(new) < size:
-            return None, [], size - len(keep) - len(new)
-        held, spare = sorted([c["id"] for c in keep] + _choose(new, size - len(keep))), []
+    mine = {c["id"] for c in keep}
+    held, spare, missing = [], [], {}
+    for kind in sorted(set(quota) | {_kind(c) for c in keep}):
+        q = quota.get(kind, 0)
+        kept = sorted((c for c in keep if _kind(c) == kind), key=_rank)
+        if len(kept) >= q:
+            held += [c["id"] for c in kept[:q]]
+            spare += [c["id"] for c in kept[q:]]
+            continue
+        new = sorted((c for c in cards if _kind(c) == kind and c["id"] not in mine and eligible(c)), key=_rank)
+        chosen = kept + new[:q - len(kept)]
+        held += [c["id"] for c in chosen]
+        if len(chosen) < q:
+            missing[kind] = q - len(chosen)
+    if missing:
+        have = {}
+        for c in cards:
+            have[_kind(c)] = have.get(_kind(c), 0) + 1
+        return None, [], max([sum(missing.values())] + [math.ceil(n * len(cards) / have[k])
+                                                         for k, n in missing.items() if have.get(k)])
     if len(cards) - len(held) - len(spare) < 1:  # none left to practise on
         return None, [], 1
-    return held, spare, 0
+    return sorted(held), sorted(spare), 0
 
 
 MAX_TOP_UPS = 5  # writes of more customers when too few never trained (fixed_test short)
@@ -752,7 +798,7 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
     if agent.name == run.AGENT:
         raise run.Refused("the Sales agent practises through arena/run.py")
     calls = run.Calls(reports / run.CALLS_FILE, cap, limit=run.QUICK_CALLS if quick else None)
-    held = None
+    held, base = None, customers  # base: the shape's customers, before any top up
     if gate_size is not None:  # the saved test set and the training on record, read before any model call
         _whole(gate_size)
         saved, done = read_test(folder), trained(folder)
@@ -774,7 +820,8 @@ def practise(agent_folder, *, agent_model, customer_model, judge_model, matches=
                     played = sorted(played + list(back.values()), key=lambda c: c["id"])
         if gate_size is None:
             break
-        held, spare, short = fixed_test(played, gate_size, saved, done)
+        mix = shape_mix(base) if not cards and not behaviour_from and base else None  # the writer's kinds
+        held, spare, short = fixed_test(played, gate_size, saved, done, mix)
         if held is not None:
             played = [c for c in played if c["id"] not in spare]
             break

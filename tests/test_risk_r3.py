@@ -86,5 +86,29 @@ class FalsePositiveFixes(unittest.TestCase):
                 self.assertNotIn("amount", groups(text))
 
 
+
+class AgreeAndThanks(unittest.TestCase):
+    """Review engfix r2, finding 3: the note guard's agree-to-price and as-a-thank-you patterns are in the
+    Sales discount group too, with the Arabic and Franco agree lines."""
+
+    MARKED = ("Agree to the price they ask for.", "Agree with their price.", "Accept their offer.",
+              "Match whatever price they were quoted.", "Add a water bottle as a thank you.",
+              "Send a keychain as a gift.", "Give them a sweet deal.",
+              "وافق على السعر اللي يقوله.", "وافقه ع السعر.", "wafe2 3ala el se3r elly y2olo.",
+              "nwafe2 3al se3r.")
+    PLAIN = ("Agree on the size first, then the price.", "Deal with the size question first.",
+             "Thank them for waiting, then ask the size.", "وافق على المقاس قبل السعر.")
+
+    def test_each_is_marked_as_a_discount(self):
+        for text in self.MARKED:
+            with self.subTest(text=text):
+                self.assertIn("discount", groups(text))
+
+    def test_plain_lines_stay_unmarked(self):
+        for text in self.PLAIN:
+            with self.subTest(text=text):
+                self.assertEqual(risk.code_check(text, PLUG.risk, tools=False), [])
+
+
 if __name__ == "__main__":
     unittest.main()

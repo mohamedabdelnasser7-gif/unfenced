@@ -573,6 +573,9 @@ class RunTheArena(unittest.TestCase):
         self.assertIn(f"<script>{pages.ARENA_SCRIPT}</script>", self.p.get("/agents/sales", ARENA_TAB, "t"))
         self.assertNotIn("script-src", self.p.csp_for("/agents/stock_watch/rollback"))
         self.assertIn("'X-Poll':'1'", pages.ARENA_SCRIPT)
+        # typing in a Correct this pauses the swap; other swaps hold the screen on the first tile in view
+        self.assertIn("if(busy(el))continue;", pages.ARENA_SCRIPT)
+        self.assertIn("window.scrollBy(0,o.getBoundingClientRect().top-a.y)", pages.ARENA_SCRIPT)
 
 
 class ArenaPost(RunTheArena):

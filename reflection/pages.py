@@ -107,19 +107,25 @@ if(q(document,'[data-live="thread"]'))window.scrollTo(0,document.body.scrollHeig
 # swaps each part marked data-live (arena, reflect) and data-running until its run is over; when that part is
 # gone (Overview once an Arena run is saved), and when a reflection ends (its lessons show elsewhere on the
 # page too), it loads the page again. A swap keeps each Correct this (data-keep) that is open, holds text or has
-# the focus, as it is, and each chat (details data-chat) open or closed as the user left it.
+# the focus, as it is, and each chat (details data-chat) open or closed as the user left it. While the user
+# types in a Correct this, the poll skips that part, so nothing moves under the cursor; every other swap holds
+# the screen on the first tile in view (data-match), so new matches opening never scroll the page.
 ARENA_SCRIPT = """(function(){
 var T=2000;function q(d,s){return d.querySelector(s)}
 function byKey(el,a,v){var xs=el.querySelectorAll('['+a+']');for(var i=0;i<xs.length;i++)if(xs[i].getAttribute(a)===v)return xs[i];return null}
-function swap(el,n){var keep=[],ks=el.querySelectorAll('[data-keep]'),op={},cs=el.querySelectorAll('details[data-chat]'),j,o,t;
+function busy(el){var a=document.activeElement;return!!(a&&el.contains(a)&&a.closest('[data-keep]'))}
+function anchor(el){var ts=el.querySelectorAll('[data-match]');for(var i=0;i<ts.length;i++){var r=ts[i].getBoundingClientRect();if(r.bottom>0)return{k:ts[i].getAttribute('data-match'),y:r.top}}return null}
+function swap(el,n){var a=anchor(el),keep=[],ks=el.querySelectorAll('[data-keep]'),op={},cs=el.querySelectorAll('details[data-chat]'),j,o,t;
 for(j=0;j<ks.length;j++){o=ks[j];t=o.querySelector('textarea');if(o.open||(t&&t.value)||o.contains(document.activeElement))keep.push(o)}
 for(j=0;j<cs.length;j++)op[cs[j].getAttribute('data-chat')]=cs[j].open;
 el.innerHTML=n.innerHTML;
 for(j=0;j<keep.length;j++){o=byKey(el,'data-keep',keep[j].getAttribute('data-keep'));if(o)o.replaceWith(keep[j]);else(el.querySelector('.tiles')||el).appendChild(keep[j])}
-cs=el.querySelectorAll('details[data-chat]');for(j=0;j<cs.length;j++){t=cs[j].getAttribute('data-chat');if(op.hasOwnProperty(t))cs[j].open=op[t]}}
+cs=el.querySelectorAll('details[data-chat]');for(j=0;j<cs.length;j++){t=cs[j].getAttribute('data-chat');if(op.hasOwnProperty(t))cs[j].open=op[t]}
+if(a){o=byKey(el,'data-match',a.k);if(o)window.scrollBy(0,o.getBoundingClientRect().top-a.y)}}
 function poll(){var els=document.querySelectorAll('[data-live][data-running]');if(!els.length)return;
 fetch(location.href,{headers:{'X-Poll':'1'},credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.text():null}).then(function(t){if(!t)return;
 var d=new DOMParser().parseFromString(t,'text/html');for(var i=0;i<els.length;i++){var el=els[i],k=el.getAttribute('data-live'),n=q(d,'[data-live="'+k+'"]');
+if(busy(el))continue;
 if(!n||(k==='reflect'&&!n.hasAttribute('data-running'))){location.reload();return}
 swap(el,n);if(!n.hasAttribute('data-running'))el.removeAttribute('data-running')}}).catch(function(){}).then(function(){
 if(q(document,'[data-live][data-running]'))setTimeout(poll,T)})}

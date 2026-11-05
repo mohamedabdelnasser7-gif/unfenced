@@ -1,8 +1,9 @@
 """Shared bookings per agent (kit/bookings.py, kit/tools/book.py, kit/tools/calendar_tool.py, 2026-11-05).
 
 A built agent that books (an Apartment Viewing Booker on a sheet of apartments) books one row at a date and time,
-checked in code against the row's own viewing days and hours and against every booking any live chat of the agent
-made, kept in <db folder>/agents/<agent>/bookings.json. Start over on the page chat keeps them; Arena practice
+checked in code only against every booking any live chat of the agent made, kept in
+<db folder>/agents/<agent>/bookings.json; the row's viewing days and hours are the agent's to follow from its prompt
+(Mohamed 2026-11-05). Start over on the page chat keeps them; Arena practice
 never writes them. The assistant's calendar refuses a time another chat booked. Fake models only, no network."""
 import datetime as dt
 import json
@@ -109,16 +110,27 @@ class TheBookTool(Base):
         self.assertEqual(saved[0]["who"], "Mona")
         self.assertTrue(self.chat(books(item="Nile View 3B"), "c4")["ok"])  # another flat at the same time is free
 
-    def test_a_slot_outside_the_rows_viewing_days_or_hours_is_refused(self):
-        monday = self.chat(books(date="2026-11-09"), "c1")
-        self.assertFalse(monday["ok"])
-        self.assertIn("Sun Tue Thu", monday["feedback"])
-        late = self.chat(books(start="16:00"), "c2")
-        self.assertFalse(late["ok"])
-        self.assertIn("10:00 to 16:00", late["feedback"])
-        self.assertTrue(self.chat(books(start="15:30"), "c3")["ok"])
-        self.assertTrue(self.chat(books(item="Villette Studio 4", date="monday", start="19:00"), "c4")["ok"])
-        self.assertEqual(len(bookings.read(self.store)), 2)
+    def test_days_hours_and_move_in_dates_are_the_prompts_and_only_a_clash_is_refused(self):
+        """Mohamed 2026-11-05: the agent follows viewing rules from its prompt, the code checks no day or hour.
+        Garden Flat 12 is shown Sun Tue Thu 10:00-16:00 on the sheet; Monday 19:00 books, and the same flat at an
+        overlapping time is still refused in another chat."""
+        monday = self.chat(books(date="2026-11-09", start="19:00"), "c1")
+        self.assertTrue(monday["ok"], monday)
+        early = self.chat(books(start="07:00"), "c2")  # before any 09:00 default and the row's 10:00
+        self.assertTrue(early["ok"], early)
+        clash = self.chat(books(date="2026-11-09", start="19:15"), "c3")
+        self.assertFalse(clash["ok"])
+        self.assertIn("already booked on Monday 2026-11-09 from 19:00 to 19:30", clash["feedback"])
+        self.assertIn("next free time that day is 19:30", clash["feedback"])
+        self.assertEqual([(b["date"], b["start"]) for b in bookings.read(self.store)],
+                         [("2026-11-09", "19:00"), (SUNDAY, "07:00")])
+        listed = book.run({"item": "Garden Flat 12"}, mock.Mock(data=sample.read(self.folder), bookings=self.store,
+                                                                chats=self.chats, chat_id=0))
+        self.assertEqual(listed["rows"], [{"item": "Garden Flat 12"}])  # no days, hours or move in date given
+        text = book.DEFINITION["function"]["description"]
+        self.assertNotIn("own days", text)
+        self.assertIn("refuses only a time another booking of that row overlaps", text)
+        self.assertFalse(hasattr(book, "DEFAULT_HOURS"))
 
     def test_practice_never_writes_the_shared_bookings(self):
         practised = self.chat(books(), "c1", live=False)

@@ -35,7 +35,7 @@ Setup, keys and every command in detail: [docs/judges.md](docs/judges.md).
 3. If the name is taken, the chat says so before you press Build. The built-in Sales agent keeps the name sales, so call yours something like `sales_mystore`; it is still of the sales kind and learns beside ours.
 4. Pick how risky the job is: low needs 5 of 10 gate matches won, medium 7 of 10, high 16 of 20 with zero failed safety checks. The card suggests one; support, money or customer data start at high.
 5. Press Build. Unfenced writes the agent's plug, instructions, card and short exam, and checks the plug before anything runs. The agent gets only tools that exist and are connected; the rest show as not connected yet.
-6. Its first Arena run starts by itself. Run the Arena plays new matches, then the gate. Only a run that passes unlocks Connect.
+6. Build starts no Arena run. The page says "Built. Add your data if you have it, then press Run the Arena." Add your rows or a file in the Add data box if you have them, then press Run the Arena: it plays new matches, then the gate. Only a run that passes unlocks Connect.
 7. If it fails, the card shows how many it won and the main reasons it lost, with two fixes side by side: Train, which reflects on that run's lost matches and puts each new lesson through the exam while you watch, and a correction box for your own fix, which takes the same exam. Then run the Arena again.
 
 Every agent starts with zero lessons and earns each one in the Arena. The same practice from the command line: `python3 -I arena/practice.py --agent <its folder>`.

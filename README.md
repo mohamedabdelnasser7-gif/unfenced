@@ -28,6 +28,16 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t .
 
 Setup, keys and every command in detail: [docs/judges.md](docs/judges.md).
 
+## Try it in 5 minutes
+
+1. Put your Meta Model API key in `.env` (above) and run `python3 -m unfenced`. Open the address it prints.
+2. Go to Agents, then New agent, and type: `An agent that books apartment viewings for a rental agency. It answers renters' questions about available apartments, prices and areas, then books a viewing time that fits.`
+3. Read the card it writes, change anything you like, pick a risk level and press Build. Build waits for you.
+4. In Add data, choose `demo/apartments.csv` (15 made up Cairo listings) and press Add.
+5. Press Run the Arena. Up to 10 practice matches play at once against customers made from real behaviour, and each one shows live, won or lost, with its chat.
+6. If you do not like a reply, write your fix in Correct this on that match and send it. It is a hotfix: it takes a short exam first, and the next matches use it.
+7. Talk to the agent yourself on its page, or open Sales and write to it in English, Egyptian Arabic or Franco.
+
 ## Build your own agent
 
 1. Open the page, then Agents, then New agent. This is Quick start.

@@ -180,7 +180,7 @@ import time
 import urllib.parse
 from contextlib import contextmanager
 from datetime import datetime
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -4317,13 +4317,17 @@ def make_server(morning, *, port=int(PORT_DEFAULT), token=None, pages=None):
     """The page's server on 127.0.0.1 (port 0: any free port). Its token is server.token.
     pages: the two tab page (reflection/pages.py, a Pages); None serves the A3 page on / only."""
     token = secrets.token_urlsafe(32) if token is None else token
-    server = HTTPServer((HOST, port), _handler(morning, token, pages))
+    # one thread per request, so a long action (a correction's exam, Train, a page chat turn) never holds the
+    # page: polls and other tabs keep answering while it runs. Actions still run one at a time (_handler).
+    server = ThreadingHTTPServer((HOST, port), _handler(morning, token, pages))
+    server.daemon_threads = True
     server.token = token
     return server
 
 
 def _handler(morning, token, pages=None):
     box = {"flash": None}
+    acting = threading.Lock()  # actions (POSTs) one at a time, as on the one-thread server before
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "morning"
@@ -4416,13 +4420,14 @@ def _handler(morning, token, pages=None):
                 return self._send(400, "Not a form.\n")
             m = pages.morning_for(back) if pages is not None else morning  # demo: the throwaway copy of that day
             now = pages.now_for(back) if pages is not None else None  # demo: that day's own clock
-            try:
-                box["flash"] = act(m, form, now=now)
-            except Refused as e:
-                box["flash"] = str(e)
-            except (ValueError, sqlite3.Error) as e:
-                box["flash"] = f"Not done: {e}"
-            to = getattr(box["flash"], "location", None)  # an answer that names where the page goes next (Build)
+            with acting:
+                try:
+                    box["flash"] = act(m, form, now=now)
+                except Refused as e:
+                    box["flash"] = str(e)
+                except (ValueError, sqlite3.Error) as e:
+                    box["flash"] = f"Not done: {e}"
+                to = getattr(box["flash"], "location", None)  # an answer that names where the page goes next (Build)
             if to and pages is not None and hasattr(pages, "land"):
                 back = pages.land(to, back)
             self._send(303, "Done.\n", location=back)

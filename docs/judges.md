@@ -1,5 +1,5 @@
 # For judges
-*Created: 2026-10-31. Last updated: 2026-11-04 (decisions 104 and 110, example agent at high, page chat).*
+*Created: 2026-10-31. Last updated: 2026-11-05 (Build starts no Arena run).*
 
 Every model this project calls is a Meta model: Muse Spark on the Meta Model API, or Muse Spark Open on Baseten. You do not need to connect any other account. The store name is made up; the products and prices are real; the practice customers are built from real chats with names, numbers and addresses removed.
 
@@ -37,7 +37,7 @@ It also adds one example agent to Agents, the Family Dinner Planner, built in Qu
 
 ## Run the Arena, then Train
 
-1. Open the page, then Agents. Pick an agent made on the page, or make one on New agent with your key. Its first Arena run starts by itself after Build.
+1. Open the page, then Agents. Pick an agent made on the page, or make one on New agent with your key. Build starts no Arena run, so you can add your data first.
 2. On its Arena tab, press Run the Arena. It plays new matches against made-up customers, then the gate, and the page shows them as it plays. Only a run that passes unlocks Connect.
 3. If the run does not pass, the card under it shows won N of M and the main reasons it lost; press Train to reflect on the matches that run lost, or type your own fix in the correction box under it, then press Run the Arena again.
 

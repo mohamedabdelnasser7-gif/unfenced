@@ -49,11 +49,10 @@ folder and capped (kit/sample.py MAX_MADE). The agent reads it through the data 
 reads its products when no Shopify keys are set; practice customers and the judge read the same rows.
 An answer that cannot be read leaves the agent with none; the build goes on.
 
-After a successful Build with the real model, the new agent plays its first Arena run in the background
-(arena/practice.py practise, the full run the Arena tab's Run the Arena makes; DECISIONS 104 item 6), one
-at a time; the page says it is playing and then how it went, and its result shows on the Arena tab. With
-no key it says so in one line; a test's model starts none. Each lost match becomes a case when
-arena/learn_built.py is there.
+Build starts no Arena run (Mohamed 2026-11-05: he needs the time to add his data first). The page says
+"Built. Add your data if you have it, then press Run the Arena." under the Add data box and the Run the
+Arena button, and Run the Arena starts the full run. start_practice below (the first Arena run in the
+background, DECISIONS 104 item 6) is kept, but Build no longer calls it.
 
 Safety. The user's text and the model's output are both untrusted: every field is capped and made
 one plain line, the folder name is a safe slug (letters, digits and _, no path parts) and the folder
@@ -1075,8 +1074,7 @@ class QuickStart:
                     "and Unfenced fixed it.")
         if offers_lost:
             said += f" {OFFERS_LOST}"
-        practice = self.start_practice(m, agent)
-        return said if practice is None else f"{said} {practice}"
+        return said  # no Arena run starts here: the user adds data, then presses Run the Arena (2026-11-05)
 
     # ---- the first Arena run after Build (C8, DECISIONS 104 item 6) ----
 
@@ -1091,7 +1089,8 @@ class QuickStart:
             return agent in self._running
 
     def start_practice(self, m, agent):
-        """After a successful Build: the new agent's first Arena run (arena/practice.py practise, the full run
+        """Build no longer calls this (2026-11-05: Run the Arena on the page starts the first run). It was,
+        after a successful Build, the new agent's first Arena run (arena/practice.py practise, the full run
         the Arena tab's Run the Arena makes: the agent's level shape, new matches, the gate, under the day's
         cap; DECISIONS 104 item 6) in a background thread, so the page never waits. Only with the real model:
         Quick start with a model handed in (a test's) starts none and returns None. No key, or a first run

@@ -207,11 +207,12 @@ class QuickStartPage(unittest.TestCase):
         # the fixed scope line from the card goes under the model's words (Mohamed 2026-11-03)
         self.assertTrue(words.endswith("\n\n" + qs.scope_line(card) + "\n"))
         self.assertIn(CASE["input"], qs.scope_line(card))
-        page = self.get()  # the build page's steps, all ticked, then Go to the Arena on the agent's Arena tab
+        page = self.get()  # the build page's steps, all ticked, then the Built line, Add data and Run the Arena
         for done in ("Card read", "Plug written and checked", "Exam written", "Files saved", "agents/stock_watcher",
                      "Ready for the Arena"):
             self.assertIn(done, page)
-        self.assertIn('href="/agents/stock_watcher?tab=arena" data-go>Go to the Arena', page)
+        self.assertIn(pages.READY_LINE, page)  # Add data and Run the Arena under it: BuildPage, on a live page
+        self.assertNotIn("data-go", page.split("<script>")[0])  # the markup: the script still names it
         self.assertNotIn('data-building=""', page)
         self.assertIn("level", card)
         self.assertNotIn("bosta", json.dumps(json.loads((where / "plug.json").read_text(encoding="utf-8"))["risk"]))
@@ -866,21 +867,36 @@ class BuildPage(unittest.TestCase):
         self.assertIn('action="/quickstart/clear"', page)  # Start over is back once it is built
         for done in ("Plug written and checked", "Exam written", "Files saved", "agents/stock_watcher", "Ready for the Arena"):
             self.assertIn(done, page)
-        self.assertIn('href="/agents/stock_watcher?tab=arena" data-go>Go to the Arena', page)
-        self.assertIn(f"data-count>{pages.COUNTDOWN}</b>", page)
-        self.assertIn("data-stay>Stay here</button>", page)
+        self.assertIn(pages.READY_LINE, page)
+        self.assertNotIn("data-count>", page)  # never moves on to the Arena by itself (2026-11-05)
+        self.assertNotIn("data-stay>", page)
         self.assertIn("stock_watcher", self.m.plugs)  # joined the running page on the server's thread
         self.assertTrue((self.folder / "agents" / "stock_watcher" / "plug.json").is_file())
 
-    def test_no_countdown_once_the_build_is_old(self):
-        self.p.actions["/quickstart"](self.m, {"text": ["an agent for my stock"]})
-        self.p.actions["/quickstart/build"](self.m, {})
-        self.finish()
-        self.p.run.ended -= pages.FRESH + 1
-        page = self.get()
-        self.assertIn('href="/agents/stock_watcher?tab=arena" data-go>Go to the Arena', page)
-        self.assertNotIn("data-count>", page)
-        self.assertNotIn("data-stay>", page)
+    def test_build_starts_no_arena_run_and_run_the_arena_still_does(self):
+        """Mohamed 2026-11-05: Build starts no Arena run, so he can add his data first. The built page shows
+        the Built line, the Add data box and then Run the Arena; pressing it starts the full run as before."""
+        started = []
+        with mock.patch.object(qs.QuickStart, "start_practice", lambda *a, **k: started.append(a)), \
+                mock.patch.object(self.m, "run_arena", lambda *a, **k: started.append(("run", a, k))):
+            self.p.actions["/quickstart"](self.m, {"text": ["an agent for my stock"]})
+            self.p.actions["/quickstart/build"](self.m, {})
+            self.finish()
+            page = self.get().split("<script>")[0]
+            self.assertEqual(started, [])  # no run of any kind after Build
+            self.assertFalse(any(t.name.startswith("practice-") for t in threading.enumerate()))
+            self.assertFalse(self.m.arena_running("stock_watcher"))
+            line, data, go = (page.index(pages.READY_LINE), page.index(f'action="{mo.DATA_PATH}"'),
+                              page.index('action="/arena/run"'))
+            self.assertLess(line, data)
+            self.assertLess(data, go)  # the line, then Add data, then Run the Arena
+            form = page[go:page.index("</form>", go)]
+            self.assertIn('name="agent" value="stock_watcher"', form)
+            self.assertIn('name="back" value="/agents/stock_watcher?tab=arena"', form)
+            self.assertIn(mo.ARENA_BUTTON, form)
+            self.assertNotIn("data-count>", page)
+            self.p.actions["/arena/run"](self.m, {"agent": ["stock_watcher"]})
+            self.assertEqual(started, [("run", ("stock_watcher",), {"now": None, "full": True})])
 
     def test_a_failed_build_says_so_and_offers_build_again(self):
         self.model.script[1] = lambda messages, tools: (_ for _ in ()).throw(RuntimeError("the line dropped"))
@@ -958,8 +974,8 @@ class BuildPage(unittest.TestCase):
         page = self.get().split("<script>")[0]
         self.assertIn('<span class="tag">Correction</span><b dir="auto">Say which item runs low first.</b>', page)
         self.assertIn("Took the exam", page)
-        self.assertNotIn("data-count>", page)  # it stayed to correct: no countdown takes the page away
-        self.assertIn('href="/agents/stock_watcher?tab=arena" data-go>Go to the Arena', page)
+        self.assertNotIn("data-count>", page)  # no countdown takes the page away
+        self.assertIn(pages.READY_LINE, page)
         self.assertIn(taken["answer"].replace("'", "&#x27;"), page)
 
     def test_a_message_after_the_files_while_it_still_runs_is_a_correction(self):

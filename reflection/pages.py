@@ -19,8 +19,8 @@ Morning methods only, so no engine rule lives here.
     /agents/<name>/rollback  what Roll back would do, lesson by lesson, and its one button.
     /new           New agent, the build page (LOCKS "App pages", 2A): a centred thread with the box pinned
                    at the bottom; the Quick start chat (reflection/quickstart.py), its card, at most one
-                   question and the second message, Build; then the build's steps ticking off and Go to
-                   the Arena with a countdown that Stay here stops. A message sent while it builds
+                   question and the second message, Build; then the build's steps ticking off, the Built
+                   line, the Add data box and Run the Arena (Build starts no run). A message sent while it builds
                    changes the card before its files are written, and is a correction through the exam
                    after (Pages._say); it never starts a new agent.
     /new/build     screen 2: the newest Arena run saved next to the database, as tiles and a path. When
@@ -55,7 +55,7 @@ from pathlib import Path
 
 from arena import levels as levels_mod
 from engine import lessons as lessons_mod
-from kit import sample as sample_mod
+from kit import bookings as bookings_mod, sample as sample_mod
 from reflection import console as console_mod
 from reflection import morning as mo
 from reflection import quickstart as qs_mod
@@ -85,8 +85,8 @@ MINE_SAME = "Change the draft first, then press Use my version."
 MAX_TRY_BODY = try_mod.MAX_PASTE * 9 + 4096
 # The build page's one script (LOCKS "App pages", 2A), allowed by its hash in the /new policy only: while a
 # build runs it fetches the page again with the X-Poll header (the console's way, so the one-time
-# message stays) and swaps the thread; when the build is done it runs the countdown to the Arena, which
-# Stay here stops; Enter sends the box.
+# message stays) and swaps the thread; Enter sends the box. Its countdown (count) finds no data-count now
+# and does nothing: since 2026-11-05 the build page never moves on to the Arena by itself.
 NEW_SCRIPT = """(function(){
 var T=1500;function q(d,s){return d.querySelector(s)}
 function count(){var g=q(document,'[data-count]'),go=q(document,'[data-go]');if(!g||!go)return;var n=+g.textContent||5,t,stay=q(document,'[data-stay]');
@@ -146,8 +146,6 @@ BUILD_STEPS = (("card", "Reading the card", "Card read"), ("plug", "Writing the 
                ("exam", "Writing the exam", "Exam written"), ("files", "Saving its files", "Files saved"),
                ("data", "Making sample data", "Sample data"),
                ("ready", "Getting ready", "Ready for the Arena"))
-COUNTDOWN = 5     # seconds before Go to the Arena opens by itself
-FRESH = 20        # seconds after a build ends that a page still starts the countdown
 
 
 class BuildRun:
@@ -1134,6 +1132,9 @@ def overview_tab(m, view, a, agent, st, ctx):
         made = "" if folder is None else "<small>Made up for practice until a real connection is set.</small>"
         left.append(f'<section class="grp sq" aria-labelledby="sd-h"><h3 id="sd-h">Sample data</h3><div class="lr">'
                     f'<b dir="auto">{h(line)}</b>{using}{made}</div></section>')
+        booked = bookings_html(bookings_mod.read(bookings_mod.path_of(folder))) if folder is not None else ""
+        if booked:  # what its live chats booked (kit/bookings.py), kept across Start over
+            left.append(booked)
         if tok:
             left.append(data_form(ctx, agent))
         own = m.offers(agent) if hasattr(m, "offers") else None
@@ -1807,7 +1808,7 @@ def _who(small=""):
 
 def steps_html(run, built):
     """The checklist message: each step done so far with its line, the one it is on, and the last one
-    big; then Go to the Arena with the countdown, or what went wrong."""
+    big; or what went wrong."""
     rows, working = [], run is not None and run.running and not run.error
     done = run.done if run is not None else {k: "" for k, _, _ in BUILD_STEPS}
     for key, doing, did in BUILD_STEPS:
@@ -1832,24 +1833,29 @@ def took(tag, said, state):
             '</span></div>')
 
 
-def ready_html(ctx, built, run):
-    href = tab_href(ctx, built, "arena")
-    # the countdown only right after the build, and never once the user stayed to send a correction
-    fresh = (run is not None and run.ended is not None and time.monotonic() - run.ended < FRESH
-             and not any(t["kind"] == "correction" for t in run.taken))
-    auto = (f'<span class="auto"><svg class="ring" viewBox="0 0 22 22" aria-hidden="true"><circle class="bg" cx="11" '
-            f'cy="11" r="9"/><circle class="fg" cx="11" cy="11" r="9"/></svg><span>Opening in <b class="num" '
-            f'data-count>{COUNTDOWN}</b> seconds</span></span><button class="stay" type="button" data-stay>Stay here'
-            "</button>") if fresh else ""
-    return (f'<div class="ready"><p>Watch its matches and correct any reply it loses.</p><div class="goto">'
-            f'<a class="yes" href="{href}" data-go>Go to the Arena{icon("arrow")}</a>{auto}</div></div>')
+READY_LINE = "Built. Add your data if you have it, then press Run the Arena."
+
+
+def ready_html():
+    """The line under the build's steps once it is built. Build starts no Arena run and the page never moves
+    on by itself (Mohamed 2026-11-05): the Add data box and Run the Arena follow it in the thread."""
+    return f'<div class="ready"><p>{READY_LINE}</p></div>'
+
+
+def arena_after_build(m, agent, ctx):
+    """Run the Arena under the Add data box once it is built (run_arena, the agent page's button and its
+    states); pressing it starts the full run (Morning.run_arena) and opens the agent's Arena tab to watch."""
+    day = f'&day={ctx["day"]}' if ctx["day"] else ""
+    go = run_arena(m, agent, ctx, f"/agents/{agent}?tab=arena{day}")
+    return f'<div class="bot">{_who()}<section class="grp sq" aria-label="The Arena">{go}</section></div>' if go else ""
 
 
 def new_agent(m, quick, ctx, run=None):
     """The build page: a centred thread, the box pinned at the bottom. The user's messages, the model's
     card, its one question and its follow line, shown as written (DECISIONS items 58 and 38); then the
-    build's steps ticking off (BuildRun, the page polls while it runs) and, once done, Go to the Arena
-    with a countdown that Stay here stops. Labels, steps and buttons are the page's frame."""
+    build's steps ticking off (BuildRun, the page polls while it runs) and, once done, the Built line, the
+    Add data box and Run the Arena; no Arena run starts by itself. Labels, steps and buttons are the page's
+    frame."""
     d = quick.draft(m)
     turns, built = d["turns"], d["built"]
     run = run if run is not None and run.m is m else None
@@ -1903,7 +1909,7 @@ def new_agent(m, quick, ctx, run=None):
         small = "building" if building else "done" if built else ""
         body = steps_html(run, built)
         if built and not building:
-            body += ready_html(ctx, built, run)
+            body += ready_html()
         out.append(f'<div class="bot">{_who(small)}<div class="check sq">{body}</div></div>')
         if run is not None and run.error:
             out.append(f'<div class="bot">{_who()}<p class="err" role="status">{h(run.error)}</p></div>')
@@ -1914,6 +1920,8 @@ def new_agent(m, quick, ctx, run=None):
             out.append(f'<div class="bot">{_who()}<p role="status">{h(practice)}</p></div>')
         if sheet:  # it can take more data
             out.append(f'<div class="bot">{_who()}{data_form(ctx, built)}</div>')
+        if built and not building:  # then Run the Arena: Build started none (2026-11-05)
+            out.append(arena_after_build(m, built, ctx))
     for t in run.taken if split else ():
         out.append(f'<div class="you"><span dir="auto">{h(t["said"])}</span></div>')
         if t["kind"] == "card":  # the model wrote the card again: its new follow line, as written
@@ -2086,6 +2094,20 @@ def data_form(ctx, agent):
 
 def sample_line(data):
     return f'<p class="quiet sdata">{icon("note")}{h(sample_mod.words(data))}</p>' if data else ""
+
+
+def bookings_html(rows, newest=3):
+    """The agent's Bookings line on its Overview: how many its live chats booked and the newest few, escaped; ""
+    when none."""
+    if not rows:
+        return ""
+    last = rows[::-1][:newest]  # the file keeps them oldest first
+    each = "".join(f'<small dir="auto">{h(" ".join(x for x in (b["item"], b["date"], b["start"] + " to " + b["end"]) if x))}'
+                   f'{h(", for " + b["who"]) if b.get("who") else ""}</small>' for b in last)
+    count = f"{len(rows)} booked" + (f", newest {len(last)}:" if len(rows) > len(last) else ":")
+    return (f'<section class="grp sq" aria-labelledby="bk-h"><h3 id="bk-h">Bookings</h3><div class="lr">'
+            f'<b>{h(count)}</b>{each}<small>Kept for every chat, Start over included. Sample data, nothing connected '
+            f'yet.</small></div></section>')
 
 
 def using_sample(folder, data):

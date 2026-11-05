@@ -31,6 +31,7 @@ from arena import match as match_mod
 from arena import rounds
 from arena import run
 from channels.base import Message
+from kit import bookings as bookings_mod
 from kit.chats import Chats
 from kit.db import Db
 
@@ -218,7 +219,7 @@ class TryAgent(TrySales):
             with match_mod.demo_store():
                 out = turn_mod.turn(agent, said, chats=self.chats, chat_id=chat_id, model=model,
                                     send=lambda to, reply: sent.append(reply), customer_id=self.customer(),
-                                    lessons=handed, channel=CHANNEL)
+                                    lessons=handed, channel=CHANNEL, bookings=bookings_mod.path_of(folder))
         except run.CapReached as e:
             raise Refused(f"Not answered: {e}.") from None
         used = [s["name"] for s in self.chats.steps(chat_id)[start:] if s["role"] == "tool" and s.get("name")]
